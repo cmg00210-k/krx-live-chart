@@ -78,8 +78,7 @@ function selectStock(code) {
     el.classList.toggle('active', el.dataset.code === code);
   });
   updateStockInfo();
-  chartInstance?.destroy();
-  chartInstance = null;
+  destroyAllCharts();
   updateChart();
   renderPastTable();
 }
@@ -160,8 +159,7 @@ document.querySelectorAll('.ct-btn').forEach(btn => {
     document.querySelectorAll('.ct-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     chartType = btn.dataset.ct;
-    chartInstance?.destroy();
-    chartInstance = null;
+    destroyAllCharts();
     updateChart();
   });
 });
@@ -176,8 +174,7 @@ document.querySelectorAll('.ind-btn').forEach(btn => {
       activeIndicators.add(ind);
       btn.classList.add('active');
     }
-    chartInstance?.destroy();
-    chartInstance = null;
+    destroyAllCharts();
     updateChart();
   });
 });

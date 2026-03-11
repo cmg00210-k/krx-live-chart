@@ -51,7 +51,17 @@
         <button class="ind-btn" data-ind="vol">거래량</button>
       </div>
       <div id="chart-wrap">
-        <canvas id="mainChart"></canvas>
+        <div id="main-chart-container">
+          <canvas id="mainChart"></canvas>
+        </div>
+        <div id="rsi-chart-container" class="sub-chart" style="display:none">
+          <div class="sub-chart-label">RSI (14)</div>
+          <canvas id="rsiChart"></canvas>
+        </div>
+        <div id="macd-chart-container" class="sub-chart" style="display:none">
+          <div class="sub-chart-label">MACD (12, 26, 9)</div>
+          <canvas id="macdChart"></canvas>
+        </div>
       </div>
     </div>
 
