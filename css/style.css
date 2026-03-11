@@ -1,0 +1,280 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0d0f14;
+  --panel: #141820;
+  --border: #1e2535;
+  --accent: #2962ff;
+  --green: #26a69a;
+  --red: #ef5350;
+  --text: #d1d4dc;
+  --muted: #555e78;
+  --header: #0f1219;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 13px;
+}
+
+/* ── HEADER ── */
+#header {
+  height: 48px;
+  background: var(--header);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+}
+
+#logo {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+#logo span { color: var(--accent); }
+
+/* ── SEARCH ── */
+#search-wrap { position: relative; flex: 1; max-width: 340px; }
+
+#search-input {
+  width: 100%;
+  background: var(--border);
+  border: 1px solid #2a3248;
+  border-radius: 6px;
+  padding: 6px 12px 6px 32px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border .2s;
+}
+
+#search-input:focus { border-color: var(--accent); }
+
+#search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+#search-dropdown {
+  display: none;
+  position: absolute;
+  top: 36px; left: 0; right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+#search-dropdown.show { display: block; }
+
+.search-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.search-item:hover { background: var(--border); }
+.search-item .code { color: var(--muted); font-size: 11px; }
+
+/* ── TICKER STRIP ── */
+#ticker-strip {
+  margin-left: auto;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.ticker-item { display: flex; flex-direction: column; align-items: flex-end; }
+.ticker-name { font-size: 10px; color: var(--muted); }
+.ticker-val { font-size: 12px; font-weight: 600; }
+.up { color: var(--green); }
+.dn { color: var(--red); }
+
+/* ── MAIN LAYOUT ── */
+#main {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  grid-template-rows: 1fr 160px;
+  height: calc(100vh - 48px);
+  gap: 0;
+}
+
+/* ── CHART AREA ── */
+#chart-area {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#chart-toolbar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#stock-info { display: flex; align-items: baseline; gap: 8px; margin-right: 8px; }
+#stock-name { font-size: 14px; font-weight: 700; color: #fff; }
+#stock-price { font-size: 18px; font-weight: 700; }
+#stock-change { font-size: 12px; }
+
+.sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+
+.tf-btn, .ct-btn, .ind-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all .15s;
+}
+
+.tf-btn:hover, .ct-btn:hover, .ind-btn:hover { color: var(--text); background: var(--border); }
+.tf-btn.active, .ct-btn.active, .ind-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+#chart-wrap { flex: 1; position: relative; padding: 8px; overflow: hidden; }
+#mainChart { width: 100% !important; height: 100% !important; }
+
+/* ── RIGHT PANEL ── */
+#right-panel {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.empty-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.empty-panel .icon { font-size: 28px; }
+.empty-panel p { font-size: 11px; }
+
+/* ── BOTTOM PANEL ── */
+#bottom-panel {
+  grid-column: 1 / 2;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#bottom-right {
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+#bottom-header {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+#bottom-header span { font-size: 12px; font-weight: 600; color: var(--text); }
+
+.period-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.period-btn.active { color: var(--accent); background: rgba(41,98,255,.12); }
+
+#past-table-wrap { flex: 1; overflow: auto; }
+
+#past-table { width: 100%; border-collapse: collapse; }
+
+#past-table thead th {
+  position: sticky; top: 0;
+  background: var(--bg);
+  padding: 6px 10px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+#past-table thead th:first-child { text-align: left; }
+
+#past-table tbody td {
+  padding: 5px 10px;
+  text-align: right;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(30,37,53,.5);
+  white-space: nowrap;
+}
+
+#past-table tbody td:first-child { text-align: left; color: var(--muted); }
+#past-table tbody tr:hover { background: rgba(255,255,255,.03); }
+
+/* ── WATCHLIST ── */
+#watchlist {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  overflow-x: auto;
+  height: 32px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.wl-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: background .15s;
+  font-size: 12px;
+}
+
+.wl-item:hover { background: var(--border); }
+.wl-item.active { background: rgba(41,98,255,.15); color: var(--accent); }
+.wl-price { font-size: 11px; }
