@@ -158,8 +158,41 @@ html, body {
 .tf-btn:hover, .ct-btn:hover, .ind-btn:hover { color: var(--text); background: var(--border); }
 .tf-btn.active, .ct-btn.active, .ind-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 
-#chart-wrap { flex: 1; position: relative; padding: 8px; overflow: hidden; }
-#mainChart { width: 100% !important; height: 100% !important; }
+#chart-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  overflow: hidden;
+}
+
+#main-chart-container {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+#main-chart-container canvas { width: 100% !important; height: 100% !important; }
+
+.sub-chart {
+  height: 100px;
+  position: relative;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.sub-chart canvas { width: 100% !important; height: 100% !important; }
+
+.sub-chart-label {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  font-size: 10px;
+  color: var(--muted);
+  z-index: 1;
+  pointer-events: none;
+}
 
 /* ── RIGHT PANEL ── */
 #right-panel {
