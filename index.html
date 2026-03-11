@@ -1,683 +1,101 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KRX 라이브 차트</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  :root {
-    --bg: #0d0f14;
-    --panel: #141820;
-    --border: #1e2535;
-    --accent: #2962ff;
-    --green: #26a69a;
-    --red: #ef5350;
-    --text: #d1d4dc;
-    --muted: #555e78;
-    --header: #0f1219;
-  }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; font-size: 13px; }
-
-  /* HEADER */
-  #header {
-    height: 48px;
-    background: var(--header);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 16px;
-    gap: 16px;
-  }
-  #logo { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 1px; white-space: nowrap; }
-  #logo span { color: var(--accent); }
-
-  #search-wrap { position: relative; flex: 1; max-width: 340px; }
-  #search-input {
-    width: 100%;
-    background: var(--border);
-    border: 1px solid #2a3248;
-    border-radius: 6px;
-    padding: 6px 12px 6px 32px;
-    color: var(--text);
-    font-size: 13px;
-    outline: none;
-    transition: border .2s;
-  }
-  #search-input:focus { border-color: var(--accent); }
-  #search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; }
-  #search-dropdown {
-    display: none;
-    position: absolute;
-    top: 36px; left: 0; right: 0;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    z-index: 100;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-  #search-dropdown.show { display: block; }
-  .search-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .search-item:hover { background: var(--border); }
-  .search-item .code { color: var(--muted); font-size: 11px; }
-
-  /* ticker strip */
-  #ticker-strip {
-    margin-left: auto;
-    display: flex;
-    gap: 20px;
-    align-items: center;
-  }
-  .ticker-item { display: flex; flex-direction: column; align-items: flex-end; }
-  .ticker-name { font-size: 10px; color: var(--muted); }
-  .ticker-val { font-size: 12px; font-weight: 600; }
-  .up { color: var(--green); }
-  .dn { color: var(--red); }
-
-  /* MAIN LAYOUT */
-  #main {
-    display: grid;
-    grid-template-columns: 1fr 220px;
-    grid-template-rows: 1fr 160px;
-    height: calc(100vh - 48px);
-    gap: 0;
-  }
-
-  /* CHART AREA */
-  #chart-area {
-    background: var(--panel);
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  #chart-toolbar {
-    height: 40px;
-    display: flex;
-    align-items: center;
-    padding: 0 12px;
-    gap: 8px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  #stock-info { display: flex; align-items: baseline; gap: 8px; margin-right: 8px; }
-  #stock-name { font-size: 14px; font-weight: 700; color: #fff; }
-  #stock-price { font-size: 18px; font-weight: 700; }
-  #stock-change { font-size: 12px; }
-
-  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
-
-  .tf-btn, .ct-btn, .ind-btn {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 3px 8px;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 12px;
-    transition: all .15s;
-  }
-  .tf-btn:hover, .ct-btn:hover, .ind-btn:hover { color: var(--text); background: var(--border); }
-  .tf-btn.active, .ct-btn.active, .ind-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
-
-  #chart-wrap { flex: 1; position: relative; padding: 8px; overflow: hidden; }
-  #mainChart { width: 100% !important; height: 100% !important; }
-
-  /* RIGHT PANEL */
-  #right-panel {
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-  .empty-panel {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    color: var(--muted);
-  }
-  .empty-panel .icon { font-size: 28px; }
-  .empty-panel p { font-size: 11px; }
-
-  /* BOTTOM - PAST DATA */
-  #bottom-panel {
-    grid-column: 1 / 2;
-    background: var(--panel);
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  #bottom-right {
-    background: var(--bg);
-    border-top: 1px solid var(--border);
-    border-left: 1px solid var(--border);
-  }
-
-  #bottom-header {
-    height: 36px;
-    display: flex;
-    align-items: center;
-    padding: 0 14px;
-    border-bottom: 1px solid var(--border);
-    gap: 16px;
-    flex-shrink: 0;
-  }
-  #bottom-header span { font-size: 12px; font-weight: 600; color: var(--text); }
-  .period-btn {
-    background: transparent;
-    border: none;
-    color: var(--muted);
-    font-size: 11px;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-  .period-btn.active { color: var(--accent); background: rgba(41,98,255,.12); }
-
-  #past-table-wrap { flex: 1; overflow: auto; }
-  #past-table { width: 100%; border-collapse: collapse; }
-  #past-table thead th {
-    position: sticky; top: 0;
-    background: var(--bg);
-    padding: 6px 10px;
-    text-align: right;
-    font-size: 11px;
-    color: var(--muted);
-    font-weight: 500;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-  #past-table thead th:first-child { text-align: left; }
-  #past-table tbody td {
-    padding: 5px 10px;
-    text-align: right;
-    font-size: 12px;
-    border-bottom: 1px solid rgba(30,37,53,.5);
-    white-space: nowrap;
-  }
-  #past-table tbody td:first-child { text-align: left; color: var(--muted); }
-  #past-table tbody tr:hover { background: rgba(255,255,255,.03); }
-
-  /* WATCHLIST TOP */
-  #watchlist {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    padding: 0 8px;
-    overflow-x: auto;
-    height: 32px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .wl-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    border-radius: 4px;
-    white-space: nowrap;
-    transition: background .15s;
-    font-size: 12px;
-  }
-  .wl-item:hover { background: var(--border); }
-  .wl-item.active { background: rgba(41,98,255,.15); color: var(--accent); }
-  .wl-price { font-size: 11px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KRX 라이브 차트</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- HEADER -->
-<div id="header">
-  <div id="logo">KRX <span>LIVE</span></div>
-  <div id="search-wrap">
-    <span id="search-icon">🔍</span>
-    <input id="search-input" type="text" placeholder="종목명 또는 코드 검색..." autocomplete="off">
-    <div id="search-dropdown"></div>
+  <!-- HEADER -->
+  <div id="header">
+    <div id="logo">KRX <span>LIVE</span></div>
+    <div id="search-wrap">
+      <span id="search-icon">&#128269;</span>
+      <input id="search-input" type="text" placeholder="종목명 또는 코드 검색..." autocomplete="off">
+      <div id="search-dropdown"></div>
+    </div>
+    <div id="ticker-strip">
+      <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val up" id="t-kospi">&mdash;</span></div>
+      <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val up" id="t-kosdaq">&mdash;</span></div>
+      <div class="ticker-item"><span class="ticker-name">USD/KRW</span><span class="ticker-val" id="t-usd">&mdash;</span></div>
+    </div>
   </div>
-  <div id="ticker-strip">
-    <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val up" id="t-kospi">—</span></div>
-    <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val up" id="t-kosdaq">—</span></div>
-    <div class="ticker-item"><span class="ticker-name">USD/KRW</span><span class="ticker-val" id="t-usd">—</span></div>
-  </div>
-</div>
 
-<!-- MAIN -->
-<div id="main">
+  <!-- MAIN -->
+  <div id="main">
 
-  <!-- CHART AREA -->
-  <div id="chart-area">
-    <!-- watchlist -->
-    <div id="watchlist"></div>
-    <!-- toolbar -->
-    <div id="chart-toolbar">
-      <div id="stock-info">
-        <span id="stock-name">삼성전자</span>
-        <span id="stock-price" class="up">73,400</span>
-        <span id="stock-change" class="up">▲ 1,200 (+1.66%)</span>
+    <!-- CHART AREA -->
+    <div id="chart-area">
+      <div id="watchlist"></div>
+      <div id="chart-toolbar">
+        <div id="stock-info">
+          <span id="stock-name">삼성전자</span>
+          <span id="stock-price" class="up">73,400</span>
+          <span id="stock-change" class="up">&#9650; 1,200 (+1.66%)</span>
+        </div>
+        <div class="sep"></div>
+        <button class="tf-btn active" data-tf="1m">1분</button>
+        <div class="sep"></div>
+        <button class="ct-btn active" data-ct="candle">캔들</button>
+        <button class="ct-btn" data-ct="line">라인</button>
+        <button class="ct-btn" data-ct="bar">바</button>
+        <div class="sep"></div>
+        <button class="ind-btn" data-ind="ma">MA</button>
+        <button class="ind-btn" data-ind="ema">EMA</button>
+        <button class="ind-btn" data-ind="bb">볼린저</button>
+        <button class="ind-btn" data-ind="rsi">RSI</button>
+        <button class="ind-btn" data-ind="macd">MACD</button>
+        <button class="ind-btn" data-ind="vol">거래량</button>
       </div>
-      <div class="sep"></div>
-      <button class="tf-btn active" data-tf="1m">1분</button>
-      <div class="sep"></div>
-      <button class="ct-btn active" data-ct="candle">캔들</button>
-      <button class="ct-btn" data-ct="line">라인</button>
-      <button class="ct-btn" data-ct="bar">바</button>
-      <div class="sep"></div>
-      <button class="ind-btn" data-ind="ma">MA</button>
-      <button class="ind-btn" data-ind="ema">EMA</button>
-      <button class="ind-btn" data-ind="bb">볼린저</button>
-      <button class="ind-btn" data-ind="rsi">RSI</button>
-      <button class="ind-btn" data-ind="macd">MACD</button>
-      <button class="ind-btn" data-ind="vol">거래량</button>
+      <div id="chart-wrap">
+        <canvas id="mainChart"></canvas>
+      </div>
     </div>
-    <div id="chart-wrap">
-      <canvas id="mainChart"></canvas>
+
+    <!-- RIGHT PANEL -->
+    <div id="right-panel">
+      <div class="empty-panel">
+        <div class="icon">&#128203;</div>
+        <p>추후 추가 예정</p>
+      </div>
     </div>
+
+    <!-- BOTTOM PANEL -->
+    <div id="bottom-panel">
+      <div id="bottom-header">
+        <span>&#128200; 과거 실적 데이터</span>
+        <button class="period-btn active" data-p="quarter">분기</button>
+        <button class="period-btn" data-p="annual">연간</button>
+      </div>
+      <div id="past-table-wrap">
+        <table id="past-table">
+          <thead>
+            <tr>
+              <th>기간</th>
+              <th>매출액 (억)</th>
+              <th>영업이익 (억)</th>
+              <th>순이익 (억)</th>
+              <th>영업이익률</th>
+              <th>EPS (원)</th>
+              <th>ROE (%)</th>
+            </tr>
+          </thead>
+          <tbody id="past-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BOTTOM RIGHT -->
+    <div id="bottom-right"></div>
+
   </div>
 
-  <!-- RIGHT PANEL (empty) -->
-  <div id="right-panel">
-    <div class="empty-panel">
-      <div class="icon">📋</div>
-      <p>추후 추가 예정</p>
-    </div>
-  </div>
-
-  <!-- BOTTOM PANEL -->
-  <div id="bottom-panel">
-    <div id="bottom-header">
-      <span>📈 과거 실적 데이터</span>
-      <button class="period-btn active" data-p="quarter">분기</button>
-      <button class="period-btn" data-p="annual">연간</button>
-    </div>
-    <div id="past-table-wrap">
-      <table id="past-table">
-        <thead>
-          <tr>
-            <th>기간</th>
-            <th>매출액 (억)</th>
-            <th>영업이익 (억)</th>
-            <th>순이익 (억)</th>
-            <th>영업이익률</th>
-            <th>EPS (원)</th>
-            <th>ROE (%)</th>
-          </tr>
-        </thead>
-        <tbody id="past-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- BOTTOM RIGHT (empty extension) -->
-  <div id="bottom-right"></div>
-
-</div>
-
-<script>
-// ── DATA ──────────────────────────────────────────────
-const STOCKS = [
-  { code:'005930', name:'삼성전자', base:73400 },
-  { code:'000660', name:'SK하이닉스', base:182000 },
-  { code:'035420', name:'NAVER', base:201500 },
-  { code:'005380', name:'현대차', base:218000 },
-  { code:'051910', name:'LG화학', base:312000 },
-  { code:'035720', name:'카카오', base:43500 },
-  { code:'207940', name:'삼성바이오', base:781000 },
-  { code:'006400', name:'삼성SDI', base:289000 },
-];
-
-const PAST_DATA = {
-  '005930': {
-    quarter:[
-      {p:'2024 Q3',rev:791050,op:91834,ni:73051,opm:'11.6%',eps:1330,roe:8.2},
-      {p:'2024 Q2',rev:740068,op:106056,ni:94050,opm:'14.3%',eps:1410,roe:9.1},
-      {p:'2024 Q1',rev:711280,op:66060,ni:50680,opm:'9.3%',eps:755,roe:7.8},
-      {p:'2023 Q4',rev:671978,op:28247,ni:24401,opm:'4.2%',eps:363,roe:5.2},
-    ],
-    annual:[
-      {p:'2023',rev:2589355,op:64739,ni:154873,opm:'2.5%',eps:2305,roe:6.2},
-      {p:'2022',rev:3023642,op:433766,ni:554589,opm:'14.3%',eps:8057,roe:16.1},
-      {p:'2021',rev:2796048,op:516339,ni:399075,opm:'18.5%',eps:5777,roe:14.2},
-    ]
-  },
-  '000660': {
-    quarter:[
-      {p:'2024 Q3',rev:174338,op:70351,ni:58011,opm:'40.4%',eps:7943,roe:18.7},
-      {p:'2024 Q2',rev:164234,op:58012,ni:44012,opm:'35.3%',eps:6022,roe:15.4},
-      {p:'2024 Q1',rev:127836,op:23412,ni:16842,opm:'18.3%',eps:2305,roe:11.2},
-      {p:'2023 Q4',rev:113291,op:-1899,ni:-2470,opm:'-1.7%',eps:-338,roe:-1.5},
-    ],
-    annual:[
-      {p:'2023',rev:406625,op:-47731,ni:-23234,opm:'-11.7%',eps:-3180,roe:-8.1},
-      {p:'2022',rev:446594,op:66976,ni:48500,opm:'15.0%',eps:6638,roe:12.0},
-      {p:'2021',rev:420609,op:129530,ni:97499,opm:'30.8%',eps:13351,roe:21.5},
-    ]
-  }
-};
-
-function getPastData(code, period) {
-  if (PAST_DATA[code]) return PAST_DATA[code][period];
-  // generic placeholder
-  const quarters = ['2024 Q3','2024 Q2','2024 Q1','2023 Q4'];
-  const years = ['2023','2022','2021'];
-  const arr = period==='quarter' ? quarters : years;
-  return arr.map(p=>({p,rev:Math.round(50000+Math.random()*500000),op:Math.round(5000+Math.random()*80000),ni:Math.round(3000+Math.random()*60000),opm:(5+Math.random()*20).toFixed(1)+'%',eps:Math.round(500+Math.random()*8000),roe:(5+Math.random()*20).toFixed(1)}));
-}
-
-// ── STATE ──────────────────────────────────────────────
-let currentStock = STOCKS[0];
-let currentPeriod = 'quarter';
-let activeIndicators = new Set();
-let chartType = 'candle';
-let chartInstance = null;
-let prices = {}; // live simulated prices
-
-// ── PRICE SIMULATION ──────────────────────────────────
-STOCKS.forEach(s => {
-  prices[s.code] = { price: s.base, change: 0, pct: 0, history: [] };
-  // generate 60 1-min candles
-  let p = s.base;
-  for(let i=0;i<60;i++){
-    const o=p, c=p+Math.round((Math.random()-.48)*p*0.003);
-    const h=Math.max(o,c)+Math.round(Math.random()*p*0.002);
-    const l=Math.min(o,c)-Math.round(Math.random()*p*0.002);
-    prices[s.code].history.push({o,h,l,c,v:Math.round(50000+Math.random()*200000)});
-    p=c;
-  }
-  prices[s.code].price = p;
-  prices[s.code].change = p - s.base;
-  prices[s.code].pct = ((p-s.base)/s.base*100).toFixed(2);
-});
-
-function tickPrices() {
-  STOCKS.forEach(s => {
-    const d = prices[s.code];
-    const last = d.history[d.history.length-1];
-    const newC = Math.max(1000, last.c + Math.round((Math.random()-.49)*last.c*0.002));
-    const newH = Math.max(last.h, newC);
-    const newL = Math.min(last.l, newC);
-    d.history[d.history.length-1] = {...last, c:newC, h:newH, l:newL, v:last.v+Math.round(Math.random()*1000)};
-    // every ~10 ticks push new candle
-    if(Math.random()<0.1){
-      d.history.push({o:newC,h:newC,l:newC,c:newC,v:0});
-      if(d.history.length>120) d.history.shift();
-    }
-    d.price = newC;
-    d.change = newC - s.base;
-    d.pct = ((newC-s.base)/s.base*100).toFixed(2);
-  });
-  updateTicker();
-  updateStockInfo();
-  updateWatchlist();
-  updateChart();
-}
-
-// ── WATCHLIST ──────────────────────────────────────────
-function buildWatchlist() {
-  const el = document.getElementById('watchlist');
-  el.innerHTML = STOCKS.map(s=>`
-    <div class="wl-item ${s.code===currentStock.code?'active':''}" data-code="${s.code}">
-      <span>${s.name}</span>
-      <span class="wl-price ${prices[s.code].change>=0?'up':'dn'}" id="wl-${s.code}">
-        ${prices[s.code].price.toLocaleString()}
-      </span>
-    </div>`).join('');
-  el.querySelectorAll('.wl-item').forEach(el=>{
-    el.addEventListener('click',()=>{ selectStock(el.dataset.code); });
-  });
-}
-
-function updateWatchlist() {
-  STOCKS.forEach(s=>{
-    const el = document.getElementById('wl-'+s.code);
-    if(!el) return;
-    el.textContent = prices[s.code].price.toLocaleString();
-    el.className = 'wl-price '+(prices[s.code].change>=0?'up':'dn');
-  });
-}
-
-function selectStock(code) {
-  currentStock = STOCKS.find(s=>s.code===code);
-  document.querySelectorAll('.wl-item').forEach(el=>{
-    el.classList.toggle('active', el.dataset.code===code);
-  });
-  updateStockInfo();
-  updateChart();
-  renderPastTable();
-}
-
-// ── STOCK INFO ─────────────────────────────────────────
-function updateStockInfo() {
-  const d = prices[currentStock.code];
-  const cls = d.change>=0?'up':'dn';
-  const sign = d.change>=0?'▲':'▼';
-  document.getElementById('stock-name').textContent = currentStock.name;
-  document.getElementById('stock-price').textContent = d.price.toLocaleString();
-  document.getElementById('stock-price').className = cls;
-  document.getElementById('stock-change').textContent = `${sign} ${Math.abs(d.change).toLocaleString()} (${d.change>=0?'+':''}${d.pct}%)`;
-  document.getElementById('stock-change').className = cls;
-}
-
-// ── TICKER ─────────────────────────────────────────────
-function updateTicker() {
-  const kospi = 2680 + Math.round((Math.random()-.5)*10);
-  const kosdaq = 810 + Math.round((Math.random()-.5)*5);
-  const usd = 1325 + Math.round((Math.random()-.5)*3);
-  document.getElementById('t-kospi').textContent = kospi.toLocaleString();
-  document.getElementById('t-kosdaq').textContent = kosdaq.toLocaleString();
-  document.getElementById('t-usd').textContent = usd.toLocaleString();
-}
-
-// ── CHART ──────────────────────────────────────────────
-function getLabels(hist) {
-  const now = new Date();
-  return hist.map((_,i)=>{
-    const d = new Date(now - (hist.length-1-i)*60000);
-    return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
-  });
-}
-
-function calcMA(data, n) {
-  return data.map((_,i)=>{
-    if(i<n-1) return null;
-    return data.slice(i-n+1,i+1).reduce((a,b)=>a+b,0)/n;
-  });
-}
-
-function calcBB(closes, n=20, k=2) {
-  return closes.map((_,i)=>{
-    if(i<n-1) return {upper:null,lower:null,mid:null};
-    const sl = closes.slice(i-n+1,i+1);
-    const mean = sl.reduce((a,b)=>a+b,0)/n;
-    const std = Math.sqrt(sl.reduce((a,b)=>a+(b-mean)**2,0)/n);
-    return {upper:mean+k*std, lower:mean-k*std, mid:mean};
-  });
-}
-
-function updateChart() {
-  const hist = prices[currentStock.code].history;
-  const labels = getLabels(hist);
-  const closes = hist.map(h=>h.c);
-  const opens = hist.map(h=>h.o);
-
-  const datasets = [];
-
-  if(chartType==='candle' || chartType==='bar') {
-    // simulate as filled line + open dots for simplicity
-    datasets.push({
-      label: '종가',
-      data: closes,
-      borderColor: '#2962ff',
-      backgroundColor: 'rgba(41,98,255,0.08)',
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.1,
-      fill: true,
-      type:'line'
-    });
-  } else {
-    datasets.push({
-      label: '종가',
-      data: closes,
-      borderColor: '#2962ff',
-      backgroundColor: 'rgba(41,98,255,0.08)',
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: true,
-      type:'line'
-    });
-  }
-
-  if(activeIndicators.has('ma')){
-    datasets.push({label:'MA(20)',data:calcMA(closes,20),borderColor:'#ff9800',borderWidth:1.2,pointRadius:0,tension:0.1,type:'line',fill:false});
-    datasets.push({label:'MA(5)',data:calcMA(closes,5),borderColor:'#e91e63',borderWidth:1.2,pointRadius:0,tension:0.1,type:'line',fill:false});
-  }
-  if(activeIndicators.has('ema')){
-    const ema=(d,n)=>d.reduce((acc,v,i)=>{if(i===0)return[v];const k=2/(n+1);return[...acc,v*k+acc[i-1]*(1-k)];},[]);
-    datasets.push({label:'EMA(20)',data:ema(closes,20),borderColor:'#00bcd4',borderWidth:1.2,pointRadius:0,tension:0.1,type:'line',fill:false});
-  }
-  if(activeIndicators.has('bb')){
-    const bb=calcBB(closes);
-    datasets.push({label:'BB상단',data:bb.map(b=>b.upper),borderColor:'rgba(156,39,176,.7)',borderWidth:1,pointRadius:0,type:'line',fill:false,borderDash:[4,2]});
-    datasets.push({label:'BB하단',data:bb.map(b=>b.lower),borderColor:'rgba(156,39,176,.7)',borderWidth:1,pointRadius:0,type:'line',fill:false,borderDash:[4,2]});
-  }
-  if(activeIndicators.has('vol')){
-    datasets.push({
-      label:'거래량',data:hist.map(h=>h.v),
-      backgroundColor:'rgba(100,120,180,.3)',
-      borderColor:'transparent',
-      type:'bar',
-      yAxisID:'yVol',
-      order:10
-    });
-  }
-
-  const chartData = { labels, datasets };
-
-  const scales = {
-    x:{ grid:{color:'rgba(255,255,255,.04)'}, ticks:{color:'#555e78',maxTicksLimit:10,font:{size:10}} },
-    y:{ position:'right', grid:{color:'rgba(255,255,255,.04)'}, ticks:{color:'#555e78',font:{size:10},callback:v=>v.toLocaleString()} }
-  };
-  if(activeIndicators.has('vol')){
-    scales.yVol={position:'left',grid:{display:false},ticks:{color:'#555e78',font:{size:9}},max:Math.max(...hist.map(h=>h.v))*4};
-  }
-
-  if(chartInstance){
-    chartInstance.data = chartData;
-    chartInstance.options.scales = scales;
-    chartInstance.update('none');
-    return;
-  }
-
-  const ctx = document.getElementById('mainChart').getContext('2d');
-  chartInstance = new Chart(ctx, {
-    type:'line',
-    data: chartData,
-    options:{
-      responsive:true, maintainAspectRatio:false, animation:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{display:false},
-        tooltip:{
-          backgroundColor:'rgba(13,15,20,.95)',
-          borderColor:'#1e2535',borderWidth:1,
-          titleColor:'#d1d4dc',bodyColor:'#d1d4dc',
-          callbacks:{label:ctx=>`${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()}`}
-        }
-      },
-      scales
-    }
-  });
-}
-
-// ── PAST TABLE ─────────────────────────────────────────
-function renderPastTable() {
-  const data = getPastData(currentStock.code, currentPeriod);
-  const tb = document.getElementById('past-tbody');
-  tb.innerHTML = data.map(r=>{
-    const opCls = parseFloat(r.op)>=0?'up':'dn';
-    const niCls = parseFloat(r.ni)>=0?'up':'dn';
-    return `<tr>
-      <td>${r.p}</td>
-      <td>${Number(r.rev).toLocaleString()}</td>
-      <td class="${opCls}">${Number(r.op).toLocaleString()}</td>
-      <td class="${niCls}">${Number(r.ni).toLocaleString()}</td>
-      <td class="${opCls}">${r.opm}</td>
-      <td>${Number(r.eps).toLocaleString()}</td>
-      <td>${r.roe}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ── SEARCH ─────────────────────────────────────────────
-const searchInput = document.getElementById('search-input');
-const dropdown = document.getElementById('search-dropdown');
-searchInput.addEventListener('input', ()=>{
-  const q = searchInput.value.trim().toLowerCase();
-  if(!q){ dropdown.classList.remove('show'); return; }
-  const matches = STOCKS.filter(s=>s.name.includes(q)||s.code.includes(q));
-  dropdown.innerHTML = matches.map(s=>`
-    <div class="search-item" data-code="${s.code}">
-      <span>${s.name}</span><span class="code">${s.code}</span>
-    </div>`).join('') || '<div class="search-item" style="color:#555e78">검색 결과 없음</div>';
-  dropdown.classList.add('show');
-  dropdown.querySelectorAll('.search-item[data-code]').forEach(el=>{
-    el.addEventListener('click',()=>{ selectStock(el.dataset.code); searchInput.value=''; dropdown.classList.remove('show'); });
-  });
-});
-document.addEventListener('click', e=>{ if(!e.target.closest('#search-wrap')) dropdown.classList.remove('show'); });
-
-// ── TOOLBAR BUTTONS ────────────────────────────────────
-document.querySelectorAll('.ct-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.ct-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    chartType = btn.dataset.ct;
-    chartInstance?.destroy(); chartInstance=null;
-    updateChart();
-  });
-});
-document.querySelectorAll('.ind-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    const ind = btn.dataset.ind;
-    if(activeIndicators.has(ind)){ activeIndicators.delete(ind); btn.classList.remove('active'); }
-    else { activeIndicators.add(ind); btn.classList.add('active'); }
-    chartInstance?.destroy(); chartInstance=null;
-    updateChart();
-  });
-});
-document.querySelectorAll('.period-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    currentPeriod = btn.dataset.p;
-    renderPastTable();
-  });
-});
-
-// ── INIT ──────────────────────────────────────────────
-buildWatchlist();
-updateStockInfo();
-updateTicker();
-updateChart();
-renderPastTable();
-setInterval(tickPrices, 800);
-</script>
+  <!-- JS: 순서 중요 (data → chart → app) -->
+  <script src="js/data.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
