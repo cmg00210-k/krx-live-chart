@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KRX 라이브 차트</title>
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -16,6 +16,11 @@
       <span id="search-icon">&#128269;</span>
       <input id="search-input" type="text" placeholder="종목명 또는 코드 검색..." autocomplete="off">
       <div id="search-dropdown"></div>
+    </div>
+    <div id="market-filter">
+      <button class="market-btn active" data-market="all">전체</button>
+      <button class="market-btn" data-market="KOSPI">KOSPI</button>
+      <button class="market-btn" data-market="KOSDAQ">KOSDAQ</button>
     </div>
     <div id="ticker-strip">
       <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val up" id="t-kospi">&mdash;</span></div>
@@ -33,11 +38,18 @@
       <div id="chart-toolbar">
         <div id="stock-info">
           <span id="stock-name">삼성전자</span>
+          <span id="stock-code" class="stock-code">005930</span>
+          <span id="stock-market" class="stock-market-tag">KOSPI</span>
           <span id="stock-price" class="up">73,400</span>
           <span id="stock-change" class="up">&#9650; 1,200 (+1.66%)</span>
         </div>
         <div class="sep"></div>
         <button class="tf-btn active" data-tf="1m">1분</button>
+        <button class="tf-btn" data-tf="5m">5분</button>
+        <button class="tf-btn" data-tf="15m">15분</button>
+        <button class="tf-btn" data-tf="30m">30분</button>
+        <button class="tf-btn" data-tf="1h">1시간</button>
+        <button class="tf-btn" data-tf="1d">일봉</button>
         <div class="sep"></div>
         <button class="ct-btn active" data-ct="candle">캔들</button>
         <button class="ct-btn" data-ct="line">라인</button>
@@ -49,28 +61,54 @@
         <button class="ind-btn" data-ind="rsi">RSI</button>
         <button class="ind-btn" data-ind="macd">MACD</button>
         <button class="ind-btn" data-ind="vol">거래량</button>
+        <button class="ind-btn" data-ind="ich">일목</button>
+        <button class="ind-btn" data-ind="kalman">칼만</button>
+        <div class="sep"></div>
+        <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">패턴</button>
       </div>
       <div id="chart-wrap">
-        <div id="main-chart-container">
-          <canvas id="mainChart"></canvas>
+        <div id="main-chart-container"></div>
+        <div class="sub-chart-wrap" style="position:relative">
+          <div class="sub-chart-label" id="rsi-label" style="display:none">RSI (14)</div>
+          <div id="rsi-chart-container" class="sub-chart" style="display:none"></div>
         </div>
-        <div id="rsi-chart-container" class="sub-chart" style="display:none">
-          <div class="sub-chart-label">RSI (14)</div>
-          <canvas id="rsiChart"></canvas>
-        </div>
-        <div id="macd-chart-container" class="sub-chart" style="display:none">
-          <div class="sub-chart-label">MACD (12, 26, 9)</div>
-          <canvas id="macdChart"></canvas>
+        <div class="sub-chart-wrap" style="position:relative">
+          <div class="sub-chart-label" id="macd-label" style="display:none">MACD (12, 26, 9)</div>
+          <div id="macd-chart-container" class="sub-chart" style="display:none"></div>
         </div>
       </div>
     </div>
 
-    <!-- RIGHT PANEL -->
+    <!-- RIGHT PANEL (패턴 분석) -->
     <div id="right-panel">
       <div id="pattern-panel">
-        <div id="pattern-header">&#128202; 패턴 분석</div>
+        <div id="pattern-header">
+          <span>&#128202; 패턴 분석</span>
+        </div>
         <div id="pattern-list">
-          <div class="pattern-empty">분석 중...</div>
+          <div class="pattern-empty">패턴 버튼을 눌러 분석을 시작하세요</div>
+        </div>
+        <div id="pattern-legend">
+          <div class="legend-title">감지 가능 패턴</div>
+          <div class="legend-item"><span class="dot buy"></span> 적삼병 (Three White Soldiers)</div>
+          <div class="legend-item"><span class="dot sell"></span> 흑삼병 (Three Black Crows)</div>
+          <div class="legend-item"><span class="dot buy"></span> 상승 삼각형 (Ascending Triangle)</div>
+          <div class="legend-item"><span class="dot sell"></span> 하락 삼각형 (Descending Triangle)</div>
+          <div class="legend-item"><span class="dot sell"></span> 상승 쐐기 (Rising Wedge)</div>
+          <div class="legend-item"><span class="dot buy"></span> 하락 쐐기 (Falling Wedge)</div>
+          <div class="legend-item"><span class="dot buy"></span> 해머 / 역해머</div>
+          <div class="legend-item"><span class="dot sell"></span> 교수형 / 유성형</div>
+          <div class="legend-item"><span class="dot neutral"></span> 도지 (Doji)</div>
+          <div class="legend-item"><span class="dot buy"></span> 상승 장악형 (Bullish Engulfing)</div>
+          <div class="legend-item"><span class="dot sell"></span> 하락 장악형 (Bearish Engulfing)</div>
+          <div class="legend-item"><span class="dot buy"></span> 상승 잉태형 (Bullish Harami)</div>
+          <div class="legend-item"><span class="dot sell"></span> 하락 잉태형 (Bearish Harami)</div>
+          <div class="legend-item"><span class="dot buy"></span> 샛별형 (Morning Star)</div>
+          <div class="legend-item"><span class="dot sell"></span> 석별형 (Evening Star)</div>
+          <div class="legend-item"><span class="dot buy"></span> 이중 바닥 (Double Bottom)</div>
+          <div class="legend-item"><span class="dot sell"></span> 이중 천장 (Double Top)</div>
+          <div class="legend-item"><span class="dot sell"></span> 머리어깨형 (H&S)</div>
+          <div class="legend-item"><span class="dot buy"></span> 역머리어깨형 (Inv H&S)</div>
         </div>
       </div>
     </div>
@@ -105,8 +143,10 @@
 
   </div>
 
-  <!-- JS: 순서 중요 (data → chart → app) -->
+  <!-- JS: 순서 중요 (data → api → patterns → chart → app) -->
   <script src="js/data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/patterns.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/app.js"></script>
 </body>
