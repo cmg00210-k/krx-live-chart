@@ -1,16 +1,7 @@
-// ── 종목 데이터 ──
-const STOCKS = [
-  { code: '005930', name: '삼성전자',   base: 73400 },
-  { code: '000660', name: 'SK하이닉스',  base: 182000 },
-  { code: '035420', name: 'NAVER',      base: 201500 },
-  { code: '005380', name: '현대차',      base: 218000 },
-  { code: '051910', name: 'LG화학',     base: 312000 },
-  { code: '035720', name: '카카오',      base: 43500 },
-  { code: '207940', name: '삼성바이오',   base: 781000 },
-  { code: '006400', name: '삼성SDI',    base: 289000 },
-];
+// ══════════════════════════════════════════════════════
+//  KRX LIVE — 과거 실적 (재무) 데이터
+// ══════════════════════════════════════════════════════
 
-// ── 과거 실적 데이터 ──
 const PAST_DATA = {
   '005930': {
     quarter: [
@@ -42,24 +33,28 @@ const PAST_DATA = {
 
 /**
  * 과거 실적 데이터 조회
- * @param {string} code - 종목코드
+ * @param {string} code
  * @param {string} period - 'quarter' | 'annual'
  */
 function getPastData(code, period) {
   if (PAST_DATA[code]) return PAST_DATA[code][period];
 
-  // 데이터 없는 종목은 랜덤 플레이스홀더
+  // 데이터 없는 종목은 코드 기반 고정값
   const quarters = ['2024 Q3', '2024 Q2', '2024 Q1', '2023 Q4'];
   const years = ['2023', '2022', '2021'];
   const arr = period === 'quarter' ? quarters : years;
 
+  let seed = 0;
+  for (let i = 0; i < code.length; i++) seed += code.charCodeAt(i);
+  const r = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
   return arr.map(p => ({
     p,
-    rev: Math.round(50000 + Math.random() * 500000),
-    op:  Math.round(5000 + Math.random() * 80000),
-    ni:  Math.round(3000 + Math.random() * 60000),
-    opm: (5 + Math.random() * 20).toFixed(1) + '%',
-    eps: Math.round(500 + Math.random() * 8000),
-    roe: (5 + Math.random() * 20).toFixed(1)
+    rev: Math.round(50000 + r() * 500000),
+    op:  Math.round(-10000 + r() * 90000),
+    ni:  Math.round(-5000 + r() * 65000),
+    opm: (-5 + r() * 25).toFixed(1) + '%',
+    eps: Math.round(-1000 + r() * 9000),
+    roe: (-3 + r() * 23).toFixed(1)
   }));
 }

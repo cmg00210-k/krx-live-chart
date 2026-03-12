@@ -1,69 +1,23 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 차트 엔진 + 기술적 분석 지표
+//  KRX LIVE — 차트 엔진 (TradingView Lightweight Charts)
+//  기술적 분석 지표 + 패턴 시각화
 // ══════════════════════════════════════════════════════
 
-let chartInstance = null;
-let rsiChartInstance = null;
-let macdChartInstance = null;
-
-// ── 캔들스틱 위크(꼬리) 플러그인 ──────────────────────
-const candlestickPlugin = {
-  id: 'candlestick',
-  afterDatasetsDraw(chart) {
-    const dataset = chart.data.datasets.find(d => d._isCandlestick);
-    if (!dataset || !dataset._rawData) return;
-
-    const meta = chart.getDatasetMeta(chart.data.datasets.indexOf(dataset));
-    const ctx = chart.ctx;
-    const yScale = chart.scales.y;
-    const hist = dataset._rawData;
-
-    meta.data.forEach((bar, i) => {
-      const candle = hist[i];
-      if (!candle) return;
-
-      const x = bar.x;
-      const highY = yScale.getPixelForValue(candle.h);
-      const lowY = yScale.getPixelForValue(candle.l);
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.strokeStyle = candle.c >= candle.o ? '#26a69a' : '#ef5350';
-      ctx.lineWidth = 1;
-      ctx.moveTo(x, highY);
-      ctx.lineTo(x, lowY);
-      ctx.stroke();
-      ctx.restore();
-    });
-  }
-};
-
-Chart.register(candlestickPlugin);
-
-// ══════════════════════════════════════════════════════
-//  기술적 지표 계산 함수
-// ══════════════════════════════════════════════════════
-
-/** 시간 라벨 */
-function getLabels(hist) {
-  const now = new Date();
-  return hist.map((_, i) => {
-    const d = new Date(now - (hist.length - 1 - i) * 60000);
-    return d.getHours().toString().padStart(2, '0') + ':' +
-           d.getMinutes().toString().padStart(2, '0');
-  });
-}
+// ── 기술적 지표 계산 함수 ──────────────────────────────
 
 /** 단순 이동평균 (SMA) */
 function calcMA(data, n) {
   return data.map((_, i) => {
     if (i < n - 1) return null;
-    return data.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n;
+    let sum = 0;
+    for (let j = i - n + 1; j <= i; j++) sum += data[j];
+    return sum / n;
   });
 }
 
 /** 지수 이동평균 (EMA) */
 function calcEMA(data, n) {
+  if (!data.length) return [];
   const k = 2 / (n + 1);
   const result = [data[0]];
   for (let i = 1; i < data.length; i++) {
@@ -91,8 +45,7 @@ function calcRSI(closes, period = 14) {
   let gains = 0, losses = 0;
   for (let i = 1; i <= period; i++) {
     const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+    if (diff >= 0) gains += diff; else losses -= diff;
   }
 
   let avgGain = gains / period;
@@ -108,6 +61,116 @@ function calcRSI(closes, period = 14) {
   return rsi;
 }
 
+/** ATR (Average True Range) */
+function calcATR(candles, period = 14) {
+  const atr = new Array(candles.length).fill(null);
+  if (candles.length < 2) return atr;
+  const tr = [candles[0].high - candles[0].low];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    tr.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+  }
+  if (candles.length < period) return atr;
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += tr[i];
+  atr[period - 1] = sum / period;
+  for (let i = period; i < candles.length; i++) {
+    atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+  }
+  return atr;
+}
+
+/** 일목균형표 (Ichimoku Cloud) */
+function calcIchimoku(candles, conv = 9, base = 26, spanBPeriod = 52, displacement = 26) {
+  const len = candles.length;
+  const midHL = (arr, start, end) => {
+    let hi = -Infinity, lo = Infinity;
+    for (let i = start; i <= end; i++) {
+      if (arr[i].high > hi) hi = arr[i].high;
+      if (arr[i].low < lo) lo = arr[i].low;
+    }
+    return (hi + lo) / 2;
+  };
+
+  const tenkan = new Array(len).fill(null);   // 전환선
+  const kijun = new Array(len).fill(null);    // 기준선
+  const spanA = new Array(len).fill(null);    // 선행스팬A
+  const spanB = new Array(len).fill(null);    // 선행스팬B
+  const chikou = new Array(len).fill(null);   // 후행스팬
+
+  for (let i = 0; i < len; i++) {
+    if (i >= conv - 1) tenkan[i] = midHL(candles, i - conv + 1, i);
+    if (i >= base - 1) kijun[i] = midHL(candles, i - base + 1, i);
+    if (i >= base - 1 && tenkan[i] !== null && kijun[i] !== null) {
+      const futIdx = i + displacement;
+      if (futIdx < len) spanA[futIdx] = (tenkan[i] + kijun[i]) / 2;
+    }
+    if (i >= spanBPeriod - 1) {
+      const futIdx = i + displacement;
+      if (futIdx < len) spanB[futIdx] = midHL(candles, i - spanBPeriod + 1, i);
+    }
+    // 후행스팬: 현재 종가를 displacement 전에 표시
+    if (i >= displacement) chikou[i - displacement] = candles[i].close;
+  }
+  return { tenkan, kijun, spanA, spanB, chikou };
+}
+
+/** 칼만 필터 (Kalman Filter) 가격 평활 */
+function calcKalman(closes, Q = 0.01, R = 1.0) {
+  if (!closes.length) return [];
+  const result = new Array(closes.length).fill(null);
+  let x = closes[0];   // 상태 추정
+  let P = 1.0;          // 추정 오차
+  result[0] = x;
+
+  for (let i = 1; i < closes.length; i++) {
+    // 예측
+    const xPred = x;
+    const PPred = P + Q;
+    // 갱신
+    const K = PPred / (PPred + R);
+    x = xPred + K * (closes[i] - xPred);
+    P = (1 - K) * PPred;
+    result[i] = x;
+  }
+  return result;
+}
+
+/** 허스트 지수 (Hurst Exponent) — R/S 분석 */
+function calcHurst(closes, minWindow = 10) {
+  if (closes.length < minWindow * 4) return null;
+
+  const logRS = [];
+  const logN = [];
+
+  for (let w = minWindow; w <= Math.floor(closes.length / 2); w = Math.floor(w * 1.5)) {
+    const numBlocks = Math.floor(closes.length / w);
+    let rsSum = 0;
+    for (let b = 0; b < numBlocks; b++) {
+      const block = closes.slice(b * w, (b + 1) * w);
+      const mean = block.reduce((a, v) => a + v, 0) / w;
+      const devs = block.map(v => v - mean);
+      const cumDevs = [];
+      let cum = 0;
+      for (const d of devs) { cum += d; cumDevs.push(cum); }
+      const R = Math.max(...cumDevs) - Math.min(...cumDevs);
+      const S = Math.sqrt(devs.reduce((a, d) => a + d * d, 0) / w);
+      if (S > 0) rsSum += R / S;
+    }
+    logRS.push(Math.log(rsSum / numBlocks));
+    logN.push(Math.log(w));
+  }
+
+  if (logRS.length < 2) return null;
+  // 선형 회귀로 기울기(H) 추정
+  const n = logRS.length;
+  let sx = 0, sy = 0, sxy = 0, sx2 = 0;
+  for (let i = 0; i < n; i++) {
+    sx += logN[i]; sy += logRS[i]; sxy += logN[i] * logRS[i]; sx2 += logN[i] * logN[i];
+  }
+  return (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+}
+
 /** MACD (12, 26, 9) */
 function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
   const emaFast = calcEMA(closes, fast);
@@ -115,6 +178,8 @@ function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
 
   const macdLine = emaFast.map((v, i) => i < slow - 1 ? null : v - emaSlow[i]);
   const validMacd = macdLine.filter(v => v !== null);
+  if (!validMacd.length) return { macdLine, signalLine: macdLine.map(() => null), histogram: macdLine.map(() => null) };
+
   const signalEma = calcEMA(validMacd, sig);
 
   const signalLine = new Array(closes.length).fill(null);
@@ -134,386 +199,543 @@ function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
 }
 
 // ══════════════════════════════════════════════════════
-//  차트 렌더링
+//  차트 매니저 (Lightweight Charts)
 // ══════════════════════════════════════════════════════
 
-/** 모든 차트 인스턴스 파괴 */
-function destroyAllCharts() {
-  chartInstance?.destroy();   chartInstance = null;
-  rsiChartInstance?.destroy(); rsiChartInstance = null;
-  macdChartInstance?.destroy(); macdChartInstance = null;
-}
+class ChartManager {
+  constructor() {
+    this.mainChart = null;
+    this.rsiChart = null;
+    this.macdChart = null;
 
-/** 서브차트 표시/숨김 */
-function updateSubChartVisibility() {
-  const rsiEl = document.getElementById('rsi-chart-container');
-  const macdEl = document.getElementById('macd-chart-container');
-  if (rsiEl) rsiEl.style.display = activeIndicators.has('rsi') ? 'block' : 'none';
-  if (macdEl) macdEl.style.display = activeIndicators.has('macd') ? 'block' : 'none';
-}
+    // Series 참조
+    this.candleSeries = null;
+    this.volumeSeries = null;
+    this.indicatorSeries = {};   // { 'ma5': series, 'ema12': series, ... }
+    this.trendlineSeries = [];   // 패턴 추세선
 
-/** 공통 차트 옵션 */
-function baseChartOptions(extraScales = {}) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    interaction: { mode: 'index', intersect: false },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: 'rgba(13,15,20,.95)',
-        borderColor: '#1e2535', borderWidth: 1,
-        titleColor: '#d1d4dc', bodyColor: '#d1d4dc'
-      }
-    },
-    scales: extraScales
-  };
-}
+    this.rsiSeries = null;
+    this.rsiPriceLines = [];
 
-/** ── 메인 차트 업데이트 ── */
-function updateChart() {
-  const hist = prices[currentStock.code].history;
-  const labels = getLabels(hist);
-  const closes = hist.map(h => h.c);
+    this.macdLineSeries = null;
+    this.macdSignalSeries = null;
+    this.macdHistSeries = null;
 
-  updateSubChartVisibility();
+    // 리사이즈 옵저버: Map<container, { observer, chart }>
+    this._resizeMap = new Map();
 
-  const datasets = [];
-
-  // ── 가격 데이터셋 ──
-  if (chartType === 'candle') {
-    datasets.push({
-      label: 'OHLC',
-      data: hist.map(h => [Math.min(h.o, h.c), Math.max(h.o, h.c)]),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.9)' : 'rgba(239,83,80,0.9)'),
-      borderColor: hist.map(h => h.c >= h.o ? '#26a69a' : '#ef5350'),
-      borderWidth: 1,
-      type: 'bar',
-      barPercentage: 0.6,
-      categoryPercentage: 0.9,
-      _isCandlestick: true,
-      _rawData: hist,
-      order: 1
-    });
-  } else if (chartType === 'bar') {
-    datasets.push({
-      label: 'OHLC',
-      data: hist.map(h => [Math.min(h.o, h.c), Math.max(h.o, h.c)]),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)'),
-      borderColor: hist.map(h => h.c >= h.o ? '#26a69a' : '#ef5350'),
-      borderWidth: 1,
-      type: 'bar',
-      barPercentage: 0.3,
-      _isCandlestick: true,
-      _rawData: hist,
-      order: 1
-    });
-  } else {
-    datasets.push({
-      label: '종가',
-      data: closes,
-      borderColor: '#2962ff',
-      backgroundColor: 'rgba(41,98,255,0.08)',
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: true,
-      type: 'line',
-      order: 0
-    });
+    // 시간축 동기화 구독 해제 함수들
+    this._syncUnsubs = [];
+    this._syncing = false;
   }
 
-  // ── MA ──
-  if (activeIndicators.has('ma')) {
-    datasets.push({
-      label: 'MA(5)', data: calcMA(closes, 5),
-      borderColor: '#e91e63', borderWidth: 1.2,
-      pointRadius: 0, tension: 0.1, type: 'line', fill: false, order: 0
-    });
-    datasets.push({
-      label: 'MA(20)', data: calcMA(closes, 20),
-      borderColor: '#ff9800', borderWidth: 1.2,
-      pointRadius: 0, tension: 0.1, type: 'line', fill: false, order: 0
-    });
-    datasets.push({
-      label: 'MA(60)', data: calcMA(closes, 60),
-      borderColor: '#4caf50', borderWidth: 1.2,
-      pointRadius: 0, tension: 0.1, type: 'line', fill: false, order: 0
-    });
-  }
-
-  // ── EMA ──
-  if (activeIndicators.has('ema')) {
-    datasets.push({
-      label: 'EMA(12)', data: calcEMA(closes, 12),
-      borderColor: '#00bcd4', borderWidth: 1.2,
-      pointRadius: 0, tension: 0.1, type: 'line', fill: false, order: 0
-    });
-    datasets.push({
-      label: 'EMA(26)', data: calcEMA(closes, 26),
-      borderColor: '#8bc34a', borderWidth: 1.2,
-      pointRadius: 0, tension: 0.1, type: 'line', fill: false, order: 0
-    });
-  }
-
-  // ── 볼린저 밴드 ──
-  if (activeIndicators.has('bb')) {
-    const bb = calcBB(closes);
-    datasets.push({
-      label: 'BB상단', data: bb.map(b => b.upper),
-      borderColor: 'rgba(156,39,176,.7)', borderWidth: 1,
-      pointRadius: 0, type: 'line', fill: false, borderDash: [4, 2], order: 0
-    });
-    datasets.push({
-      label: 'BB중간', data: bb.map(b => b.mid),
-      borderColor: 'rgba(156,39,176,.4)', borderWidth: 1,
-      pointRadius: 0, type: 'line', fill: false, borderDash: [2, 2], order: 0
-    });
-    datasets.push({
-      label: 'BB하단', data: bb.map(b => b.lower),
-      borderColor: 'rgba(156,39,176,.7)', borderWidth: 1,
-      pointRadius: 0, type: 'line', fill: false, borderDash: [4, 2], order: 0
-    });
-  }
-
-  // ── 거래량 (상승=초록, 하락=빨강) ──
-  if (activeIndicators.has('vol')) {
-    datasets.push({
-      label: '거래량', data: hist.map(h => h.v),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)'),
-      borderColor: 'transparent',
-      type: 'bar', yAxisID: 'yVol', order: 10
-    });
-  }
-
-  // ── Y축: high/low 범위 보장 ──
-  const allHighs = hist.map(h => h.h);
-  const allLows = hist.map(h => h.l);
-  const yMin = Math.min(...allLows) * 0.999;
-  const yMax = Math.max(...allHighs) * 1.001;
-
-  const scales = {
-    x: {
-      grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', maxTicksLimit: 10, font: { size: 10 } }
-    },
-    y: {
-      position: 'right',
-      min: yMin, max: yMax,
-      grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', font: { size: 10 }, callback: v => v.toLocaleString() }
-    }
-  };
-
-  if (activeIndicators.has('vol')) {
-    scales.yVol = {
-      position: 'left',
-      grid: { display: false },
-      ticks: { display: false },
-      max: Math.max(...hist.map(h => h.v)) * 4
+  // ── 공통 차트 옵션 ─────────────────────────────────
+  _baseOptions() {
+    return {
+      layout: {
+        background: { type: 'solid', color: '#141820' },
+        textColor: '#d1d4dc',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.04)' },
+        horzLines: { color: 'rgba(255,255,255,0.04)' },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(255,255,255,0.15)', width: 1, style: 2 },
+        horzLine: { color: 'rgba(255,255,255,0.15)', width: 1, style: 2 },
+      },
+      rightPriceScale: {
+        borderColor: '#1e2535',
+        scaleMargins: { top: 0.05, bottom: 0.05 },
+      },
+      timeScale: {
+        borderColor: '#1e2535',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 5,
+      },
+      handleScroll: { vertTouchDrag: false },
     };
   }
 
-  // 툴팁 커스텀
-  const tooltipCallbacks = {
-    label: ctx => {
-      if (ctx.dataset._isCandlestick) {
-        const h = ctx.dataset._rawData[ctx.dataIndex];
-        return `O ${h.o.toLocaleString()}  H ${h.h.toLocaleString()}  L ${h.l.toLocaleString()}  C ${h.c.toLocaleString()}`;
-      }
-      if (ctx.dataset.yAxisID === 'yVol') {
-        return `거래량: ${Number(ctx.parsed.y).toLocaleString()}`;
-      }
-      return `${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()}`;
-    }
-  };
+  // ══════════════════════════════════════════════════
+  //  메인 차트 생성
+  // ══════════════════════════════════════════════════
+  createMainChart(container) {
+    if (this.mainChart) this.destroyAll();
 
-  if (chartInstance) {
-    chartInstance.data = { labels, datasets };
-    chartInstance.options.scales = scales;
-    chartInstance.update('none');
-  } else {
-    const ctx = document.getElementById('mainChart').getContext('2d');
-    const opts = baseChartOptions(scales);
-    opts.plugins.tooltip.callbacks = tooltipCallbacks;
-    chartInstance = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options: opts });
+    const opts = this._baseOptions();
+    this.mainChart = LightweightCharts.createChart(container, opts);
+
+    // 캔들스틱 시리즈
+    this.candleSeries = this.mainChart.addCandlestickSeries({
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderUpColor: '#26a69a',
+      borderDownColor: '#ef5350',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+    });
+
+    // 거래량 히스토그램
+    this.volumeSeries = this.mainChart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'vol',
+    });
+    this.mainChart.priceScale('vol').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    this._observeResize(container, this.mainChart);
+
+    return this.mainChart;
   }
 
-  // ── 서브차트 ──
-  if (activeIndicators.has('rsi')) updateRSIChart(labels, closes);
-  else { rsiChartInstance?.destroy(); rsiChartInstance = null; }
+  // ══════════════════════════════════════════════════
+  //  RSI 서브차트 생성
+  // ══════════════════════════════════════════════════
+  createRSIChart(container) {
+    this.destroyRSI();
 
-  if (activeIndicators.has('macd')) updateMACDChart(labels, closes);
-  else { macdChartInstance?.destroy(); macdChartInstance = null; }
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+
+    this.rsiChart = LightweightCharts.createChart(container, opts);
+
+    this.rsiSeries = this.rsiChart.addLineSeries({
+      color: '#ff9800',
+      lineWidth: 1.5,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+
+    this.rsiPriceLines = [
+      this.rsiSeries.createPriceLine({ price: 70, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
+      this.rsiSeries.createPriceLine({ price: 50, color: 'rgba(255,255,255,0.15)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }),
+      this.rsiSeries.createPriceLine({ price: 30, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
+    ];
+
+    this._observeResize(container, this.rsiChart);
+    this._rebuildSync();
+
+    return this.rsiChart;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  MACD 서브차트 생성
+  // ══════════════════════════════════════════════════
+  createMACDChart(container) {
+    this.destroyMACD();
+
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.15, bottom: 0.15 };
+
+    this.macdChart = LightweightCharts.createChart(container, opts);
+
+    this.macdHistSeries = this.macdChart.addHistogramSeries({
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    this.macdLineSeries = this.macdChart.addLineSeries({
+      color: '#2962ff',
+      lineWidth: 1.5,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+
+    this.macdSignalSeries = this.macdChart.addLineSeries({
+      color: '#ff9800',
+      lineWidth: 1.2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+
+    this.macdHistSeries.createPriceLine({
+      price: 0,
+      color: 'rgba(255,255,255,0.15)',
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: false,
+    });
+
+    this._observeResize(container, this.macdChart);
+    this._rebuildSync();
+
+    return this.macdChart;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  차트 데이터 업데이트
+  // ══════════════════════════════════════════════════
+  updateMain(candles, chartType, activeIndicators, patterns) {
+    if (!this.mainChart || !candles || !candles.length) return;
+
+    const times = candles.map(c => c.time);
+    const closes = candles.map(c => c.close);
+
+    // ── 가격 데이터 ──
+    if (chartType === 'line') {
+      this.candleSeries.setData([]);
+      if (!this.indicatorSeries._priceLine) {
+        this.indicatorSeries._priceLine = this.mainChart.addLineSeries({
+          color: '#2962ff',
+          lineWidth: 2,
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
+      }
+      this.indicatorSeries._priceLine.setData(
+        candles.map(c => ({ time: c.time, value: c.close }))
+      );
+    } else {
+      if (this.indicatorSeries._priceLine) {
+        this.mainChart.removeSeries(this.indicatorSeries._priceLine);
+        delete this.indicatorSeries._priceLine;
+      }
+      this.candleSeries.setData(candles.map(c => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      })));
+
+      if (chartType === 'bar') {
+        this.candleSeries.applyOptions({
+          upColor: 'transparent',
+          downColor: 'transparent',
+          borderUpColor: '#26a69a',
+          borderDownColor: '#ef5350',
+        });
+      } else {
+        this.candleSeries.applyOptions({
+          upColor: '#26a69a',
+          downColor: '#ef5350',
+          borderUpColor: '#26a69a',
+          borderDownColor: '#ef5350',
+        });
+      }
+    }
+
+    // ── 거래량 ──
+    if (activeIndicators.has('vol')) {
+      this.volumeSeries.setData(candles.map(c => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
+      })));
+    } else {
+      this.volumeSeries.setData([]);
+    }
+
+    // ── 이동평균 (MA) ──
+    this._updateIndicatorLine('ma5', activeIndicators.has('ma'),
+      times, calcMA(closes, 5), '#e91e63', 1);
+    this._updateIndicatorLine('ma20', activeIndicators.has('ma'),
+      times, calcMA(closes, 20), '#ff9800', 1);
+    this._updateIndicatorLine('ma60', activeIndicators.has('ma'),
+      times, calcMA(closes, 60), '#4caf50', 1);
+
+    // ── EMA ──
+    this._updateIndicatorLine('ema12', activeIndicators.has('ema'),
+      times, calcEMA(closes, 12), '#00bcd4', 1);
+    this._updateIndicatorLine('ema26', activeIndicators.has('ema'),
+      times, calcEMA(closes, 26), '#8bc34a', 1);
+
+    // ── 일목균형표 ──
+    if (activeIndicators.has('ich')) {
+      const ich = calcIchimoku(candles);
+      this._updateIndicatorLine('ichTenkan', true, times,
+        ich.tenkan, '#2196f3', 1);
+      this._updateIndicatorLine('ichKijun', true, times,
+        ich.kijun, '#ef5350', 1);
+      this._updateIndicatorLine('ichSpanA', true, times,
+        ich.spanA, 'rgba(76,175,80,0.5)', 1);
+      this._updateIndicatorLine('ichSpanB', true, times,
+        ich.spanB, 'rgba(244,67,54,0.5)', 1);
+      this._updateIndicatorLine('ichChikou', true, times,
+        ich.chikou, '#9c27b0', 1);
+    } else {
+      ['ichTenkan', 'ichKijun', 'ichSpanA', 'ichSpanB', 'ichChikou'].forEach(k =>
+        this._removeIndicatorLine(k));
+    }
+
+    // ── 칼만 필터 ──
+    if (activeIndicators.has('kalman')) {
+      const kalman = calcKalman(closes);
+      this._updateIndicatorLine('kalman', true, times, kalman, '#00e5ff', 2);
+    } else {
+      this._removeIndicatorLine('kalman');
+    }
+
+    // ── 볼린저 밴드 ──
+    if (activeIndicators.has('bb')) {
+      const bb = calcBB(closes);
+      this._updateIndicatorLine('bbUpper', true,
+        times, bb.map(b => b.upper), 'rgba(156,39,176,0.7)', 1);
+      this._updateIndicatorLine('bbMid', true,
+        times, bb.map(b => b.mid), 'rgba(156,39,176,0.4)', 1);
+      this._updateIndicatorLine('bbLower', true,
+        times, bb.map(b => b.lower), 'rgba(156,39,176,0.7)', 1);
+    } else {
+      this._removeIndicatorLine('bbUpper');
+      this._removeIndicatorLine('bbMid');
+      this._removeIndicatorLine('bbLower');
+    }
+
+    // ── 패턴 마커 & 추세선 ──
+    this._drawPatterns(candles, chartType, patterns);
+  }
+
+  /** RSI 업데이트 */
+  updateRSI(candles) {
+    if (!this.rsiChart || !this.rsiSeries) return;
+
+    const closes = candles.map(c => c.close);
+    const rsi = calcRSI(closes, 14);
+
+    this.rsiSeries.setData(
+      rsi.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
+         .filter(Boolean)
+    );
+  }
+
+  /** MACD 업데이트 */
+  updateMACD(candles) {
+    if (!this.macdChart) return;
+
+    const closes = candles.map(c => c.close);
+    const { macdLine, signalLine, histogram } = calcMACD(closes);
+
+    this.macdHistSeries.setData(
+      histogram.map((v, i) => v !== null ? {
+        time: candles[i].time,
+        value: v,
+        color: v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+      } : null).filter(Boolean)
+    );
+
+    this.macdLineSeries.setData(
+      macdLine.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
+              .filter(Boolean)
+    );
+
+    this.macdSignalSeries.setData(
+      signalLine.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
+                .filter(Boolean)
+    );
+  }
+
+  // ══════════════════════════════════════════════════
+  //  패턴 시각화
+  // ══════════════════════════════════════════════════
+  _drawPatterns(candles, chartType, patterns) {
+    // 기존 추세선 제거
+    this.trendlineSeries.forEach(s => {
+      try { this.mainChart.removeSeries(s); } catch (e) {}
+    });
+    this.trendlineSeries = [];
+
+    // 마커를 설정할 시리즈 결정 (라인 모드일 때는 priceLine 시리즈 사용)
+    const markerSeries = (chartType === 'line' && this.indicatorSeries._priceLine)
+      ? this.indicatorSeries._priceLine
+      : this.candleSeries;
+
+    if (!patterns || !patterns.length) {
+      markerSeries.setMarkers([]);
+      return;
+    }
+
+    // ── 마커 설정 ──
+    const markers = patterns
+      .filter(p => p.marker)
+      .map(p => ({
+        time: p.marker.time,
+        position: p.marker.position,
+        color: p.marker.color,
+        shape: p.marker.shape,
+        text: p.marker.text,
+        size: 2,
+      }))
+      .sort((a, b) => a.time - b.time);
+
+    markerSeries.setMarkers(markers);
+
+    // ── 추세선 (삼각형, 쐐기 패턴) ──
+    patterns.forEach(p => {
+      if (!p.trendlines) return;
+
+      p.trendlines.forEach(tl => {
+        if (!tl.points || tl.points.length < 2) return;
+
+        const series = this.mainChart.addLineSeries({
+          color: tl.color || '#ff9800',
+          lineWidth: 2,
+          lineStyle: tl.style === 'dashed' ? 2 : 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+
+        series.setData(tl.points.map(pt => ({
+          time: pt.time,
+          value: pt.value,
+        })));
+
+        this.trendlineSeries.push(series);
+      });
+    });
+  }
+
+  // ══════════════════════════════════════════════════
+  //  지표 라인 유틸리티
+  // ══════════════════════════════════════════════════
+  _updateIndicatorLine(key, show, times, values, color, lineWidth) {
+    if (!show) {
+      this._removeIndicatorLine(key);
+      return;
+    }
+
+    if (!this.indicatorSeries[key]) {
+      this.indicatorSeries[key] = this.mainChart.addLineSeries({
+        color: color,
+        lineWidth: lineWidth,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+
+    const data = values
+      .map((v, i) => v !== null ? { time: times[i], value: v } : null)
+      .filter(Boolean);
+
+    this.indicatorSeries[key].setData(data);
+  }
+
+  _removeIndicatorLine(key) {
+    if (this.indicatorSeries[key]) {
+      try { this.mainChart.removeSeries(this.indicatorSeries[key]); } catch (e) {}
+      delete this.indicatorSeries[key];
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  시간축 동기화 (구독 해제 → 재구독)
+  // ══════════════════════════════════════════════════
+  _rebuildSync() {
+    // 기존 구독 모두 해제
+    this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
+    this._syncUnsubs = [];
+
+    if (!this.mainChart) return;
+
+    const charts = [this.mainChart, this.rsiChart, this.macdChart].filter(Boolean);
+    if (charts.length < 2) return;
+
+    charts.forEach(source => {
+      const targets = charts.filter(c => c !== source);
+      const unsub = source.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (this._syncing || !range) return;
+        this._syncing = true;
+        targets.forEach(t => {
+          try { t.timeScale().setVisibleLogicalRange(range); } catch (e) {}
+        });
+        this._syncing = false;
+      });
+      this._syncUnsubs.push(unsub);
+    });
+  }
+
+  // ══════════════════════════════════════════════════
+  //  개별 서브차트 파괴
+  // ══════════════════════════════════════════════════
+  destroyRSI() {
+    if (this.rsiChart) {
+      // 리사이즈 옵저버 해제
+      this._resizeMap.forEach((entry, container) => {
+        if (entry.chart === this.rsiChart) {
+          entry.observer.disconnect();
+          this._resizeMap.delete(container);
+        }
+      });
+      this.rsiChart.remove();
+      this.rsiChart = null;
+      this.rsiSeries = null;
+      this.rsiPriceLines = [];
+      this._rebuildSync();
+    }
+  }
+
+  destroyMACD() {
+    if (this.macdChart) {
+      this._resizeMap.forEach((entry, container) => {
+        if (entry.chart === this.macdChart) {
+          entry.observer.disconnect();
+          this._resizeMap.delete(container);
+        }
+      });
+      this.macdChart.remove();
+      this.macdChart = null;
+      this.macdLineSeries = null;
+      this.macdSignalSeries = null;
+      this.macdHistSeries = null;
+      this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  리사이즈 & 전체 파괴
+  // ══════════════════════════════════════════════════
+  _observeResize(container, chart) {
+    // 기존 옵저버가 있으면 해제
+    if (this._resizeMap.has(container)) {
+      this._resizeMap.get(container).observer.disconnect();
+    }
+
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          try { chart.applyOptions({ width, height }); } catch (e) {}
+        }
+      }
+    });
+    ro.observe(container);
+    this._resizeMap.set(container, { observer: ro, chart });
+  }
+
+  destroyAll() {
+    // 동기화 구독 해제
+    this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
+    this._syncUnsubs = [];
+
+    // 리사이즈 옵저버 해제
+    this._resizeMap.forEach(entry => entry.observer.disconnect());
+    this._resizeMap.clear();
+
+    // 차트 제거
+    if (this.mainChart) { this.mainChart.remove(); this.mainChart = null; }
+    if (this.rsiChart) { this.rsiChart.remove(); this.rsiChart = null; }
+    if (this.macdChart) { this.macdChart.remove(); this.macdChart = null; }
+
+    // 참조 초기화
+    this.candleSeries = null;
+    this.volumeSeries = null;
+    this.indicatorSeries = {};
+    this.trendlineSeries = [];
+    this.rsiSeries = null;
+    this.rsiPriceLines = [];
+    this.macdLineSeries = null;
+    this.macdSignalSeries = null;
+    this.macdHistSeries = null;
+  }
 }
 
-// ══════════════════════════════════════════════════════
-//  RSI 서브차트
-// ══════════════════════════════════════════════════════
-
-const rsiZonePlugin = {
-  id: 'rsiZones',
-  beforeDraw(chart) {
-    const ctx = chart.ctx;
-    const yScale = chart.scales.y;
-    const area = chart.chartArea;
-    if (!area) return;
-
-    // 과매수 영역 (70~100)
-    const y70 = yScale.getPixelForValue(70);
-    const y100 = yScale.getPixelForValue(100);
-    ctx.fillStyle = 'rgba(239,83,80,0.06)';
-    ctx.fillRect(area.left, y100, area.width, y70 - y100);
-
-    // 과매도 영역 (0~30)
-    const y0 = yScale.getPixelForValue(0);
-    const y30 = yScale.getPixelForValue(30);
-    ctx.fillStyle = 'rgba(38,166,154,0.06)';
-    ctx.fillRect(area.left, y30, area.width, y0 - y30);
-
-    // 기준선 (30, 50, 70)
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    [30, 50, 70].forEach(v => {
-      const y = yScale.getPixelForValue(v);
-      ctx.beginPath();
-      ctx.moveTo(area.left, y);
-      ctx.lineTo(area.right, y);
-      ctx.stroke();
-    });
-    ctx.setLineDash([]);
-  }
-};
-
-function updateRSIChart(labels, closes) {
-  const rsi = calcRSI(closes, 14);
-  const data = {
-    labels,
-    datasets: [{
-      label: 'RSI(14)',
-      data: rsi,
-      borderColor: '#ff9800',
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.1,
-      fill: false
-    }]
-  };
-
-  const scales = {
-    x: { display: false },
-    y: {
-      position: 'right',
-      min: 0, max: 100,
-      grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: {
-        color: '#555e78', font: { size: 9 }, stepSize: 10,
-        callback: v => [30, 50, 70].includes(v) ? v : ''
-      }
-    }
-  };
-
-  if (rsiChartInstance) {
-    rsiChartInstance.data = data;
-    rsiChartInstance.update('none');
-  } else {
-    const canvas = document.getElementById('rsiChart');
-    if (!canvas) return;
-    const opts = baseChartOptions(scales);
-    opts.plugins.tooltip.callbacks = { label: ctx => `RSI: ${ctx.parsed.y?.toFixed(1)}` };
-    rsiChartInstance = new Chart(canvas.getContext('2d'), {
-      type: 'line', data, plugins: [rsiZonePlugin], options: opts
-    });
-  }
-}
-
-// ══════════════════════════════════════════════════════
-//  MACD 서브차트
-// ══════════════════════════════════════════════════════
-
-const macdZeroPlugin = {
-  id: 'macdZero',
-  beforeDraw(chart) {
-    const ctx = chart.ctx;
-    const yScale = chart.scales.y;
-    const area = chart.chartArea;
-    if (!area) return;
-
-    const y0 = yScale.getPixelForValue(0);
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(area.left, y0);
-    ctx.lineTo(area.right, y0);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-};
-
-function updateMACDChart(labels, closes) {
-  const { macdLine, signalLine, histogram } = calcMACD(closes);
-  const data = {
-    labels,
-    datasets: [
-      {
-        label: 'Histogram',
-        data: histogram,
-        backgroundColor: histogram.map(v =>
-          v === null ? 'transparent' : v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)'
-        ),
-        borderColor: 'transparent',
-        type: 'bar',
-        order: 2
-      },
-      {
-        label: 'MACD',
-        data: macdLine,
-        borderColor: '#2962ff',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.1,
-        type: 'line',
-        fill: false,
-        order: 1
-      },
-      {
-        label: 'Signal',
-        data: signalLine,
-        borderColor: '#ff9800',
-        borderWidth: 1.2,
-        pointRadius: 0,
-        tension: 0.1,
-        type: 'line',
-        fill: false,
-        order: 1
-      }
-    ]
-  };
-
-  const scales = {
-    x: { display: false },
-    y: {
-      position: 'right',
-      grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', font: { size: 9 } }
-    }
-  };
-
-  if (macdChartInstance) {
-    macdChartInstance.data = data;
-    macdChartInstance.update('none');
-  } else {
-    const canvas = document.getElementById('macdChart');
-    if (!canvas) return;
-    const opts = baseChartOptions(scales);
-    opts.plugins.tooltip.callbacks = {
-      label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(0)}`
-    };
-    macdChartInstance = new Chart(canvas.getContext('2d'), {
-      type: 'bar', data, plugins: [macdZeroPlugin], options: opts
-    });
-  }
-}
+// 글로벌 인스턴스
+const chartManager = new ChartManager();
