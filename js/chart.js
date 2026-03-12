@@ -28,7 +28,7 @@ const candlestickPlugin = {
 
       ctx.save();
       ctx.beginPath();
-      ctx.strokeStyle = candle.c >= candle.o ? '#26a69a' : '#ef5350';
+      ctx.strokeStyle = candle.c >= candle.o ? '#E05050' : '#5086DC';
       ctx.lineWidth = 1;
       ctx.moveTo(x, highY);
       ctx.lineTo(x, lowY);
@@ -162,9 +162,9 @@ function baseChartOptions(extraScales = {}) {
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: 'rgba(13,15,20,.95)',
-        borderColor: '#1e2535', borderWidth: 1,
-        titleColor: '#d1d4dc', bodyColor: '#d1d4dc'
+        backgroundColor: 'rgba(17,17,17,.97)',
+        borderColor: '#2a2a2a', borderWidth: 1,
+        titleColor: '#E8E8E8', bodyColor: '#E8E8E8'
       }
     },
     scales: extraScales
@@ -186,8 +186,8 @@ function updateChart() {
     datasets.push({
       label: 'OHLC',
       data: hist.map(h => [Math.min(h.o, h.c), Math.max(h.o, h.c)]),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.9)' : 'rgba(239,83,80,0.9)'),
-      borderColor: hist.map(h => h.c >= h.o ? '#26a69a' : '#ef5350'),
+      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(224,80,80,0.9)' : 'rgba(80,134,220,0.9)'),
+      borderColor: hist.map(h => h.c >= h.o ? '#E05050' : '#5086DC'),
       borderWidth: 1,
       type: 'bar',
       barPercentage: 0.6,
@@ -200,8 +200,8 @@ function updateChart() {
     datasets.push({
       label: 'OHLC',
       data: hist.map(h => [Math.min(h.o, h.c), Math.max(h.o, h.c)]),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)'),
-      borderColor: hist.map(h => h.c >= h.o ? '#26a69a' : '#ef5350'),
+      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(224,80,80,0.7)' : 'rgba(80,134,220,0.7)'),
+      borderColor: hist.map(h => h.c >= h.o ? '#E05050' : '#5086DC'),
       borderWidth: 1,
       type: 'bar',
       barPercentage: 0.3,
@@ -281,7 +281,7 @@ function updateChart() {
   if (activeIndicators.has('vol')) {
     datasets.push({
       label: '거래량', data: hist.map(h => h.v),
-      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)'),
+      backgroundColor: hist.map(h => h.c >= h.o ? 'rgba(224,80,80,0.3)' : 'rgba(80,134,220,0.3)'),
       borderColor: 'transparent',
       type: 'bar', yAxisID: 'yVol', order: 10
     });
@@ -296,13 +296,13 @@ function updateChart() {
   const scales = {
     x: {
       grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', maxTicksLimit: 10, font: { size: 10 } }
+      ticks: { color: '#888888', maxTicksLimit: 10, font: { size: 10 } }
     },
     y: {
       position: 'right',
       min: yMin, max: yMax,
       grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', font: { size: 10 }, callback: v => v.toLocaleString() }
+      ticks: { color: '#888888', font: { size: 10 }, callback: v => v.toLocaleString() }
     }
   };
 
@@ -462,7 +462,7 @@ function updateMACDChart(labels, closes) {
         label: 'Histogram',
         data: histogram,
         backgroundColor: histogram.map(v =>
-          v === null ? 'transparent' : v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)'
+          v === null ? 'transparent' : v >= 0 ? 'rgba(224,80,80,0.5)' : 'rgba(80,134,220,0.5)'
         ),
         borderColor: 'transparent',
         type: 'bar',
@@ -498,7 +498,7 @@ function updateMACDChart(labels, closes) {
     y: {
       position: 'right',
       grid: { color: 'rgba(255,255,255,.04)' },
-      ticks: { color: '#555e78', font: { size: 9 } }
+      ticks: { color: '#888888', font: { size: 9 } }
     }
   };
 
