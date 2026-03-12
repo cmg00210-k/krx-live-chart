@@ -233,13 +233,13 @@ class ChartManager {
   _baseOptions() {
     return {
       layout: {
-        background: { type: 'solid', color: '#141820' },
+        background: { type: 'solid', color: '#161616' },
         textColor: '#d1d4dc',
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: 'rgba(255,255,255,0.07)' },
+        horzLines: { color: 'rgba(255,255,255,0.07)' },
       },
       crosshair: {
         mode: LightweightCharts.CrosshairMode.Normal,
@@ -247,11 +247,11 @@ class ChartManager {
         horzLine: { color: 'rgba(255,255,255,0.15)', width: 1, style: 2 },
       },
       rightPriceScale: {
-        borderColor: '#1e2535',
+        borderColor: '#252525',
         scaleMargins: { top: 0.05, bottom: 0.05 },
       },
       timeScale: {
-        borderColor: '#1e2535',
+        borderColor: '#252525',
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 5,
@@ -271,12 +271,12 @@ class ChartManager {
 
     // 캔들스틱 시리즈
     this.candleSeries = this.mainChart.addCandlestickSeries({
-      upColor: '#26a69a',
-      downColor: '#ef5350',
-      borderUpColor: '#26a69a',
-      borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      upColor: '#E05050',
+      downColor: '#5086DC',
+      borderUpColor: '#E05050',
+      borderDownColor: '#5086DC',
+      wickUpColor: '#E05050',
+      wickDownColor: '#5086DC',
     });
 
     // 거래량 히스토그램
@@ -313,9 +313,9 @@ class ChartManager {
     });
 
     this.rsiPriceLines = [
-      this.rsiSeries.createPriceLine({ price: 70, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
+      this.rsiSeries.createPriceLine({ price: 70, color: 'rgba(224,80,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
       this.rsiSeries.createPriceLine({ price: 50, color: 'rgba(255,255,255,0.15)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }),
-      this.rsiSeries.createPriceLine({ price: 30, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
+      this.rsiSeries.createPriceLine({ price: 30, color: 'rgba(80,134,220,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true }),
     ];
 
     this._observeResize(container, this.rsiChart);
@@ -409,15 +409,15 @@ class ChartManager {
         this.candleSeries.applyOptions({
           upColor: 'transparent',
           downColor: 'transparent',
-          borderUpColor: '#26a69a',
-          borderDownColor: '#ef5350',
+          borderUpColor: '#E05050',
+          borderDownColor: '#5086DC',
         });
       } else {
         this.candleSeries.applyOptions({
-          upColor: '#26a69a',
-          downColor: '#ef5350',
-          borderUpColor: '#26a69a',
-          borderDownColor: '#ef5350',
+          upColor: '#E05050',
+          downColor: '#5086DC',
+          borderUpColor: '#E05050',
+          borderDownColor: '#5086DC',
         });
       }
     }
@@ -427,7 +427,7 @@ class ChartManager {
       this.volumeSeries.setData(candles.map(c => ({
         time: c.time,
         value: c.volume,
-        color: c.close >= c.open ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
+        color: c.close >= c.open ? 'rgba(224,80,80,0.3)' : 'rgba(80,134,220,0.3)',
       })));
     } else {
       this.volumeSeries.setData([]);
@@ -490,6 +490,7 @@ class ChartManager {
 
     // ── 패턴 마커 & 추세선 ──
     this._drawPatterns(candles, chartType, patterns);
+    if (typeof patternRenderer !== 'undefined') patternRenderer.render(this, candles, chartType, patterns);
   }
 
   /** RSI 업데이트 */
@@ -516,7 +517,7 @@ class ChartManager {
       histogram.map((v, i) => v !== null ? {
         time: candles[i].time,
         value: v,
-        color: v >= 0 ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+        color: v >= 0 ? 'rgba(224,80,80,0.5)' : 'rgba(80,134,220,0.5)',
       } : null).filter(Boolean)
     );
 
@@ -562,7 +563,7 @@ class ChartManager {
         text: p.marker.text,
         size: 2,
       }))
-      .sort((a, b) => a.time - b.time);
+      .sort((a, b) => typeof a.time === 'string' ? a.time.localeCompare(b.time) : a.time - b.time);
 
     markerSeries.setMarkers(markers);
 
@@ -574,7 +575,7 @@ class ChartManager {
         if (!tl.points || tl.points.length < 2) return;
 
         const series = this.mainChart.addLineSeries({
-          color: tl.color || '#ff9800',
+          color: tl.color || '#C9A84C',
           lineWidth: 2,
           lineStyle: tl.style === 'dashed' ? 2 : 0,
           priceLineVisible: false,

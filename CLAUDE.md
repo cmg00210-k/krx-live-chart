@@ -21,7 +21,7 @@ Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is u
 | File | Globals Exported | Role |
 |------|-----------------|------|
 | `js/data.js` | `PAST_DATA`, `getPastData()` | Historical financial data |
-| `js/api.js` | `KRX_API_CONFIG`, `ALL_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (55 stocks, 6 timeframes, demo/KIS dual mode) |
+| `js/api.js` | `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (file/demo/KIS tri-mode, 2,700+ stocks from index.json) |
 | `js/patterns.js` | `patternEngine` | PatternEngine class — 20+ candlestick/chart patterns with ATR normalization, quality scoring |
 | `js/chart.js` | `chartManager`, `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()` | ChartManager class using TradingView Lightweight Charts v4.2.0 |
 | `js/app.js` | (none — side effects only) | State management, UI event binding, initialization |
@@ -46,7 +46,13 @@ dataService.getCandles(stock, timeframe)
     → chartManager.updateRSI(candles) / updateMACD(candles)
 ```
 
-Demo mode generates deterministic data using stock code hash as random seed.
+### Data Modes
+
+- **file** (default): Loads real OHLCV from `data/kospi/`, `data/kosdaq/` JSON files. Daily only — intraday falls back to demo. Stock list from `data/index.json`.
+- **demo**: Deterministic simulated data using stock code hash as random seed.
+- **kis**: 한국투자증권 OpenAPI (requires backend CORS proxy).
+
+`data/` folder is in `.gitignore` — generated locally by `scripts/download_ohlcv.py`.
 
 ## Collaboration Rules (from GUIDE.md)
 

@@ -16,5 +16,8 @@ node_modules/
 .env
 .env.local
 
+# Stock data (large JSON files — downloaded via scripts/download_ohlcv.py)
+data/
+
 # Claude Code (AI assistant local config)
 .claude/

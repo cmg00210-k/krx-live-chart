@@ -14,7 +14,8 @@
 // ══════════════════════════════════════════════════════
 
 const KRX_API_CONFIG = {
-  mode: 'demo',   // 'demo' | 'kis'
+  mode: 'file',   // 'file' | 'demo' | 'kis'
+  dataDir: 'data', // file 모드에서 JSON 파일 경로
   kis: {
     appKey: '',
     appSecret: '',
@@ -22,8 +23,8 @@ const KRX_API_CONFIG = {
   }
 };
 
-// ── 전체 종목 목록 (KOSPI + KOSDAQ 주요 종목) ──────────
-const ALL_STOCKS = [
+// ── 기본 종목 목록 (index.json 로드 전 폴백) ──────────
+const DEFAULT_STOCKS = [
   // ═══ KOSPI 대형주 ═══
   { code: '005930', name: '삼성전자',       market: 'KOSPI', base: 73400 },
   { code: '000660', name: 'SK하이닉스',     market: 'KOSPI', base: 182000 },
@@ -84,6 +85,9 @@ const ALL_STOCKS = [
   { code: '035900', name: 'JYP Ent.',       market: 'KOSDAQ', base: 62000 },
 ];
 
+// ALL_STOCKS: initFromIndex() 호출 시 index.json에서 동적 로드
+let ALL_STOCKS = DEFAULT_STOCKS;
+
 // ── 타임프레임 정의 ────────────────────────────────────
 const TIMEFRAMES = {
   '1m':  { label: '1분',    seconds: 60,    count: 120 },
@@ -102,6 +106,35 @@ class KRXDataService {
     this.cache = {};       // { 'code-tf': { candles, lastUpdate } }
     this.kisToken = null;
     this.kisTokenExpiry = 0;
+  }
+
+  /**
+   * index.json에서 종목 목록 로드 (file 모드)
+   * 실패 시 DEFAULT_STOCKS 폴백
+   */
+  async initFromIndex() {
+    if (KRX_API_CONFIG.mode !== 'file') return;
+
+    try {
+      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
+      if (!res.ok) throw new Error(`index.json: ${res.status}`);
+
+      const index = await res.json();
+      if (!index.stocks || !index.stocks.length) throw new Error('빈 인덱스');
+
+      ALL_STOCKS = index.stocks.map(s => ({
+        code: s.code,
+        name: s.name,
+        market: s.market,
+        file: s.file,
+        base: s.lastClose || 50000,  // 데모 모드 폴백용
+      }));
+
+      console.log(`[KRX] index.json 로드 완료: ${ALL_STOCKS.length}종목 (${index.kospi} KOSPI + ${index.kosdaq} KOSDAQ)`);
+    } catch (e) {
+      console.warn('[KRX] index.json 로드 실패, 기본 종목 사용:', e.message);
+      ALL_STOCKS = DEFAULT_STOCKS;
+    }
   }
 
   /** 종목 목록 (시장 필터) */
@@ -124,7 +157,9 @@ class KRXDataService {
     if (this.cache[key]) return this.cache[key].candles;
 
     let candles;
-    if (KRX_API_CONFIG.mode === 'kis') {
+    if (KRX_API_CONFIG.mode === 'file' && timeframe === '1d') {
+      candles = await this._fileGetCandles(stock);
+    } else if (KRX_API_CONFIG.mode === 'kis') {
       candles = await this._kisGetCandles(stock, timeframe);
     } else {
       candles = this._demoGenerateCandles(stock, timeframe);
@@ -180,6 +215,38 @@ class KRXDataService {
       });
     } else {
       this.cache = {};
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  파일 모드: data/ 폴더의 JSON 로드
+  // ══════════════════════════════════════════════════
+
+  async _fileGetCandles(stock) {
+    try {
+      // stock.file이 있으면 사용, 없으면 market에서 경로 추론
+      const filePath = stock.file
+        ? `${KRX_API_CONFIG.dataDir}/${stock.file}`
+        : `${KRX_API_CONFIG.dataDir}/${stock.market.toLowerCase()}/${stock.code}.json`;
+
+      const res = await fetch(filePath);
+      if (!res.ok) throw new Error(`${filePath}: ${res.status}`);
+
+      const data = await res.json();
+      if (!data.candles || !data.candles.length) throw new Error('빈 캔들 데이터');
+
+      // "YYYY-MM-DD" → Lightweight Charts v4 호환 형식
+      return data.candles.map(c => ({
+        time: c.time,  // "YYYY-MM-DD" 문자열 — LWC가 직접 지원
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }));
+    } catch (e) {
+      console.warn(`[KRX] 파일 로드 실패 (${stock.code}), 데모 폴백:`, e.message);
+      return this._demoGenerateCandles(stock, '1d');
     }
   }
 

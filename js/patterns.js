@@ -173,7 +173,7 @@ class PatternEngine {
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `3연속 양봉 상승 — 강한 매수 신호. 신뢰도 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
-        marker: { time: c2.time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: `적삼병 ${confidence}%` },
+        marker: { time: c2.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `적삼병 ${confidence}%` },
       });
     }
     return results;
@@ -209,7 +209,7 @@ class PatternEngine {
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `3연속 음봉 하락 — 강한 매도 신호. 신뢰도 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
-        marker: { time: c2.time, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: `흑삼병 ${confidence}%` },
+        marker: { time: c2.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `흑삼병 ${confidence}%` },
       });
     }
     return results;
@@ -249,7 +249,7 @@ class PatternEngine {
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
         description: `긴 아래꼬리 — 하락 반전 신호. 신뢰도 ${confidence}%`,
         startIndex: i, endIndex: i,
-        marker: { time: c.time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: `해머 ${confidence}%` },
+        marker: { time: c.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `해머 ${confidence}%` },
       });
     }
     return results;
@@ -288,7 +288,7 @@ class PatternEngine {
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
         description: `긴 윗꼬리 — 하락 반전 가능 신호. 신뢰도 ${confidence}%`,
         startIndex: i, endIndex: i,
-        marker: { time: c.time, position: 'belowBar', color: '#66bb6a', shape: 'arrowUp', text: `역해머 ${confidence}%` },
+        marker: { time: c.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `역해머 ${confidence}%` },
       });
     }
     return results;
@@ -328,7 +328,7 @@ class PatternEngine {
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
         description: `상승 후 긴 아래꼬리 — 하락 반전 경고. 신뢰도 ${confidence}%`,
         startIndex: i, endIndex: i,
-        marker: { time: c.time, position: 'aboveBar', color: '#ff9800', shape: 'arrowDown', text: `교수형 ${confidence}%` },
+        marker: { time: c.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `교수형 ${confidence}%` },
       });
     }
     return results;
@@ -368,7 +368,7 @@ class PatternEngine {
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
         description: `상승 후 긴 윗꼬리 — 하락 반전 경고. 신뢰도 ${confidence}%`,
         startIndex: i, endIndex: i,
-        marker: { time: c.time, position: 'aboveBar', color: '#ff5722', shape: 'arrowDown', text: `유성형 ${confidence}%` },
+        marker: { time: c.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `유성형 ${confidence}%` },
       });
     }
     return results;
@@ -440,7 +440,7 @@ class PatternEngine {
             priceTarget: this._target(candles, i - 1, i, 'buy'),
             description: `양봉이 음봉을 감싸 — 강한 상승 반전. 신뢰도 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
-            marker: { time: curr.time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: `상승장악 ${confidence}%` },
+            marker: { time: curr.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `상승장악 ${confidence}%` },
           });
         }
       }
@@ -457,7 +457,7 @@ class PatternEngine {
             priceTarget: this._target(candles, i - 1, i, 'sell'),
             description: `음봉이 양봉을 감싸 — 강한 하락 반전. 신뢰도 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
-            marker: { time: curr.time, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: `하락장악 ${confidence}%` },
+            marker: { time: curr.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `하락장악 ${confidence}%` },
           });
         }
       }
@@ -495,7 +495,7 @@ class PatternEngine {
             priceTarget: this._target(candles, i - 1, i, 'buy'),
             description: `작은 양봉이 음봉 내에 — 반전 가능. 신뢰도 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
-            marker: { time: curr.time, position: 'belowBar', color: '#66bb6a', shape: 'arrowUp', text: `잉태 ${confidence}%` },
+            marker: { time: curr.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `잉태 ${confidence}%` },
           });
         }
       }
@@ -513,7 +513,7 @@ class PatternEngine {
             priceTarget: this._target(candles, i - 1, i, 'sell'),
             description: `작은 음봉이 양봉 내에 — 반전 가능. 신뢰도 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
-            marker: { time: curr.time, position: 'aboveBar', color: '#ff9800', shape: 'arrowDown', text: `잉태 ${confidence}%` },
+            marker: { time: curr.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `잉태 ${confidence}%` },
           });
         }
       }
@@ -553,7 +553,7 @@ class PatternEngine {
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `음봉 → 소형봉 → 양봉 — 3봉 바닥 반전. 신뢰도 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
-        marker: { time: c2.time, position: 'belowBar', color: '#4caf50', shape: 'arrowUp', text: `샛별형 ${confidence}%` },
+        marker: { time: c2.time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `샛별형 ${confidence}%` },
       });
     }
     return results;
@@ -591,7 +591,7 @@ class PatternEngine {
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `양봉 → 소형봉 → 음봉 — 3봉 천장 반전. 신뢰도 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
-        marker: { time: c2.time, position: 'aboveBar', color: '#ff5252', shape: 'arrowDown', text: `석별형 ${confidence}%` },
+        marker: { time: c2.time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `석별형 ${confidence}%` },
       });
     }
     return results;
@@ -640,13 +640,13 @@ class PatternEngine {
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `수평 저항 + 상승 지지 — 상방 돌파 가능. 신뢰도 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
-        marker: { time: candles[endIdx].time, position: 'belowBar', color: '#2196f3', shape: 'arrowUp', text: `상승삼각 ${confidence}%` },
+        marker: { time: candles[endIdx].time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `상승삼각 ${confidence}%` },
         trendlines: [
-          { color: '#ef5350', style: 'dashed', points: [
+          { color: '#5086DC', style: 'dashed', points: [
             { time: candles[h1.index].time, value: resistanceLevel },
             { time: candles[h2.index].time, value: resistanceLevel },
           ]},
-          { color: '#26a69a', style: 'dashed', points: [
+          { color: '#E05050', style: 'dashed', points: [
             { time: candles[relevantLows[0].index].time, value: relevantLows[0].price },
             { time: candles[relevantLows[relevantLows.length - 1].index].time, value: relevantLows[relevantLows.length - 1].price },
           ]},
@@ -699,13 +699,13 @@ class PatternEngine {
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 신뢰도 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
-        marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#ff5722', shape: 'arrowDown', text: `하락삼각 ${confidence}%` },
+        marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `하락삼각 ${confidence}%` },
         trendlines: [
-          { color: '#26a69a', style: 'dashed', points: [
+          { color: '#E05050', style: 'dashed', points: [
             { time: candles[l1.index].time, value: supportLevel },
             { time: candles[l2.index].time, value: supportLevel },
           ]},
-          { color: '#ef5350', style: 'dashed', points: [
+          { color: '#5086DC', style: 'dashed', points: [
             { time: candles[relevantHighs[0].index].time, value: relevantHighs[0].price },
             { time: candles[relevantHighs[relevantHighs.length - 1].index].time, value: relevantHighs[relevantHighs.length - 1].price },
           ]},
@@ -757,13 +757,13 @@ class PatternEngine {
           signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
           description: `상향 수렴 — 상승 피로, 하락 반전 가능. 신뢰도 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
-          marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#ff9800', shape: 'arrowDown', text: `상승쐐기 ${confidence}%` },
+          marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `상승쐐기 ${confidence}%` },
           trendlines: [
-            { color: '#ef5350', style: 'dashed', points: [
+            { color: '#5086DC', style: 'dashed', points: [
               { time: candles[h1.index].time, value: h1.price },
               { time: candles[h2.index].time, value: h2.price },
             ]},
-            { color: '#26a69a', style: 'dashed', points: [
+            { color: '#E05050', style: 'dashed', points: [
               { time: candles[l1.index].time, value: l1.price },
               { time: candles[l2.index].time, value: l2.price },
             ]},
@@ -817,13 +817,13 @@ class PatternEngine {
           signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
           description: `하향 수렴 — 하락 피로, 상승 반전 가능. 신뢰도 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
-          marker: { time: candles[endIdx].time, position: 'belowBar', color: '#4caf50', shape: 'arrowUp', text: `하락쐐기 ${confidence}%` },
+          marker: { time: candles[endIdx].time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `하락쐐기 ${confidence}%` },
           trendlines: [
-            { color: '#ef5350', style: 'dashed', points: [
+            { color: '#5086DC', style: 'dashed', points: [
               { time: candles[h1.index].time, value: h1.price },
               { time: candles[h2.index].time, value: h2.price },
             ]},
-            { color: '#26a69a', style: 'dashed', points: [
+            { color: '#E05050', style: 'dashed', points: [
               { time: candles[l1.index].time, value: l1.price },
               { time: candles[l2.index].time, value: l2.price },
             ]},
@@ -868,7 +868,7 @@ class PatternEngine {
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `W형 바닥 — 강한 지지 확인. 신뢰도 ${confidence}%`,
         startIndex: l1.index, endIndex: l2.index,
-        marker: { time: candles[l2.index].time, position: 'belowBar', color: '#2196f3', shape: 'arrowUp', text: `W바닥 ${confidence}%` },
+        marker: { time: candles[l2.index].time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `W바닥 ${confidence}%` },
       });
     }
     return results;
@@ -907,7 +907,7 @@ class PatternEngine {
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `M형 천장 — 강한 저항 확인. 신뢰도 ${confidence}%`,
         startIndex: h1.index, endIndex: h2.index,
-        marker: { time: candles[h2.index].time, position: 'aboveBar', color: '#ff5722', shape: 'arrowDown', text: `M천장 ${confidence}%` },
+        marker: { time: candles[h2.index].time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `M천장 ${confidence}%` },
       });
     }
     return results;
@@ -954,9 +954,9 @@ class PatternEngine {
         stopLoss: +(head.price).toFixed(0), priceTarget,
         description: `머리어깨 — 강한 하락 반전. 신뢰도 ${confidence}%`,
         startIndex: ls.index, endIndex: endIdx,
-        marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: `H&S ${confidence}%` },
+        marker: { time: candles[endIdx].time, position: 'aboveBar', color: '#5086DC', shape: 'arrowDown', text: `H&S ${confidence}%` },
         trendlines: [
-          { color: '#ff9800', style: 'dashed', points: [
+          { color: '#C9A84C', style: 'dashed', points: [
             { time: candles[t1.index].time, value: t1.price },
             { time: candles[t2.index].time, value: t2.price },
           ]},
@@ -1005,9 +1005,9 @@ class PatternEngine {
         stopLoss: +(head.price).toFixed(0), priceTarget,
         description: `역머리어깨 — 강한 상승 반전. 신뢰도 ${confidence}%`,
         startIndex: ls.index, endIndex: endIdx,
-        marker: { time: candles[endIdx].time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: `역H&S ${confidence}%` },
+        marker: { time: candles[endIdx].time, position: 'belowBar', color: '#E05050', shape: 'arrowUp', text: `역H&S ${confidence}%` },
         trendlines: [
-          { color: '#ff9800', style: 'dashed', points: [
+          { color: '#C9A84C', style: 'dashed', points: [
             { time: candles[t1.index].time, value: t1.price },
             { time: candles[t2.index].time, value: t2.price },
           ]},

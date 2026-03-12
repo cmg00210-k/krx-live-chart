@@ -1,5 +1,6 @@
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* 폰트: index.html <link>로 로딩 (render-blocking 방지) */
+/* Pretendard: OFL 1.1 라이선스, 상업적 사용 가능 */
+/* JetBrains Mono: OFL 1.1 라이선스, 상업적 사용 가능 */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -9,10 +10,11 @@
   --border:       #252525;
   --accent:       #C9A84C;
   --accent-hover: #DEC06A;
-  --green:        #E05050;   /* 상승 (한국식 빨강) */
-  --red:          #5086DC;   /* 하락 (한국식 파랑) */
+  --up:           #E05050;   /* 상승 빨강 (한국식) */
+  --down:         #5086DC;   /* 하락 파랑 (한국식) */
+  --neutral:      var(--neutral);   /* 중립 노랑 */
   --text:         #E8E8E8;
-  --muted:        #666666;
+  --muted:        #787878;
   --header:       #0D0D0D;
 }
 
@@ -53,7 +55,7 @@ html, body {
 #search-input {
   width: 100%;
   background: var(--border);
-  border: 1px solid #2a3248;
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 12px 6px 32px;
   color: var(--text);
@@ -100,7 +102,7 @@ html, body {
 .search-item .code { color: var(--muted); font-size: 11px; }
 
 .market-tag {
-  font-size: 9px;
+  font-size: 10px;
   padding: 1px 4px;
   border-radius: 3px;
   font-weight: 600;
@@ -139,14 +141,14 @@ html, body {
 .ticker-item { display: flex; flex-direction: column; align-items: flex-end; }
 .ticker-name { font-size: 10px; color: var(--muted); }
 .ticker-val { font-size: 12px; font-weight: 600; }
-.up { color: var(--green); }
-.dn { color: var(--red); }
+.up { color: var(--up); }
+.dn { color: var(--down); }
 
 /* ── MAIN LAYOUT ── */
 #main {
   display: grid;
-  grid-template-columns: 1fr 240px;
-  grid-template-rows: 1fr 160px;
+  grid-template-columns: 1fr 200px;
+  grid-template-rows: 1fr 120px;
   height: calc(100vh - 48px);
   gap: 0;
 }
@@ -162,11 +164,11 @@ html, body {
 }
 
 #chart-toolbar {
-  height: 40px;
+  height: 34px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  gap: 6px;
+  padding: 0 10px;
+  gap: 4px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   overflow-x: auto;
@@ -183,15 +185,15 @@ html, body {
 #stock-name { font-size: 14px; font-weight: 700; color: #fff; }
 .stock-code { font-size: 10px; color: var(--muted); }
 .stock-market-tag {
-  font-size: 9px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(41,98,255,0.15);
   color: #5b8af5;
   font-weight: 600;
 }
-#stock-price { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
-#stock-change { font-size: 12px; font-family: 'JetBrains Mono', monospace; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+#stock-price { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+#stock-change { font-size: 12px; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
 
 .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
 
@@ -212,11 +214,11 @@ html, body {
 .tf-btn.active, .ct-btn.active, .ind-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* 패턴 버튼 특별 스타일 */
-.pattern-btn { border-color: rgba(255,152,0,0.3); }
+.pattern-btn { border-color: rgba(201,168,76,0.3); }
 .pattern-btn.active {
-  background: rgba(255,152,0,0.2) !important;
-  border-color: #ff9800 !important;
-  color: #ff9800 !important;
+  background: rgba(201,168,76,0.2) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
 }
 
 #chart-wrap {
@@ -229,7 +231,7 @@ html, body {
 #main-chart-container {
   flex: 1;
   position: relative;
-  min-height: 200px;
+  min-height: 320px;
 }
 
 .sub-chart-wrap {
@@ -305,9 +307,9 @@ html, body {
 }
 
 .pattern-item:hover { background: rgba(255,255,255,0.04); }
-.pattern-item.buy { border-left-color: var(--green); }
-.pattern-item.sell { border-left-color: var(--red); }
-.pattern-item.neutral { border-left-color: #ffeb3b; }
+.pattern-item.buy { border-left-color: var(--up); }
+.pattern-item.sell { border-left-color: var(--down); }
+.pattern-item.neutral { border-left-color: var(--neutral); }
 
 .pattern-header {
   display: flex;
@@ -323,18 +325,18 @@ html, body {
 }
 
 .pattern-signal {
-  font-size: 9px;
+  font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 700;
 }
 
-.pattern-signal.buy { background: rgba(38,166,154,0.2); color: var(--green); }
-.pattern-signal.sell { background: rgba(239,83,80,0.2); color: var(--red); }
-.pattern-signal.neutral { background: rgba(255,235,59,0.15); color: #ffeb3b; }
+.pattern-signal.buy { background: rgba(224,80,80,0.15); color: var(--up); }
+.pattern-signal.sell { background: rgba(80,134,220,0.15); color: var(--down); }
+.pattern-signal.neutral { background: rgba(255,235,59,0.15); color: var(--neutral); }
 
 .pattern-strength {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   margin-left: auto;
 }
@@ -356,7 +358,7 @@ html, body {
 }
 .pattern-risk span { white-space: nowrap; }
 .confluence-badge {
-  color: #ffeb3b;
+  color: var(--neutral);
   font-weight: 600;
 }
 .pattern-desc {
@@ -397,9 +399,9 @@ html, body {
   flex-shrink: 0;
 }
 
-.dot.buy { background: var(--green); }
-.dot.sell { background: var(--red); }
-.dot.neutral { background: #ffeb3b; }
+.dot.buy { background: var(--up); }
+.dot.sell { background: var(--down); }
+.dot.neutral { background: var(--neutral); }
 
 /* ── BOTTOM PANEL ── */
 #bottom-panel {
@@ -439,7 +441,7 @@ html, body {
   border-radius: 3px;
 }
 
-.period-btn.active { color: var(--accent); background: rgba(41,98,255,.12); }
+.period-btn.active { color: var(--accent); background: rgba(201,168,76,0.12); }
 
 #past-table-wrap { flex: 1; overflow: auto; }
 
@@ -477,7 +479,7 @@ html, body {
   gap: 0;
   padding: 0 8px;
   overflow-x: auto;
-  height: 32px;
+  height: 28px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -499,13 +501,13 @@ html, body {
 }
 
 .wl-item:hover { background: var(--border); }
-.wl-item.active { background: rgba(41,98,255,.15); color: var(--accent); }
+.wl-item.active { background: rgba(201,168,76,0.12); color: var(--accent); }
 
 .wl-name { font-size: 11px; }
-.wl-price { font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+.wl-price { font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
 
 /* ── 스크롤바 스타일 ── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #2a3248; }
+::-webkit-scrollbar-thumb:hover { background: #333; }

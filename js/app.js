@@ -20,6 +20,10 @@ let _lastPatternAnalysis = 0;
 // ══════════════════════════════════════════════════════
 
 async function init() {
+  // index.json에서 전체 종목 로드 (file 모드)
+  await dataService.initFromIndex();
+  currentStock = ALL_STOCKS[0];
+
   buildWatchlist();
   renderPastTable();
 
@@ -33,8 +37,10 @@ async function init() {
   updateStockInfo();
   updateTicker();
 
-  // 실시간 틱 시작
-  startTick();
+  // 실시간 틱 시작 (file 모드 일봉에서는 틱 불필요)
+  if (KRX_API_CONFIG.mode !== 'file' || currentTimeframe !== '1d') {
+    startTick();
+  }
 }
 
 function startTick() {
@@ -159,7 +165,7 @@ function updateWatchlistPrices() {
       el.textContent = last.close.toLocaleString();
       el.className = 'wl-price ' + (change >= 0 ? 'up' : 'dn');
     } else {
-      el.textContent = s.base.toLocaleString();
+      el.textContent = (s.base || 0).toLocaleString();
       el.className = 'wl-price';
     }
   });
@@ -247,7 +253,7 @@ function renderPatternPanel(patterns) {
     const signalText = p.signal === 'buy' ? '매수' : p.signal === 'sell' ? '매도' : '중립';
     const strengthText = p.strength === 'strong' ? '강' : p.strength === 'medium' ? '중' : '약';
     const confBar = p.confidence != null
-      ? `<span class="pattern-conf" style="color:${p.confidence >= 60 ? '#4caf50' : p.confidence >= 40 ? '#ff9800' : '#ef5350'}">${p.confidence}%</span>` : '';
+      ? `<span class="pattern-conf" style="color:${p.confidence >= 60 ? '#E05050' : p.confidence >= 40 ? '#C9A84C' : '#5086DC'}">${p.confidence}%</span>` : '';
     const riskInfo = (p.stopLoss || p.priceTarget)
       ? `<div class="pattern-risk">` +
         (p.stopLoss ? `<span>손절 ${p.stopLoss.toLocaleString()}</span>` : '') +
@@ -331,7 +337,13 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     candles = await dataService.getCandles(currentStock, currentTimeframe);
     _lastPatternAnalysis = 0;
     updateChartFull();
-    startTick();
+
+    // file 모드 일봉은 정적 데이터 → 틱 불필요
+    if (KRX_API_CONFIG.mode === 'file' && currentTimeframe === '1d') {
+      if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+    } else {
+      startTick();
+    }
   });
 });
 
