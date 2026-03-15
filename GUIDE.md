@@ -3,16 +3,30 @@
 ## 프로젝트 구조
 ```
 krx-live-chart/
-├── index.html          ← 페이지 뼈대 (상대방 담당)
-├── css/style.css       ← 디자인 (상대방 담당)
-├── js/data.js          ← 종목 데이터
-├── js/chart.js         ← 차트 + 기술적분석 (내 담당)
-├── js/app.js           ← 상태관리, UI 이벤트 (공유)
+├── index.html           ← 페이지 뼈대 (상대방 담당)
+├── css/style.css        ← 디자인 (상대방 담당)
+├── js/colors.js         ← 색상 상수 (공유)
+├── js/data.js           ← 종목 재무 데이터
+├── js/api.js            ← 데이터 서비스 (file/demo/kis)
+├── js/realtimeProvider.js ← 실시간 데이터 폴링
+├── js/indicators.js     ← 지표 계산 함수 (내 담당)
+├── js/patterns.js       ← 패턴 엔진 26종 (내 담당)
+├── js/signalEngine.js   ← 시그널 엔진 (내 담당)
+├── js/chart.js          ← 차트 렌더링 (내 담당)
+├── js/patternRenderer.js ← 패턴 시각화 (내 담당)
+├── js/signalRenderer.js ← 시그널 시각화 (내 담당)
+├── js/backtester.js     ← 백테스트 (내 담당)
+├── js/analysisWorker.js ← Web Worker (내 담당)
+├── js/sidebar.js        ← 사이드바 (공유)
+├── js/app.js            ← 상태관리, UI 이벤트 (공유)
+├── core_data/           ← 학술 문서 (17편)
+├── pattern_impl/        ← 패턴 구현 문서 (5편)
+├── scripts/             ← Python 스크립트
 └── .gitignore
 ```
 
 ## 역할 분담
-- **나**: js/chart.js 중심 — RSI, MACD, 캔들스틱, 패턴 인식
+- **나**: js/indicators.js, patterns.js, signalEngine.js, chart.js, patternRenderer.js, signalRenderer.js, backtester.js, analysisWorker.js — 기술적 분석 전체
 - **상대방**: css/style.css + index.html 중심 — UI 디자인, 레이아웃
 
 ## 매일 작업 루틴

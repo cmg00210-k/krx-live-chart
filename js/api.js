@@ -3,24 +3,24 @@
 // ══════════════════════════════════════════════════════
 //
 //  사용법:
-//  1. 데모 모드 (기본): 시뮬레이션 데이터로 즉시 실행
-//  2. 한국투자증권 OpenAPI 연동:
-//     - https://apiportal.koreainvestment.com 에서 계정 등록
-//     - APP_KEY, APP_SECRET 발급
-//     - KRX_API_CONFIG.mode = 'kis' 로 변경
-//     - CORS 이슈로 백엔드 프록시 필요
-//        (Node.js 프록시 예시: server/proxy.js 참고)
+//  1. WebSocket 모드 (기본): Kiwoom OCX 서버 연동 실시간 데이터
+//     - server/start_server.bat 실행 (Python 3.9-32bit, PyQt5)
+//     - KRX_API_CONFIG.mode = 'ws'
+//  2. 파일 모드: data/ 폴더의 JSON 파일 로드 (일봉만)
+//     - python scripts/download_ohlcv.py 실행
+//     - KRX_API_CONFIG.mode = 'file'
+//  3. 데모 모드: 시뮬레이션 데이터로 즉시 실행
+//     - KRX_API_CONFIG.mode = 'demo'
+//
+//  향후 교체:
+//  - 'koscom' 모드 추가 시 서버 측 KRX_PROVIDER 환경변수만 변경
 //
 // ══════════════════════════════════════════════════════
 
 const KRX_API_CONFIG = {
-  mode: 'file',   // 'file' | 'demo' | 'kis'
+  mode: 'ws',     // 'ws' | 'file' | 'demo' (향후 'koscom' 추가)
+  wsUrl: 'ws://localhost:8765',  // WebSocket 서버 주소 (Kiwoom OCX)
   dataDir: 'data', // file 모드에서 JSON 파일 경로
-  kis: {
-    appKey: '',
-    appSecret: '',
-    baseUrl: '/api',  // 프록시 서버 주소
-  }
 };
 
 // ── 기본 종목 목록 (index.json 로드 전 폴백) ──────────
@@ -104,8 +104,6 @@ const TIMEFRAMES = {
 class KRXDataService {
   constructor() {
     this.cache = {};       // { 'code-tf': { candles, lastUpdate } }
-    this.kisToken = null;
-    this.kisTokenExpiry = 0;
   }
 
   /**
@@ -113,7 +111,7 @@ class KRXDataService {
    * 실패 시 DEFAULT_STOCKS 폴백
    */
   async initFromIndex() {
-    if (KRX_API_CONFIG.mode !== 'file') return;
+    if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws') return;
 
     try {
       const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
@@ -151,21 +149,49 @@ class KRXDataService {
     );
   }
 
-  /** 캔들 데이터 가져오기 (자동 캐싱) */
+  /** 캔들 데이터 가져오기 (TTL 캐싱) */
   async getCandles(stock, timeframe) {
     const key = `${stock.code}-${timeframe}`;
-    if (this.cache[key]) return this.cache[key].candles;
+    const cached = this.cache[key];
+    const TTL = timeframe === '1d' ? 3600000 : 60000; // 일봉 1시간, 분봉 1분
+    if (cached && (Date.now() - cached.lastUpdate) < TTL) return cached.candles;
 
     let candles;
-    if (KRX_API_CONFIG.mode === 'file' && timeframe === '1d') {
+    if (KRX_API_CONFIG.mode === 'ws') {
+      // WS 모드: 서버가 subscribe 응답으로 candles 전송.
+      // getCandles()는 빈 배열만 반환하고, 실제 데이터는
+      // realtimeProvider.onTick 콜백에서 수신 처리.
+      // 서버 미연결 + 분봉: Naver 시도 (CORS 허용 환경만), 실패 시 데모 폴백.
+      if (timeframe !== '1d' && typeof realtimeProvider !== 'undefined' && !realtimeProvider.connected) {
+        candles = await this._naverMinuteCandles(stock.code, timeframe);
+        if (candles.length > 0) {
+          console.log('[KRX] WS 미연결 — Naver 분봉 폴백: %s %s (%d건)', stock.code, timeframe, candles.length);
+        } else {
+          // Naver CORS 차단 또는 실패 → 데모 폴백
+          candles = this._demoGenerateCandles(stock, timeframe);
+          console.log('[KRX] WS 미연결 — 데모 분봉 폴백: %s %s', stock.code, timeframe);
+        }
+      } else {
+        candles = [];
+      }
+    } else if (KRX_API_CONFIG.mode === 'file' && timeframe === '1d') {
       candles = await this._fileGetCandles(stock);
-    } else if (KRX_API_CONFIG.mode === 'kis') {
-      candles = await this._kisGetCandles(stock, timeframe);
+    } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
+      // file 모드 + 분봉: Naver Finance API 시도 (CORS 허용 환경만), 실패 시 데모
+      candles = await this._naverMinuteCandles(stock.code, timeframe);
+      if (candles.length > 0) {
+        console.log('[KRX] file 모드 — Naver 분봉 로드: %s %s (%d건)', stock.code, timeframe, candles.length);
+      } else {
+        // Naver CORS 차단 또는 실패 → 데모 폴백
+        candles = this._demoGenerateCandles(stock, timeframe);
+      }
     } else {
       candles = this._demoGenerateCandles(stock, timeframe);
     }
 
-    this.cache[key] = { candles, lastUpdate: Date.now() };
+    if (candles.length > 0) {
+      this.cache[key] = { candles, lastUpdate: Date.now() };
+    }
     return candles;
   }
 
@@ -245,8 +271,114 @@ class KRXDataService {
         volume: c.volume,
       }));
     } catch (e) {
-      console.warn(`[KRX] 파일 로드 실패 (${stock.code}), 데모 폴백:`, e.message);
+      console.warn(`[KRX] 파일 로드 실패 (${stock.code}):`, e.message);
+      // 파일이 없으면 데모 데이터로 폴백
       return this._demoGenerateCandles(stock, '1d');
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  Naver Finance API: 분봉 데이터 (장외/서버 미연결 폴백)
+  //
+  //  엔드포인트:
+  //    https://api.stock.naver.com/chart/domestic/item/{code}/minute    (1분)
+  //    https://api.stock.naver.com/chart/domestic/item/{code}/minute5   (5분)
+  //    https://api.stock.naver.com/chart/domestic/item/{code}/minute15  (15분)
+  //    https://api.stock.naver.com/chart/domestic/item/{code}/minute30  (30분)
+  //    https://api.stock.naver.com/chart/domestic/item/{code}/minute60  (60분)
+  //
+  //  응답: [{localDateTime, currentPrice, openPrice, highPrice,
+  //          lowPrice, accumulatedTradingVolume}, ...]
+  // ══════════════════════════════════════════════════
+
+  /**
+   * CORS 차단 여부 감지.
+   * file:// 프로토콜에서는 Origin 헤더가 없어 Naver API 정상 동작.
+   * http://localhost (VS Code Live Server 등)에서는 CORS 차단.
+   */
+  _isNaverCorsBlocked() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+  }
+
+  async _naverMinuteCandles(code, timeframe) {
+    // CORS 차단 환경이면 시도하지 않고 빈 배열 반환 (호출측에서 폴백 처리)
+    if (this._isNaverCorsBlocked()) {
+      console.log('[KRX] Naver 분봉 스킵 (CORS 차단 환경: %s)', location.protocol);
+      return [];
+    }
+
+    const pathMap = {
+      '1m': 'minute', '3m': 'minute3', '5m': 'minute5',
+      '10m': 'minute10', '15m': 'minute15',
+      '30m': 'minute30', '1h': 'minute60',
+    };
+    const path = pathMap[timeframe] || 'minute';
+
+    // 분봉 간격 (초) — LWC 타임스탬프 정렬용
+    const intervalSec = {
+      '1m': 60, '3m': 180, '5m': 300, '10m': 600,
+      '15m': 900, '30m': 1800, '1h': 3600,
+    }[timeframe] || 60;
+
+    try {
+      // Naver API 호출
+      // - file:// 프로토콜: CORS 무관, 정상 동작
+      // - http://localhost (Live Server): CORS 차단 → _isNaverCorsBlocked()에서 사전 차단
+      // count=120: TIMEFRAMES[tf].count와 일치 (차트에 충분한 봉 표시)
+      const naverUrl = `https://api.stock.naver.com/chart/domestic/item/${code}/${path}?count=120`;
+      const res = await fetch(naverUrl);
+      if (!res.ok) throw new Error(`Naver API: ${res.status}`);
+
+      const raw = await res.json();
+      if (!Array.isArray(raw) || raw.length === 0) throw new Error('빈 응답');
+
+      const candles = [];
+      const seen = new Set();  // 중복 timestamp 방지
+
+      for (const item of raw) {
+        const dtStr = item.localDateTime || '';
+        if (dtStr.length < 12) continue;
+
+        // "20260313090000" → Date → unix timestamp (봉 시작 정렬)
+        const year = parseInt(dtStr.substring(0, 4));
+        const month = parseInt(dtStr.substring(4, 6)) - 1;
+        const day = parseInt(dtStr.substring(6, 8));
+        const hour = parseInt(dtStr.substring(8, 10));
+        const min = parseInt(dtStr.substring(10, 12));
+        const sec = parseInt(dtStr.substring(12, 14) || '0');
+
+        const dt = new Date(year, month, day, hour, min, sec);
+        let ts = Math.floor(dt.getTime() / 1000);
+        ts = Math.floor(ts / intervalSec) * intervalSec;  // 봉 시작 기준 정렬
+
+        if (seen.has(ts)) continue;
+        seen.add(ts);
+
+        const c = Math.round(item.currentPrice || 0);
+        const o = Math.round(item.openPrice || c);
+        const h = Math.round(item.highPrice || c);
+        const l = Math.round(item.lowPrice || c);
+        const v = Math.round(item.accumulatedTradingVolume || 0);
+
+        if (c === 0) continue;
+
+        candles.push({
+          time: ts,
+          open: o > 0 ? o : c,
+          high: h > 0 ? h : c,
+          low: l > 0 ? l : c,
+          close: c,
+          volume: v,
+        });
+      }
+
+      // 시간순 정렬
+      candles.sort((a, b) => a.time - b.time);
+      return candles;
+
+    } catch (e) {
+      console.warn(`[KRX] Naver 분봉 로드 실패 (${code} ${timeframe}):`, e.message);
+      return [];
     }
   }
 
@@ -318,117 +450,6 @@ class KRXDataService {
     return candles;
   }
 
-  // ══════════════════════════════════════════════════
-  //  한국투자증권 OpenAPI 연동
-  //  (CORS 이슈로 백엔드 프록시 경유 필요)
-  // ══════════════════════════════════════════════════
-
-  async _kisAuth() {
-    if (this.kisToken && Date.now() < this.kisTokenExpiry) return;
-
-    const res = await fetch(`${KRX_API_CONFIG.kis.baseUrl}/oauth2/tokenP`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'client_credentials',
-        appkey: KRX_API_CONFIG.kis.appKey,
-        appsecret: KRX_API_CONFIG.kis.appSecret,
-      }),
-    });
-
-    const data = await res.json();
-    this.kisToken = data.access_token;
-    this.kisTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  }
-
-  async _kisGetCandles(stock, timeframe) {
-    await this._kisAuth();
-
-    // 분봉 조회 (1분/5분/15분/30분/1시간)
-    if (timeframe !== '1d') {
-      const tfMap = { '1m': '1', '5m': '5', '15m': '15', '30m': '30', '1h': '60' };
-      const res = await fetch(
-        `${KRX_API_CONFIG.kis.baseUrl}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice?` +
-        new URLSearchParams({
-          FID_ETC_CLS_CODE: '',
-          FID_COND_MRKT_DIV_CODE: stock.market === 'KOSPI' ? 'J' : 'Q',
-          FID_INPUT_ISCD: stock.code,
-          FID_INPUT_HOUR_1: tfMap[timeframe] || '1',
-          FID_PW_DATA_INCU_YN: 'Y',
-        }),
-        {
-          headers: {
-            'Authorization': `Bearer ${this.kisToken}`,
-            'appkey': KRX_API_CONFIG.kis.appKey,
-            'appsecret': KRX_API_CONFIG.kis.appSecret,
-            'tr_id': 'FHKST03010200',
-          },
-        }
-      );
-
-      const data = await res.json();
-      if (!data.output2) return this._demoGenerateCandles(stock, timeframe);
-
-      return data.output2.reverse().map(item => ({
-        time: this._parseKISTime(item.stck_cntg_hour, item.stck_bsop_date),
-        open: Number(item.stck_oprc),
-        high: Number(item.stck_hgpr),
-        low: Number(item.stck_lwpr),
-        close: Number(item.stck_prpr),
-        volume: Number(item.cntg_vol),
-      }));
-    }
-
-    // 일봉 조회
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - 300);
-    const fmt = d => d.toISOString().slice(0, 10).replace(/-/g, '');
-
-    const res = await fetch(
-      `${KRX_API_CONFIG.kis.baseUrl}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?` +
-      new URLSearchParams({
-        FID_COND_MRKT_DIV_CODE: stock.market === 'KOSPI' ? 'J' : 'Q',
-        FID_INPUT_ISCD: stock.code,
-        FID_INPUT_DATE_1: fmt(startDate),
-        FID_INPUT_DATE_2: fmt(today),
-        FID_PERIOD_DIV_CODE: 'D',
-        FID_ORG_ADJ_PRC: '0',
-      }),
-      {
-        headers: {
-          'Authorization': `Bearer ${this.kisToken}`,
-          'appkey': KRX_API_CONFIG.kis.appKey,
-          'appsecret': KRX_API_CONFIG.kis.appSecret,
-          'tr_id': 'FHKST03010100',
-        },
-      }
-    );
-
-    const data = await res.json();
-    if (!data.output2) return this._demoGenerateCandles(stock, timeframe);
-
-    return data.output2.reverse().map(item => ({
-      time: this._parseDateToUnix(item.stck_bsop_date),
-      open: Number(item.stck_oprc),
-      high: Number(item.stck_hgpr),
-      low: Number(item.stck_lwpr),
-      close: Number(item.stck_clpr),
-      volume: Number(item.acml_vol),
-    }));
-  }
-
-  _parseKISTime(hour, date) {
-    // hour: 'HHmmss', date: 'YYYYMMDD'
-    const y = date.slice(0, 4), m = date.slice(4, 6), d = date.slice(6, 8);
-    const hh = hour.slice(0, 2), mm = hour.slice(2, 4);
-    return Math.floor(new Date(`${y}-${m}-${d}T${hh}:${mm}:00+09:00`).getTime() / 1000);
-  }
-
-  _parseDateToUnix(dateStr) {
-    const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), d = dateStr.slice(6, 8);
-    return Math.floor(new Date(`${y}-${m}-${d}T09:00:00+09:00`).getTime() / 1000);
-  }
 }
 
 // 글로벌 인스턴스

@@ -10,13 +10,13 @@ const patternRenderer = (() => {
   let _primitive = null;
   let _attachedSeries = null;
 
-  // ── 색상 ──
-  const BUY_COLOR  = '#E05050';
-  const BUY_FILL   = 'rgba(224,80,80,0.13)';
-  const SELL_COLOR  = '#5086DC';
-  const SELL_FILL   = 'rgba(80,134,220,0.13)';
-  const GOLD_COLOR  = '#C9A84C';
-  const NEUTRAL_COLOR = '#9e9e9e';
+  // ── 색상 (패턴 전용 — 은은한 민트/라벤더 계열) ──
+  const BUY_COLOR  = KRX_COLORS.PTN_BUY;
+  const BUY_FILL   = KRX_COLORS.PTN_BUY_FILL;
+  const SELL_COLOR  = KRX_COLORS.PTN_SELL;
+  const SELL_FILL   = KRX_COLORS.PTN_SELL_FILL;
+  const GOLD_COLOR  = KRX_COLORS.PTN_STRUCT;
+  const NEUTRAL_COLOR = KRX_COLORS.PTN_NEUTRAL;
   const MAX_PATTERNS = 3;
 
   // ── 패턴별 설정 ──
@@ -29,6 +29,10 @@ const patternRenderer = (() => {
     eveningStar:        { color: SELL_COLOR, fill: SELL_FILL },
     bullishHarami:      { color: BUY_COLOR, fill: BUY_FILL, useBody: true },
     bearishHarami:      { color: SELL_COLOR, fill: SELL_FILL, useBody: true },
+    piercingLine:       { color: BUY_COLOR, fill: BUY_FILL },
+    darkCloud:          { color: SELL_COLOR, fill: SELL_FILL },
+    tweezerBottom:      { color: BUY_COLOR, fill: BUY_FILL },
+    tweezerTop:         { color: SELL_COLOR, fill: SELL_FILL },
   };
 
   const SINGLE_PATTERNS = {
@@ -37,6 +41,50 @@ const patternRenderer = (() => {
     hangingMan:     { key: 'low',   color: SELL_COLOR },
     shootingStar:   { key: 'high',  color: SELL_COLOR },
     doji:           { key: 'close', color: NEUTRAL_COLOR },
+    dragonflyDoji:  { key: 'low',   color: BUY_COLOR },
+    gravestoneDoji: { key: 'high',  color: SELL_COLOR },
+  };
+
+  // ── 패턴 한글 이름 매핑 (33종: 실제 감지 27종 + 향후 확장 6종) ──
+  const PATTERN_NAMES_KO = {
+    // 단일 캔들 패턴 (7종)
+    hammer:                   '망치형',
+    invertedHammer:           '역망치',
+    hangingMan:               '교수형',
+    shootingStar:             '유성형',
+    doji:                     '도지',
+    dragonflyDoji:            '잠자리도지',
+    gravestoneDoji:           '비석도지',
+    // 2봉 패턴 (8종)
+    bullishEngulfing:         '상승장악',
+    bearishEngulfing:         '하락장악',
+    bullishHarami:            '상승잉태',
+    bearishHarami:            '하락잉태',
+    piercingLine:             '관통형',
+    darkCloud:                '먹구름',
+    tweezerBottom:            '족집게바닥',
+    tweezerTop:               '족집게천장',
+    // 3봉 패턴 (4종)
+    morningStar:              '샛별형',
+    eveningStar:              '석별형',
+    threeWhiteSoldiers:       '적삼병',
+    threeBlackCrows:          '흑삼병',
+    // 차트 패턴 (8종)
+    doubleBottom:             '이중바닥',
+    doubleTop:                '이중천장',
+    headAndShoulders:         '머리어깨',
+    inverseHeadAndShoulders:  '역머리어깨',
+    ascendingTriangle:        '상승삼각',
+    descendingTriangle:       '하락삼각',
+    risingWedge:              '상승쐐기',
+    fallingWedge:             '하락쐐기',
+    // 향후 확장용 (6종 — 아직 미감지)
+    symmetricTriangle:        '대칭삼각',
+    bullishFlag:              '상승깃발',
+    bearishFlag:              '하락깃발',
+    cupAndHandle:             '컵핸들',
+    channel:                  '채널',
+    rectangle:                '박스권',
   };
 
 
@@ -51,28 +99,31 @@ const patternRenderer = (() => {
       target.useMediaCoordinateSpace(scope => {
         const ctx = scope.context;
         const w = scope.mediaSize.width;
-        const { rects, polylines, hlines } = this._data;
+        const h = scope.mediaSize.height;
+        const { rects, polylines, hlines, labels } = this._data;
+
+        // 빈 데이터면 즉시 반환 (불필요한 save/restore 방지)
+        if (!rects.length && !polylines.length && !hlines.length && !(labels && labels.length)) return;
 
         ctx.save();
 
         // ── 1. 채워진 직사각형 (Zone Bracket) ──
-        rects.forEach(r => {
-          if (r.x1 == null || r.y1 == null || r.x2 == null || r.y2 == null) return;
-          const rx = Math.min(r.x1, r.x2);
-          const ry = Math.min(r.y1, r.y2);
-          const rw = Math.abs(r.x2 - r.x1);
-          const rh = Math.abs(r.y2 - r.y1);
-
-          // 반투명 채우기
-          ctx.fillStyle = r.fill;
-          ctx.fillRect(rx, ry, rw, rh);
-
-          // 점선 테두리
-          ctx.strokeStyle = r.border;
-          ctx.lineWidth = 1;
+        if (rects.length) {
           ctx.setLineDash([4, 3]);
-          ctx.strokeRect(rx, ry, rw, rh);
-        });
+          ctx.lineWidth = 1;
+          rects.forEach(r => {
+            if (r.x1 == null || r.y1 == null || r.x2 == null || r.y2 == null) return;
+            const rx = Math.min(r.x1, r.x2);
+            const ry = Math.min(r.y1, r.y2);
+            const rw = Math.abs(r.x2 - r.x1);
+            const rh = Math.abs(r.y2 - r.y1);
+
+            ctx.fillStyle = r.fill;
+            ctx.fillRect(rx, ry, rw, rh);
+            ctx.strokeStyle = r.border;
+            ctx.strokeRect(rx, ry, rw, rh);
+          });
+        }
 
         // ── 2. 폴리라인 (W/M, 넥라인 연장 등) ──
         polylines.forEach(pl => {
@@ -90,38 +141,111 @@ const patternRenderer = (() => {
         });
 
         // ── 3. 수평선 (손절/목표/단일캔들 수준) ──
-        hlines.forEach(h => {
-          if (h.y == null) return;
-          const x1 = h.x1 != null ? h.x1 : 0;
-          const x2 = h.x2 != null ? h.x2 : w;
+        hlines.forEach(hl => {
+          if (hl.y == null) return;
+          const x1 = hl.x1 != null ? hl.x1 : 0;
+          const x2 = hl.x2 != null ? hl.x2 : w;
 
           ctx.beginPath();
-          ctx.moveTo(x1, h.y);
-          ctx.lineTo(x2, h.y);
-          ctx.strokeStyle = h.color;
-          ctx.lineWidth = h.width || 1;
-          ctx.setLineDash(h.dash || [4, 3]);
+          ctx.moveTo(x1, hl.y);
+          ctx.lineTo(x2, hl.y);
+          ctx.strokeStyle = hl.color;
+          ctx.lineWidth = hl.width || 1;
+          ctx.setLineDash(hl.dash || [4, 3]);
           ctx.stroke();
 
           // 라벨 대신 끝점 삼각형 마커
-          if (h.marker) {
+          if (hl.marker) {
             ctx.setLineDash([]);
-            ctx.fillStyle = h.color;
+            ctx.fillStyle = hl.color;
             ctx.beginPath();
-            if (h.marker === 'stop') {
-              // ▼ 아래 삼각형 (손절)
-              ctx.moveTo(w - 60, h.y - 6);
-              ctx.lineTo(w - 54, h.y + 2);
-              ctx.lineTo(w - 66, h.y + 2);
+            if (hl.marker === 'stop') {
+              ctx.moveTo(w - 60, hl.y - 6);
+              ctx.lineTo(w - 54, hl.y + 2);
+              ctx.lineTo(w - 66, hl.y + 2);
             } else {
-              // ▲ 위 삼각형 (목표)
-              ctx.moveTo(w - 60, h.y + 6);
-              ctx.lineTo(w - 54, h.y - 2);
-              ctx.lineTo(w - 66, h.y - 2);
+              ctx.moveTo(w - 60, hl.y + 6);
+              ctx.lineTo(w - 54, hl.y - 2);
+              ctx.lineTo(w - 66, hl.y - 2);
             }
             ctx.fill();
           }
         });
+
+        // ── 4. 패턴 라벨 (한글 이름 + 배경 roundRect) ──
+        // 차트 하단 마진(bottom 20%)에 매수 라벨, 상단 마진(top 12%)에 매도 라벨
+        if (labels && labels.length) {
+          ctx.setLineDash([]);
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = 10;
+          ctx.font = `600 ${fontSize}px 'Pretendard', sans-serif`;
+
+          // 라벨 간 겹침 방지를 위한 y오프셋 카운터
+          let bottomSlot = 0;
+          let topSlot = 0;
+
+          labels.forEach(lb => {
+            if (lb.x == null) return;
+
+            // y좌표 계산: placement 기반
+            let labelY;
+            if (lb.placement === 'bottom') {
+              // 하단 마진: 캔들 영역 끝(h * 0.80)에서부터 아래로
+              // scaleMargins.bottom = 0.20이므로 h * 0.82 ~ h * 0.96 영역 사용
+              labelY = h * 0.84 + bottomSlot * 16;
+              bottomSlot++;
+              if (labelY > h - 10) labelY = h - 10;  // 하단 넘침 방지
+            } else if (lb.placement === 'top') {
+              // 상단 마진: scaleMargins.top = 0.12이므로 h * 0.02 ~ h * 0.10 영역
+              labelY = h * 0.04 + topSlot * 16;
+              topSlot++;
+              if (labelY < 8) labelY = 8;  // 상단 넘침 방지
+            } else if (lb.y != null) {
+              labelY = lb.y;  // 기존 방식 폴백
+            } else {
+              return;
+            }
+
+            const text = lb.text;
+            const metrics = ctx.measureText(text);
+            const padH = 5;    // 좌우 패딩
+            const padV = 3;    // 상하 패딩
+            const boxW = metrics.width + padH * 2;
+            const boxH = fontSize + padV * 2;
+            const boxX = lb.x - boxW / 2;
+            const boxY = labelY - boxH / 2;
+            const radius = 3;
+
+            // 배경 roundRect
+            ctx.fillStyle = lb.bgColor || 'rgba(19,23,34,0.85)';
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+            } else {
+              // roundRect 미지원 브라우저 폴백
+              ctx.moveTo(boxX + radius, boxY);
+              ctx.lineTo(boxX + boxW - radius, boxY);
+              ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + radius);
+              ctx.lineTo(boxX + boxW, boxY + boxH - radius);
+              ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - radius, boxY + boxH);
+              ctx.lineTo(boxX + radius, boxY + boxH);
+              ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - radius);
+              ctx.lineTo(boxX, boxY + radius);
+              ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+            }
+            ctx.fill();
+
+            // 배경 테두리
+            ctx.strokeStyle = lb.borderColor || lb.color;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // 텍스트
+            ctx.fillStyle = lb.color;
+            ctx.fillText(text, lb.x, labelY);
+          });
+        }
 
         ctx.restore();
       });
@@ -136,7 +260,7 @@ const patternRenderer = (() => {
   class PatternPaneView {
     constructor(source) {
       this._source = source;
-      this._drawData = { rects: [], polylines: [], hlines: [] };
+      this._drawData = { rects: [], polylines: [], hlines: [], labels: [] };
     }
 
     zOrder() { return 'normal'; }
@@ -144,7 +268,7 @@ const patternRenderer = (() => {
     update() {
       const src = this._source;
       if (!src._chart || !src._series || !src._patterns) {
-        this._drawData = { rects: [], polylines: [], hlines: [] };
+        this._drawData = { rects: [], polylines: [], hlines: [], labels: [] };
         return;
       }
 
@@ -161,6 +285,7 @@ const patternRenderer = (() => {
       const rects = [];
       const polylines = [];
       const hlines = [];
+      const labels = [];
 
       patterns.forEach(p => {
         if (ZONE_PATTERNS[p.type])    this._buildZone(candles, p, toXY, rects);
@@ -169,10 +294,13 @@ const patternRenderer = (() => {
         if (p.type === 'doubleTop')    this._buildDoubleTop(candles, p, toXY, polylines);
         if (p.type === 'headAndShoulders' || p.type === 'inverseHeadAndShoulders')
           this._buildHSExtension(candles, p, toXY, polylines);
+
+        // ── 패턴 라벨 생성 ──
+        this._buildLabel(candles, p, toXY, labels);
       });
 
       this._buildStopTarget(patterns, series, hlines);
-      this._drawData = { rects, polylines, hlines };
+      this._drawData = { rects, polylines, hlines, labels };
     }
 
     renderer() { return new PatternRenderer(this._drawData); }
@@ -297,6 +425,52 @@ const patternRenderer = (() => {
       });
     }
 
+    // ── 패턴 라벨 (한글 이름, 차트 하단 마진 영역에 표시) ──
+    // 매수 패턴: 캔들 아래 하단 마진에 빨강 텍스트
+    // 매도 패턴: 캔들 위 상단에 파랑 텍스트
+    _buildLabel(candles, p, toXY, labels) {
+      const si = p.startIndex, ei = p.endIndex;
+      if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
+
+      const name = PATTERN_NAMES_KO[p.type] || p.type;
+
+      // 라벨 위치: 패턴 중앙 X
+      const midIdx = Math.round((si + ei) / 2);
+      const midTime = candles[Math.min(midIdx, candles.length - 1)].time;
+      const coordX = toXY(midTime, 0);
+      if (coordX.x == null) return;
+
+      // 매수(bullish) 판별 — 실제 감지되는 패턴 전체 포함
+      const isBullish = p.signal === 'buy' || p.direction === 'bullish' ||
+        ['hammer', 'invertedHammer', 'bullishEngulfing', 'bullishHarami',
+         'morningStar', 'threeWhiteSoldiers', 'doubleBottom',
+         'inverseHeadAndShoulders', 'fallingWedge', 'bullishFlag',
+         'ascendingTriangle', 'cupAndHandle',
+         'piercingLine', 'dragonflyDoji', 'tweezerBottom'].includes(p.type);
+
+      const isBearish = p.signal === 'sell' || p.direction === 'bearish' ||
+        ['hangingMan', 'shootingStar', 'bearishEngulfing', 'bearishHarami',
+         'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
+         'risingWedge', 'bearishFlag', 'descendingTriangle',
+         'darkCloud', 'gravestoneDoji', 'tweezerTop'].includes(p.type);
+
+      // 패턴 방향에 따른 색상 (한국식)
+      // 매수 패턴 → 빨강 (#E05050), 매도 패턴 → 파랑 (#5086DC)
+      const color = isBullish ? KRX_COLORS.UP : (isBearish ? KRX_COLORS.DOWN : NEUTRAL_COLOR);
+
+      // y좌표는 'bottom' 또는 'top' 키워드로 설정
+      // Canvas 렌더러에서 실제 height 기반으로 계산
+      labels.push({
+        x: coordX.x,
+        y: null,                        // Canvas 렌더러에서 계산
+        placement: isBullish ? 'bottom' : 'top',  // 매수→하단, 매도→상단
+        text: name,
+        color: color,
+        bgColor: 'rgba(19,23,34,0.85)',
+        borderColor: color,
+      });
+    }
+
     // ── 손절/목표가 수평선 (최상위 1개) ──
     _buildStopTarget(patterns, series, hlines) {
       const top = patterns.find(p => p.stopLoss != null || p.priceTarget != null);
@@ -305,14 +479,14 @@ const patternRenderer = (() => {
       if (top.stopLoss != null) {
         hlines.push({
           y: series.priceToCoordinate(top.stopLoss),
-          color: SELL_COLOR, width: 1, dash: [6, 3],
+          color: KRX_COLORS.PTN_STOP, width: 1, dash: [6, 3],
           marker: 'stop',
         });
       }
       if (top.priceTarget != null) {
         hlines.push({
           y: series.priceToCoordinate(top.priceTarget),
-          color: BUY_COLOR, width: 1, dash: [6, 3],
+          color: KRX_COLORS.PTN_TARGET, width: 1, dash: [6, 3],
           marker: 'target',
         });
       }
@@ -371,11 +545,16 @@ const patternRenderer = (() => {
       return;
     }
 
-    // 차트 재생성 감지 → primitive 재연결
-    if (_attachedSeries !== cm.candleSeries) {
+    // 차트 재생성 감지 → primitive 재연결 (라인 모드: _priceLine 시리즈 사용)
+    const targetSeries = (chartType === 'line' && cm.indicatorSeries._priceLine)
+      ? cm.indicatorSeries._priceLine : cm.candleSeries;
+    if (_attachedSeries !== targetSeries) {
+      if (_primitive && _attachedSeries) {
+        try { _attachedSeries.detachPrimitive(_primitive); } catch (e) {}
+      }
       _primitive = new PatternOverlayPrimitive();
-      cm.candleSeries.attachPrimitive(_primitive);
-      _attachedSeries = cm.candleSeries;
+      targetSeries.attachPrimitive(_primitive);
+      _attachedSeries = targetSeries;
     }
 
     if (!patterns || !patterns.length || !candles || !candles.length) {
@@ -387,7 +566,7 @@ const patternRenderer = (() => {
     _primitive.setPatterns(candles, sorted.slice(0, MAX_PATTERNS));
   }
 
-  function cleanup(cm) {
+  function cleanup() {
     if (_primitive && _attachedSeries) {
       try { _attachedSeries.detachPrimitive(_primitive); } catch (e) {}
     }
