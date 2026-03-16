@@ -97,7 +97,7 @@ class ChartManager {
       },
       rightPriceScale: {
         borderColor: KRX_COLORS.CHART_BORDER,
-        scaleMargins: { top: 0.12, bottom: 0.20 },
+        scaleMargins: { top: 0.15, bottom: 0.20 },
         autoScale: true,
         alignLabels: true,
         entireTextOnly: true,               // 잘린 가격 라벨 방지
@@ -115,19 +115,17 @@ class ChartManager {
         fixLeftEdge: false,
         lockVisibleTimeRangeOnResize: true,
       },
-      // ── 줌 비활성화: 드래그 스크롤만 허용 (KNOWSTOCK 참고) ──
-      // KNOWSTOCK chart_widget.py는 _zoom + _offset 기반이지만
-      // Lightweight Charts는 handleScale/handleScroll로 제어
+      // ── 줌/스크롤 자유 허용 (증권사 HTS / TradingView 스타일) ──
       handleScale: {
-        mouseWheel: false,             // 마우스 휠 줌 비활성화
-        pinch: false,                  // 핀치 줌 비활성화
-        axisPressedMouseMove: false,   // 축 드래그 줌 비활성화
+        mouseWheel: true,              // 마우스 휠 줌 허용
+        pinch: true,                   // 핀치 줌 허용
+        axisPressedMouseMove: true,    // 축 드래그 줌 허용
       },
       handleScroll: {
-        mouseWheel: false,             // 휠 스크롤도 비활성화
+        mouseWheel: true,              // 휠 스크롤 허용
         pressedMouseMove: true,        // 마우스 드래그 스크롤 허용
         horzTouchDrag: true,           // 터치 수평 드래그 허용
-        vertTouchDrag: false,          // 수직 터치 비활성화
+        vertTouchDrag: true,           // 수직 터치 드래그 허용
       },
     };
   }
@@ -309,7 +307,14 @@ class ChartManager {
         this.mainChart.removeSeries(this.indicatorSeries._priceLine);
         delete this.indicatorSeries._priceLine;
       }
-      this.candleSeries.setData(candles.map(c => ({
+
+      // Heikin Ashi 변환
+      let displayCandles = candles;
+      if (chartType === 'heikin') {
+        displayCandles = this._convertToHeikinAshi(candles);
+      }
+
+      this.candleSeries.setData(displayCandles.map(c => ({
         time: c.time,
         open: c.open,
         high: c.high,
@@ -334,13 +339,31 @@ class ChartManager {
       }
     }
 
-    // ── 거래량 ──
+    // ── 거래량 (동적 투명도: 20일 평균 대비 비율) ──
     if (activeIndicators.has('vol')) {
-      this.volumeSeries.setData(candles.map(c => ({
-        time: c.time,
-        value: c.volume,
-        color: c.close >= c.open ? KRX_COLORS.UP_FILL(0.45) : KRX_COLORS.DOWN_FILL(0.45),
-      })));
+      // 20봉 평균 거래량 계산
+      var volSum = 0, volCount = 0;
+      var startIdx = Math.max(0, candles.length - 20);
+      for (var vi = startIdx; vi < candles.length; vi++) {
+        volSum += (candles[vi].volume || 0);
+        volCount++;
+      }
+      var avgVol = volCount > 0 ? volSum / volCount : 1;
+
+      this.volumeSeries.setData(candles.map(function(c) {
+        var ratio = avgVol > 0 ? (c.volume || 0) / avgVol : 1;
+        // 동적 투명도: 1x미만=0.15, 1~2x=0.25, 2x+=0.45
+        var alpha;
+        if (ratio < 1) alpha = 0.15;
+        else if (ratio < 2) alpha = 0.25;
+        else alpha = 0.45;
+
+        return {
+          time: c.time,
+          value: c.volume,
+          color: c.close >= c.open ? KRX_COLORS.UP_FILL(alpha) : KRX_COLORS.DOWN_FILL(alpha),
+        };
+      }));
     } else {
       this.volumeSeries.setData([]);
     }
@@ -471,30 +494,12 @@ class ChartManager {
       return;
     }
 
-    // ── 마커 설정 (TradingView 스타일: 화살표만, 텍스트 없음) ──
-    const markerMap = new Map();
-    patterns.filter(p => p.marker).forEach(p => {
-      const key = `${p.marker.time}-${p.marker.position}`;
-      const existing = markerMap.get(key);
-      if (!existing || (p.confidence || 0) > (existing._conf || 0)) {
-        markerMap.set(key, { ...p.marker, _conf: p.confidence || 0 });
-      }
-    });
-    const markers = [...markerMap.values()]
-      .map(m => ({
-        time: m.time,
-        position: m.position,
-        color: m.color,
-        shape: m.shape,
-        text: m.text || '',
-        size: 1,
-      }))
-      .sort((a, b) => typeof a.time === 'string' ? a.time.localeCompare(b.time) : a.time - b.time);
+    // ── 마커 비활성화: patternRenderer v3가 Canvas로 전문 시각화 처리 ──
+    // 기존 투박한 화살표 마커 대신 Canvas 글로우/브래킷/라벨 사용
+    markerSeries.setMarkers([]);
 
-    markerSeries.setMarkers(markers);
-
-    // ── 추세선 (삼각형, 쐐기 패턴) — 시리즈 풀링 ──
-    // 필요한 추세선 데이터 수집
+    // ── 추세선 (삼각형, 쐐기 패턴) — 데이터 공간 LineSeries ──
+    // Canvas 오버레이와 함께 LineSeries도 유지 (줌/팬 시 정확한 스케일링)
     const trendlineData = [];
     patterns.forEach(p => {
       if (!p.trendlines) return;
@@ -515,21 +520,19 @@ class ChartManager {
       this.trendlineSeries.length = needed;
     }
 
-    // 부족분 생성 + 기존분 재활용
+    // 부족분 생성 + 기존분 재활용 (은은한 스타일)
     trendlineData.forEach((tl, i) => {
       const color = tl.color || KRX_COLORS.PTN_STRUCT;
       const lineStyle = tl.style === 'dashed' ? 2 : 0;
       const data = tl.points.map(pt => ({ time: pt.time, value: pt.value }));
 
       if (i < existing) {
-        // 기존 시리즈 재활용: 옵션 갱신 + 데이터 설정
-        this.trendlineSeries[i].applyOptions({ color, lineStyle });
+        this.trendlineSeries[i].applyOptions({ color, lineStyle, lineWidth: 1 });
         this.trendlineSeries[i].setData(data);
       } else {
-        // 새 시리즈 생성
         const series = this.mainChart.addLineSeries({
           color,
-          lineWidth: 1.5,
+          lineWidth: 1,
           lineStyle,
           priceLineVisible: false,
           lastValueVisible: false,
@@ -728,6 +731,28 @@ class ChartManager {
     this._resizeMap.set(container, { observer: ro, chart });
   }
 
+  /** Heikin Ashi 캔들 변환 */
+  _convertToHeikinAshi(candles) {
+    if (!candles || !candles.length) return [];
+    const ha = [];
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      const haClose = (c.open + c.high + c.low + c.close) / 4;
+      const haOpen = i === 0
+        ? (c.open + c.close) / 2
+        : (ha[i - 1].open + ha[i - 1].close) / 2;
+      ha.push({
+        time: c.time,
+        open: Math.round(haOpen),
+        high: Math.round(Math.max(c.high, haOpen, haClose)),
+        low: Math.round(Math.min(c.low, haOpen, haClose)),
+        close: Math.round(haClose),
+        volume: c.volume,
+      });
+    }
+    return ha;
+  }
+
   destroyAll() {
     // renderer cleanup (stale 참조 방지)
     if (typeof patternRenderer !== 'undefined' && patternRenderer.cleanup) patternRenderer.cleanup();
@@ -897,6 +922,9 @@ class ChartManager {
       const si = p.startIndex != null ? p.startIndex : 0;
       const ei = p.endIndex != null ? p.endIndex : si;
       if (crossIdx >= si - tolerance && crossIdx <= ei + tolerance) {
+        // 진입가: 패턴 완성 봉(endIndex)의 종가
+        const entryIdx = Math.min(ei, candles.length - 1);
+        const entryPrice = candles[entryIdx] ? candles[entryIdx].close : null;
         matches.push({
           source: 'pattern',
           type: p.type,
@@ -907,6 +935,7 @@ class ChartManager {
           description: p.description || '',
           stopLoss: p.stopLoss,
           priceTarget: p.priceTarget,
+          entryPrice: entryPrice,
           confluence: p.confluence,
         });
       }

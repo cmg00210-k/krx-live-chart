@@ -133,8 +133,127 @@ def download_stock(code, name, market, start_date, end_date, output_dir):
         return {"error": str(e)}
 
 
-def build_index(stocks_meta, start_date, end_date):
-    """data/index.json 생성 — js/api.js에서 읽는 전체 종목 인덱스"""
+def fetch_market_caps(date_str):
+    """FinanceDataReader로 전체 종목 시가총액 조회 (억원 단위)
+
+    pykrx의 get_market_cap_by_ticker가 컬럼명 인코딩 문제로 실패하므로
+    FinanceDataReader.StockListing()의 Marcap 필드를 사용.
+
+    Args:
+        date_str: "YYYYMMDD" 형식의 날짜 (미사용, FDR은 최신 데이터 반환)
+
+    Returns:
+        dict: { 종목코드: 시총(억원) }
+    """
+    market_caps = {}
+    try:
+        import FinanceDataReader as fdr
+
+        for market in ["KOSPI", "KOSDAQ"]:
+            try:
+                df = fdr.StockListing(market)
+                if df is not None and not df.empty and "Marcap" in df.columns:
+                    for _, row in df.iterrows():
+                        code = str(row.get("Code", ""))
+                        marcap = row.get("Marcap", 0)
+                        if code and marcap and marcap > 0:
+                            cap_억 = int(marcap / 100_000_000)  # 원 → 억원
+                            if cap_억 > 0:
+                                market_caps[code] = cap_억
+            except Exception as e:
+                print(f"  ⚠ {market} 시총 조회 실패: {e}")
+
+        print(f"  시가총액 데이터: {len(market_caps)}종목 로드 완료")
+
+    except Exception as e:
+        print(f"  ⚠ 시가총액 조회 전체 실패: {e}")
+
+    return market_caps
+
+
+def fetch_sector_info():
+    """FinanceDataReader로 전체 종목 섹터/업종 정보 조회
+
+    Returns:
+        dict: { 종목코드: { 'sector': '...', 'industry': '...' } }
+    """
+    sector_map = {}
+    try:
+        import FinanceDataReader as fdr
+        for market in ['KRX-DESC']:
+            df = fdr.StockListing(market)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    code = str(row.get('Code', ''))
+                    raw_sector = row.get('Sector', '')
+                    raw_industry = row.get('Industry', '')
+                    import math
+                    def _safe_str(v):
+                        if v is None: return ''
+                        if isinstance(v, float) and math.isnan(v): return ''
+                        s = str(v).strip()
+                        return '' if s.lower() == 'nan' else s
+                    sector = _safe_str(raw_sector)
+                    industry = _safe_str(raw_industry)
+                    # FDR에서 Sector가 대부분 NaN이므로 Industry를 sector로 사용
+                    if not sector and industry:
+                        sector = industry
+                    if code and sector:
+                        sector_map[code] = {
+                            'sector': sector,
+                            'industry': industry,
+                        }
+        print(f"  섹터 정보: {len(sector_map)}종목 로드 완료")
+    except Exception as e:
+        print(f"  섹터 정보 조회 실패: {e}")
+    return sector_map
+
+
+def _fetch_indices():
+    """KOSPI/KOSDAQ 최신 지수 조회"""
+    indices = {}
+    try:
+        import FinanceDataReader as fdr
+        # KOSPI 지수
+        df = fdr.DataReader('KS11', start=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'))
+        if df is not None and not df.empty:
+            indices['kospi'] = float(df.iloc[-1]['Close'])
+        # KOSDAQ 지수
+        df = fdr.DataReader('KQ11', start=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'))
+        if df is not None and not df.empty:
+            indices['kosdaq'] = float(df.iloc[-1]['Close'])
+        if indices:
+            print(f"  지수 조회 완료: KOSPI {indices.get('kospi', '?')}, KOSDAQ {indices.get('kosdaq', '?')}")
+    except Exception as e:
+        print(f"  지수 조회 실패: {e}")
+    return indices
+
+
+def build_index(stocks_meta, start_date, end_date, market_caps=None, sector_map=None):
+    """data/index.json 생성 — js/api.js에서 읽는 전체 종목 인덱스
+
+    Args:
+        stocks_meta: 종목 메타 리스트
+        start_date: 시작일
+        end_date: 종료일
+        market_caps: { 종목코드: 시총(억원) } (선택)
+        sector_map: { 종목코드: { 'sector': '...', 'industry': '...' } } (선택)
+    """
+    # 시가총액 필드 추가
+    if market_caps:
+        for s in stocks_meta:
+            code = s["code"]
+            if code in market_caps:
+                s["marketCap"] = market_caps[code]
+
+    # 섹터/업종 필드 추가
+    if sector_map:
+        for s in stocks_meta:
+            code = s["code"]
+            if code in sector_map:
+                s["sector"] = sector_map[code].get("sector", "")
+                s["industry"] = sector_map[code].get("industry", "")
+
     index = {
         "source": "pykrx (KRX)",
         "license": "개발용 (사업화 시 코스콤 전환 필요)",
@@ -143,7 +262,8 @@ def build_index(stocks_meta, start_date, end_date):
         "total": len(stocks_meta),
         "kospi": len([s for s in stocks_meta if s["market"] == "KOSPI"]),
         "kosdaq": len([s for s in stocks_meta if s["market"] == "KOSDAQ"]),
-        "stocks": stocks_meta
+        "stocks": stocks_meta,
+        "indices": _fetch_indices(),
     }
 
     filepath = os.path.join(DATA_DIR, "index.json")
@@ -230,8 +350,16 @@ def main():
         if i < len(targets) - 1:
             time.sleep(args.delay)
 
-    # ── 인덱스 파일 생성 ──
-    index_path = build_index(stocks_meta, start_date, end_date)
+    # ── 시가총액 데이터 조회 ──
+    print(f"\n── 시가총액 데이터 조회 ──\n")
+    market_caps = fetch_market_caps(end_date)
+
+    # ── 섹터/업종 정보 조회 ──
+    print(f"\n── 섹터/업종 정보 조회 ──\n")
+    sector_map = fetch_sector_info()
+
+    # ── 인덱스 파일 생성 (시총 + 섹터 포함) ──
+    index_path = build_index(stocks_meta, start_date, end_date, market_caps, sector_map)
 
     # ── 용량 계산 ──
     total_size = 0

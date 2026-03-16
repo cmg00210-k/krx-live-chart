@@ -31,9 +31,9 @@
     </div>
     <div id="ticker-strip">
       <span id="market-state" class="market-state closed">장마감</span>
-      <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val up" id="t-kospi">2,687.44</span></div>
-      <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val up" id="t-kosdaq">868.52</span></div>
-      <div class="ticker-item"><span class="ticker-name">USD/KRW</span><span class="ticker-val" id="t-usd">1,312.50</span></div>
+      <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val" id="t-kospi">&mdash;</span></div>
+      <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val" id="t-kosdaq">&mdash;</span></div>
+      <div class="ticker-item"><span class="ticker-name">USD/KRW</span><span class="ticker-val" id="t-usd">&mdash;</span></div>
     </div>
   </div>
 
@@ -57,25 +57,26 @@
         <div class="sb-search-wrap">
           <input id="sb-search-input" type="text" placeholder="종목 검색..." autocomplete="off">
         </div>
-        <div class="sb-sort-track" data-active="0">
-          <div class="sb-sort-indicator"></div>
-          <button class="sb-sort-btn active" data-sort="mcap" data-idx="0" data-dir="desc">시총순</button>
-          <button class="sb-sort-btn" data-sort="change" data-idx="1">등락률</button>
-          <button class="sb-sort-btn" data-sort="pattern" data-idx="2">패턴별</button>
-        </div>
-        <div class="sb-filter-chips">
-          <button class="sb-chip active" data-filter="all">전체</button>
-          <button class="sb-chip" data-filter="up">▲상승</button>
-          <button class="sb-chip" data-filter="down">▼하락</button>
-          <button class="sb-chip" data-filter="highvol">대량거래</button>
+        <div class="sb-sort-filter-row">
+          <select class="sb-sort-select" id="sb-sort-select">
+            <option value="mcap">시총순</option>
+            <option value="change">등락률순</option>
+            <option value="pattern">패턴순</option>
+            <option value="name">이름순</option>
+          </select>
+          <button class="sb-sort-dir" id="sb-sort-dir" title="정렬 방향">&#9660;</button>
+          <button class="sb-chip sb-vol-toggle" id="sb-vol-toggle" data-filter="highvol">대량거래</button>
         </div>
       </div>
       <div class="sb-view-controls">
-        <button class="sb-view-btn" id="sb-view-toggle" title="보기 모드 전환">&#9776;</button>
+        <div class="sb-view-group" id="sb-view-group">
+          <button class="sb-view-opt active" data-view="default" title="기본">기본</button>
+          <button class="sb-view-opt" data-view="analysis" title="상세">상세</button>
+        </div>
         <button class="sb-chip sb-pattern-only-chip" data-filter="patternOnly" style="display:none">패턴 감지만</button>
       </div>
       <div class="sb-body">
-        <div class="sb-section sb-recent-section" style="display:none">
+        <div class="sb-section sb-recent-section" id="sb-recent-section" style="display:none">
           <div class="sb-header" id="sb-recent-header">
             <span>최근 본 종목</span>
             <span class="sb-count" id="sb-recent-count">0</span>
@@ -84,19 +85,11 @@
         </div>
         <div class="sb-section">
           <div class="sb-header">
-            <span>KOSPI</span>
-            <span class="sb-index-val" id="sb-kospi-val"></span>
-            <span class="sb-count" id="sb-kospi-count">0</span>
+            <span>종목 (시총순)</span>
+            <span class="sb-count" id="sb-all-count">0</span>
           </div>
-          <div class="sb-list" id="sb-kospi"></div>
-        </div>
-        <div class="sb-section">
-          <div class="sb-header">
-            <span>KOSDAQ</span>
-            <span class="sb-index-val" id="sb-kosdaq-val"></span>
-            <span class="sb-count" id="sb-kosdaq-count">0</span>
-          </div>
-          <div class="sb-list" id="sb-kosdaq"></div>
+          <div class="sb-list" id="sb-all"></div>
+          <button class="sb-load-more" id="sb-load-more" style="display:none">더보기</button>
         </div>
       </div>
     </div>
@@ -114,8 +107,8 @@
             <span id="live-label" class="live-label demo">DEMO</span>
           </div>
           <div class="sh-price-row">
-            <span id="stock-price" class="sh-price up">73,400</span>
-            <span id="stock-change" class="sh-change up">&#9650; 1,200 (+1.66%)</span>
+            <span id="stock-price" class="sh-price">&mdash;</span>
+            <span id="stock-change" class="sh-change">&mdash;</span>
           </div>
         </div>
         <div class="sh-details">
@@ -150,6 +143,7 @@
         <button class="ct-btn active" data-ct="candle">캔들</button>
         <button class="ct-btn" data-ct="line">라인</button>
         <button class="ct-btn" data-ct="bar">바</button>
+        <button class="ct-btn" data-ct="heikin">HA</button>
         <div class="sep"></div>
         <div class="ind-dropdown-wrap">
           <button class="ind-dropdown-btn" id="ind-dropdown-toggle">지표 ▼</button>
@@ -260,6 +254,7 @@
     <!-- ── C열: 기술적 패턴 설명 (신규) ── -->
     <div id="pattern-panel">
       <div class="pp-header">기술적 패턴 분석</div>
+
       <div class="pp-content" id="pp-content">
         <!-- JS에서 동적 생성: 최대 3개 패턴 카드 -->
         <div id="pp-cards">
@@ -283,7 +278,7 @@
         </div>
 
         <!-- 주요손익지표 -->
-        <div class="fin-section-title">주요손익지표</div>
+        <div class="fin-section-title">주요손익 지표</div>
 
         <div class="fin-row">
           <span class="fin-row-label">매출액</span>
@@ -313,7 +308,7 @@
         </div>
 
         <!-- 수익성 -->
-        <div class="fin-section-title">수익성</div>
+        <div class="fin-section-title">수익성 지표</div>
 
         <div class="fin-grid">
           <div class="fin-grid-item">
@@ -335,7 +330,7 @@
         </div>
 
         <!-- 밸류에이션 -->
-        <div class="fin-section-title">밸류에이션</div>
+        <div class="fin-section-title">밸류에이션 지표</div>
 
         <div class="fin-grid">
           <div class="fin-grid-item">
@@ -364,26 +359,28 @@
           </div>
         </div>
 
-        <!-- 성장성 / 투자판단 -->
-        <div class="fin-section-title">성장성 / 투자판단</div>
+        <!-- 성장성 지표 -->
+        <div class="fin-section-title">성장성 지표</div>
 
-        <div class="fin-grid">
+        <div class="fin-grid fin-grid-2col">
           <div class="fin-grid-item">
-            <span class="fin-grid-label">매출 CAGR <span class="fin-info" data-tooltip="최근 3년 매출액 연평균 성장률 (Compound Annual Growth Rate). 지속적 성장 기업 식별에 사용합니다.">&#9432;</span></span>
+            <span class="fin-grid-label">매출 CAGR <span class="fin-info" data-tooltip="최근 3년 매출액 연평균 성장률">&#9432;</span></span>
             <span class="fin-grid-value" id="fin-rev-cagr">&mdash;</span>
           </div>
           <div class="fin-grid-item">
-            <span class="fin-grid-label">순이익 CAGR <span class="fin-info" data-tooltip="최근 3년 순이익 연평균 성장률. 수익성 개선 추세를 파악합니다.">&#9432;</span></span>
+            <span class="fin-grid-label">순이익 CAGR <span class="fin-info" data-tooltip="최근 3년 순이익 연평균 성장률">&#9432;</span></span>
             <span class="fin-grid-value" id="fin-ni-cagr">&mdash;</span>
           </div>
-          <div class="fin-grid-item fin-score-item">
-            <span class="fin-grid-label">투자판단 <span class="fin-info" data-tooltip="수익성(ROE, OPM), 밸류에이션(PER, PBR), 성장성(CAGR), 안정성(부채비율)을 종합한 0~100 점수입니다. 참고용이며 투자 권유가 아닙니다.">&#9432;</span></span>
+        </div>
+
+        <!-- 투자판단 -->
+        <div class="fin-section-title">투자판단</div>
+        <div class="fin-score-badge">
+          <div class="fin-score-main">
             <span class="fin-grid-value fin-score" id="fin-score">&mdash;</span>
+            <span class="fin-score-grade" id="fin-grade">&mdash;</span>
           </div>
-          <div class="fin-grid-item">
-            <span class="fin-grid-label">등급</span>
-            <span class="fin-grid-value" id="fin-grade">&mdash;</span>
-          </div>
+          <span class="fin-score-note">수익성·밸류에이션·성장성·안정성 종합 <span class="fin-info" data-tooltip="수익성(ROE, OPM), 밸류에이션(PER, PBR), 성장성(CAGR), 안정성(부채비율)을 종합한 0~100 점수입니다. 참고용이며 투자 권유가 아닙니다.">&#9432;</span></span>
         </div>
 
         <!-- 추이 차트 -->
@@ -398,14 +395,32 @@
             <button class="fin-trend-toggle" id="fin-trend-toggle" title="접기/펼치기">&#9660;</button>
           </div>
           <div class="fin-trend-body" id="fin-trend-body">
-            <canvas id="fin-trend-canvas" width="260" height="80"></canvas>
+            <canvas id="fin-trend-canvas" width="350" height="80"></canvas>
           </div>
+        </div>
+
+        <!-- 업종 비교 -->
+        <div class="fin-section-title">업종 비교</div>
+        <div class="fin-compare" id="fin-compare">
+          <div class="fin-compare-placeholder">데이터 준비 중...</div>
+        </div>
+
+        <!-- 동종업종 비교 -->
+        <div class="fin-section-title">동종업종 비교</div>
+        <div class="fin-peers" id="fin-peers">
+          <div class="fin-compare-placeholder">데이터 로딩 중...</div>
+        </div>
+
+        <!-- PER 밴드 차트 -->
+        <div class="fin-section-title">PER 밴드</div>
+        <div class="fin-per-band-wrap" id="fin-per-band-wrap">
+          <canvas id="fin-per-band" width="350" height="100"></canvas>
         </div>
 
         <!-- OPM 스파크라인 -->
         <div class="fin-spark-wrap">
           <span class="fin-spark-label">영업이익률 추이</span>
-          <canvas id="opm-sparkline" width="260" height="50"></canvas>
+          <canvas id="opm-sparkline" width="350" height="80"></canvas>
         </div>
 
         <!-- 면책 조항 -->

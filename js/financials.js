@@ -13,6 +13,10 @@
 var _finTrendData = [];
 var _finTrendMetric = 'revenue';
 
+// ── 업종 비교용 최신 재무값 캐시 ──
+var _latestFinOpm = 0;
+var _latestFinRoe = 0;
+
 // ══════════════════════════════════════════════════════
 //  재무지표 패널 (우측 탭)
 // ══════════════════════════════════════════════════════
@@ -49,11 +53,13 @@ async function updateFinancials() {
   // 수익성 지표
   set('fin-opm', latest.opm);
   setClass('fin-opm', 'fin-grid-value' + (parseFloat(latest.opm) < 0 ? ' dn' : ''));
+  _latestFinOpm = _parsePercent(latest.opm);
   set('fin-eps', Number(latest.eps).toLocaleString() + '원');
   setClass('fin-eps', 'fin-grid-value' + (Number(latest.eps) < 0 ? ' dn' : ''));
   const roeNum = parseFloat(latest.roe);
   set('fin-roe', isNaN(roeNum) ? '—' : roeNum.toFixed(1) + '%');
   setClass('fin-roe', 'fin-grid-value' + (!isNaN(roeNum) && roeNum < 0 ? ' dn' : ''));
+  _latestFinRoe = isNaN(roeNum) ? 0 : roeNum;
   // BPS: 자본총계/발행주식수 (DART 데이터에 있으면 표시)
   const bps = latest.bps || '—';
   set('fin-bps', typeof bps === 'number' ? bps.toLocaleString() + '원' : bps);
@@ -207,6 +213,15 @@ async function updateFinancials() {
   const tabs = document.querySelectorAll('.fin-trend-tab');
   tabs.forEach(t => t.classList.toggle('active', t.dataset.metric === 'revenue'));
   drawFinTrendChart(data, 'revenue');
+
+  // ── 업종 비교 렌더링 ──
+  _renderSectorComparison();
+
+  // ── 동종업종 비교 테이블 ──
+  _renderPeerGroup();
+
+  // ── PER 밴드 차트 ──
+  _drawPERBandChart();
 }
 
 /**
@@ -437,9 +452,15 @@ function drawOPMSparkline(data) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
 
-  // 하단 날짜 라벨 영역 확보 (12px)
-  const labelHeight = 14;
-  const w = 200, h = 36 + labelHeight;
+  // 레이아웃: 상단 값 라벨 + 차트 영역 + 하단 분기 라벨
+  const topLabelH = 14;   // 퍼센트 값 표시 영역
+  const bottomLabelH = 14; // 분기 라벨 영역
+  const paddingL = 16;     // 좌측 여백 (첫 라벨 잘림 방지)
+  const paddingR = 16;     // 우측 여백
+
+  // 부모 너비에 맞게 동적 계산, height 80px로 확장
+  const w = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200;
+  const h = 80;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
@@ -447,58 +468,115 @@ function drawOPMSparkline(data) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
-  // 라벨을 제외한 차트 영역 높이
-  const chartH = h - labelHeight;
+  // 차트 그리기 영역 (상단/하단 라벨 제외)
+  const chartTop = topLabelH;
+  const chartH = h - topLabelH - bottomLabelH;
+  const chartW = w - paddingL - paddingR;
 
   const values = data.map(d => parseFloat(d.opm) || 0).reverse();
-  // 분기 라벨도 역순으로 (과거 → 최신)
   const labels = data.map(d => _sparklineLabel(d.p)).reverse();
   if (values.length < 2) return;
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const pad = 3;
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const range = maxVal - minVal || 1;
+  const pad = 4; // 상하 내부 패딩
 
-  // 영역 채우기
+  // 좌표 계산 헬퍼
+  const ptX = (i) => paddingL + (i / (values.length - 1)) * chartW;
+  const ptY = (v) => chartTop + pad + ((maxVal - v) / range) * (chartH - 2 * pad);
+
+  // 포인트 배열 미리 계산
+  var points = [];
+  for (var i = 0; i < values.length; i++) {
+    points.push({ x: ptX(i), y: ptY(values[i]) });
+  }
+
+  // 0% 기준선의 Y 좌표 (영역 채우기 기준점으로도 사용)
+  var baseY = chartTop + chartH; // 기본: 차트 하단
+  var hasZeroLine = minVal < 0 && maxVal > 0;
+  var zeroY = hasZeroLine ? ptY(0) : baseY;
+
+  // ── 1) 영역 채우기 (그라디언트) ──
   ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = (i / (values.length - 1)) * w;
-    const y = pad + ((max - v) / range) * (chartH - 2 * pad);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.lineTo(w, chartH);
-  ctx.lineTo(0, chartH);
+  ctx.moveTo(points[0].x, points[0].y);
+  for (i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  // 아래로 닫기: 0% 기준선 또는 차트 하단까지
+  ctx.lineTo(points[points.length - 1].x, baseY);
+  ctx.lineTo(points[0].x, baseY);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(201,168,76,0.1)';
+  var gradient = ctx.createLinearGradient(0, chartTop, 0, chartTop + chartH);
+  gradient.addColorStop(0, 'rgba(201,168,76,0.20)');
+  gradient.addColorStop(1, 'rgba(201,168,76,0.02)');
+  ctx.fillStyle = gradient;
   ctx.fill();
 
-  // 라인
+  // ── 2) 0% 기준선 (양수/음수 혼재 시) ──
+  if (hasZeroLine) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(paddingL, zeroY);
+    ctx.lineTo(w - paddingR, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // "0%" 라벨
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('0%', paddingL - 3, zeroY);
+  }
+
+  // ── 3) 라인 ──
   ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = (i / (values.length - 1)) * w;
-    const y = pad + ((max - v) / range) * (chartH - 2 * pad);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
+  ctx.moveTo(points[0].x, points[0].y);
+  for (i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
   ctx.strokeStyle = KRX_COLORS.ACCENT;
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // ── 분기 라벨 (x축 하단) ──
+  // ── 4) 원형 마커 (각 데이터 포인트) ──
+  for (i = 0; i < points.length; i++) {
+    ctx.beginPath();
+    ctx.arc(points[i].x, points[i].y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = values[i] >= 0 ? KRX_COLORS.ACCENT : KRX_COLORS.DOWN;
+    ctx.fill();
+  }
+
+  // ── 5) 퍼센트 값 텍스트 (마커 위) ──
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  // 라벨 표시 간격: 6개 이하면 모두, 아니면 짝수 인덱스 + 마지막
+  var showAll = values.length <= 6;
+  for (i = 0; i < points.length; i++) {
+    if (!showAll && i % 2 !== 0 && i !== points.length - 1) continue;
+    ctx.fillStyle = values[i] >= 0
+      ? KRX_COLORS.CHART_TEXT || 'rgba(255,255,255,0.7)'
+      : KRX_COLORS.DOWN;
+    ctx.fillText(values[i].toFixed(1) + '%', points[i].x, points[i].y - 6);
+  }
+
+  // ── 6) X축 분기 라벨 (하단) ──
   ctx.font = '9px Pretendard, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-
-  // 라벨이 너무 많으면 간격 조절 (최대 6개 표시)
-  const maxLabels = 6;
-  const step = values.length <= maxLabels ? 1 : Math.ceil(values.length / maxLabels);
-
-  values.forEach((v, i) => {
-    if (i % step !== 0 && i !== values.length - 1) return;
-    const x = (i / (values.length - 1)) * w;
-    ctx.fillText(labels[i] || '', x, chartH + 2);
-  });
+  var maxLabels = 6;
+  var step = values.length <= maxLabels ? 1 : Math.ceil(values.length / maxLabels);
+  for (i = 0; i < points.length; i++) {
+    if (i % step !== 0 && i !== points.length - 1) continue;
+    ctx.fillText(labels[i] || '', points[i].x, chartTop + chartH + 2);
+  }
 }
 
 /**
@@ -631,10 +709,30 @@ function drawFinTrendChart(data, metric) {
       ctx.lineTo(w, zeroY);
       ctx.stroke();
     }
+
+    // 바 위에 값 표시 (억원 → 조/억 단위)
+    ctx.fillStyle = '#A0A0A0';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    values.forEach((v, i) => {
+      var barX = gap + i * (barW + gap);
+      var barH = (Math.abs(v) / absMax) * (hasNeg ? chartH / 2 : chartH - 2);
+      var text = '';
+      if (Math.abs(v) >= 10000) {         // 1조 이상 (값은 억원 단위)
+        text = (v / 10000).toFixed(1) + '조';
+      } else if (Math.abs(v) >= 100) {     // 100억 이상
+        text = Math.round(v) + '억';
+      }
+      if (text) {
+        var labelY = v >= 0 ? zeroY - barH - 2 : zeroY + barH + 10;
+        ctx.fillText(text, barX + barW / 2, labelY);
+      }
+    });
   }
 
   // ── 분기 라벨 (x축 하단) ──
-  ctx.font = '9px Pretendard, sans-serif';
+  ctx.font = '10px Pretendard, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -658,4 +756,458 @@ function drawFinTrendChart(data, metric) {
       ctx.fillText(labels[i] || '', x, chartH + 2);
     });
   }
+}
+
+// ══════════════════════════════════════════════════════
+//  업종 비교 (P1 — FnGuide 스타일 3열 비교 테이블)
+// ══════════════════════════════════════════════════════
+
+/**
+ * 퍼센트 문자열 파싱: "14.1%" → 14.1, 숫자 → 그대로
+ */
+function _parsePercent(val) {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  var s = String(val).replace('%', '').trim();
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * 업종 비교 테이블 렌더링
+ * 현재 종목의 ROE/OPM을 업종 평균, 시장 평균과 비교
+ */
+function _renderSectorComparison() {
+  var container = document.getElementById('fin-compare');
+  if (!container) return;
+
+  // 전역 변수 존재 여부 확인
+  if (typeof currentStock === 'undefined' || !currentStock ||
+      typeof ALL_STOCKS === 'undefined' ||
+      typeof _sectorData === 'undefined' || !_sectorData) {
+    container.innerHTML = '<div class="fin-compare-placeholder">업종 데이터 없음</div>';
+    return;
+  }
+
+  // 현재 종목의 섹터 찾기
+  var stockInfo = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
+  var sectorName = stockInfo ? (stockInfo.sector || '') : '';
+
+  if (!sectorName || !_sectorData.sectors || !_sectorData.sectors[sectorName]) {
+    container.innerHTML = '<div class="fin-compare-placeholder">업종 데이터 없음</div>';
+    return;
+  }
+
+  var sectorAvg = _sectorData.sectors[sectorName];
+  var marketAvg = (currentStock.market === 'KOSDAQ')
+    ? (_sectorData.kosdaqAvg || {})
+    : (_sectorData.kospiAvg || {});
+
+  // 현재 종목의 ROE/OPM (updateFinancials에서 캐시된 값)
+  var myRoe = _latestFinRoe;
+  var myOpm = _latestFinOpm;
+
+  // FnGuide 스타일 3열 비교 테이블
+  var html = '<div class="fin-compare-header">' +
+    '<span class="fin-compare-sector">' + sectorName + '</span>' +
+    '<span class="fin-compare-count">' + (sectorAvg.count || 0) + '개 종목</span>' +
+  '</div>';
+
+  html += '<table class="fin-compare-table">' +
+    '<thead><tr>' +
+      '<th></th><th>기업</th><th>업종평균</th><th>' + (currentStock.market || 'KOSPI') + '</th>' +
+    '</tr></thead><tbody>';
+
+  // ROE 비교 (높을수록 양호)
+  html += _compareRow('ROE', myRoe, sectorAvg.avgRoe, marketAvg.roe, '%', true);
+
+  // OPM 비교 (높을수록 양호)
+  html += _compareRow('영업이익률', myOpm, sectorAvg.avgOpm, marketAvg.opm, '%', true);
+
+  html += '</tbody></table>';
+
+  container.innerHTML = html;
+}
+
+/**
+ * 비교 테이블 행 생성
+ * @param {string} label - 지표명
+ * @param {number} myVal - 기업 값
+ * @param {number} sectorVal - 업종 평균
+ * @param {number} marketVal - 시장 평균
+ * @param {string} unit - 단위 (%, 배 등)
+ * @param {boolean} higherIsBetter - true면 높을수록 양호
+ */
+function _compareRow(label, myVal, sectorVal, marketVal, unit, higherIsBetter) {
+  var fmt = function(v) {
+    if (v == null || v === 0) return '-';
+    return (typeof v === 'number') ? v.toFixed(1) + unit : String(v);
+  };
+
+  // 색상: 기업이 업종평균보다 좋으면 초록, 나쁘면 톤다운 빨강
+  var myClass = '';
+  if (myVal && sectorVal && sectorVal > 0) {
+    if (higherIsBetter) {
+      myClass = myVal >= sectorVal ? 'fin-cmp-good' : 'fin-cmp-bad';
+    } else {
+      myClass = myVal <= sectorVal ? 'fin-cmp-good' : 'fin-cmp-bad';
+    }
+  }
+
+  return '<tr>' +
+    '<td class="fin-cmp-label">' + label + '</td>' +
+    '<td class="fin-cmp-val ' + myClass + '">' + fmt(myVal) + '</td>' +
+    '<td class="fin-cmp-val">' + fmt(sectorVal) + '</td>' +
+    '<td class="fin-cmp-val">' + fmt(marketVal) + '</td>' +
+  '</tr>';
+}
+
+// ══════════════════════════════════════════════════════
+//  동종업종 비교 (Peer Group — FnGuide/Seeking Alpha 스타일)
+// ══════════════════════════════════════════════════════
+
+var _peerPreloading = false;
+
+/**
+ * 퍼센트 값 포맷: 0 또는 null → '-', 그 외 → '3.0%'
+ */
+function _fmtPct(val) {
+  if (val == null || val === 0) return '-';
+  return val.toFixed(1) + '%';
+}
+
+/**
+ * peer 종목의 재무 데이터를 _financialCache에서 동기적으로 가져오기
+ * @param {string} code - 종목코드
+ * @returns {{roe: number, opm: number, debtRatio: number}}
+ */
+function _getPeerFinancials(code) {
+  var result = { roe: 0, opm: 0, debtRatio: 0 };
+
+  try {
+    // data.js의 _financialCache는 전역 const — 직접 접근 가능
+    if (typeof _financialCache !== 'undefined' && _financialCache[code]) {
+      var cached = _financialCache[code];
+      var q = cached.quarterly || [];
+      if (q.length > 0) {
+        var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
+        result.roe = typeof latest.roe === 'number' ? latest.roe : _parsePercent(latest.roe);
+        result.opm = _parsePercent(latest.opm);
+        result.debtRatio = latest.debt_ratio != null ? parseFloat(latest.debt_ratio) : 0;
+      }
+    }
+  } catch (e) {
+    console.debug('[PeerGroup] 재무 데이터 접근 실패:', code, e.message);
+  }
+
+  return result;
+}
+
+/**
+ * peer 종목의 재무 데이터 비동기 프리로드
+ * getFinancialData()는 내부적으로 _financialCache에 저장하므로
+ * 프리로드 후 _renderPeerGroup() 재호출 시 캐시에서 즉시 사용 가능.
+ * @param {Array} peers - ALL_STOCKS 항목 배열
+ */
+async function _preloadPeerFinancials(peers) {
+  var loaded = 0;
+  for (var i = 0; i < peers.length; i++) {
+    if (typeof _financialCache !== 'undefined' && _financialCache[peers[i].code]) continue;
+    if (typeof getFinancialData === 'function') {
+      try {
+        await getFinancialData(peers[i].code, 'quarter');
+        loaded++;
+      } catch (e) {
+        // 개별 종목 실패는 무시 — 테이블에 '-'로 표시
+      }
+    }
+  }
+  // 프리로드 후 테이블 재렌더링
+  if (loaded > 0) _renderPeerGroup();
+}
+
+/**
+ * 동종업종 비교 테이블 렌더링
+ * 현재 종목과 같은 업종(sector)의 시총 상위 5개 종목 비교.
+ * 종목명 클릭 시 해당 종목으로 전환.
+ */
+function _renderPeerGroup() {
+  var container = document.getElementById('fin-peers');
+  if (!container) return;
+
+  if (typeof currentStock === 'undefined' || !currentStock ||
+      typeof ALL_STOCKS === 'undefined') {
+    container.innerHTML = '<div class="fin-compare-placeholder">데이터 없음</div>';
+    return;
+  }
+
+  // 현재 종목의 업종 찾기
+  var myStock = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
+  var mySector = myStock ? (myStock.sector || '') : '';
+
+  if (!mySector) {
+    container.innerHTML = '<div class="fin-compare-placeholder">업종 정보 없음</div>';
+    return;
+  }
+
+  // 같은 업종 종목 필터 → 시총 내림차순 → 상위 4개
+  var peers = ALL_STOCKS
+    .filter(function(s) { return s.sector === mySector && s.code !== currentStock.code; })
+    .sort(function(a, b) { return (b.marketCap || 0) - (a.marketCap || 0); })
+    .slice(0, 4);  // 현재 종목 + 4개 = 총 5개
+
+  // 현재 종목을 맨 앞에 추가
+  peers.unshift(myStock);
+
+  // 재무 데이터 프리로드 필요 여부 확인
+  var needsPreload = peers.some(function(p) {
+    return typeof _financialCache === 'undefined' || !_financialCache[p.code];
+  });
+  if (needsPreload && !_peerPreloading) {
+    _peerPreloading = true;
+    _preloadPeerFinancials(peers).then(function() { _peerPreloading = false; });
+  }
+
+  // 테이블 생성 — 현재 캐시된 데이터로 렌더링
+  var html = '<table class="fin-peer-table"><thead><tr>' +
+    '<th class="fin-peer-name">종목</th>' +
+    '<th>ROE</th><th>OPM</th><th>부채</th><th>시총</th>' +
+    '</tr></thead><tbody>';
+
+  for (var i = 0; i < peers.length; i++) {
+    var p = peers[i];
+    var isCurrent = (p.code === currentStock.code);
+    var rowClass = isCurrent ? ' class="fin-peer-current"' : '';
+    var prefix = isCurrent ? '\u25B8' : '';  // ▸
+
+    // 재무 데이터 (캐시 또는 빈 값)
+    var finData = _getPeerFinancials(p.code);
+
+    // 시총 포맷 (억원 → 조/억 표시)
+    var mcap = p.marketCap || 0;
+    var mcapText = '-';
+    if (mcap >= 10000) {
+      mcapText = Math.round(mcap / 10000).toLocaleString() + '조';
+    } else if (mcap > 0) {
+      mcapText = mcap.toLocaleString() + '억';
+    }
+
+    // 종목명: 현재 종목은 강조, 나머지는 클릭 가능
+    var nameHtml = isCurrent
+      ? '<span class="fin-peer-me">' + prefix + p.name + '</span>'
+      : '<a class="fin-peer-link" data-code="' + p.code + '">' + p.name + '</a>';
+
+    html += '<tr' + rowClass + '>' +
+      '<td class="fin-peer-name">' + nameHtml + '</td>' +
+      '<td class="fin-peer-val">' + _fmtPct(finData.roe) + '</td>' +
+      '<td class="fin-peer-val">' + _fmtPct(finData.opm) + '</td>' +
+      '<td class="fin-peer-val">' + _fmtPct(finData.debtRatio) + '</td>' +
+      '<td class="fin-peer-val fin-peer-mcap">' + mcapText + '</td>' +
+    '</tr>';
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  // 종목 클릭 이벤트 — innerHTML 교체 시 기존 리스너 자동 제거되므로 중복 없음
+  container.onclick = function(e) {
+    var link = e.target.closest('.fin-peer-link');
+    if (link && typeof selectStock === 'function') {
+      selectStock(link.dataset.code);
+    }
+  };
+}
+
+// ══════════════════════════════════════════════════════
+//  PER 밴드 차트 (FnGuide/Bloomberg 스타일)
+//
+//  과거 주가 위에 PER 배수 라인(8x, 12x, 16x, 20x)을
+//  오버레이하여 현재 밸류에이션 구간 시각화.
+//
+//  데이터: dataService.cache 일봉 종가 + _financialCache EPS
+// ══════════════════════════════════════════════════════
+
+/**
+ * 최근 EPS 추출 (연환산)
+ * 우선순위:
+ *   1. _financialCache quarterly 최신 분기의 eps 필드
+ *   2. 순이익(ni) / 발행주식수 추정 × 4 (연환산)
+ * @returns {number} 연환산 EPS (원). 산출 불가 시 0
+ */
+function _getLatestEPS() {
+  if (!currentStock) return 0;
+
+  if (typeof _financialCache !== 'undefined' && _financialCache[currentStock.code]) {
+    var data = _financialCache[currentStock.code];
+    var q = data.quarterly || [];
+    if (q.length > 0) {
+      var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
+
+      // 1순위: eps 필드 직접 사용 (연환산 × 4)
+      if (latest.eps && Number(latest.eps) > 0) {
+        // 분기 EPS → 연환산 (최근 4분기 합산 시도)
+        if (q.length >= 4) {
+          var sum = 0;
+          for (var i = 0; i < 4; i++) sum += Number(q[i].eps) || 0;
+          if (sum > 0) return sum;
+        }
+        return Number(latest.eps) * 4;
+      }
+
+      // 2순위: 순이익 / 발행주식수 추정
+      var ni = Number(latest.ni) || 0;
+      if (ni > 0 && typeof ALL_STOCKS !== 'undefined') {
+        var stockInfo = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
+        if (stockInfo && stockInfo.base > 0 && stockInfo.marketCap > 0) {
+          // marketCap(억원) → 원, / base(원) = 주식수
+          var stockCount = (stockInfo.marketCap * 100000000) / stockInfo.base;
+          if (stockCount > 0) {
+            // ni(억원) → 원, / 주식수 = 분기 EPS → × 4 연환산
+            return (ni * 100000000 / stockCount) * 4;
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+/**
+ * PER 밴드 차트 렌더링
+ * Canvas에 주가 라인 + PER 배수(8x/12x/16x/20x) 수평 밴드 라인을 그린다.
+ */
+function _drawPERBandChart() {
+  var canvas = document.getElementById('fin-per-band');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+
+  // 캔버스 크기 동적 계산
+  var parentW = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 340;
+  var h = 100;
+  canvas.width = parentW * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = parentW + 'px';
+  canvas.style.height = h + 'px';
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, parentW, h);
+
+  // 데이터: 일봉 캔들에서 종가 추출
+  if (!currentStock || typeof dataService === 'undefined') return;
+  var cacheKey = currentStock.code + '-1d';
+  var cached = dataService.cache[cacheKey];
+  if (!cached || !cached.candles || cached.candles.length < 10) return;
+
+  var candles_data = cached.candles;
+  var closes = candles_data.map(function(c) { return c.close; });
+
+  // EPS 추출 (재무 데이터에서)
+  var eps = _getLatestEPS();
+  if (!eps || eps <= 0) {
+    ctx.fillStyle = '#808080';
+    ctx.font = '11px Pretendard, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('EPS 데이터 없음', parentW / 2, h / 2);
+    return;
+  }
+
+  // PER 배수 라인 정의 (저평가→고평가)
+  var bands = [
+    { per: 8,  color: 'rgba(80,134,220,0.5)',  label: '8x' },   // 파랑 (저평가)
+    { per: 12, color: 'rgba(107,203,119,0.5)',  label: '12x' },  // 초록
+    { per: 16, color: 'rgba(201,168,76,0.5)',   label: '16x' },  // 금색
+    { per: 20, color: 'rgba(224,80,80,0.5)',    label: '20x' },  // 빨강 (고평가)
+  ];
+
+  // 가격 범위 계산 (주가 + 모든 밴드 포함)
+  var allPrices = closes.slice();
+  bands.forEach(function(b) { allPrices.push(eps * b.per); });
+  var minP = Math.min.apply(null, allPrices) * 0.95;
+  var maxP = Math.max.apply(null, allPrices) * 1.05;
+  var rangeP = maxP - minP;
+  if (rangeP <= 0) return;
+
+  var padL = 8, padR = 30, padT = 8, padB = 16;
+  var chartW = parentW - padL - padR;
+  var chartH = h - padT - padB;
+
+  var toX = function(i) { return padL + (i / (closes.length - 1)) * chartW; };
+  var toY = function(p) { return padT + (1 - (p - minP) / rangeP) * chartH; };
+
+  // ── 1) 밴드 사이 영역 채우기 (반투명 그라디언트) ──
+  for (var bi = 0; bi < bands.length - 1; bi++) {
+    var yTop = toY(eps * bands[bi + 1].per);
+    var yBot = toY(eps * bands[bi].per);
+    ctx.fillStyle = bands[bi].color.replace('0.5', '0.06');
+    ctx.fillRect(padL, yTop, chartW, yBot - yTop);
+  }
+
+  // ── 2) PER 밴드 점선 ──
+  bands.forEach(function(b) {
+    var bandPrice = eps * b.per;
+    var y = toY(bandPrice);
+
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + chartW, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 라벨 (우측)
+    ctx.fillStyle = b.color.replace('0.5', '0.9');
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.label, padL + chartW + 3, y);
+  });
+
+  // ── 3) 주가 라인 (그라디언트 영역 + 실선) ──
+  // 영역 채우기
+  ctx.beginPath();
+  for (var i = 0; i < closes.length; i++) {
+    var x = toX(i);
+    var y = toY(closes[i]);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(toX(closes.length - 1), padT + chartH);
+  ctx.lineTo(toX(0), padT + chartH);
+  ctx.closePath();
+  var grad = ctx.createLinearGradient(0, padT, 0, padT + chartH);
+  grad.addColorStop(0, 'rgba(232,232,232,0.12)');
+  grad.addColorStop(1, 'rgba(232,232,232,0.01)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // 실선
+  ctx.strokeStyle = '#E8E8E8';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (var j = 0; j < closes.length; j++) {
+    var px = toX(j);
+    var py = toY(closes[j]);
+    if (j === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  // ── 4) 현재가 점 ──
+  var lastX = toX(closes.length - 1);
+  var lastY = toY(closes[closes.length - 1]);
+  ctx.fillStyle = '#E8E8E8';
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── 5) 현재 PER 표시 ──
+  var currentPER = closes[closes.length - 1] / eps;
+  ctx.fillStyle = KRX_COLORS.ACCENT;
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillText('현재 ' + currentPER.toFixed(1) + 'x', padL + chartW - 2, padT + 2);
 }

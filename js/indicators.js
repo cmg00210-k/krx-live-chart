@@ -210,6 +210,308 @@ function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
   return { macdLine, signalLine, histogram };
 }
 
+/** 스토캐스틱 오실레이터 (Stochastic %K / %D)
+ *  %K = SMA( (Close - Lowest Low) / (Highest High - Lowest Low) * 100, smooth )
+ *  %D = SMA(%K, dPeriod)
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @param {number} kPeriod — %K 룩백 기간 (기본 14)
+ *  @param {number} dPeriod — %D 평활 기간 (기본 3)
+ *  @param {number} smooth — %K 평활 기간 (기본 3, 1이면 Fast Stochastic)
+ *  @returns {{ k: number[], d: number[] }}
+ */
+function calcStochastic(candles, kPeriod = 14, dPeriod = 3, smooth = 3) {
+  const len = candles.length;
+  const k = new Array(len).fill(null);
+  const d = new Array(len).fill(null);
+  if (len < kPeriod) return { k, d };
+
+  // Raw %K 계산
+  const rawK = new Array(len).fill(null);
+  for (let i = kPeriod - 1; i < len; i++) {
+    let highest = -Infinity, lowest = Infinity;
+    for (let j = i - kPeriod + 1; j <= i; j++) {
+      if (candles[j].high > highest) highest = candles[j].high;
+      if (candles[j].low < lowest) lowest = candles[j].low;
+    }
+    const range = highest - lowest;
+    rawK[i] = range === 0 ? 50 : ((candles[i].close - lowest) / range) * 100;
+  }
+
+  // %K = SMA(rawK, smooth)
+  const validRawK = rawK.filter(v => v !== null);
+  if (validRawK.length < smooth) return { k, d };
+
+  const smoothedK = calcMA(validRawK, smooth);
+  let vi = 0;
+  for (let i = 0; i < len; i++) {
+    if (rawK[i] !== null) {
+      k[i] = smoothedK[vi];
+      vi++;
+    }
+  }
+
+  // %D = SMA(%K, dPeriod)
+  const validK = k.filter(v => v !== null);
+  if (validK.length < dPeriod) return { k, d };
+
+  const dLine = calcMA(validK, dPeriod);
+  vi = 0;
+  for (let i = 0; i < len; i++) {
+    if (k[i] !== null) {
+      d[i] = dLine[vi];
+      vi++;
+    }
+  }
+
+  return { k, d };
+}
+
+/** 스토캐스틱 RSI (Stochastic RSI)
+ *  StochRSI = (RSI - min(RSI, stochPeriod)) / (max(RSI, stochPeriod) - min(RSI, stochPeriod))
+ *  K = SMA(StochRSI, kPeriod), D = SMA(K, dPeriod)
+ *  @param {number[]} closes — 종가 배열
+ *  @param {number} rsiPeriod — RSI 기간 (기본 14)
+ *  @param {number} kPeriod — %K 평활 기간 (기본 3)
+ *  @param {number} dPeriod — %D 평활 기간 (기본 3)
+ *  @param {number} stochPeriod — 스토캐스틱 룩백 기간 (기본 14)
+ *  @returns {{ k: number[], d: number[] }}
+ */
+function calcStochRSI(closes, rsiPeriod = 14, kPeriod = 3, dPeriod = 3, stochPeriod = 14) {
+  const len = closes.length;
+  const k = new Array(len).fill(null);
+  const d = new Array(len).fill(null);
+
+  const rsiArr = calcRSI(closes, rsiPeriod);
+  // RSI 유효값 추출
+  const rsiValid = [];
+  const rsiIdxMap = [];
+  for (let i = 0; i < len; i++) {
+    if (rsiArr[i] !== null) {
+      rsiValid.push(rsiArr[i]);
+      rsiIdxMap.push(i);
+    }
+  }
+  if (rsiValid.length < stochPeriod) return { k, d };
+
+  // StochRSI 계산
+  const stochRsi = new Array(rsiValid.length).fill(null);
+  for (let i = stochPeriod - 1; i < rsiValid.length; i++) {
+    let minRSI = Infinity, maxRSI = -Infinity;
+    for (let j = i - stochPeriod + 1; j <= i; j++) {
+      if (rsiValid[j] < minRSI) minRSI = rsiValid[j];
+      if (rsiValid[j] > maxRSI) maxRSI = rsiValid[j];
+    }
+    const range = maxRSI - minRSI;
+    stochRsi[i] = range === 0 ? 50 : ((rsiValid[i] - minRSI) / range) * 100;
+  }
+
+  // K = SMA(StochRSI, kPeriod)
+  const validStochRsi = stochRsi.filter(v => v !== null);
+  if (validStochRsi.length < kPeriod) return { k, d };
+
+  const kLine = calcMA(validStochRsi, kPeriod);
+  // kLine → 원래 인덱스로 매핑
+  let vi = 0;
+  const kAtRsiIdx = new Array(rsiValid.length).fill(null);
+  for (let i = 0; i < rsiValid.length; i++) {
+    if (stochRsi[i] !== null) {
+      kAtRsiIdx[i] = kLine[vi];
+      vi++;
+    }
+  }
+  for (let i = 0; i < rsiValid.length; i++) {
+    if (kAtRsiIdx[i] !== null) k[rsiIdxMap[i]] = kAtRsiIdx[i];
+  }
+
+  // D = SMA(K, dPeriod)
+  const validK = [];
+  const kOrigIdxMap = [];
+  for (let i = 0; i < len; i++) {
+    if (k[i] !== null) {
+      validK.push(k[i]);
+      kOrigIdxMap.push(i);
+    }
+  }
+  if (validK.length < dPeriod) return { k, d };
+
+  const dLine = calcMA(validK, dPeriod);
+  for (let i = 0; i < validK.length; i++) {
+    d[kOrigIdxMap[i]] = dLine[i];
+  }
+
+  return { k, d };
+}
+
+/** CCI (Commodity Channel Index)
+ *  Typical Price = (High + Low + Close) / 3
+ *  CCI = (TP - SMA(TP, period)) / (0.015 * Mean Deviation)
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @param {number} period — 기간 (기본 20)
+ *  @returns {number[]} — CCI 배열
+ */
+function calcCCI(candles, period = 20) {
+  const len = candles.length;
+  const cci = new Array(len).fill(null);
+  if (len < period) return cci;
+
+  const tp = candles.map(c => (c.high + c.low + c.close) / 3);
+
+  for (let i = period - 1; i < len; i++) {
+    // SMA of TP
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += tp[j];
+    const smaTP = sum / period;
+
+    // Mean Deviation
+    let mdSum = 0;
+    for (let j = i - period + 1; j <= i; j++) mdSum += Math.abs(tp[j] - smaTP);
+    const md = mdSum / period;
+
+    cci[i] = md === 0 ? 0 : (tp[i] - smaTP) / (0.015 * md);
+  }
+  return cci;
+}
+
+/** ADX (Average Directional Index)
+ *  +DI / -DI / ADX (Wilder 평활 방식)
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @param {number} period — 기간 (기본 14)
+ *  @returns {{ adx: number[], plusDI: number[], minusDI: number[] }}
+ */
+function calcADX(candles, period = 14) {
+  const len = candles.length;
+  const adx = new Array(len).fill(null);
+  const plusDI = new Array(len).fill(null);
+  const minusDI = new Array(len).fill(null);
+  if (len < period + 1) return { adx, plusDI, minusDI };
+
+  // True Range, +DM, -DM 계산
+  const tr = new Array(len).fill(0);
+  const plusDM = new Array(len).fill(0);
+  const minusDM = new Array(len).fill(0);
+
+  for (let i = 1; i < len; i++) {
+    const c = candles[i], p = candles[i - 1];
+    tr[i] = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    const upMove = c.high - p.high;
+    const downMove = p.low - c.low;
+    plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+    minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+  }
+
+  // 초기 합계 (Wilder 평활)
+  let smoothTR = 0, smoothPlusDM = 0, smoothMinusDM = 0;
+  for (let i = 1; i <= period; i++) {
+    smoothTR += tr[i];
+    smoothPlusDM += plusDM[i];
+    smoothMinusDM += minusDM[i];
+  }
+
+  // 첫 번째 +DI/-DI
+  plusDI[period] = smoothTR === 0 ? 0 : (smoothPlusDM / smoothTR) * 100;
+  minusDI[period] = smoothTR === 0 ? 0 : (smoothMinusDM / smoothTR) * 100;
+
+  // DX 배열 (ADX 계산용)
+  const dx = new Array(len).fill(null);
+  const diSum = plusDI[period] + minusDI[period];
+  dx[period] = diSum === 0 ? 0 : (Math.abs(plusDI[period] - minusDI[period]) / diSum) * 100;
+
+  // Wilder 평활 계속
+  for (let i = period + 1; i < len; i++) {
+    smoothTR = smoothTR - (smoothTR / period) + tr[i];
+    smoothPlusDM = smoothPlusDM - (smoothPlusDM / period) + plusDM[i];
+    smoothMinusDM = smoothMinusDM - (smoothMinusDM / period) + minusDM[i];
+
+    plusDI[i] = smoothTR === 0 ? 0 : (smoothPlusDM / smoothTR) * 100;
+    minusDI[i] = smoothTR === 0 ? 0 : (smoothMinusDM / smoothTR) * 100;
+
+    const diS = plusDI[i] + minusDI[i];
+    dx[i] = diS === 0 ? 0 : (Math.abs(plusDI[i] - minusDI[i]) / diS) * 100;
+  }
+
+  // ADX = Wilder 평활(DX, period)
+  // 첫 ADX = 첫 period개 DX의 평균
+  const adxStart = period * 2;
+  if (adxStart >= len) return { adx, plusDI, minusDI };
+
+  let dxSum = 0;
+  for (let i = period; i <= adxStart; i++) {
+    dxSum += (dx[i] || 0);
+  }
+  adx[adxStart] = dxSum / (period + 1);
+
+  for (let i = adxStart + 1; i < len; i++) {
+    adx[i] = (adx[i - 1] * (period - 1) + (dx[i] || 0)) / period;
+  }
+
+  return { adx, plusDI, minusDI };
+}
+
+/** 윌리엄스 %R (Williams %R)
+ *  %R = ((Highest High - Close) / (Highest High - Lowest Low)) * -100
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @param {number} period — 룩백 기간 (기본 14)
+ *  @returns {number[]} — %R 배열 (-100 ~ 0)
+ */
+function calcWilliamsR(candles, period = 14) {
+  const len = candles.length;
+  const wr = new Array(len).fill(null);
+  if (len < period) return wr;
+
+  for (let i = period - 1; i < len; i++) {
+    let highest = -Infinity, lowest = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (candles[j].high > highest) highest = candles[j].high;
+      if (candles[j].low < lowest) lowest = candles[j].low;
+    }
+    const range = highest - lowest;
+    wr[i] = range === 0 ? -50 : ((highest - candles[i].close) / range) * -100;
+  }
+  return wr;
+}
+
+/** 모멘텀 (Momentum)
+ *  Momentum = close[i] - close[i - period]
+ *  @param {number[]} closes — 종가 배열
+ *  @param {number} period — 비교 기간 (기본 10)
+ *  @returns {number[]} — 모멘텀 배열
+ */
+function calcMomentum(closes, period = 10) {
+  const len = closes.length;
+  const mom = new Array(len).fill(null);
+  if (len <= period) return mom;
+
+  for (let i = period; i < len; i++) {
+    mom[i] = closes[i] - closes[i - period];
+  }
+  return mom;
+}
+
+/** 어썸 오실레이터 (Awesome Oscillator)
+ *  Median Price = (High + Low) / 2
+ *  AO = SMA(Median, shortPeriod) - SMA(Median, longPeriod)
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @param {number} shortPeriod — 단기 SMA 기간 (기본 5)
+ *  @param {number} longPeriod — 장기 SMA 기간 (기본 34)
+ *  @returns {number[]} — AO 배열
+ */
+function calcAwesomeOscillator(candles, shortPeriod = 5, longPeriod = 34) {
+  const len = candles.length;
+  const ao = new Array(len).fill(null);
+  if (len < longPeriod) return ao;
+
+  const median = candles.map(c => (c.high + c.low) / 2);
+  const shortMA = calcMA(median, shortPeriod);
+  const longMA = calcMA(median, longPeriod);
+
+  for (let i = 0; i < len; i++) {
+    if (shortMA[i] !== null && longMA[i] !== null) {
+      ao[i] = shortMA[i] - longMA[i];
+    }
+  }
+  return ao;
+}
+
 // ══════════════════════════════════════════════════════
 //  IndicatorCache — Lazy Evaluation 지표 캐시
 //  필요한 지표만 최초 접근 시 계산, 캔들 변경 시 invalidate
@@ -329,6 +631,71 @@ class IndicatorCache {
     const key = `hurst_${minWindow}`;
     if (!this._cache[key]) {
       this._cache[key] = calcHurst(this.closes, minWindow);
+    }
+    return this._cache[key];
+  }
+
+  // ── 오실레이터 접근자 ───────────────────────────────
+
+  /** 스토캐스틱 (%K, %D) */
+  stochastic(kPeriod = 14, dPeriod = 3, smooth = 3) {
+    const key = `stoch_${kPeriod}_${dPeriod}_${smooth}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcStochastic(this._candles, kPeriod, dPeriod, smooth);
+    }
+    return this._cache[key];
+  }
+
+  /** 스토캐스틱 RSI (%K, %D) */
+  stochRsi(rsiPeriod = 14, kPeriod = 3, dPeriod = 3, stochPeriod = 14) {
+    const key = `stochRsi_${rsiPeriod}_${kPeriod}_${dPeriod}_${stochPeriod}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcStochRSI(this.closes, rsiPeriod, kPeriod, dPeriod, stochPeriod);
+    }
+    return this._cache[key];
+  }
+
+  /** CCI (Commodity Channel Index) */
+  cci(period = 20) {
+    const key = `cci_${period}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcCCI(this._candles, period);
+    }
+    return this._cache[key];
+  }
+
+  /** ADX (+DI, -DI, ADX) */
+  adx(period = 14) {
+    const key = `adx_${period}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcADX(this._candles, period);
+    }
+    return this._cache[key];
+  }
+
+  /** 윌리엄스 %R */
+  williamsR(period = 14) {
+    const key = `wr_${period}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcWilliamsR(this._candles, period);
+    }
+    return this._cache[key];
+  }
+
+  /** 모멘텀 */
+  momentum(period = 10) {
+    const key = `mom_${period}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcMomentum(this.closes, period);
+    }
+    return this._cache[key];
+  }
+
+  /** 어썸 오실레이터 (AO) */
+  ao(shortPeriod = 5, longPeriod = 34) {
+    const key = `ao_${shortPeriod}_${longPeriod}`;
+    if (!this._cache[key]) {
+      this._cache[key] = calcAwesomeOscillator(this._candles, shortPeriod, longPeriod);
     }
     return this._cache[key];
   }

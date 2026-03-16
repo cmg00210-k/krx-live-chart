@@ -10,7 +10,7 @@
 // ── 상태 ──
 let currentStock = ALL_STOCKS[0];
 let currentTimeframe = '1d';  // 기본 일봉 (장외에서도 데이터 있음)
-let activeIndicators = new Set();
+let activeIndicators = new Set(['vol', 'ma']);
 let chartType = 'candle';
 let patternEnabled = false;
 let detectedPatterns = [];
@@ -25,6 +25,8 @@ let _selectVersion = 0;
 let _fallbackTimer = null;
 let _prevPrice = null;       // 가격 변화 flash 감지용
 let _kbNavTimer = null;      // 키보드 네비게이션 디바운스 타이머
+let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.json)
+let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 
 // ── DOM 캐시 (빈번 조회 요소) ──
 const _dom = {};
@@ -54,6 +56,44 @@ let _prevPatternCount = -1;    // 패턴 toast 중복 방지용
 let _dragVersion = 0;          // 드래그 분석 stale 결과 무시용
 let _dragDebounceTimer = null;  // 드래그 분석 150ms 디바운스
 let _dragClampFrom = 0;        // 드래그 분석 인덱스 오프셋 (Worker 결과 보정용)
+
+// 차트 패턴 구조선 보존 대상 타입 (이중바닥, 삼각형 등 넓은 구간에 걸치는 패턴)
+const _CHART_PATTERN_TYPES = new Set([
+  'doubleBottom', 'doubleTop',
+  'headAndShoulders', 'inverseHeadAndShoulders',
+  'ascendingTriangle', 'descendingTriangle',
+  'risingWedge', 'fallingWedge',
+  'flag', 'supportBounce', 'resistanceReject',
+]);
+
+/**
+ * 보존된 차트 패턴을 드래그 분석 결과에 병합 (중복 방지)
+ * @param {Array} dragPatterns - 드래그 분석으로 감지된 패턴
+ * @returns {Array} 병합된 패턴 배열
+ */
+function _mergeChartPatternStructLines(dragPatterns) {
+  var merged = dragPatterns.slice();
+  _chartPatternStructLines.forEach(function (chartP) {
+    var isDuplicate = merged.some(function (dp) {
+      return dp.type === chartP.type &&
+             Math.abs((dp.startIndex || 0) - (chartP.startIndex || 0)) < 3;
+    });
+    if (!isDuplicate) {
+      merged.push(chartP);
+    }
+  });
+  return merged;
+}
+
+/**
+ * 전체 분석 결과에서 차트 패턴 구조선 추출하여 보존
+ * @param {Array} patterns - 전체 분석으로 감지된 패턴
+ */
+function _saveChartPatternStructLines(patterns) {
+  _chartPatternStructLines = patterns
+    .filter(function (p) { return _CHART_PATTERN_TYPES.has(p.type); })
+    .slice();  // 복사본 저장
+}
 
 // ══════════════════════════════════════════════════════
 //  Toast 알림 시스템
@@ -164,6 +204,13 @@ function _applyPrefsToUI() {
   var retArea = document.getElementById('return-stats-area');
   if (retArea) retArea.style.display = patternEnabled ? '' : 'none';
 
+  // 지표 체크박스 동기화 (activeIndicators ↔ DOM)
+  document.querySelectorAll('#ind-dropdown-menu input[type="checkbox"]').forEach(function (cb) {
+    cb.checked = activeIndicators.has(cb.dataset.ind);
+  });
+  var indToggle = document.getElementById('ind-dropdown-toggle');
+  if (indToggle) indToggle.classList.toggle('has-active', activeIndicators.size > 0);
+
   // 사이드바: 복원된 종목 활성 표시
   if (currentStock && typeof sidebarManager !== 'undefined' && sidebarManager.setActive) {
     sidebarManager.setActive(currentStock.code);
@@ -199,13 +246,18 @@ async function init() {
   }
 
   // 차트 타입 복원
-  if (prefs && prefs.chartType && ['candle', 'line', 'bar'].indexOf(prefs.chartType) !== -1) {
+  if (prefs && prefs.chartType && ['candle', 'line', 'bar', 'heikin'].indexOf(prefs.chartType) !== -1) {
     chartType = prefs.chartType;
   }
 
   // 패턴 활성 상태 복원
   if (prefs && typeof prefs.patternEnabled === 'boolean') {
     patternEnabled = prefs.patternEnabled;
+  }
+
+  // 활성 지표 복원 (localStorage 저장분 우선, 없으면 기본값 vol+ma 유지)
+  if (prefs && Array.isArray(prefs.indicators)) {
+    activeIndicators = new Set(prefs.indicators);
   }
 
   // 종목 데이터 로드 알림
@@ -222,6 +274,17 @@ async function init() {
 
   // 사이드바 초기화
   sidebarManager.init();
+
+  // 업종 비교 데이터 로드 (sector_fundamentals.json)
+  try {
+    var sectorRes = await fetch('data/sector_fundamentals.json');
+    if (sectorRes.ok) {
+      _sectorData = await sectorRes.json();
+      console.log('[KRX] 업종 데이터 로드:', Object.keys(_sectorData.sectors || {}).length, '개 업종');
+    }
+  } catch (e) {
+    console.warn('[KRX] 업종 데이터 로드 실패:', e.message);
+  }
 
   // 복원된 환경설정을 UI에 반영
   _applyPrefsToUI();
@@ -350,11 +413,107 @@ async function init() {
     });
   }
 
+  // ── 사이드바 토글 grid transition 완료 시 차트 리사이즈 ──
+  const mainEl = document.getElementById('main');
+  if (mainEl) {
+    mainEl.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'grid-template-columns') {
+        if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
+          const container = document.getElementById('main-chart-container');
+          if (container) {
+            chartManager.mainChart.applyOptions({ width: container.clientWidth });
+          }
+        }
+      }
+    });
+  }
+
   // 실시간 데이터 시작
   startRealtimeTick();
 
+  // 지수 폴백: WS 미연결 시 최신 지수 가져오기
+  _fetchIndexFallback();
+
+  // 사이드바 종목 데이터 프리로드 (백그라운드)
+  _preloadSidebarData();
+
   // 첫 방문자 온보딩 오버레이
   showOnboarding();
+}
+
+// ══════════════════════════════════════════════════════
+//  지수 폴백: WS 미연결 시 index.json에서 지수 표시
+// ══════════════════════════════════════════════════════
+
+function _fetchIndexFallback() {
+  // WS 연결 시에는 서버에서 실시간으로 받으므로 스킵
+  if (typeof realtimeProvider !== 'undefined' && realtimeProvider.connected) return;
+
+  // 10초 후에도 지수가 "—"이면 폴백 시도
+  setTimeout(function() {
+    var kospiEl = document.getElementById('t-kospi');
+    if (kospiEl && kospiEl.textContent !== '\u2014') return; // 이미 갱신됨
+
+    _loadIndexFromJSON();
+  }, 10000);
+}
+
+function _loadIndexFromJSON() {
+  fetch('data/index.json')
+    .then(function(res) { return res.ok ? res.json() : null; })
+    .then(function(data) {
+      if (!data) return;
+      // index.json에 indices 필드가 있으면 표시
+      if (data.indices) {
+        var kospiEl = document.getElementById('t-kospi');
+        var kosdaqEl = document.getElementById('t-kosdaq');
+        if (data.indices.kospi && kospiEl && kospiEl.textContent === '\u2014') {
+          kospiEl.textContent = Number(data.indices.kospi).toLocaleString('ko-KR', {minimumFractionDigits:2, maximumFractionDigits:2});
+        }
+        if (data.indices.kosdaq && kosdaqEl && kosdaqEl.textContent === '\u2014') {
+          kosdaqEl.textContent = Number(data.indices.kosdaq).toLocaleString('ko-KR', {minimumFractionDigits:2, maximumFractionDigits:2});
+        }
+      }
+    })
+    .catch(function() {}); // 실패 시 무시 (—로 유지)
+}
+
+// ══════════════════════════════════════════════════════
+//  사이드바 종목 데이터 프리로드 (file 모드 전용)
+// ══════════════════════════════════════════════════════
+
+async function _preloadSidebarData() {
+  // 사이드바 종목들의 일봉 데이터를 로컬 파일에서 병렬 로드
+  var stocks = (typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : []).slice(0, 30);
+  var batchSize = 6;
+
+  for (var batch = 0; batch < stocks.length; batch += batchSize) {
+    var batchStocks = stocks.slice(batch, batch + batchSize);
+    var promises = [];
+
+    for (var i = 0; i < batchStocks.length; i++) {
+      var stock = batchStocks[i];
+      if (stock.code === currentStock.code) continue;
+      var cacheKey = stock.code + '-1d';
+      if (dataService.cache[cacheKey]) continue;
+
+      promises.push((function(s, key) {
+        return dataService._fileGetCandles(s).then(function(candles) {
+          if (candles && candles.length > 0) {
+            dataService.cache[key] = { candles: candles, lastUpdate: Date.now() };
+          }
+        }).catch(function() {});
+      })(stock, cacheKey));
+    }
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      // 배치마다 중간 갱신 → 체감 속도 향상
+      if (typeof sidebarManager !== 'undefined' && sidebarManager.updatePrices) {
+        sidebarManager.updatePrices();
+      }
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -472,7 +631,8 @@ function _initAnalysisWorker() {
             if (p.endIndex != null) p.endIndex += clampFrom;
           });
 
-          detectedPatterns = dragPatterns;
+          // 보존된 차트 패턴 구조선 병합 (드래그 시 소실 방지)
+          detectedPatterns = _mergeChartPatternStructLines(dragPatterns);
           chartManager._drawPatterns(candles, chartType, detectedPatterns);
           if (typeof patternRenderer !== 'undefined') {
             patternRenderer.render(chartManager, candles, chartType, detectedPatterns);
@@ -511,6 +671,9 @@ function _initAnalysisWorker() {
         detectedPatterns = msg.patterns;
         detectedSignals = msg.signals;
         signalStats = msg.stats;
+
+        // 차트 패턴 구조선 보존 (드래그 시 소실 방지)
+        _saveChartPatternStructLines(detectedPatterns);
 
         // 사이드바 패턴 수 갱신 (카테고리별 분류)
         if (currentStock && typeof sidebarManager !== 'undefined') {
@@ -628,44 +791,45 @@ function startRealtimeTick() {
   // WS 모드: 서버 응답 대기 (Kiwoom 로그인+TR 포함하면 시간 소요 가능)
   if (KRX_API_CONFIG.mode === 'ws') {
     // WS 모드: 서버 재연결은 realtimeProvider 내부에서 자동 처리
-    // 서버 연결 실패 시 Naver Finance 폴백으로 정적 차트 표시
+    // 서버 미연결 시 file 모드 일봉 데이터로 정적 차트 표시 (Naver 사용 안 함)
     _fallbackTimer = setTimeout(async () => {
       _fallbackTimer = null;
       if (!realtimeProvider.connected) {
         console.warn('[KRX] WS 서버 연결 대기 중 (10초 타임아웃)...');
         updateLiveStatus('offline');
 
-        // 차트가 비어있으면 폴백 시도
+        // 차트가 비어있으면 file 모드 폴백 시도 (일봉만 — 분봉은 서버 전용)
         if (candles.length === 0 && currentStock) {
-          let fallbackCandles = [];
-          let fallbackSource = '';
           if (currentTimeframe === '1d') {
-            // 일봉: file 모드 데이터 시도
-            fallbackCandles = await dataService._fileGetCandles(currentStock);
-            fallbackSource = 'file';
+            const fallbackCandles = await dataService._fileGetCandles(currentStock);
+            if (fallbackCandles.length > 0) {
+              candles = fallbackCandles;
+              const cacheKey = `${currentStock.code}-${currentTimeframe}`;
+              dataService.cache[cacheKey] = { candles, lastUpdate: Date.now() };
+              updateChartFull();
+              updateStockInfo();
+              updateOHLCBar(null);
+              chartManager.setWatermark(currentStock.name);
+              console.log('[KRX] WS 미연결 — file 폴백 일봉 로드: %s (%d건)',
+                currentStock.code, candles.length);
+            }
           } else {
-            // 분봉: Naver 시도 (CORS 허용 환경만), 실패 시 데모 폴백
-            fallbackCandles = await dataService._naverMinuteCandles(currentStock.code, currentTimeframe);
-            fallbackSource = 'Naver';
-            if (fallbackCandles.length === 0) {
-              fallbackCandles = dataService._demoGenerateCandles(currentStock, currentTimeframe);
-              fallbackSource = '데모';
+            // 분봉: 데모 데이터로 폴백 (서버 연결 시 실시간으로 교체됨)
+            var demoCandles = dataService._demoGenerateCandles(currentStock, currentTimeframe);
+            if (demoCandles.length > 0) {
+              candles = demoCandles;
+              var cacheKey2 = currentStock.code + '-' + currentTimeframe;
+              dataService.cache[cacheKey2] = { candles: candles, lastUpdate: Date.now() };
+              updateChartFull();
+              updateStockInfo();
+              updateOHLCBar(null);
+              chartManager.setWatermark(currentStock.name + ' (데모)');
+              console.log('[KRX] WS 미연결 — 데모 분봉 폴백: %s %s (%d건)',
+                currentStock.code, currentTimeframe, candles.length);
             }
           }
-          if (fallbackCandles.length > 0) {
-            candles = fallbackCandles;
-            const cacheKey = `${currentStock.code}-${currentTimeframe}`;
-            dataService.cache[cacheKey] = { candles, lastUpdate: Date.now() };
-            updateChartFull();
-            updateStockInfo();
-            updateOHLCBar(null);
-            const label = fallbackSource === 'file' ? '' : ` (${fallbackSource})`;
-            chartManager.setWatermark(currentStock.name + label);
-            console.log('[KRX] WS 미연결 — %s 폴백 데이터 로드: %s %s (%d건)',
-              fallbackSource, currentStock.code, currentTimeframe, candles.length);
-          }
         }
-        // 서버 재연결 시 onTick 콜백에서 자동 복구 (Naver 데이터를 서버 데이터로 교체)
+        // 서버 재연결 시 onTick 콜백에서 자동 복구
       }
     }, 10000);
   } else {
@@ -742,6 +906,7 @@ function updateChartFull() {
     if (_dom.macdLabel) _dom.macdLabel.style.display = 'none';
     chartManager.destroyMACD();
   }
+
 }
 
 /**
@@ -769,13 +934,7 @@ const _CANDLE_PATTERN_TYPES = new Set([
   'piercingLine', 'darkCloud', 'dragonflyDoji', 'gravestoneDoji',
   'tweezerBottom', 'tweezerTop',
 ]);
-const _CHART_PATTERN_TYPES = new Set([
-  'headAndShoulders', 'inverseHeadAndShoulders',
-  'doubleBottom', 'doubleTop',
-  'ascendingTriangle', 'descendingTriangle',
-  'risingWedge', 'fallingWedge',
-  'flag', 'supportBounce', 'resistanceReject',
-]);
+// _CHART_PATTERN_TYPES는 상단(61줄)에서 이미 정의됨
 const _VOLUME_SIGNAL_TYPES = new Set([
   'volumeBreakout', 'volumeSelloff', 'volumeExhaustion',
 ]);
@@ -839,6 +998,10 @@ function _analyzeOnMainThread() {
   const result = signalEngine.analyze(analyzeCandles, detectedPatterns);
   detectedSignals = result.signals;
   signalStats = result.stats;
+
+  // 차트 패턴 구조선 보존 (드래그 시 소실 방지)
+  _saveChartPatternStructLines(detectedPatterns);
+
   // 사이드바 패턴 수 갱신 (카테고리별 분류)
   if (currentStock && typeof sidebarManager !== 'undefined') {
     const categorized = _categorizePatterns(detectedPatterns, detectedSignals);
@@ -870,7 +1033,8 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
     if (p.endIndex != null) p.endIndex += clampFrom;
   });
 
-  detectedPatterns = visiblePatterns;
+  // 보존된 차트 패턴 구조선 병합 (드래그 시 소실 방지)
+  detectedPatterns = _mergeChartPatternStructLines(visiblePatterns);
   chartManager._drawPatterns(candles, chartType, detectedPatterns);
   if (typeof patternRenderer !== 'undefined') {
     patternRenderer.render(chartManager, candles, chartType, detectedPatterns);
@@ -1062,6 +1226,7 @@ async function selectStock(code) {
   _workerPending = false;    // 이전 요청 무효화
   _dragVersion++;            // 드래그 분석 stale 결과 무효화
   if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
+  _chartPatternStructLines = [];  // 종목 변경 시 보존된 차트 패턴 초기화
   _prevPrice = null;         // 종목 변경 시 flash 초기화
   _prevPatternCount = -1;    // 종목 변경 시 패턴 toast 리셋
   // 백테스트 캐시 무효화
@@ -1093,9 +1258,10 @@ async function selectStock(code) {
 function updateStockInfo() {
   if (!candles.length) return;
   const last = candles[candles.length - 1];
-  const first = candles[0];
-  const change = last.close - first.open;
-  const pct = ((change / first.open) * 100).toFixed(2);
+  const prev = candles.length >= 2 ? candles[candles.length - 2] : null;
+  const prevClose = prev ? prev.close : last.open;  // 전일 종가, 없으면 당일 시가
+  const change = last.close - prevClose;
+  const pct = prevClose > 0 ? ((change / prevClose) * 100).toFixed(2) : '0.00';
   const cls = change >= 0 ? 'up' : 'dn';
   const sign = change >= 0 ? '\u25B2' : '\u25BC';
 
@@ -1133,6 +1299,18 @@ function updateStockInfo() {
     priceEl.addEventListener('animationend', cleanup, { once: true });
   }
   _prevPrice = last.close;
+
+  // file/demo 모드에서도 가격선 표시
+  if (candles.length > 0) {
+    const lastC = candles[candles.length - 1];
+    const prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
+    chartManager.updatePriceLines(
+      lastC.close,
+      lastC.high,
+      lastC.low,
+      prevC ? prevC.close : lastC.open
+    );
+  }
 }
 
 // ── 재무지표: financials.js로 분리됨 ──
@@ -1300,7 +1478,46 @@ function handlePatternTooltip(data) {
     if (item.confluence) metaParts.push(`<span style="color:${KRX_COLORS.NEUTRAL}">합류</span>`);
     if (metaParts.length) meta = `<div class="pt-meta">${metaParts.join('')}</div>`;
 
-    return `<div class="pt-header"><span class="pt-name">${item.name}</span><span class="pt-signal ${sc}">${st}</span>${confText}</div><div class="pt-desc">${item.description}</div>${academicDescHtml}${meta}`;
+    // ── 예상 수익률 (priceTarget 기반 + 리스크/리워드 비율 바) ──
+    //  벤치마크: Autochartist Forecast Zone의 "Expected Move" 표시
+    //  TrendSpider의 "Projected Move" + R:R ratio 바
+    let forecastHtml = '';
+    if (item.source === 'pattern' && item.priceTarget && item.stopLoss) {
+      // 진입가: chart.js에서 전달받은 실제 패턴 완성 봉 종가
+      const entry = item.entryPrice || ((item.priceTarget + item.stopLoss) / 2);
+      const reward = Math.abs(item.priceTarget - entry);
+      const risk = Math.abs(entry - item.stopLoss);
+      const rr = risk > 0 ? (reward / risk).toFixed(1) : '--';
+      const retPct = entry > 0 ? ((item.priceTarget - entry) / entry * 100).toFixed(1) : '--';
+      const retSign = parseFloat(retPct) >= 0 ? '+' : '';
+      const retCls = parseFloat(retPct) >= 0 ? 'up' : 'dn';
+
+      // R:R 비율 바 (시각적 리스크/리워드)
+      const rrNum = parseFloat(rr);
+      const rewardPct = rrNum > 0 ? Math.min(80, Math.round(rrNum / (1 + rrNum) * 100)) : 50;
+
+      forecastHtml = `<div class="pt-forecast"><div class="pt-forecast-row"><span class="pt-forecast-ret ${retCls}">${retSign}${retPct}%</span><span class="pt-forecast-rr">R:R ${rr}</span></div><div class="pt-rr-bar"><div class="pt-rr-reward" style="width:${rewardPct}%"></div></div></div>`;
+    }
+
+    // ── 과거 수익률 (backtester 연동) ──
+    //  벤치마크: TradingView Auto Chart Patterns의 "Historical Performance"
+    //  Thomas Bulkowski 통계 스타일: 샘플 수 + 5일 후 평균 수익률 + 승률
+    let backtestHtml = '';
+    if (item.source === 'pattern' && item.type && typeof backtester !== 'undefined' && candles && candles.length >= 50) {
+      try {
+        const btResult = backtester.backtest(candles, item.type);
+        if (btResult && btResult.sampleSize > 0) {
+          const h5 = btResult.horizons[5];
+          if (h5 && h5.n > 0) {
+            const btRetSign = h5.mean >= 0 ? '+' : '';
+            const btRetCls = h5.mean >= 0 ? 'up' : 'dn';
+            backtestHtml = `<div class="pt-backtest"><span class="pt-bt-label">과거 ${btResult.sampleSize}회</span><span class="pt-bt-ret ${btRetCls}">${btRetSign}${h5.mean.toFixed(1)}% (5D)</span><span class="pt-bt-win">${h5.winRate.toFixed(0)}%승</span></div>`;
+          }
+        }
+      } catch (e) { /* backtester 오류 무시 */ }
+    }
+
+    return `<div class="pt-header"><span class="pt-name">${item.name}</span><span class="pt-signal ${sc}">${st}</span>${confText}</div><div class="pt-desc">${item.description}</div>${academicDescHtml}${forecastHtml}${backtestHtml}${meta}`;
   }).join('<div style="border-top:1px solid rgba(255,255,255,0.04);margin:4px 0"></div>');
 
   tooltip.innerHTML = html;
@@ -1382,20 +1599,38 @@ searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
   if (!q) { dropdown.classList.remove('show'); return; }
   const matches = dataService.searchStocks(q).slice(0, 10);
-  dropdown.innerHTML = matches.map(s => `
-    <div class="search-item" data-code="${s.code}">
-      <span>${s.name}</span>
-      <span class="code">${s.code}</span>
-      <span class="market-tag ${s.market.toLowerCase()}">${s.market}</span>
-    </div>`).join('') || '<div class="search-item" style="color:#555e78">검색 결과 없음</div>';
-  dropdown.classList.add('show');
-  dropdown.querySelectorAll('.search-item[data-code]').forEach(el => {
-    el.addEventListener('click', () => {
-      selectStock(el.dataset.code);
-      searchInput.value = '';
-      dropdown.classList.remove('show');
+  dropdown.innerHTML = '';
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'search-item';
+    empty.style.color = '#555e78';
+    empty.textContent = '검색 결과 없음';
+    dropdown.appendChild(empty);
+  } else {
+    matches.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'search-item';
+      item.dataset.code = s.code;
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = s.name;
+      const codeSpan = document.createElement('span');
+      codeSpan.className = 'code';
+      codeSpan.textContent = s.code;
+      const marketSpan = document.createElement('span');
+      marketSpan.className = 'market-tag ' + s.market.toLowerCase();
+      marketSpan.textContent = s.market;
+      item.appendChild(nameSpan);
+      item.appendChild(codeSpan);
+      item.appendChild(marketSpan);
+      item.addEventListener('click', () => {
+        selectStock(item.dataset.code);
+        searchInput.value = '';
+        dropdown.classList.remove('show');
+      });
+      dropdown.appendChild(item);
     });
-  });
+  }
+  dropdown.classList.add('show');
 });
 
 // Enter 키로 첫 번째 검색 결과 선택
@@ -1453,22 +1688,14 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     _workerPending = false;
     _dragVersion++;            // 드래그 분석 stale 결과 무효화
     if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
+    _chartPatternStructLines = [];  // 타임프레임 변경 시 보존된 차트 패턴 초기화
     _prevPrice = null;         // 타임프레임 변경 시 flash 초기화
     _prevPatternCount = -1;    // 타임프레임 변경 시 패턴 toast 리셋
     if (candles.length > 0) {
       updateChartFull();
       updateStockInfo();
       updateOHLCBar(null);
-      // 분봉 폴백 표시 (WS 미연결 또는 file 모드에서 분봉)
-      const isMinuteFallback = currentTimeframe !== '1d' && (
-        (KRX_API_CONFIG.mode === 'ws' && typeof realtimeProvider !== 'undefined' && !realtimeProvider.connected) ||
-        KRX_API_CONFIG.mode === 'file'
-      );
-      // CORS 환경이면 데모 데이터, 아니면 Naver 데이터
-      const fallbackLabel = isMinuteFallback
-        ? (dataService._isNaverCorsBlocked() ? ' (데모)' : ' (Naver)')
-        : '';
-      chartManager.setWatermark(currentStock.name + fallbackLabel);
+      chartManager.setWatermark(currentStock.name);
     } else if (KRX_API_CONFIG.mode === 'ws') {
       console.log('[KRX] WS 모드 — %s 캔들 서버 수신 대기 중...', currentTimeframe);
       chartManager.setWatermark(currentStock.name + ' (' + currentTimeframe + ' 로드 중...)');
@@ -1508,6 +1735,8 @@ if (indDropdownToggle && indDropdownMenu) {
       }
       // 활성 지표가 있으면 드롭다운 버튼에 accent 표시
       indDropdownToggle.classList.toggle('has-active', activeIndicators.size > 0);
+      // 지표 상태를 localStorage에 저장
+      _savePrefs({ indicators: Array.from(activeIndicators) });
       updateChartFull();
     });
   });
@@ -1554,7 +1783,7 @@ if (patternBtn) {
 }
 
 
-// ── 패턴 패널 슬라이드 토글 (1024px 이하 반응형) ──
+// ── 패턴 패널 슬라이드 토글 (1200px 이하 반응형) ──
 (function initPatternPanelToggle() {
   const ppToggle = document.getElementById('pp-toggle');
   const ppPanel = document.getElementById('pattern-panel');
@@ -1585,8 +1814,8 @@ if (patternBtn) {
     ppBackdrop.addEventListener('click', closePanel);
   }
 
-  // 뷰포트가 넓어지면 (1024px 초과) 자동으로 상태 초기화
-  const mq = window.matchMedia('(max-width: 1024px)');
+  // 뷰포트가 넓어지면 (1200px 초과) 자동으로 상태 초기화
+  const mq = window.matchMedia('(max-width: 1200px)');
   mq.addEventListener('change', (e) => {
     if (!e.matches) closePanel();
   });
@@ -1791,7 +2020,7 @@ document.addEventListener('keydown', (e) => {
 
   // C: 차트 타입 순환 (candle → line → bar → candle)
   if (key === 'c' || key === 'C') {
-    const types = ['candle', 'line', 'bar'];
+    const types = ['candle', 'line', 'bar', 'heikin'];
     const curIdx = types.indexOf(chartType);
     const nextType = types[(curIdx + 1) % types.length];
     const ctBtn = document.querySelector(`.ct-btn[data-ct="${nextType}"]`);

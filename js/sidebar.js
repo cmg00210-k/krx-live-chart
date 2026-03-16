@@ -1,17 +1,20 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 사이드바 매니저 v7.0
-//  11개 기능 완전 구현:
+//  KRX LIVE — 사이드바 매니저 v10.0
+//  15개 기능:
 //    R1:  키보드 ↑↓ 네비게이션
 //    R2:  최근 본 종목 섹션
 //    R3:  코드→tooltip, 거래량 컬럼
-//    R4:  정렬 방향 화살표
-//    R5:  Compact / Detailed 보기 모드
+//    R4:  정렬 드롭다운 (시총/등락률/패턴/이름)
+//    R5:  3단계 보기 모드 (미니멀/기본/분석)
 //    R6:  빠른 필터 칩 (전체/상승/하락/대량거래)
 //    R7:  패턴명 표시
 //    R8:  패턴 감지 종목만 필터
 //    R9:  미니 스파크라인
 //    R10: RSI 지표 값
 //    R11: 드래그 앤 드롭 재정렬
+//    S3:  시가총액 값 표시 (row2)
+//    S4:  30개 스크롤 + "더보기" 버튼
+//    S6:  패턴명 row3 → 호버 툴팁
 // ══════════════════════════════════════════════════════
 
 const sidebarManager = (() => {
@@ -26,57 +29,50 @@ const sidebarManager = (() => {
   let _currentSort = 'mcap';
   let _sortDirection = 'desc';
   let _searchQuery = '';
-  let _viewMode = 'detailed';        // R5: 'compact' | 'detailed'
+  let _viewMode = 'default';          // R5: 'default' | 'analysis'
   let _activeFilter = 'all';         // R6: 'all' | 'up' | 'down' | 'highvol'
   let _patternOnlyFilter = false;    // R8: 패턴 감지 종목만
   let _kbFocusIndex = -1;            // R1: 키보드 포커스 인덱스
   let _recentStocks = [];            // R2: 최근 본 종목 코드 배열
   let _customOrder = null;           // R11: 사용자 정의 정렬 순서
 
-  const MAX_RECENT = 8;
-  const INITIAL_DISPLAY_COUNT = 20;
+  const MAX_RECENT = 5;
+  const DISPLAY_COUNT = 30;           // S4: 한 번에 표시할 종목 수
 
   const _prevPrices = {};
   const _stockChangeCache = {};
   const _stockPatternCache = {};     // code → { candle, indicator, volume, total, names }
 
-  // ── 더보기 상태 (섹션별) ──
-  const _showAllStocks = { 'sb-kospi': false, 'sb-kosdaq': false };
+  // ── S4: 스크롤 + 더보기 상태 ──
+  let _displayCount = DISPLAY_COUNT;
+  let _filteredStocks = [];          // 현재 필터/정렬 적용된 전체 종목 배열
 
-  // ── 패턴 카테고리 서브필터 ──
-  const _patternSubFilters = ['all', 'candle', 'indicator', 'volume'];
-  const _patternSubLabels = {
-    all: '패턴별',
-    candle: '캔들',
-    indicator: 'MA/지표',
-    volume: '거래량',
-  };
-  let _patternSubIdx = 0;
+  // ── R5: 3모드 순환 순서 ──
+  const _viewModes = ['default', 'analysis'];
+  const _viewModeLabels = { 'default': '기본', analysis: '상세' };
 
-  // ── 시가총액 데이터 (억원 단위, 2025년 기준 근사치) ──
-  const MARKET_CAP = {
-    // KOSPI
-    '005930': 4380000,  '000660': 1320000,  '005380':  480000,
-    '000270':  390000,  '005490':  230000,  '051910':  225000,
-    '006400':  195000,  '207940':  520000,  '068270':  230000,
-    '035420':  330000,  '035720':  190000,  '028260':  170000,
-    '105560':  290000,  '055550':  240000,  '003550':  130000,
-    '066570':  160000,  '012330':  200000,  '034730':  150000,
-    '015760':  140000,  '030200':   95000,  '033780':  130000,
-    '009150':  110000,  '086790':  180000,  '018260':  120000,
-    '032830':  160000,  '003670':  100000,  '096770':   90000,
-    '010130':  100000,  '011200':   90000,  '034020':   65000,
-    '005935':  360000,  '010950':   55000,  '011170':   25000,
-    '017670':  130000,  '036570':   35000,
-    // KOSDAQ
-    '247540':   95000,  '086520':   80000,  '196170':  180000,
-    '058470':   65000,  '328130':   40000,  '383220':   35000,
-    '357780':   45000,  '145020':   40000,  '263750':   18000,
-    '293490':   12000,  '112040':   10000,  '041510':   22000,
-    '251270':   25000,  '067160':   20000,  '403870':   25000,
-    '039030':   35000,  '095340':   20000,  '141080':   30000,
-    '377300':   22000,  '035900':   28000,
-  };
+  // ── 시가총액 데이터 (억원 단위, index.json에서 동적 빌드) ──
+  // init() 호출 시 _buildMarketCapFromStocks()로 ALL_STOCKS에서 자동 채움.
+  // download_ohlcv.py가 index.json에 marketCap 필드를 포함하면 실제 시총 사용.
+  const MARKET_CAP = {};
+
+  /**
+   * ALL_STOCKS에서 MARKET_CAP 자동 빌드.
+   * marketCap 필드(억원)가 있으면 우선 사용, 없으면 base(lastClose)를 대용.
+   */
+  function _buildMarketCapFromStocks() {
+    if (typeof ALL_STOCKS === 'undefined') return;
+    // 기존 값 초기화
+    Object.keys(MARKET_CAP).forEach(function(k) { delete MARKET_CAP[k]; });
+    ALL_STOCKS.forEach(function(s) {
+      if (s.marketCap && s.marketCap > 0) {
+        MARKET_CAP[s.code] = s.marketCap;
+      } else if (s.base && s.base > 0) {
+        // base(lastClose)를 대략적 시총 대용으로 사용 (정렬 순서 유지용)
+        MARKET_CAP[s.code] = s.base;
+      }
+    });
+  }
 
 
   // ════════════════════════════════════════════════════
@@ -95,13 +91,13 @@ const sidebarManager = (() => {
     return (cached && cached.candles && cached.candles.length) ? cached.candles : null;
   }
 
-  /** R3: 거래량 포맷팅 — 1.2억, 3,450만, 원본 */
+  /** R3: 거래량 포맷팅 — 정확한 단위 (억/만/원본) */
   function _formatVolume(vol) {
     if (vol == null || vol === 0) return '-';
     if (vol >= 100000000) {
-      return (vol / 100000000).toFixed(1) + '억';
+      return Math.round(vol / 100000000).toLocaleString() + '억';
     }
-    if (vol >= 10000) {
+    if (vol >= 1000000) {
       return Math.round(vol / 10000).toLocaleString() + '만';
     }
     return vol.toLocaleString();
@@ -150,6 +146,26 @@ const sidebarManager = (() => {
     return '#888';                    // 중립 (회색)
   }
 
+  /** S3: 시가총액 포맷팅 (억원 → 조/억 단위)
+   *  - index.json의 marketCap 필드(억원)가 있는 종목만 표시
+   *  - base(원) 대용 값일 경우 정렬에만 사용하고 표시하지 않음
+   *  실제 marketCap 값 범위: 삼성전자 ~4,380,000억, 소형주 ~100억
+   *  base(원) 대용 값 범위: ~1,000,000원 이하
+   *  구분 기준: marketCap 필드가 있었는지 여부 (ALL_STOCKS.marketCap > 0)
+   */
+  function _formatMarketCap(code) {
+    const cap = MARKET_CAP[code];
+    if (!cap) return '';
+    var stock = (typeof ALL_STOCKS !== 'undefined')
+      ? ALL_STOCKS.find(function(s) { return s.code === code; })
+      : null;
+    if (!stock || !stock.marketCap || stock.marketCap <= 0) return '';
+    // 간결한 포맷: 100조 이상 → "1,117조", 1조 이상 → "5.4조", 1조 미만 → "5,440억"
+    if (cap >= 1000000) return Math.round(cap / 10000).toLocaleString() + '조';
+    if (cap >= 10000) return (cap / 10000).toFixed(1) + '조';
+    return cap.toLocaleString() + '억';
+  }
+
   /** R3: 마지막 캔들 거래량 가져오기 */
   function _getLastVolume(code) {
     const candles = _getCachedCandles(code);
@@ -184,7 +200,7 @@ const sidebarManager = (() => {
   // ════════════════════════════════════════════════════
 
   function _sortStocks(stocks, sortBy) {
-    const dir = _sortDirection === 'asc' ? 1 : -1;
+    const dir = _sortDirection === 'asc' ? -1 : 1;
 
     switch (sortBy) {
       case 'change':
@@ -192,15 +208,18 @@ const sidebarManager = (() => {
           return dir * (_getChangePct(b.code) - _getChangePct(a.code));
         });
 
-      case 'pattern': {
-        const cat = _patternSubFilters[_patternSubIdx];
+      case 'pattern':
         return [].concat(stocks).sort(function (a, b) {
-          const pa = _getPatternCount(a.code, cat);
-          const pb = _getPatternCount(b.code, cat);
+          const pa = _getPatternCount(a.code, 'all');
+          const pb = _getPatternCount(b.code, 'all');
           if (pb !== pa) return dir * (pb - pa);
           return (MARKET_CAP[b.code] || 0) - (MARKET_CAP[a.code] || 0);
         });
-      }
+
+      case 'name':
+        return [].concat(stocks).sort(function (a, b) {
+          return dir * a.name.localeCompare(b.name, 'ko');
+        });
 
       case 'mcap':
       default:
@@ -224,19 +243,12 @@ const sidebarManager = (() => {
     });
   }
 
-  /** R6: 퀵 필터 칩 적용 */
+  /** R6: 퀵 필터 칩 적용 (대량거래 토글만) */
   function _filterByChip(stocks) {
-    switch (_activeFilter) {
-      case 'up':
-        return stocks.filter(function (s) { return _getChangePct(s.code) > 0; });
-      case 'down':
-        return stocks.filter(function (s) { return _getChangePct(s.code) < 0; });
-      case 'highvol':
-        return stocks.filter(function (s) { return _getVolumeRatio(s.code) >= 2.0; });
-      case 'all':
-      default:
-        return stocks;
+    if (_activeFilter === 'highvol') {
+      return stocks.filter(function (s) { return _getVolumeRatio(s.code) >= 2.0; });
     }
+    return stocks; // 'all' 또는 기타
   }
 
   /** R8: 패턴 감지 종목만 필터 */
@@ -302,10 +314,12 @@ const sidebarManager = (() => {
       '</div>' +
       '<div class="sb-body" id="sb-recent"></div>';
 
-    // KOSPI 섹션 앞에 삽입
-    const kospiSection = sidebar.querySelector('[data-section="kospi"]');
-    if (kospiSection) {
-      kospiSection.parentNode.insertBefore(recentSection, kospiSection);
+    // 종목 목록 섹션 앞에 삽입
+    const sbBody = sidebar.querySelector('.sb-body');
+    if (sbBody && sbBody.firstChild) {
+      sbBody.insertBefore(recentSection, sbBody.firstChild);
+    } else if (sbBody) {
+      sbBody.appendChild(recentSection);
     } else {
       sidebar.appendChild(recentSection);
     }
@@ -338,9 +352,9 @@ const sidebarManager = (() => {
 
     if (countEl) countEl.textContent = stocks.length;
 
-    // 종목이 없으면 섹션 숨김
+    // 검색 중이거나 종목이 없으면 섹션 숨김
     if (sectionEl) {
-      sectionEl.style.display = stocks.length > 0 ? '' : 'none';
+      sectionEl.style.display = (stocks.length > 0 && !_searchQuery) ? '' : 'none';
     }
 
     if (stocks.length === 0) {
@@ -353,135 +367,113 @@ const sidebarManager = (() => {
 
 
   // ════════════════════════════════════════════════════
-  //  R5: Compact / Detailed 보기 모드
+  //  R5: 3단계 보기 모드 (미니멀/기본/분석)
   // ════════════════════════════════════════════════════
 
   function setViewMode(mode) {
-    if (mode !== 'compact' && mode !== 'detailed') return;
+    // 하위 호환: compact/minimal → default, detailed → analysis
+    if (mode === 'compact' || mode === 'minimal') mode = 'default';
+    if (mode === 'detailed') mode = 'analysis';
+    if (_viewModes.indexOf(mode) === -1) mode = 'default';
+
     _viewMode = mode;
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
-      sidebar.classList.remove('sb-compact', 'sb-detailed');
-      sidebar.classList.add(mode === 'compact' ? 'sb-compact' : 'sb-detailed');
+      sidebar.classList.remove('sb-minimal', 'sb-analysis');
+      if (mode === 'analysis') sidebar.classList.add('sb-analysis');
+      // 'default' 모드에는 클래스 없음
     }
-    // 토글 버튼 아이콘 갱신
-    const toggleBtn = document.getElementById('sb-view-toggle');
-    if (toggleBtn) {
-      toggleBtn.textContent = mode === 'compact' ? '\u2630' : '\u2637';
-      toggleBtn.title = mode === 'compact' ? '상세 보기' : '간략 보기';
-    }
+    // 세그먼트 그룹 활성 상태 갱신
+    _updateViewGroup();
     try { localStorage.setItem(LS_VIEW, mode); } catch (e) { /* ignore */ }
     build(_currentSort);
   }
 
+  /** 보기 모드 세그먼트 그룹 활성 상태 갱신 */
+  function _updateViewGroup() {
+    var group = document.getElementById('sb-view-group');
+    if (!group) return;
+    group.querySelectorAll('.sb-view-opt').forEach(function(o) {
+      o.classList.toggle('active', o.dataset.view === _viewMode);
+    });
+  }
+
 
   // ════════════════════════════════════════════════════
-  //  R6: 퀵 필터 칩 DOM 생성
+  //  R6: 퀵 필터 칩 이벤트 바인딩
   // ════════════════════════════════════════════════════
 
   function _ensureFilterChips() {
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar || document.getElementById('sb-filter-chips')) return;
+    var volToggle = document.getElementById('sb-vol-toggle');
+    if (!volToggle) return;
 
-    const chipsWrap = document.createElement('div');
-    chipsWrap.className = 'sb-filter-chips';
-    chipsWrap.id = 'sb-filter-chips';
-    chipsWrap.innerHTML =
-      '<button class="sb-chip active" data-filter="all">전체</button>' +
-      '<button class="sb-chip" data-filter="up">\u25B2상승</button>' +
-      '<button class="sb-chip" data-filter="down">\u25BC하락</button>' +
-      '<button class="sb-chip" data-filter="highvol">대량거래</button>';
-
-    // sb-sort-bar 다음에 삽입
-    const sortBar = sidebar.querySelector('.sb-sort-bar');
-    if (sortBar && sortBar.nextSibling) {
-      sortBar.parentNode.insertBefore(chipsWrap, sortBar.nextSibling);
-    } else if (sortBar) {
-      sortBar.parentNode.appendChild(chipsWrap);
-    } else {
-      sidebar.insertBefore(chipsWrap, sidebar.firstChild);
-    }
-
-    // 이벤트 위임
-    chipsWrap.addEventListener('click', function (e) {
-      const btn = e.target.closest('.sb-chip');
-      if (!btn) return;
-      _activeFilter = btn.dataset.filter || 'all';
-      chipsWrap.querySelectorAll('.sb-chip').forEach(function (c) {
-        c.classList.toggle('active', c === btn);
-      });
+    volToggle.addEventListener('click', function () {
+      // 토글: active면 해제(전체), 아니면 활성화(대량거래)
+      if (_activeFilter === 'highvol') {
+        _activeFilter = 'all';
+        volToggle.classList.remove('active');
+      } else {
+        _activeFilter = 'highvol';
+        volToggle.classList.add('active');
+      }
       build(_currentSort);
     });
   }
 
 
   // ════════════════════════════════════════════════════
-  //  R5: 보기 모드 토글 버튼
+  //  R5: 보기 모드 토글 버튼 (3모드 순환)
   // ════════════════════════════════════════════════════
 
   function _ensureViewToggle() {
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar || document.getElementById('sb-view-toggle')) return;
+    var group = document.getElementById('sb-view-group');
+    if (!group) return;
 
-    const btn = document.createElement('button');
-    btn.id = 'sb-view-toggle';
-    btn.className = 'sb-view-toggle';
-    btn.title = _viewMode === 'compact' ? '상세 보기' : '간략 보기';
-    btn.textContent = _viewMode === 'compact' ? '\u2630' : '\u2637';
+    // 초기 상태 반영
+    _updateViewGroup();
 
-    // 필터 칩 옆에 삽입
-    const chips = document.getElementById('sb-filter-chips');
-    if (chips) {
-      chips.parentNode.insertBefore(btn, chips.nextSibling);
-    } else {
-      const sortBar = sidebar.querySelector('.sb-sort-bar');
-      if (sortBar && sortBar.nextSibling) {
-        sortBar.parentNode.insertBefore(btn, sortBar.nextSibling);
-      }
-    }
+    group.addEventListener('click', function(e) {
+      var opt = e.target.closest('.sb-view-opt');
+      if (!opt) return;
 
-    btn.addEventListener('click', function () {
-      setViewMode(_viewMode === 'compact' ? 'detailed' : 'compact');
+      var newMode = opt.dataset.view;
+      if (newMode === _viewMode) return;
+
+      _viewMode = newMode;
+
+      // 활성 클래스 갱신
+      group.querySelectorAll('.sb-view-opt').forEach(function(o) {
+        o.classList.toggle('active', o.dataset.view === _viewMode);
+      });
+
+      // 사이드바 클래스 갱신
+      var sidebar = document.getElementById('sidebar');
+      sidebar.classList.remove('sb-minimal', 'sb-analysis');
+      if (_viewMode === 'analysis') sidebar.classList.add('sb-analysis');
+
+      // localStorage 저장
+      try { localStorage.setItem(LS_VIEW, _viewMode); } catch(ex) {}
+
+      build(_currentSort, true);
     });
   }
 
 
   // ════════════════════════════════════════════════════
-  //  R8: 패턴 감지 종목만 토글
+  //  R8: 패턴 감지 종목만 칩 토글
   // ════════════════════════════════════════════════════
 
   function _ensurePatternOnlyToggle() {
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar || document.getElementById('sb-pattern-only-wrap')) return;
+    // HTML에 이미 .sb-pattern-only-chip이 존재하므로 이벤트만 바인딩
+    const chip = document.querySelector('.sb-pattern-only-chip');
+    if (!chip) return;
 
-    const wrap = document.createElement('div');
-    wrap.id = 'sb-pattern-only-wrap';
-    wrap.className = 'sb-pattern-only-wrap';
-    wrap.style.display = _currentSort === 'pattern' ? '' : 'none';
-    wrap.innerHTML =
-      '<label class="sb-pattern-only-label">' +
-        '<input type="checkbox" id="sb-pattern-only-cb">' +
-        '<span>패턴 감지 종목만</span>' +
-      '</label>';
-
-    // 보기 모드 토글 다음에 삽입
-    const viewToggle = document.getElementById('sb-view-toggle');
-    if (viewToggle && viewToggle.nextSibling) {
-      viewToggle.parentNode.insertBefore(wrap, viewToggle.nextSibling);
-    } else {
-      const chips = document.getElementById('sb-filter-chips');
-      if (chips && chips.nextSibling) {
-        chips.parentNode.insertBefore(wrap, chips.nextSibling);
-      }
-    }
-
-    const cb = document.getElementById('sb-pattern-only-cb');
-    if (cb) {
-      cb.addEventListener('change', function () {
-        _patternOnlyFilter = cb.checked;
-        build(_currentSort);
-      });
-    }
+    chip.addEventListener('click', function (e) {
+      e.stopPropagation();
+      _patternOnlyFilter = !_patternOnlyFilter;
+      chip.classList.toggle('active', _patternOnlyFilter);
+      build(_currentSort);
+    });
   }
 
 
@@ -523,7 +515,7 @@ const sidebarManager = (() => {
 
   /** 보이는 아이템의 스파크라인 일괄 그리기 (rAF) */
   function _drawVisibleSparklines(container) {
-    if (_viewMode === 'compact') return;
+    if (_viewMode !== 'analysis') return;
     const canvases = container.querySelectorAll('.sb-sparkline');
     if (!canvases.length) return;
 
@@ -691,8 +683,14 @@ const sidebarManager = (() => {
    */
   function _renderItemHTML(s, isPatternMode) {
     const cdls = _getCachedCandles(s.code);
-    let price = s.base || 0;
-    let changeText = '\u2014';
+    // base: index.json lastClose (188700 등), 없으면 ALL_STOCKS에서 재조회
+    let basePrice = s.base;
+    if (!basePrice && typeof ALL_STOCKS !== 'undefined') {
+      var found = ALL_STOCKS.find(function(st) { return st.code === s.code; });
+      if (found) basePrice = found.base;
+    }
+    let price = basePrice || 0;
+    let changeText = '';
     let changeClass = '';
     let volume = 0;
 
@@ -710,15 +708,10 @@ const sidebarManager = (() => {
       }
     }
 
-    // ── Compact 모드 (R5) ──
-    if (_viewMode === 'compact') {
-      return '<div class="sb-item compact" data-code="' + s.code + '" draggable="true">' +
-        '<span class="sb-name" title="' + s.code + '">' + s.name + '</span>' +
-        '<span class="sb-change ' + changeClass + '" id="sb-chg-' + s.code + '">' + changeText + '</span>' +
-      '</div>';
-    }
-
-    // ── Detailed 모드 ──
+    // ── 미니멀 모드 (R5) ──
+    // CSS가 row2/row3을 숨기므로 row1에 가격+등락률을 모두 포함
+    // ── 기본/상세 모드 ──
+    // CSS가 모드별로 sparkline/rsi/code/row3 표시 제어
 
     // R10: RSI 값
     const rsiVal = _getRSI(s.code);
@@ -727,34 +720,47 @@ const sidebarManager = (() => {
       rsiHtml = '<span class="sb-rsi" style="color:' + _rsiColor(rsiVal) + '">' + rsiVal + '</span>';
     }
 
-    // R7: 패턴명 표시 (패턴 모드에서만)
-    let patternRow = '';
+    // S3: 시가총액 표시
+    const mcapText = _formatMarketCap(s.code);
+    let mcapHtml = '';
+    if (mcapText) {
+      mcapHtml = '<span class="sb-mcap">' + mcapText + '</span>';
+    }
+
+    // S6: 패턴명 → data-patterns 속성 (호버 툴팁)
+    let patternAttr = '';
     if (isPatternMode) {
       const cached = _stockPatternCache[s.code];
       if (cached && cached.names && cached.names.length > 0) {
-        let displayNames = cached.names.slice(0, 2).join(', ');
-        if (cached.names.length > 2) {
-          displayNames += ' +' + (cached.names.length - 2);
+        let displayNames = cached.names.slice(0, 3).join(', ');
+        if (cached.names.length > 3) {
+          displayNames += ' +' + (cached.names.length - 3);
         }
-        patternRow = '<div class="sb-row3 sb-pattern-names">' + displayNames + '</div>';
+        patternAttr = ' data-patterns="' + displayNames.replace(/"/g, '&quot;') + '"';
       }
     }
+
+    // 대량거래 뱃지 (volumeRatio >= 2.0)
+    const volRatio = _getVolumeRatio(s.code);
+    const volBadge = volRatio >= 2.0
+      ? '<span class="sb-vol-badge" title="거래량 ' + volRatio.toFixed(1) + '배">&#9650;</span>'
+      : '';
 
     // 패턴 카테고리 pill (기존 호환)
     const pillsHtml = isPatternMode ? _renderCategoryPills(s.code) : '';
 
-    return '<div class="sb-item' + (isPatternMode && pillsHtml ? ' has-pattern' : '') + '" data-code="' + s.code + '" draggable="true">' +
+    return '<div class="sb-item' + (isPatternMode && pillsHtml ? ' has-pattern' : '') + '" data-code="' + s.code + '"' + patternAttr + ' draggable="true">' +
       '<div class="sb-row1">' +
-        '<span class="sb-name" title="' + s.code + '">' + s.name + pillsHtml + '</span>' +
-        '<span class="sb-price" id="sb-' + s.code + '">' + (price ? price.toLocaleString() : '\u2014') + '</span>' +
+        '<span class="sb-name" title="' + s.code + '">' + s.name + volBadge + pillsHtml + '</span>' +
+        '<span class="sb-price" id="sb-' + s.code + '">' + (price > 0 ? price.toLocaleString() : '\u2014') + '</span>' +
       '</div>' +
       '<div class="sb-row2">' +
         '<canvas class="sb-sparkline" data-code="' + s.code + '" width="48" height="16"></canvas>' +
+        mcapHtml +
         '<span class="sb-volume">' + _formatVolume(volume) + '</span>' +
         rsiHtml +
         '<span class="sb-change ' + changeClass + '" id="sb-chg-' + s.code + '">' + changeText + '</span>' +
       '</div>' +
-      patternRow +
     '</div>';
   }
 
@@ -800,32 +806,55 @@ const sidebarManager = (() => {
 
 
   // ════════════════════════════════════════════════════
-  //  섹션 렌더링
+  //  S4: 스크롤 + 더보기 렌더링
   // ════════════════════════════════════════════════════
 
-  function _renderSection(containerId, stocks) {
-    const el = document.getElementById(containerId);
+  /** 현재 _displayCount 만큼 종목을 sb-all 컨테이너에 렌더링 */
+  function _renderList() {
+    const el = document.getElementById('sb-all');
     if (!el) return;
 
-    const showAll = _showAllStocks[containerId];
-    const displayStocks = showAll ? stocks : stocks.slice(0, INITIAL_DISPLAY_COUNT);
-    const remaining = stocks.length - INITIAL_DISPLAY_COUNT;
+    const listStocks = _filteredStocks.slice(0, _displayCount);
+    _renderItems(el, listStocks, false, 0, null);
 
-    _renderItems(el, displayStocks, !showAll, remaining, containerId);
+    // "더보기" 버튼 표시/숨김
+    _updateLoadMoreUI();
+  }
+
+  /** "더보기" 버튼 상태 갱신 */
+  function _updateLoadMoreUI() {
+    const btn = document.getElementById('sb-load-more');
+    if (!btn) return;
+    const remaining = _filteredStocks.length - _displayCount;
+    if (remaining > 0) {
+      const nextBatch = Math.min(remaining, DISPLAY_COUNT);
+      btn.textContent = '더보기 (+' + nextBatch + ')';
+      btn.style.display = '';
+    } else {
+      btn.style.display = 'none';
+    }
+  }
+
+  /** "더보기" 버튼 이벤트 바인딩 (init에서 1회 호출) */
+  function _initLoadMore() {
+    const btn = document.getElementById('sb-load-more');
+    if (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        _displayCount += DISPLAY_COUNT;
+        _renderList();
+      });
+    }
   }
 
 
   // ════════════════════════════════════════════════════
-  //  시장 지수 갱신
+  //  시장 지수 갱신 (헤더 ticker strip에만 표시)
   // ════════════════════════════════════════════════════
 
   function _updateMarketIndex() {
-    const kospiTicker = document.getElementById('t-kospi');
-    const kosdaqTicker = document.getElementById('t-kosdaq');
-    const kospiVal = document.getElementById('sb-kospi-val');
-    const kosdaqVal = document.getElementById('sb-kosdaq-val');
-    if (kospiTicker && kospiVal) kospiVal.textContent = kospiTicker.textContent;
-    if (kosdaqTicker && kosdaqVal) kosdaqVal.textContent = kosdaqTicker.textContent;
+    // 사이드바 내 시장 지수 표시 요소가 제거됨 (v8.0 통합 목록)
+    // 헤더 ticker strip (t-kospi, t-kosdaq)은 app.js가 관리
   }
 
 
@@ -837,24 +866,16 @@ const sidebarManager = (() => {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
 
-    // 종목 클릭 + 더보기 버튼 (이벤트 위임)
+    // 종목 클릭 (이벤트 위임)
     sidebar.addEventListener('click', function (e) {
-      // 더보기 버튼
-      const loadMoreBtn = e.target.closest('.sb-load-more');
-      if (loadMoreBtn) {
-        const cid = loadMoreBtn.dataset.container;
-        if (cid) {
-          _showAllStocks[cid] = true;
-          build(_currentSort);
-        }
-        return;
-      }
-
       // 종목 아이템 클릭 (sb-header 내부는 제외 — 아코디언 토글)
       if (e.target.closest('.sb-header')) return;
-      // 필터/정렬/토글 버튼은 제외
-      if (e.target.closest('.sb-sort-btn') || e.target.closest('.sb-chip') ||
-          e.target.closest('.sb-view-toggle') || e.target.closest('.sb-pattern-only-wrap')) return;
+      // 필터/정렬/토글/더보기 버튼은 제외
+      if (e.target.closest('.sb-sort-select') || e.target.closest('.sb-chip') ||
+          e.target.closest('.sb-view-group') || e.target.closest('.sb-view-opt') ||
+          e.target.closest('.sb-sort-dir') ||
+          e.target.closest('.sb-pattern-only-chip') ||
+          e.target.closest('.sb-load-more')) return;
 
       const item = e.target.closest('.sb-item[data-code]');
       if (item) {
@@ -877,19 +898,26 @@ const sidebarManager = (() => {
   // ════════════════════════════════════════════════════
 
   function init() {
+    // ALL_STOCKS에서 시가총액 자동 빌드 (index.json 로드 후)
+    _buildMarketCapFromStocks();
+
     // localStorage에서 상태 복원
     const saved = localStorage.getItem(LS_KEY);
     _open = saved !== 'false';
     if (!_open) document.getElementById('main').classList.add('sidebar-collapsed');
 
-    // R5: 보기 모드 복원
+    // R5: 보기 모드 복원 (하위 호환: compact→minimal, detailed→analysis)
     const savedView = localStorage.getItem(LS_VIEW);
-    if (savedView === 'compact' || savedView === 'detailed') {
-      _viewMode = savedView;
+    if (savedView) {
+      if (savedView === 'compact' || savedView === 'minimal') _viewMode = 'default';
+      else if (savedView === 'detailed') _viewMode = 'analysis';
+      else if (_viewModes.indexOf(savedView) !== -1) _viewMode = savedView;
     }
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
-      sidebar.classList.add(_viewMode === 'compact' ? 'sb-compact' : 'sb-detailed');
+      sidebar.classList.remove('sb-compact', 'sb-detailed', 'sb-minimal', 'sb-analysis');
+      if (_viewMode === 'analysis') sidebar.classList.add('sb-analysis');
+      // 'default' 모드에는 클래스 없음
     }
 
     // R2: 최근 본 종목 로드
@@ -916,7 +944,7 @@ const sidebarManager = (() => {
       });
       searchInput.addEventListener('keydown', function (e) {
         if (e.key !== 'Enter') return;
-        const first = document.querySelector('#sb-kospi .sb-item[data-code], #sb-kosdaq .sb-item[data-code]');
+        const first = document.querySelector('#sb-all .sb-item[data-code]');
         if (first && typeof selectStock === 'function') {
           selectStock(first.dataset.code);
           searchInput.value = '';
@@ -926,78 +954,36 @@ const sidebarManager = (() => {
       });
     }
 
-    // ── 세그먼트 컨트롤 정렬 버튼 이벤트 ──
-    const sortTrack = document.querySelector('.sb-sort-track');
-    if (sortTrack) sortTrack.setAttribute('data-active', '0');
-
-    document.querySelectorAll('.sb-sort-btn').forEach(function (btn) {
-      // R4: 초기 방향 표시
-      if (btn.classList.contains('active')) {
-        btn.setAttribute('data-dir', _sortDirection);
-      }
-
-      btn.addEventListener('click', function () {
-        const sortBy = btn.dataset.sort;
-        const btnIdx = btn.dataset.idx || '0';
-
-        // 패턴 버튼 반복 클릭 → 서브필터 순환
-        if (sortBy === 'pattern' && _currentSort === 'pattern') {
-          _patternSubIdx = (_patternSubIdx + 1) % _patternSubFilters.length;
-          btn.textContent = _patternSubLabels[_patternSubFilters[_patternSubIdx]];
-          build('pattern');
-          return;
-        }
-
-        // 다른 정렬에서 패턴으로 전환 시 서브필터 초기화
-        if (sortBy === 'pattern' && _currentSort !== 'pattern') {
-          _patternSubIdx = 0;
-          btn.textContent = _patternSubLabels.all;
-        }
-
-        // 패턴이 아닌 다른 정렬로 전환 시 패턴 버튼 라벨 복원
-        if (sortBy !== 'pattern') {
-          const patternBtn = document.querySelector('.sb-sort-btn[data-sort="pattern"]');
-          if (patternBtn) {
-            patternBtn.textContent = _patternSubLabels.all;
-            _patternSubIdx = 0;
-          }
-        }
-
-        // R4: 같은 정렬 버튼 재클릭 → 방향 토글
-        if (sortBy === _currentSort) {
-          _sortDirection = _sortDirection === 'desc' ? 'asc' : 'desc';
-          btn.setAttribute('data-dir', _sortDirection);
-          build(sortBy);
-          return;
-        }
-
-        // 정렬 기준 변경
+    // ── R4: 정렬 드롭다운 이벤트 ──
+    const sortSelect = document.getElementById('sb-sort-select');
+    if (sortSelect) {
+      sortSelect.addEventListener('change', function () {
+        const sortBy = sortSelect.value;
         _currentSort = sortBy;
-        _sortDirection = 'desc';
-
-        document.querySelectorAll('.sb-sort-btn').forEach(function (b) {
-          b.classList.remove('active');
-          b.removeAttribute('data-dir');
-        });
-        btn.classList.add('active');
-        btn.setAttribute('data-dir', _sortDirection);
-
-        if (sortTrack) sortTrack.setAttribute('data-active', btnIdx);
 
         // R8: 패턴 전용 필터 토글 표시/숨김
-        const patternOnlyWrap = document.getElementById('sb-pattern-only-wrap');
-        if (patternOnlyWrap) {
-          patternOnlyWrap.style.display = sortBy === 'pattern' ? '' : 'none';
+        var patChip = document.querySelector('.sb-pattern-only-chip');
+        if (patChip) {
+          patChip.style.display = sortBy === 'pattern' ? '' : 'none';
           if (sortBy !== 'pattern') {
             _patternOnlyFilter = false;
-            const cb = document.getElementById('sb-pattern-only-cb');
-            if (cb) cb.checked = false;
+            patChip.classList.remove('active');
           }
         }
 
         build(sortBy);
       });
-    });
+    }
+
+    // ── 정렬 방향 토글 버튼 ──
+    var dirBtn = document.getElementById('sb-sort-dir');
+    if (dirBtn) {
+      dirBtn.addEventListener('click', function() {
+        _sortDirection = _sortDirection === 'desc' ? 'asc' : 'desc';
+        dirBtn.innerHTML = _sortDirection === 'desc' ? '&#9660;' : '&#9650;';
+        build(_currentSort, true);
+      });
+    }
 
     // ── 동적 DOM 요소 생성 ──
     _ensureFilterChips();       // R6
@@ -1008,11 +994,11 @@ const sidebarManager = (() => {
     // ── 이벤트 위임 + 드래그 앤 드롭 ──
     _setupEventDelegation();
 
+    // S4: 더보기 버튼 이벤트
+    _initLoadMore();
+
     // R1: 키보드 네비게이션
     _initKeyboardNav();
-
-    // 시장 지수 값 표시
-    _updateMarketIndex();
 
     // 최근 본 종목 렌더링
     _renderRecentSection();
@@ -1034,6 +1020,16 @@ const sidebarManager = (() => {
     _open = !_open;
     document.getElementById('main').classList.toggle('sidebar-collapsed', !_open);
     localStorage.setItem(LS_KEY, _open);
+
+    // 사이드바 토글 후 차트 리사이즈 (grid transition 완료 대기)
+    setTimeout(function () {
+      if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
+        var container = document.getElementById('main-chart-container');
+        if (container) {
+          chartManager.mainChart.applyOptions({ width: container.clientWidth });
+        }
+      }
+    }, 300);
   }
 
 
@@ -1041,14 +1037,15 @@ const sidebarManager = (() => {
   //  PUBLIC: build
   // ════════════════════════════════════════════════════
 
-  function build(sortBy) {
+  function build(sortBy, keepPage) {
     sortBy = sortBy || _currentSort || 'mcap';
     _currentSort = sortBy;
 
-    // 검색 중이면 ALL_STOCKS 전체 검색, 아니면 DEFAULT_STOCKS만
+    // 검색 중이면 ALL_STOCKS 전체 검색, 아니면 ALL_STOCKS (index.json 로드됨)
+    const allStocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : (typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : []);
     let source = _searchQuery
-      ? _filterBySearch(typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : []).slice(0, 50)
-      : (typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : []);
+      ? _filterBySearch(allStocks).slice(0, 50)
+      : allStocks;
 
     // R6: 퀵 필터 적용
     source = _filterByChip(source);
@@ -1058,22 +1055,18 @@ const sidebarManager = (() => {
       source = _filterByPatternOnly(source);
     }
 
-    const filteredKospi = source.filter(function (s) { return s.market === 'KOSPI'; });
-    const filteredKosdaq = source.filter(function (s) { return s.market === 'KOSDAQ'; });
+    // R12: 통합 정렬 (KOSPI/KOSDAQ 구분 없이)
+    _filteredStocks = _sortStocks(source, sortBy);
 
-    const kospi = _sortStocks(filteredKospi, sortBy);
-    const kosdaq = _sortStocks(filteredKosdaq, sortBy);
+    // 필터/정렬 변경 시 표시 수 리셋 (keepPage 제외)
+    if (!keepPage) _displayCount = DISPLAY_COUNT;
 
-    _renderSection('sb-kospi', kospi);
-    _renderSection('sb-kosdaq', kosdaq);
+    // 총 종목 수 표시
+    const allCount = document.getElementById('sb-all-count');
+    if (allCount) allCount.textContent = _filteredStocks.length;
 
-    const kospiCount = document.getElementById('sb-kospi-count');
-    const kosdaqCount = document.getElementById('sb-kosdaq-count');
-    if (kospiCount) kospiCount.textContent = kospi.length;
-    if (kosdaqCount) kosdaqCount.textContent = kosdaq.length;
-
-    // 시장 지수 값 갱신
-    _updateMarketIndex();
+    // S4: 현재 목록 렌더링
+    _renderList();
 
     // R2: 최근 본 종목 섹션 갱신
     _renderRecentSection();
@@ -1114,7 +1107,7 @@ const sidebarManager = (() => {
   function updatePrices() {
     _updateMarketIndex();
 
-    const stocks = typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : [];
+    const stocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : (typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : []);
     for (let si = 0; si < stocks.length; si++) {
       const s = stocks[si];
       const priceEl = document.getElementById('sb-' + s.code);
@@ -1160,11 +1153,9 @@ const sidebarManager = (() => {
     }
 
     // R9: 스파크라인 일괄 갱신
-    const sbKospi = document.getElementById('sb-kospi');
-    const sbKosdaq = document.getElementById('sb-kosdaq');
+    const sbAll = document.getElementById('sb-all');
     const sbRecent = document.getElementById('sb-recent');
-    if (sbKospi) _drawVisibleSparklines(sbKospi);
-    if (sbKosdaq) _drawVisibleSparklines(sbKosdaq);
+    if (sbAll) _drawVisibleSparklines(sbAll);
     if (sbRecent) _drawVisibleSparklines(sbRecent);
   }
 

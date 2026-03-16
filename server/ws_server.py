@@ -106,7 +106,11 @@ class TRThrottler:
         self._timestamps = collections.deque()
 
     def acquire(self) -> float:
-        """호출 가능할 때까지 대기. 대기한 시간(초) 반환."""
+        """호출 가능할 때까지 대기. 대기한 시간(초) 반환.
+
+        PyQt5 메인 스레드에서 호출되므로 time.sleep() 대신
+        QApplication.processEvents()로 이벤트 루프를 유지하며 대기.
+        """
         waited = 0.0
         now = time.time()
         while self._timestamps and (now - self._timestamps[0]) >= self._window_sec:
@@ -114,7 +118,11 @@ class TRThrottler:
         if len(self._timestamps) >= self._max_calls:
             sleep_sec = self._window_sec - (now - self._timestamps[0]) + 0.02
             if sleep_sec > 0:
-                time.sleep(sleep_sec)
+                # time.sleep() → processEvents 폴링으로 변경 (메인 스레드 블로킹 방지)
+                deadline = time.time() + sleep_sec
+                while time.time() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(0.01)
                 waited = sleep_sec
             now = time.time()
             while self._timestamps and (now - self._timestamps[0]) >= self._window_sec:
@@ -334,7 +342,11 @@ class KiwoomProvider(DataProvider):
 
     def _request_tr(self, rqname: str, trcode: str, screen: str,
                     prev_next: int = 0, timeout: float = 10.0) -> dict:
-        """TR 요청 후 응답 대기. 쓰로틀링 적용."""
+        """TR 요청 후 응답 대기. 쓰로틀링 적용.
+
+        PyQt5 이벤트 루프를 유지하면서 대기해야 OnReceiveTrData가 수신됨.
+        threading.Event.wait()는 메인 스레드를 블로킹하여 데드락 유발.
+        """
         self._throttler.acquire()
         self._tr_event.clear()
         self._tr_data = {}
@@ -345,10 +357,14 @@ class KiwoomProvider(DataProvider):
             log.warning("[TR] CommRqData 실패: %s (ret=%s)", rqname, ret)
             return {}
 
-        # 응답 대기 (OnReceiveTrData에서 _tr_event.set())
-        if not self._tr_event.wait(timeout=timeout):
-            log.warning("[TR] 응답 타임아웃: %s (%s)", rqname, trcode)
-            return {}
+        # PyQt 이벤트 루프를 유지하며 응답 대기 (데드락 방지)
+        deadline = time.time() + timeout
+        while not self._tr_event.is_set():
+            if time.time() > deadline:
+                log.warning("[TR] 응답 타임아웃: %s (%s)", rqname, trcode)
+                return {}
+            QApplication.processEvents()
+            time.sleep(0.01)
 
         return self._tr_data
 
@@ -458,12 +474,17 @@ class KiwoomProvider(DataProvider):
         """opt10080 응답 파싱"""
         count = self._call("GetRepeatCnt(QString,QString)", trcode, record)
         count = int(count) if count else 0
+        log.debug("[TR] 분봉 파싱 시작: record=%s, count=%d", record, count)
 
         candles = []
+        skipped = 0
         for i in range(count):
             dt_raw = (self._call("GetCommData(QString,QString,int,QString)",
                                  trcode, record, i, "체결시간") or "").strip()
             if not dt_raw or len(dt_raw) < 12:
+                skipped += 1
+                if i < 3:
+                    log.debug("[TR] 분봉[%d] 체결시간 누락/짧음: '%s'", i, dt_raw)
                 continue
 
             # 체결시간: "YYYYMMDDHHMMSS" → Unix timestamp
@@ -471,6 +492,7 @@ class KiwoomProvider(DataProvider):
                 dt = datetime.strptime(dt_raw[:12], "%Y%m%d%H%M")
                 ts = int(dt.timestamp())
             except ValueError:
+                skipped += 1
                 continue
 
             o = abs(int((self._call("GetCommData(QString,QString,int,QString)",
@@ -485,6 +507,7 @@ class KiwoomProvider(DataProvider):
                                     trcode, record, i, "거래량") or "0").strip()))
 
             if o == 0 and h == 0 and l == 0 and c == 0:
+                skipped += 1
                 continue
 
             candles.append({
@@ -492,6 +515,10 @@ class KiwoomProvider(DataProvider):
                 "open": o, "high": h, "low": l, "close": c,
                 "volume": v,
             })
+
+        if skipped > 0:
+            log.debug("[TR] 분봉 파싱 스킵: %d건 (총 %d건 중 유효 %d건)",
+                      skipped, count, len(candles))
 
         # opt10080은 최신 체결이 먼저 → 역순 정렬
         candles.reverse()
@@ -846,95 +873,6 @@ def _pykrx_daily_fallback(code: str, days: int = 365) -> list:
         return []
 
 
-def _naver_minute_fallback(code: str, timeframe: str = "1m") -> list:
-    """
-    Naver Finance API 폴백 — 장외 또는 Kiwoom 분봉 TR 0건 시 사용.
-
-    Naver API 엔드포인트:
-      https://api.stock.naver.com/chart/domestic/item/{code}/minute   (1분)
-      https://api.stock.naver.com/chart/domestic/item/{code}/minute5  (5분)
-      https://api.stock.naver.com/chart/domestic/item/{code}/minute15 (15분)
-      https://api.stock.naver.com/chart/domestic/item/{code}/minute30 (30분)
-      https://api.stock.naver.com/chart/domestic/item/{code}/minute60 (60분)
-
-    응답 형식:
-      [{"localDateTime":"20260313090000",
-        "currentPrice":180250.0, "openPrice":180000.0,
-        "highPrice":181100.0, "lowPrice":179900.0,
-        "accumulatedTradingVolume":968681}, ...]
-    """
-    try:
-        import urllib.request
-
-        # timeframe → Naver API 경로 매핑
-        naver_path_map = {
-            "1m": "minute", "3m": "minute3", "5m": "minute5",
-            "10m": "minute10", "15m": "minute15",
-            "30m": "minute30", "1h": "minute60",
-        }
-        path = naver_path_map.get(timeframe, "minute")
-
-        url = f"https://api.stock.naver.com/chart/domestic/item/{code}/{path}?count=3"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-
-        if not raw or not isinstance(raw, list):
-            return []
-
-        # 분봉 간격 (초)
-        interval_sec_map = {
-            "1m": 60, "3m": 180, "5m": 300, "10m": 600,
-            "15m": 900, "30m": 1800, "1h": 3600,
-        }
-        interval_sec = interval_sec_map.get(timeframe, 60)
-
-        candles = []
-        for item in raw:
-            dt_str = item.get("localDateTime", "")
-            if len(dt_str) < 12:
-                continue
-            # "20260313090000" → unix timestamp
-            try:
-                dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
-                # 분봉 시작 시간에 정렬 (봉 시작 기준)
-                ts = int(dt.timestamp())
-                ts = (ts // interval_sec) * interval_sec
-            except (ValueError, OSError):
-                continue
-
-            o = int(item.get("openPrice", 0))
-            h = int(item.get("highPrice", 0))
-            l = int(item.get("lowPrice", 0))
-            c = int(item.get("currentPrice", 0))
-            v = int(item.get("accumulatedTradingVolume", 0))
-
-            if c == 0:
-                continue
-
-            candles.append({
-                "time": ts,
-                "open": o if o > 0 else c,
-                "high": h if h > 0 else c,
-                "low": l if l > 0 else c,
-                "close": c,
-                "volume": v,
-            })
-
-        # 중복 timestamp 제거 (같은 봉 시작시간이면 마지막 것 사용)
-        seen = {}
-        for candle in candles:
-            seen[candle["time"]] = candle
-        candles = sorted(seen.values(), key=lambda x: x["time"])
-
-        log.info("[Naver 폴백] %s %s 분봉 %d건 로드", code, timeframe, len(candles))
-        return candles
-
-    except Exception as e:
-        log.warning("[Naver 폴백] 실패 %s (%s): %s", code, timeframe, e)
-        return []
-
-
 def get_cached_candles(provider: DataProvider, code: str,
                        timeframe: str = "1d") -> list:
     """캐시된 캔들 반환. 만료 시 provider를 통해 재조회. 빈 결과면 폴백."""
@@ -954,10 +892,10 @@ def get_cached_candles(provider: DataProvider, code: str,
                         "15m": 15, "30m": 30, "1h": 60}
         interval = interval_map.get(timeframe, 1)
         candles = provider.get_minute_candles(code, interval)
-        # Kiwoom 분봉 TR이 0건 (장외 등) → Naver Finance API 폴백
+        # Kiwoom 분봉 TR 0건 시 로그만 남김 (Naver 폴백 제거)
         if not candles:
-            log.info("[폴백] Kiwoom 분봉 0건 → Naver 시도: %s (%s)", code, timeframe)
-            candles = _naver_minute_fallback(code, timeframe)
+            log.warning("[분봉] Kiwoom TR 0건: %s (%s) — 장중에 실시간 틱으로 생성",
+                        code, timeframe)
 
     if candles:
         _candle_cache[cache_key] = {
@@ -1075,6 +1013,13 @@ class WebSocketBridge:
         # 클라이언트별 구독 타임프레임
         self._client_tfs: Dict[int, str] = {}
 
+        # 새 클라이언트 연결 시 호출할 콜백 (캐시된 데이터 전송용)
+        self._on_connect_callback = None
+
+        # 새 클라이언트 연결 시 즉시 전송할 초기 메시지 (지수 등)
+        # ServerController가 지수 업데이트 시 갱신
+        self._init_messages: Dict[str, str] = {}  # key → JSON string
+
     def start(self):
         """별도 스레드에서 WebSocket 서버 시작"""
         self._thread = threading.Thread(
@@ -1103,11 +1048,24 @@ class WebSocketBridge:
 
         self._loop.run_until_complete(_serve())
 
+    def set_on_connect_callback(self, callback):
+        """새 클라이언트 연결 시 호출할 콜백 등록.
+        callback(client_id) — 캐시된 지수 등 초기 데이터 전송용.
+        """
+        self._on_connect_callback = callback
+
     async def _handler(self, ws):
         """WebSocket 클라이언트 핸들러"""
         client_id = id(ws)
         self.clients.add(ws)
         log.info("[WS] 클라이언트 연결: %d (총 %d)", client_id, len(self.clients))
+
+        # 새 클라이언트에게 캐시된 초기 데이터 전송 (지수 등)
+        for key, msg_json in self._init_messages.items():
+            try:
+                await ws.send(msg_json)
+            except Exception as e:
+                log.error("[WS] 초기 데이터 전송 실패 (%s): %s", key, e)
 
         try:
             async for raw in ws:
@@ -1376,10 +1334,12 @@ class ServerController:
             "provider": PROVIDER_NAME,
         }
         self.ws.send_to_client(client_id, msg)
+        log.info("[SUB] 캔들 전송: %s (%s) %d건, 현재가=%d, 장상태=%s → client %d",
+                 code, timeframe, len(candles or []), current_price, state, client_id)
 
         if not candles:
-            log.warning("[SUB] 캔들 없음: %s (%s) — 실시간 틱 수신 시 생성 예정",
-                        code, timeframe)
+            log.warning("[SUB] 캔들 없음: %s (%s, 장상태=%s) — 실시간 틱 수신 시 생성 예정",
+                        code, timeframe, state)
 
         # 실시간 구독 (참조 카운트)
         if code not in self._sub_refcount:
@@ -1498,6 +1458,11 @@ class ServerController:
         msg = {"type": "market_index"}
         msg.update(self._index_cache)
         self.ws.broadcast_all(msg)
+
+        # 새 클라이언트 연결 시 즉시 전송할 캐시 갱신
+        self.ws._init_messages["market_index"] = json.dumps(
+            msg, ensure_ascii=False
+        )
 
     def cleanup(self):
         """종료 시 정리"""

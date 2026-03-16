@@ -22,7 +22,7 @@ Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is u
 |------|-----------------|------|-------|
 | `js/colors.js` | `KRX_COLORS` | Frozen color constants used by all JS files instead of hardcoded hex values | 20 |
 | `js/data.js` | `PAST_DATA`, `getPastData()`, `getFinancialData()` | Historical financial data; async loader tries `data/financials/{code}.json` first, falls back to hardcoded/seed data | 160 |
-| `js/api.js` | `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json) | 330 |
+| `js/api.js` | `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json) | 334 |
 | `js/realtimeProvider.js` | `realtimeProvider` | WebSocket client for Kiwoom OCX server, demo fallback | 230 |
 | `js/indicators.js` | `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()`, `IndicatorCache` | 9 technical indicator calculations + lazy-evaluation cache with VMA/volRatio | 378 |
 | `js/patterns.js` | `patternEngine` | PatternEngine class — 26 patterns (17 candle + 8 chart + S/R) with ATR normalization, quality scoring | 1488 |
@@ -95,9 +95,9 @@ app.js init() → dataService.initFromIndex() → loads data/index.json → popu
 
 dataService.getCandles(stock, timeframe)
   → file mode + 1d: fetch data/{market}/{code}.json
-  → file mode + intraday: Naver Finance API → demo fallback
-  → ws mode + connected: 서버 subscribe 응답 (서버 측 Kiwoom TR → Naver 폴백)
-  → ws mode + disconnected + intraday: Naver Finance API 직접 호출
+  → file mode + intraday: demo fallback (분봉 JSON 없음)
+  → ws mode + connected: 서버 subscribe 응답 (서버 측 Kiwoom TR, 일봉 pykrx 폴백)
+  → ws mode + disconnected: 일봉=file 폴백, 분봉=서버 재연결 대기
   → candles[] (OHLCV array)
 
 Analysis path (main thread or Web Worker):
@@ -115,7 +115,7 @@ Rendering path:
 ### Data Modes
 
 - **ws** (default): Kiwoom OCX WebSocket 서버 연결. `server/ws_server.py`가 PyQt5 + QAxWidget으로 Kiwoom OpenAPI+ OCX에 직접 연결. 실시간 체결(OnReceiveRealData), 일봉/분봉 TR 조회. `server/start_server.bat`로 서버 시작.
-- **file**: Loads real OHLCV from `data/kospi/`, `data/kosdaq/` JSON files. Daily from local JSON, intraday from Naver Finance API (demo fallback). Stock list from `data/index.json` (~2,733 stocks).
+- **file**: Loads real OHLCV from `data/kospi/`, `data/kosdaq/` JSON files. Daily from local JSON, intraday uses demo fallback. Stock list from `data/index.json` (~2,733 stocks).
 - **demo**: Deterministic simulated data using stock code hash as random seed.
 
 `data/` folder is in `.gitignore` — generated locally by `scripts/download_ohlcv.py`.

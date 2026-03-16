@@ -23,8 +23,8 @@ const KRX_COLORS = Object.freeze({
   CHART_BORDER: '#2a2e39',
   CHART_CROSSHAIR: 'rgba(149,152,161,0.4)',
   CHART_CROSSHAIR_LABEL: '#363a45',
-  CHART_GRID_VERT: 'rgba(42,46,57,0.25)',
-  CHART_GRID_HORZ: 'rgba(42,46,57,0.40)',
+  CHART_GRID_VERT: 'rgba(42,46,57,0.12)',   // 0.25→0.12 (수직선 더 은은)
+  CHART_GRID_HORZ: 'rgba(42,46,57,0.20)',   // 0.40→0.20 (수평선 더 은은)
   CHART_WATERMARK: 'rgba(255,255,255,0.04)',
   CHART_ZERO_LINE: 'rgba(255,255,255,0.15)',
   LINE_PRICE: '#2962ff',

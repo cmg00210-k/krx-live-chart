@@ -17,9 +17,9 @@ const signalRenderer = (() => {
 
   // ── 색상 (KRX_COLORS 참조) ──
   const BUY_COLOR   = KRX_COLORS.UP;
-  const BUY_FILL    = KRX_COLORS.UP_FILL(0.06);
+  const BUY_FILL    = KRX_COLORS.UP_FILL(0.10);
   const SELL_COLOR   = KRX_COLORS.DOWN;
-  const SELL_FILL    = KRX_COLORS.DOWN_FILL(0.06);
+  const SELL_FILL    = KRX_COLORS.DOWN_FILL(0.10);
 
   // 최근 N봉 이내 시그널만 표시 (차트 혼잡 방지)
   const RECENT_BAR_LIMIT = 50;
@@ -76,7 +76,7 @@ const signalRenderer = (() => {
           ctx.lineWidth = 1;
           diamonds.forEach(d => {
             if (d.x == null || d.y == null) return;
-            const half = (d.size || 8) / 2;
+            const half = (d.size || 10) / 2;
             // 45도 회전된 정사각형 = 다이아몬드 (꼭짓점 좌표 직접 계산)
             ctx.beginPath();
             ctx.moveTo(d.x, d.y - half);       // 위
@@ -129,8 +129,8 @@ const signalRenderer = (() => {
     ctx.globalAlpha = 0.9;
     ctx.fill();
     ctx.strokeStyle = KRX_COLORS.CHART_TEXT;
-    ctx.lineWidth = 0.5;
-    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.0;
+    ctx.globalAlpha = 0.7;
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -259,7 +259,7 @@ const signalRenderer = (() => {
           stars.push({
             x, y,
             color: isBuy ? BUY_COLOR : SELL_COLOR,
-            size: 10,
+            size: 12,
           });
         }
 
