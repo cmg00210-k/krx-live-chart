@@ -516,13 +516,13 @@ const patternRenderer = (() => {
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
                   // 텍스트 배경 (가독성)
-                  const rtm = ctx.measureText(fz.returnText);
+                  const rtm = ctx.measureText('목표 ' + fz.returnText);
                   ctx.fillStyle = 'rgba(19,23,34,0.75)';
                   ctx.beginPath();
                   _roundRect(ctx, retX - rtm.width / 2 - 4, retY - 7, rtm.width + 8, 14, 3);
                   ctx.fill();
                   ctx.fillStyle = fz.returnColor || 'rgba(150,220,200,0.85)';
-                  ctx.fillText(fz.returnText, retX, retY);
+                  ctx.fillText('목표 ' + fz.returnText, retX, retY);
                 }
               }
             }
@@ -533,7 +533,7 @@ const patternRenderer = (() => {
               const sH = Math.abs(fz.yStop - fz.yEntry);
               if (sH > 2) {
                 // 반투명 배경
-                ctx.fillStyle = fz.stopFill || 'rgba(190,170,220,0.06)';
+                ctx.fillStyle = fz.stopFill || 'rgba(150,220,200,0.06)';
                 ctx.fillRect(zoneX, sY, zoneW, sH);
 
                 // 사선 줄무늬 (위험 표시)
@@ -541,7 +541,7 @@ const patternRenderer = (() => {
                 ctx.beginPath();
                 ctx.rect(zoneX, sY, zoneW, sH);
                 ctx.clip();
-                ctx.strokeStyle = fz.stopStripe || 'rgba(190,170,220,0.12)';
+                ctx.strokeStyle = fz.stopStripe || 'rgba(150,220,200,0.12)';
                 ctx.lineWidth = 1.0;
                 const step = 6;
                 for (let sx = zoneX - sH; sx < zoneX + zoneW + sH; sx += step) {
@@ -553,7 +553,7 @@ const patternRenderer = (() => {
                 ctx.restore();
 
                 // 손절가 점선
-                ctx.strokeStyle = fz.stopBorder || 'rgba(190,170,220,0.35)';
+                ctx.strokeStyle = fz.stopBorder || 'rgba(150,220,200,0.35)';
                 ctx.lineWidth = 0.8;
                 ctx.setLineDash([3, 3]);
                 ctx.beginPath();
@@ -561,6 +561,23 @@ const patternRenderer = (() => {
                 ctx.lineTo(zoneX + zoneW, fz.yStop);
                 ctx.stroke();
                 ctx.setLineDash([]);
+
+                // [UX] 손절 텍스트 라벨 (작은 빨강/파랑 폰트)
+                if (fz.stopColor) {
+                  const slText = '손절';
+                  ctx.font = "600 9px 'Pretendard', sans-serif";
+                  ctx.textAlign = 'right';
+                  ctx.textBaseline = 'middle';
+                  const slm = ctx.measureText(slText);
+                  const slX = zoneX + zoneW - 4;
+                  const slY = fz.yStop;
+                  ctx.fillStyle = 'rgba(19,23,34,0.75)';
+                  ctx.beginPath();
+                  _roundRect(ctx, slX - slm.width - 4, slY - 6, slm.width + 8, 12, 2);
+                  ctx.fill();
+                  ctx.fillStyle = fz.stopColor;
+                  ctx.fillText(slText, slX, slY);
+                }
               }
             }
           });
@@ -752,10 +769,10 @@ const patternRenderer = (() => {
       const isSell = cfg.direction === 'sell';
       const glowColor = isBuy
         ? 'rgba(150,220,200,0.18)'
-        : isSell ? 'rgba(190,170,220,0.18)' : 'rgba(200,200,200,0.12)';
+        : isSell ? 'rgba(150,220,200,0.18)' : 'rgba(200,200,200,0.12)';
       const glowCenter = isBuy
         ? 'rgba(150,220,200,0.25)'
-        : isSell ? 'rgba(190,170,220,0.25)' : 'rgba(200,200,200,0.18)';
+        : isSell ? 'rgba(150,220,200,0.25)' : 'rgba(200,200,200,0.18)';
       const borderColor = cfg.color;
 
       glows.push({
@@ -799,9 +816,9 @@ const patternRenderer = (() => {
 
       // 위에서 아래로 그라데이션 (매수: 아래서 진해짐, 매도: 위에서 진해짐)
       const fillTop = isBuy
-        ? 'rgba(150,220,200,0.02)' : 'rgba(190,170,220,0.10)';
+        ? 'rgba(150,220,200,0.02)' : 'rgba(150,220,200,0.10)';
       const fillBottom = isBuy
-        ? 'rgba(150,220,200,0.10)' : 'rgba(190,170,220,0.02)';
+        ? 'rgba(150,220,200,0.10)' : 'rgba(150,220,200,0.02)';
 
       brackets.push({
         x1: tl.x, y1: tl.y,
@@ -922,7 +939,7 @@ const patternRenderer = (() => {
             { x: p2.x, y: pn.y },
             { x: p1.x, y: pn.y },
           ],
-          fill: 'rgba(190,170,220,0.05)',
+          fill: 'rgba(150,220,200,0.05)',
         });
       }
     }
@@ -1072,7 +1089,7 @@ const patternRenderer = (() => {
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: isBuy ? 'rgba(150,220,200,0.04)' : 'rgba(190,170,220,0.04)',
+          fill: isBuy ? 'rgba(150,220,200,0.04)' : 'rgba(150,220,200,0.04)',
         });
       }
     }
@@ -1116,7 +1133,7 @@ const patternRenderer = (() => {
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: isBuy ? 'rgba(150,220,200,0.05)' : 'rgba(190,170,220,0.05)',
+          fill: isBuy ? 'rgba(150,220,200,0.05)' : 'rgba(150,220,200,0.05)',
         });
       }
     }
@@ -1266,19 +1283,11 @@ const patternRenderer = (() => {
           const retSign = retPct >= 0 ? '+' : '';
           zone.returnText = `${retSign}${retPct.toFixed(1)}%`;
 
-          if (isBuy) {
-            zone.returnColor = 'rgba(150,220,200,0.9)';
-            // [UX] 포캐스트존 가시성 향상: 0.14→0.22
-            zone.targetFillNear = 'rgba(150,220,200,0.22)';
-            zone.targetFillFar  = 'rgba(150,220,200,0.05)';
-            zone.targetBorder   = 'rgba(150,220,200,0.45)';
-          } else {
-            zone.returnColor = 'rgba(190,170,220,0.9)';
-            // [UX] 포캐스트존 가시성 향상: 0.14→0.22
-            zone.targetFillNear = 'rgba(190,170,220,0.22)';
-            zone.targetFillFar  = 'rgba(190,170,220,0.05)';
-            zone.targetBorder   = 'rgba(190,170,220,0.45)';
-          }
+          // [UX] 목표가 수익률 텍스트: 매수=빨강(UP), 매도=파랑(DOWN) — 작은 폰트로 방향 전달
+          zone.returnColor = isBuy ? '#E05050' : '#5086DC';
+          zone.targetFillNear = 'rgba(150,220,200,0.22)';
+          zone.targetFillFar  = 'rgba(150,220,200,0.05)';
+          zone.targetBorder   = 'rgba(150,220,200,0.45)';
         }
       }
 
@@ -1288,17 +1297,11 @@ const patternRenderer = (() => {
         if (stopCoord.y != null) {
           zone.yStop = stopCoord.y;
 
-          if (isBuy) {
-            // [UX] 손절존 가시성 향상: 0.06→0.10, 0.10→0.16
-            zone.stopFill   = 'rgba(190,170,220,0.10)';
-            zone.stopStripe = 'rgba(190,170,220,0.16)';
-            zone.stopBorder = 'rgba(190,170,220,0.35)';
-          } else {
-            // [UX] 손절존 가시성 향상
-            zone.stopFill   = 'rgba(150,220,200,0.10)';
-            zone.stopStripe = 'rgba(150,220,200,0.16)';
-            zone.stopBorder = 'rgba(150,220,200,0.35)';
-          }
+          // [UX] 손절존: 민트 통일, 손절 텍스트는 반대색 (매수 손절=파랑, 매도 손절=빨강)
+          zone.stopFill   = 'rgba(150,220,200,0.10)';
+          zone.stopStripe = 'rgba(150,220,200,0.16)';
+          zone.stopBorder = 'rgba(150,220,200,0.35)';
+          zone.stopColor  = isBuy ? '#5086DC' : '#E05050';
         }
       }
 
