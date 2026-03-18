@@ -89,10 +89,27 @@ class ChartManager {
         textColor: KRX_COLORS.CHART_TEXT,
         fontSize: 11,
         fontFamily: "'JetBrains Mono', 'Pretendard', monospace",
+        attributionLogo: false,  // TradingView 로고 제거 (푸터 링크로 대체)
       },
       localization: {
         locale: 'ko-KR',
+        dateFormat: 'yyyy-MM-dd',  // 한국식 연-월-일
         priceFormatter: (price) => Math.round(price).toLocaleString('ko-KR'),
+        timeFormatter: (businessDayOrTimestamp) => {
+          // businessDay 객체이면 날짜 포맷 (일봉)
+          if (typeof businessDayOrTimestamp === 'object' && businessDayOrTimestamp.year) {
+            return businessDayOrTimestamp.year + '-' +
+              String(businessDayOrTimestamp.month).padStart(2, '0') + '-' +
+              String(businessDayOrTimestamp.day).padStart(2, '0');
+          }
+          // Unix timestamp이면 KST(UTC+9)로 변환하여 표시
+          // 한국은 서머타임 미적용 — 항상 +9시간 고정
+          var d = new Date(businessDayOrTimestamp * 1000);
+          var h = d.getUTCHours() + 9;  // KST = UTC+9
+          var m = d.getUTCMinutes();
+          if (h >= 24) h -= 24;         // 자정 넘김 보정
+          return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+        },
       },
       grid: {
         vertLines: { color: KRX_COLORS.CHART_GRID_VERT },

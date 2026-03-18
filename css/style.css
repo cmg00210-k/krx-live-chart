@@ -3285,6 +3285,16 @@ html, body {
 .conn-guide-help p { margin: 4px 0; }
 .conn-guide-help code { color: var(--accent, #A08830); font-family: var(--font-mono); }
 
+/* ═══ TradingView 출처 표기 ═══════════════════════ */
+
+.tv-attribution {
+  position: fixed; bottom: 4px; left: 50%; transform: translateX(-50%);
+  font-size: 9px; color: var(--text-muted); opacity: 0.4; z-index: 1;
+  pointer-events: auto; white-space: nowrap;
+}
+.tv-attribution a { color: var(--text-muted); text-decoration: none; }
+.tv-attribution a:hover { color: var(--text-sub); }
+
 /* ═══ 접근성: prefers-reduced-motion ═════════════ */
 
 @media (prefers-reduced-motion: reduce) {
