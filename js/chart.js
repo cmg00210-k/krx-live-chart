@@ -217,10 +217,13 @@ class ChartManager {
           const data = param.seriesData.get(this.candleSeries);
           if (data && data.open != null) {
             // [UX] _idx 추가: 크로스헤어 위치의 캔들 인덱스 (지표값 조회용)
+            // [FIX] _idx: Math.round()로 float 타임스탬프 비교 안정화
             let _idx = null;
-            if (this._hoverCandles.length) {
+            if (this._hoverCandles.length && param.time != null) {
+              const pt = typeof param.time === 'number' ? Math.round(param.time) : param.time;
               for (let ci = this._hoverCandles.length - 1; ci >= 0; ci--) {
-                if (String(this._hoverCandles[ci].time) === String(param.time)) { _idx = ci; break; }
+                const ct = typeof this._hoverCandles[ci].time === 'number' ? Math.round(this._hoverCandles[ci].time) : this._hoverCandles[ci].time;
+                if (ct === pt || String(ct) === String(pt)) { _idx = ci; break; }
               }
             }
             this._ohlcCallback({ open: data.open, high: data.high, low: data.low, close: data.close, volume: null, type: 'crosshair', _idx });

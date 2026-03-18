@@ -149,9 +149,9 @@ const sidebarManager = (() => {
   /** R10: RSI 값에 따른 색상 */
   function _rsiColor(val) {
     if (val == null) return '#888';
-    if (val < 30) return '#5086DC';   // 과매도 (파랑)
-    if (val > 70) return '#E05050';   // 과매수 (빨강)
-    return '#888';                    // 중립 (회색)
+    if (val < 30) return KRX_COLORS.DOWN;   // 과매도 (파랑)
+    if (val > 70) return KRX_COLORS.UP;     // 과매수 (빨강)
+    return '#888';                           // 중립 (회색)
   }
 
   /** S3: 시가총액 포맷팅 (억원 → 조/억 단위)

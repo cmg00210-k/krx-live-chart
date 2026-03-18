@@ -253,7 +253,10 @@ class PatternBacktester {
         const exitIdx = occ.idx + h;
         if (exitIdx >= candles.length) continue;
 
-        const entryPrice = candles[occ.idx].close;
+        // [FIX] 진입가: 패턴 다음 캔들 시가 (look-ahead bias 제거)
+        const entryIdx = occ.idx + 1;
+        if (entryIdx >= candles.length) continue;
+        const entryPrice = candles[entryIdx].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
         const exitPrice = candles[exitIdx].close;
@@ -441,7 +444,10 @@ class PatternBacktester {
         const exitIdx = occ.idx + d;
         if (exitIdx >= candles.length) continue;
 
-        const entryPrice = candles[occ.idx].close;
+        // [FIX] 진입가: 패턴 다음 캔들 시가
+        const entryIdx2 = occ.idx + 1;
+        if (entryIdx2 >= candles.length) continue;
+        const entryPrice = candles[entryIdx2].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
         const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100;
