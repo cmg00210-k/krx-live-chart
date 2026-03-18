@@ -9,6 +9,11 @@
 
 class RealtimeProvider {
   constructor() {
+    // ── 배포 환경 자동 감지: cheesestock.com에서는 WSS 프록시 사용 ──
+    if (window.location.hostname === 'www.cheesestock.com' || window.location.hostname === 'cheesestock.com') {
+      KRX_API_CONFIG.wsUrl = 'wss://ws.cheesestock.com/ws';
+    }
+
     // ── WebSocket 상태 ──
     this._ws = null;
     this._wsReconnectTimer = null;

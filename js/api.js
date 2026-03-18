@@ -72,7 +72,7 @@ const _idb = {
 };
 
 const KRX_API_CONFIG = {
-  mode: 'ws',     // 'ws' | 'file' | 'demo' (향후 'koscom' 추가)
+  mode: 'ws',     // 'ws' | 'file' | 'demo' | 'koscom'
   wsUrl: 'ws://localhost:8765',  // WebSocket 서버 주소 (Kiwoom OCX)
   dataDir: 'data', // file 모드에서 JSON 파일 경로
 };
@@ -204,7 +204,7 @@ class KRXDataService {
       }
     }
 
-    if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws') return;
+    if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;
 
     try {
       const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
@@ -300,12 +300,25 @@ class KRXDataService {
       // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
       candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // file 모드 + 분봉: 분봉 JSON 없음 → 일봉 데이터를 그대로 표시
-      // 데모 데이터 생성 대신 실제 일봉으로 대체 (데이터 무결성 유지)
-      candles = await this._fileGetCandles(stock);
+      // file 모드 + 분봉: 보간 분봉 JSON 로드 시도 → 없으면 일봉 폴백
+      // generate_intraday.py가 생성한 {code}_{timeframe}.json 파일 사용
+      candles = await this._fileGetIntradayCandles(stock, timeframe);
+      if (!candles || candles.length === 0) {
+        // 분봉 파일 없으면 일봉 데이터를 그대로 표시 (데이터 무결성 유지)
+        candles = await this._fileGetCandles(stock);
+      }
     } else if (KRX_API_CONFIG.mode === 'demo') {
       // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
       candles = this._demoGenerateCandles(stock, timeframe);
+    } else if (KRX_API_CONFIG.mode === 'koscom') {
+      // 코스콤 모드: 향후 구현 예정 (사업화 시 전환)
+      console.warn('[KRX] Koscom API는 아직 구현되지 않았습니다');
+      try {
+        candles = await koscomService.getCandles(stock, timeframe);
+      } catch (e) {
+        console.warn('[Koscom]', e.message);
+        candles = [];
+      }
     } else {
       // 알 수 없는 모드: 빈 배열 반환 (가짜 데이터 생성하지 않음)
       console.warn('[KRX] 알 수 없는 데이터 모드:', KRX_API_CONFIG.mode);
@@ -515,6 +528,39 @@ class KRXDataService {
     }
   }
 
+  /**
+   * 보간 분봉 JSON 파일 로드 (generate_intraday.py가 생성한 파일)
+   * 파일명 형식: {code}_{timeframe}.json (예: 005930_5m.json)
+   * @param {Object} stock - 종목 객체
+   * @param {string} timeframe - 타임프레임 ('1m', '5m', '15m', '1h')
+   * @returns {Array} 캔들 배열 (없으면 빈 배열)
+   */
+  async _fileGetIntradayCandles(stock, timeframe) {
+    try {
+      const market = (stock.market || 'kospi').toLowerCase();
+      const filePath = `${KRX_API_CONFIG.dataDir}/${market}/${stock.code}_${timeframe}.json`;
+
+      const res = await fetch(filePath);
+      if (!res.ok) return [];
+
+      const data = await res.json();
+      if (!data.candles || !data.candles.length) return [];
+
+      // 분봉 time은 Unix 타임스탬프 (숫자) — LWC가 직접 지원
+      return data.candles.map(c => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }));
+    } catch (e) {
+      // 분봉 파일 없음 — 조용히 빈 배열 반환 (일봉 폴백으로 진행)
+      return [];
+    }
+  }
+
   // ══════════════════════════════════════════════════
   //  데모 모드: 시뮬레이션 데이터 생성
   // ══════════════════════════════════════════════════
@@ -642,6 +688,60 @@ class KRXDataService {
   }
 
 }
+
+// ══════════════════════════════════════════════════════
+//  Koscom API 스텁 (향후 전환용)
+//
+//  코스콤 정보분배 API (sandbox-apigw.koscom.co.kr) 대응.
+//  현재는 미구현 — 실제 전환 시 getCandles/getRealTimeQuote 구현 필요.
+//  사업화 시 pykrx → 코스콤 전환 필수 (라이선스 요건).
+// ══════════════════════════════════════════════════════
+class KoscomDataService {
+  constructor() {
+    this.apiKey = null;
+    this.baseUrl = 'https://sandbox-apigw.koscom.co.kr/v3';
+    this.connected = false;
+  }
+
+  /**
+   * API 키 설정
+   * @param {string} key - 코스콤 API 인증키
+   */
+  setApiKey(key) {
+    this.apiKey = key;
+  }
+
+  /**
+   * 캔들 데이터 조회 (미구현)
+   * @param {Object} stock - 종목 객체 { code, name, market }
+   * @param {string} timeframe - 타임프레임 ('1d', '5m' 등)
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getCandles(stock, timeframe) {
+    throw new Error('[Koscom] 미구현 — Kiwoom OCX 또는 file 모드 사용');
+  }
+
+  /**
+   * 실시간 시세 조회 (미구현)
+   * @param {string} stockCode - 종목 코드
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getRealTimeQuote(stockCode) {
+    throw new Error('[Koscom] 미구현');
+  }
+
+  /**
+   * 종목 기본 정보 조회 (미구현)
+   * @param {string} stockCode - 종목 코드
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getStockInfo(stockCode) {
+    throw new Error('[Koscom] 미구현');
+  }
+}
+
+// 코스콤 서비스 인스턴스 (향후 전환 시 사용)
+const koscomService = new KoscomDataService();
 
 // 글로벌 인스턴스
 const dataService = new KRXDataService();

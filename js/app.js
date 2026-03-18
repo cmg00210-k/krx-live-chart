@@ -2520,8 +2520,17 @@ function _initDrawingTools() {
 
   // 툴바 버튼 클릭 이벤트
   document.querySelectorAll('.draw-btn').forEach(function(btn) {
+    var tool = btn.dataset.tool;
+    // 색상 버튼은 도구 전환 대신 색상 선택기를 토글
+    if (tool === 'color') {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        drawingTools.toggleColorPicker();
+      });
+      return;
+    }
     btn.addEventListener('click', function() {
-      drawingTools.setTool(btn.dataset.tool);
+      drawingTools.setTool(tool);
     });
   });
 
@@ -2553,7 +2562,7 @@ function _initDrawingTools() {
     });
   }
 
-  // 메인 차트 크로스헤어 이동 — 프리뷰 업데이트
+  // 메인 차트 크로스헤어 이동 — 프리뷰 + 드래그 이동 업데이트
   // 기존 onCrosshairMove 콜백에 추가로 등록 (subscribeCrosshairMove는 다중 구독 지원)
   if (chartManager.mainChart) {
     chartManager.mainChart.subscribeCrosshairMove(function(param) {
@@ -2571,6 +2580,16 @@ function _initDrawingTools() {
       if (price == null) return;
 
       drawingTools.handleChartMouseMove(price, param.time);
+    });
+  }
+
+  // 차트 컨테이너에서 mouseup 이벤트 — 드래그 이동 종료
+  var chartWrapEl = document.getElementById('chart-wrap');
+  if (chartWrapEl) {
+    chartWrapEl.addEventListener('mouseup', function() {
+      if (typeof drawingTools !== 'undefined') {
+        drawingTools.handleChartMouseUp();
+      }
     });
   }
 }
@@ -2700,9 +2719,10 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // 드로잉 도구 단축키: T=추세선, H=수평선, V=수직선, R=사각형, G=피보나치, Delete=삭제
+  // 드로잉 도구 단축키: S=선택, T=추세선, H=수평선, V=수직선, R=사각형, G=피보나치, Delete=삭제
   if (typeof drawingTools !== 'undefined') {
     const drawKeyMap = {
+      s: 'select', S: 'select',
       t: 'trendline', T: 'trendline',
       h: 'hline', H: 'hline',
       v: 'vline', V: 'vline',

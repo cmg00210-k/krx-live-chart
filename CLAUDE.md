@@ -24,13 +24,13 @@ Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is u
 | `js/data.js` | `PAST_DATA`, `getPastData()`, `getFinancialData()` | Historical financial data; async loader tries `data/financials/{code}.json` first, falls back to hardcoded/seed data | 160 |
 | `js/api.js` | `_idb`, `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json, L1 memory + L2 IndexedDB + L3 network 3-tier caching, marketCap/sector fields) | 420 |
 | `js/realtimeProvider.js` | `realtimeProvider` | WebSocket client for Kiwoom OCX server, demo fallback | 230 |
-| `js/indicators.js` | `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()`, `IndicatorCache` | 9 technical indicator calculations + lazy-evaluation cache with VMA/volRatio | 378 |
+| `js/indicators.js` | `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()`, `calcWLSRegression()`, `_invertMatrix()`, `IndicatorCache` | 9 technical indicators + WLS regression engine + lazy-evaluation cache with VMA/volRatio | 888 |
 | `js/patterns.js` | `patternEngine` | PatternEngine class — 26 patterns (17 candle + 8 chart + S/R) with ATR normalization, quality scoring | 1488 |
 | `js/signalEngine.js` | `COMPOSITE_SIGNAL_DEFS`, `signalEngine` | SignalEngine class — 16 indicator signals (5 categories) + 6 composite signals (3 tiers) + divergence detection | 1129 |
 | `js/chart.js` | `chartManager` | ChartManager class using TradingView Lightweight Charts v4.2.3 (indicators delegated to indicators.js) | 697 |
 | `js/patternRenderer.js` | `patternRenderer` | ISeriesPrimitive-based HTS-grade Canvas pattern visualization v3.1 (glows, brackets, trendAreas, polylines, hlines, labels, connectors, forecastZones) with 3-tier visibility filtering and label collision avoidance | 1400+ |
 | `js/signalRenderer.js` | `signalRenderer` | ISeriesPrimitive-based Canvas signal visualization (diamonds, stars, vbands, divergence lines, volume highlight) | 469 |
-| `js/backtester.js` | `backtester` | PatternBacktester class — per-pattern N-day return statistics + backtest panel rendering | 497 |
+| `js/backtester.js` | `backtester` | PatternBacktester class — per-pattern N-day return statistics + WLS regression return prediction + backtest panel rendering | 517 |
 | `js/analysisWorker.js` | (Web Worker) | Offloads pattern + signal + backtest analysis to Web Worker thread; loads colors/indicators/patterns/signalEngine/backtester via importScripts | 103 |
 | `js/sidebar.js` | `sidebarManager` | Collapsible sidebar with KOSPI/KOSDAQ stock lists, accordion sections | 87 |
 | `js/patternPanel.js` | `PATTERN_ACADEMIC_META`, `renderPatternPanel()`, `renderPatternCards()`, etc. | 27-pattern academic metadata + pattern UI panel (summary bar, history table, return curve, cards) | 770 |
@@ -61,7 +61,7 @@ patternRenderer.js ← chart.js (chartManager.candleSeries)
   ↓
 signalRenderer.js ← chart.js (chartManager.candleSeries, volumeSeries)
   ↓
-backtester.js ← patterns.js (patternEngine.analyze)
+backtester.js ← patterns.js (patternEngine.analyze), indicators.js (calcATR, calcMA, calcWLSRegression)
   ↓
 sidebar.js ← api.js (ALL_STOCKS)
   ↓
@@ -157,11 +157,35 @@ python scripts/download_ohlcv.py              # All stocks, 1 year (default)
 python scripts/download_ohlcv.py --years 3    # 3 years
 python scripts/download_ohlcv.py --market KOSPI  # KOSPI only
 python scripts/download_ohlcv.py --code 005930   # Single stock
+python scripts/download_ohlcv.py --cron        # Unattended mode (log to file, exit codes)
 ```
 
 Requires: `pip install pykrx FinanceDataReader`
 
 Output: `data/kospi/*.json`, `data/kosdaq/*.json`, `data/index.json`
+
+`--cron` flag: No interactive prompts, logs to `logs/download_YYYYMMDD_HHMMSS.log`, returns exit code 0/1.
+
+### Generating Intraday Candles (Interpolation)
+
+```bash
+python scripts/generate_intraday.py                    # All stocks, all timeframes
+python scripts/generate_intraday.py --code 005930      # Single stock
+python scripts/generate_intraday.py --timeframe 5m     # 5-minute candles only
+python scripts/generate_intraday.py --days 10          # Last 10 days only
+```
+
+Generates intraday candle JSON from daily OHLCV using Brownian bridge interpolation. Eliminates demo fallback for file mode intraday charts. Output: `data/{market}/{code}_{timeframe}.json` (e.g., `data/kospi/005930_5m.json`).
+
+### Daily Update Script (Cron/Scheduler)
+
+```bash
+scripts\daily_update.bat    # Run manually or via Windows Task Scheduler
+```
+
+Runs 3 steps: OHLCV download (cron mode) -> intraday generation (5m) -> index price update (offline).
+
+Register with Task Scheduler: `schtasks /create /sc daily /tn "KRX_DailyUpdate" /tr "...\daily_update.bat" /st 16:00`
 
 ### Downloading Financial Statements (DART)
 

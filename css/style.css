@@ -1110,8 +1110,29 @@ html, body {
 .draw-btn:active { transform: scale(0.96); }
 .draw-sep { width: 20px; height: 1px; background: #252525; margin: 4px 0; }
 
+/* 색상 버튼 내부 원의 기본 채우기 (현재 선택 색상 반영은 JS에서) */
+.draw-color-btn svg circle:last-child { fill: #C9A84C; }
+
+/* ── 색상 선택기 팝업 ── */
+.draw-color-picker {
+  position: absolute; left: 44px; top: 0;
+  background: #1E1E1E; border: 1px solid #333;
+  border-radius: 6px; padding: 6px; z-index: 35;
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.draw-color-swatch {
+  width: 22px; height: 22px; border-radius: 3px;
+  cursor: pointer; border: 2px solid transparent;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+}
+.draw-color-swatch.active { border-color: #fff; }
+.draw-color-swatch:hover { transform: scale(1.15); }
+
 /* 드로잉 모드일 때 차트 커서 변경 */
 #main-chart-container.drawing-mode { cursor: crosshair; }
+#main-chart-container.select-mode { cursor: default; }
+#main-chart-container.select-mode:active { cursor: grabbing; }
 
 /* 드로잉 툴바가 있을 때 내부 요소들의 왼쪽 여백 조정 */
 #chart-wrap .sub-chart-wrap { margin-left: 40px; }
@@ -2355,6 +2376,17 @@ html, body {
 .php-wr.up { color: var(--up); }
 .php-wr.dn { color: var(--down); }
 
+/* WLS 기대수익 + 신뢰구간 열 */
+.php-expected {
+  font-weight: 600; font-size: var(--fs-nano);
+}
+.php-expected.up { color: var(--up); }
+.php-expected.dn { color: var(--down); }
+.php-ci {
+  font-size: 9px; color: var(--text-muted);
+  white-space: nowrap; letter-spacing: -0.3px;
+}
+
 /* 표본 부족 경고 아이콘 (테이블 행 내) */
 .php-sample-warn {
   display: inline-block; margin-left: 2px;
@@ -2512,7 +2544,7 @@ html, body {
 
 .fin-row-value, .fin-grid-value,
 .sh-price, .sb-price, .sb-change,
-.php-ret, .php-wr, .php-count,
+.php-ret, .php-wr, .php-count, .php-expected, .php-ci,
 .ohlc-val, .sh-detail-value,
 .rs-return, .rs-winrate, .rs-count,
 .ticker-val,
@@ -2790,8 +2822,9 @@ html, body {
 
 /* ── 768px: 모바일 — 사이드바 드로어, D열 바텀시트 ── */
 @media (max-width: 768px) {
-  /* 모바일: 드로잉 툴바 숨김, 여백 제거 */
+  /* 모바일: 드로잉 툴바 + 색상 선택기 숨김, 여백 제거 */
   .draw-toolbar { display: none; }
+  .draw-color-picker { display: none !important; }
   #main-chart-container { margin-left: 0 !important; }
   #chart-wrap .sub-chart-wrap { margin-left: 0; }
   #chart-wrap #ohlc-bar { left: var(--sp-2); }

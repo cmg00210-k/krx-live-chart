@@ -491,12 +491,12 @@ function updatePatternHistoryTable(patterns) {
 
   // 패턴 비활성 or 데이터 부족
   if (!patternEnabled || !patterns || !patterns.length || typeof backtester === 'undefined') {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:12px">패턴 활성화 후 데이터가 표시됩니다</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:12px">패턴 활성화 후 데이터가 표시됩니다</td></tr>';
     return;
   }
 
   if (!candles || candles.length < 50) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:12px">캔들 데이터 부족 (최소 50개 필요)</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:12px">캔들 데이터 부족 (최소 50개 필요)</td></tr>';
     return;
   }
 
@@ -513,7 +513,7 @@ function updatePatternHistoryTable(patterns) {
   }
 
   if (topPatterns.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:12px">백테스트 가능한 패턴 없음</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:12px">백테스트 가능한 패턴 없음</td></tr>';
     return;
   }
 
@@ -575,12 +575,31 @@ function updatePatternHistoryTable(patterns) {
       rowHtml += `<td class="php-wr">--</td>`;
     }
 
+    // 기대수익 (WLS 회귀 예측, 5일 horizon 기준)
+    const expRet = h5 ? h5.expectedReturn : null;
+    if (expRet != null) {
+      const expCls = expRet > 0 ? 'up' : expRet < 0 ? 'dn' : '';
+      const expSign = expRet >= 0 ? '+' : '';
+      rowHtml += `<td class="php-expected ${expCls}" title="WLS 회귀 예측 (R\u00B2=${h5.regression ? h5.regression.rSquared : '?'})">${expSign}${expRet}%</td>`;
+    } else {
+      rowHtml += `<td class="php-expected">\u2014</td>`;
+    }
+
+    // 95% 신뢰구간
+    const ciLower = h5 ? h5.ci95Lower : null;
+    const ciUpper = h5 ? h5.ci95Upper : null;
+    if (ciLower != null && ciUpper != null) {
+      rowHtml += `<td class="php-ci" title="95% \uC2E0\uB8B0\uAD6C\uAC04">[${ciLower}%, ${ciUpper}%]</td>`;
+    } else {
+      rowHtml += `<td class="php-ci">\u2014</td>`;
+    }
+
     rowHtml += `</tr>`;
     rows.push(rowHtml);
   }
 
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:12px">과거 발생 이력 없음</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:12px">과거 발생 이력 없음</td></tr>';
     return;
   }
 
@@ -905,6 +924,27 @@ function renderPatternCards(patterns) {
         const h5 = bt.horizons[5];
         const retCls = h5 && h5.mean > 0 ? 'up' : h5 && h5.mean < 0 ? 'dn' : '';
         const retSign = h5 && h5.mean > 0 ? '+' : '';
+        // WLS 기대수익 (있으면 표시)
+        var expRetHtml = '';
+        if (h5 && h5.expectedReturn != null) {
+          var expRetCls = h5.expectedReturn > 0 ? 'up' : h5.expectedReturn < 0 ? 'dn' : '';
+          var expRetSign = h5.expectedReturn >= 0 ? '+' : '';
+          var ciText = (h5.ci95Lower != null && h5.ci95Upper != null)
+            ? ' [' + h5.ci95Lower + '%, ' + h5.ci95Upper + '%]' : '';
+          expRetHtml = `
+            <div class="pp-stat-row">
+              <span class="pp-stat-label">기대수익</span>
+              <span class="pp-stat-value ${expRetCls}" title="WLS 회귀 예측${ciText}">${expRetSign}${h5.expectedReturn}%</span>
+            </div>`;
+          if (h5.regression) {
+            expRetHtml += `
+            <div class="pp-stat-row">
+              <span class="pp-stat-label">R\u00B2</span>
+              <span class="pp-stat-value" title="가중 결정계수">${h5.regression.rSquared}</span>
+            </div>`;
+          }
+        }
+
         statsHtml = `
           <div class="pp-card-stats">
             <div class="pp-stat-row">
@@ -919,6 +959,7 @@ function renderPatternCards(patterns) {
               <span class="pp-stat-label">5일 승률</span>
               <span class="pp-stat-value">${h5 && h5.n > 0 ? h5.winRate.toFixed(0) + '%' : '--'}</span>
             </div>` +
+            expRetHtml +
             (meta ? `
             <div class="pp-stat-row">
               <span class="pp-stat-label">학술 승률</span>
