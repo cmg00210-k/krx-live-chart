@@ -1400,8 +1400,10 @@ const patternRenderer = (() => {
     }
 
     // 차트 재생성 감지 → primitive 재연결
+    // [FIX-6] 라인 모드 _priceLine null 안전 처리
     const targetSeries = (chartType === 'line' && cm.indicatorSeries._priceLine)
       ? cm.indicatorSeries._priceLine : cm.candleSeries;
+    if (!targetSeries) return;
     if (_attachedSeries !== targetSeries) {
       if (_primitive && _attachedSeries) {
         try { _attachedSeries.detachPrimitive(_primitive); } catch (e) {}

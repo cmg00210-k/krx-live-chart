@@ -397,7 +397,8 @@ class PatternBacktester {
               }
             }
             var se = Math.sqrt(reg.sigmaHat2 * (1 + xInvx));
-            var tCrit = reg.df >= 30 ? 1.96 : 2.04;
+            // [FIX-7] 정밀 t-분포 임계값 테이블 (95% 신뢰구간, 양측)
+            var tCrit = reg.df >= 120 ? 1.96 : reg.df >= 60 ? 2.00 : reg.df >= 30 ? 2.04 : reg.df >= 15 ? 2.13 : reg.df >= 10 ? 2.23 : reg.df >= 5 ? 2.57 : 4.30;
             stats.ci95Lower = +(predicted - tCrit * se).toFixed(2);
             stats.ci95Upper = +(predicted + tCrit * se).toFixed(2);
           }
