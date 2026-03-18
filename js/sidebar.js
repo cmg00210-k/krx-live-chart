@@ -318,14 +318,20 @@ const sidebarManager = (() => {
         '<span>최근 본 종목</span>' +
         '<span class="sb-count" id="sb-recent-count">0</span>' +
       '</div>' +
-      '<div class="sb-body" id="sb-recent"></div>';
+      '<div class="sb-list" id="sb-recent"></div>';  // [FIX] sb-body → sb-list (CSS 아코디언 .collapsed + .sb-list 규칙과 일치)
 
-    // 종목 목록 섹션 앞에 삽입
+    // 즐겨찾기 다음, 종목 목록 앞에 삽입
     const sbBody = sidebar.querySelector('.sb-body');
-    if (sbBody && sbBody.firstChild) {
-      sbBody.insertBefore(recentSection, sbBody.firstChild);
-    } else if (sbBody) {
-      sbBody.appendChild(recentSection);
+    if (sbBody) {
+      // 즐겨찾기 섹션이 있으면 그 다음에, 없으면 맨 앞에
+      const wlSection = document.getElementById('sb-watchlist-section');
+      if (wlSection && wlSection.nextSibling) {
+        sbBody.insertBefore(recentSection, wlSection.nextSibling);
+      } else if (sbBody.firstChild) {
+        sbBody.insertBefore(recentSection, sbBody.firstChild);
+      } else {
+        sbBody.appendChild(recentSection);
+      }
     } else {
       sidebar.appendChild(recentSection);
     }
@@ -734,43 +740,35 @@ const sidebarManager = (() => {
    */
   function _renderItemHTML(s, isPatternMode) {
     const cdls = _getCachedCandles(s.code);
-    // [OPT] index.json 요약 데이터 조회 (prevClose/change/volume 사용)
-    var stock = null;
-    if (typeof ALL_STOCKS !== 'undefined') {
-      stock = ALL_STOCKS.find(function(st) { return st.code === s.code; });
-    }
+    // [FIX] s 자체가 ALL_STOCKS 요소 — find() 없이 직접 읽기
     let price = 0;
     let changeText = '';
     let changeClass = '';
     let volume = 0;
 
     if (cdls && cdls.length) {
-      // 캐시된 캔들 우선 (실시간/최근 로드 데이터)
       const last = cdls[cdls.length - 1];
       price = last.close;
       volume = last.volume || 0;
       const prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
       const prevClose = prevCandle ? prevCandle.close : last.open;
       if (prevClose > 0) {
-        const pct = ((last.close - prevClose) / prevClose * 100).toFixed(2);
-        const arrow = pct > 0 ? '\u25B2 ' : pct < 0 ? '\u25BC ' : '';
-        changeText = arrow + (pct >= 0 ? '+' : '') + pct + '%';
-        changeClass = pct >= 0 ? 'up' : 'dn';
+        const pctNum = parseFloat(((last.close - prevClose) / prevClose * 100).toFixed(2));
+        const pct = pctNum.toFixed(2);
+        const arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
+        changeText = arrow + (pctNum >= 0 ? '+' : '') + pct + '%';
+        changeClass = pctNum >= 0 ? 'up' : 'dn';
       }
-    } else if (stock) {
-      // [OPT] index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
-      price = stock.base || 0;
-      volume = stock.volume || 0;
-      var chg = stock.change || 0;
-      var chgPct = stock.changePercent || 0;
-      if (chg !== 0 || chgPct !== 0) {
-        var arrow = chg > 0 ? '\u25B2 ' : chg < 0 ? '\u25BC ' : '';
+    } else {
+      // index.json 요약 데이터에서 직접 표시 (OHLCV fetch 불필요)
+      price = s.base || s.lastClose || 0;
+      volume = s.volume || 0;
+      var chgPct = s.changePercent || 0;
+      if (s.prevClose > 0 || chgPct !== 0) {
+        var arrow = chgPct > 0 ? '\u25B2 ' : chgPct < 0 ? '\u25BC ' : '';
         changeText = arrow + (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
         changeClass = chgPct >= 0 ? 'up' : 'dn';
       }
-    } else {
-      // 최종 폴백: base만 사용
-      price = s.base || 0;
     }
 
     // ── 미니멀 모드 (R5) ──
@@ -1154,6 +1152,9 @@ const sidebarManager = (() => {
     // S4: 현재 목록 렌더링
     _renderList();
 
+    // [FIX] build 직후 즉시 가격/등락률 표시 (index.json 요약 데이터 사용)
+    updatePrices();
+
     // 즐겨찾기 섹션 갱신
     renderWatchlist();
 
@@ -1228,11 +1229,12 @@ const sidebarManager = (() => {
       // 등락률
       const changeEl = document.getElementById('sb-chg-' + s.code);
       if (changeEl) {
-        var pctStr = changePct.toFixed(2);
-        const arrow = pctStr > 0 ? '\u25B2 ' : pctStr < 0 ? '\u25BC ' : '';
-        changeEl.textContent = arrow + (pctStr >= 0 ? '+' : '') + pctStr + '%';
-        changeEl.className = 'sb-change ' + (pctStr >= 0 ? 'up' : 'dn');
-        _stockChangeCache[s.code] = parseFloat(pctStr);
+        var pctNum = parseFloat(changePct.toFixed(2));
+        var pctStr = pctNum.toFixed(2);
+        const arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
+        changeEl.textContent = arrow + (pctNum >= 0 ? '+' : '') + pctStr + '%';
+        changeEl.className = 'sb-change ' + (pctNum >= 0 ? 'up' : 'dn');
+        _stockChangeCache[s.code] = pctNum;
       }
 
       // R3: 거래량 갱신

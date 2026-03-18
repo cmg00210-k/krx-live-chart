@@ -458,8 +458,8 @@ function drawOPMSparkline(data) {
   const paddingL = 16;     // 좌측 여백 (첫 라벨 잘림 방지)
   const paddingR = 16;     // 우측 여백
 
-  // 부모 너비에 맞게 동적 계산, height 80px로 확장
-  const w = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200;
+  // [FIX] 부모 너비에 맞게 동적 계산 — 최소 100px 보장
+  const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200), 100);
   const h = 80;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
@@ -608,7 +608,8 @@ function drawFinTrendChart(data, metric) {
   const dpr = window.devicePixelRatio || 1;
 
   const labelHeight = 14;
-  const w = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190;
+  // [FIX] 최소 너비 보장 (scrollbar-gutter 등으로 인한 축소 대응)
+  const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190), 100);
   const h = 70;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
@@ -1076,14 +1077,26 @@ function _getLatestEPS() {
  * PER 밴드 차트 렌더링
  * Canvas에 주가 라인 + PER 배수(8x/12x/16x/20x) 수평 밴드 라인을 그린다.
  */
+var _perBandRetries = 0;  // 재시도 횟수 제한용
+
 function _drawPERBandChart() {
   var canvas = document.getElementById('fin-per-band');
   if (!canvas) return;
   var ctx = canvas.getContext('2d');
   var dpr = window.devicePixelRatio || 1;
 
-  // 캔버스 크기 동적 계산
-  var parentW = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 340;
+  // [FIX] 캔버스 크기 동적 계산 — 패널 미표시/레이아웃 전 안전 처리
+  var rawW = canvas.parentElement ? canvas.parentElement.clientWidth : 0;
+  if (rawW <= 0) {
+    // 패널이 아직 레이아웃되지 않음 — 최대 5회 재시도 (50ms 간격)
+    if (_perBandRetries < 5) {
+      _perBandRetries++;
+      setTimeout(_drawPERBandChart, 50);
+    }
+    return;
+  }
+  _perBandRetries = 0;  // 성공 시 카운터 리셋
+  var parentW = Math.max(rawW - 8, 100);  // 최소 100px 보장
   var h = 100;
   canvas.width = parentW * dpr;
   canvas.height = h * dpr;
