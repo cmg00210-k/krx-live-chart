@@ -513,18 +513,24 @@ const sidebarManager = (() => {
     ctx.stroke();
   }
 
-  /** 보이는 아이템의 스파크라인 일괄 그리기 (rAF) */
+  /** 보이는 아이템의 스파크라인 일괄 그리기 (rAF)
+   *  로딩 shimmer를 해제하고 캔버스에 종가 데이터를 그림 */
   function _drawVisibleSparklines(container) {
     if (_viewMode !== 'analysis') return;
-    const canvases = container.querySelectorAll('.sb-sparkline');
+    var canvases = container.querySelectorAll('.sb-sparkline');
     if (!canvases.length) return;
 
     requestAnimationFrame(function () {
       canvases.forEach(function (cvs) {
-        const code = cvs.dataset.code;
+        var code = cvs.dataset.code;
         if (!code) return;
-        const closes = _getLast20Closes(code);
-        if (closes) _drawSparkline(cvs, closes);
+        var closes = _getLast20Closes(code);
+        var wrap = cvs.closest('.sb-spark-wrap');
+        if (closes) {
+          _drawSparkline(cvs, closes);
+          // 로딩 shimmer 해제
+          if (wrap) wrap.classList.remove('loading');
+        }
       });
     });
   }
@@ -749,13 +755,23 @@ const sidebarManager = (() => {
     // 패턴 카테고리 pill (기존 호환)
     const pillsHtml = isPatternMode ? _renderCategoryPills(s.code) : '';
 
+    // 스파크라인 데이터 존재 여부에 따라 로딩 상태 결정
+    var hasSparkData = !!_getLast20Closes(s.code);
+    var sparkWrapClass = 'sb-spark-wrap' + (hasSparkData ? '' : ' loading');
+    // 스파크라인 레이블: 일봉이면 '30D', 분봉이면 '오늘'
+    var tf = _tf();
+    var sparkLabel = tf === '1d' ? '30D' : '\uC624\uB298';
+
     return '<div class="sb-item' + (isPatternMode && pillsHtml ? ' has-pattern' : '') + '" data-code="' + s.code + '"' + patternAttr + ' draggable="true">' +
       '<div class="sb-row1">' +
         '<span class="sb-name" title="' + s.code + '">' + s.name + volBadge + pillsHtml + '</span>' +
         '<span class="sb-price" id="sb-' + s.code + '">' + (price > 0 ? price.toLocaleString() : '\u2014') + '</span>' +
       '</div>' +
       '<div class="sb-row2">' +
-        '<canvas class="sb-sparkline" data-code="' + s.code + '" width="48" height="16"></canvas>' +
+        '<span class="' + sparkWrapClass + '">' +
+          '<canvas class="sb-sparkline" data-code="' + s.code + '" width="48" height="16"></canvas>' +
+          '<span class="sb-spark-label">' + sparkLabel + '</span>' +
+        '</span>' +
         mcapHtml +
         '<span class="sb-volume">' + _formatVolume(volume) + '</span>' +
         rsiHtml +
@@ -1000,6 +1016,17 @@ const sidebarManager = (() => {
     // R1: 키보드 네비게이션
     _initKeyboardNav();
 
+    // 즐겨찾기 섹션 렌더링
+    renderWatchlist();
+
+    // 즐겨찾기 아코디언 토글
+    var wlHeader = document.getElementById('sb-watchlist-header');
+    if (wlHeader) {
+      wlHeader.addEventListener('click', function () {
+        wlHeader.classList.toggle('collapsed');
+      });
+    }
+
     // 최근 본 종목 렌더링
     _renderRecentSection();
 
@@ -1067,6 +1094,9 @@ const sidebarManager = (() => {
 
     // S4: 현재 목록 렌더링
     _renderList();
+
+    // 즐겨찾기 섹션 갱신
+    renderWatchlist();
 
     // R2: 최근 본 종목 섹션 갱신
     _renderRecentSection();
@@ -1191,8 +1221,59 @@ const sidebarManager = (() => {
 
 
   // ════════════════════════════════════════════════════
+  //  즐겨찾기 (워치리스트) 섹션 렌더링
+  // ════════════════════════════════════════════════════
+
+  function renderWatchlist() {
+    var container = document.getElementById('sb-watchlist-items');
+    var countEl = document.getElementById('sb-watchlist-count');
+    var sectionEl = document.getElementById('sb-watchlist-section');
+    if (!container) return;
+
+    var list = [];
+    try { list = JSON.parse(localStorage.getItem('krx_watchlist')) || []; } catch (e) { list = []; }
+    if (!Array.isArray(list)) list = [];
+
+    if (countEl) countEl.textContent = list.length;
+
+    // 종목이 없거나 검색 중이면 숨김
+    if (sectionEl) {
+      sectionEl.style.display = (list.length > 0 && !_searchQuery) ? '' : 'none';
+    }
+
+    if (list.length === 0) {
+      container.innerHTML = '<div class="sb-empty-msg" style="padding:8px;color:var(--text-muted);font-size:var(--fs-micro);">종목을 즐겨찾기에 추가하세요</div>';
+      return;
+    }
+
+    // ALL_STOCKS에서 워치리스트 종목 정보 찾기
+    var stocks = [];
+    for (var i = 0; i < list.length; i++) {
+      var code = list[i];
+      var found = (typeof ALL_STOCKS !== 'undefined')
+        ? ALL_STOCKS.find(function (s) { return s.code === code; })
+        : null;
+      if (found) stocks.push(found);
+    }
+
+    if (stocks.length === 0) {
+      container.innerHTML = '';
+      if (sectionEl) sectionEl.style.display = 'none';
+      return;
+    }
+
+    _renderItems(container, stocks, false, 0, null);
+  }
+
+
+  // ════════════════════════════════════════════════════
   //  PUBLIC API
   // ════════════════════════════════════════════════════
+
+  /** 현재 사이드바에 표시 중인 종목 목록 반환 (시총 순 정렬 적용됨) */
+  function getFilteredStocks() {
+    return _filteredStocks.slice();
+  }
 
   return {
     init: init,
@@ -1205,6 +1286,8 @@ const sidebarManager = (() => {
     setRecentStock: setRecentStock,
     getRecentStocks: getRecentStocks,
     setViewMode: setViewMode,
+    getFilteredStocks: getFilteredStocks,
+    renderWatchlist: renderWatchlist,
     MARKET_CAP: MARKET_CAP,
   };
 })();

@@ -9,6 +9,12 @@ class ChartManager {
     this.mainChart = null;
     this.rsiChart = null;
     this.macdChart = null;
+    // [NEW] 5개 추가 서브차트
+    this.stochChart = null;
+    this.cciChart = null;
+    this.adxChart = null;
+    this.willrChart = null;
+    this.atrChart = null;
 
     // Series 참조
     this.candleSeries = null;
@@ -18,6 +24,12 @@ class ChartManager {
 
     this.rsiSeries = null;
     this.rsiPriceLines = [];
+    // [NEW] 추가 지표 시리즈
+    this.stochKSeries = null; this.stochDSeries = null;
+    this.cciSeries = null;
+    this.adxSeries = null; this.adxPlusDISeries = null; this.adxMinusDISeries = null;
+    this.willrSeries = null;
+    this.atrSeries = null;
 
     this.macdLineSeries = null;
     this.macdSignalSeries = null;
@@ -47,6 +59,12 @@ class ChartManager {
 
     // 초기 표시 범위 플래그 (차트 생성 시 true, 한 번 적용 후 false)
     this._shouldSetInitialRange = false;
+
+    // [PERF] 지표 데이터 캐싱 — 동일 데이터 setData() 중복 호출 방지
+    this._lastDataKey = {};
+    // [UX] RSI/MACD 최근 계산값 저장 (크로스헤어 툴팁용)
+    this._lastRsiValues = null;
+    this._lastMacdValues = null;
 
     // ── 보이는 구간 변경 시 패턴 즉시 감지 (드래그 기반 UX) ──
     // KNOWSTOCK의 _offset 변경 → repaint 패턴과 유사:
@@ -180,7 +198,14 @@ class ChartManager {
         if (param.time && param.seriesData) {
           const data = param.seriesData.get(this.candleSeries);
           if (data && data.open != null) {
-            this._ohlcCallback({ open: data.open, high: data.high, low: data.low, close: data.close, volume: null, type: 'crosshair' });
+            // [UX] _idx 추가: 크로스헤어 위치의 캔들 인덱스 (지표값 조회용)
+            let _idx = null;
+            if (this._hoverCandles.length) {
+              for (let ci = this._hoverCandles.length - 1; ci >= 0; ci--) {
+                if (String(this._hoverCandles[ci].time) === String(param.time)) { _idx = ci; break; }
+              }
+            }
+            this._ohlcCallback({ open: data.open, high: data.high, low: data.low, close: data.close, volume: null, type: 'crosshair', _idx });
           } else {
             this._ohlcCallback(null);
           }
@@ -281,8 +306,10 @@ class ChartManager {
   // ══════════════════════════════════════════════════
   //  차트 데이터 업데이트
   // ══════════════════════════════════════════════════
-  updateMain(candles, chartType, activeIndicators, patterns) {
+  updateMain(candles, chartType, activeIndicators, patterns, params) {
     if (!this.mainChart || !candles || !candles.length) return;
+    // params: 지표 파라미터 (커스텀 기간 등), 없으면 기본값 사용
+    const _p = params || {};
 
     const times = candles.map(c => c.time);
     const closes = candles.map(c => c.close);
@@ -368,33 +395,36 @@ class ChartManager {
       this.volumeSeries.setData([]);
     }
 
-    // ── 이동평균 (MA) — 충돌 방지 팔레트 ──
+    // ── 이동평균 (MA) — 커스텀 기간 지원 ──
+    const maP = (_p.ma || { p1: 5, p2: 20, p3: 60 });
     this._updateIndicatorLine('ma5', activeIndicators.has('ma'),
-      times, calcMA(closes, 5), KRX_COLORS.MA_SHORT, 1);    // 코랄 (단기)
+      times, calcMA(closes, maP.p1), KRX_COLORS.MA_SHORT, 1);    // 단기
     this._updateIndicatorLine('ma20', activeIndicators.has('ma'),
-      times, calcMA(closes, 20), KRX_COLORS.MA_MID, 1);   // 골드 (중기)
+      times, calcMA(closes, maP.p2), KRX_COLORS.MA_MID, 1);      // 중기
     this._updateIndicatorLine('ma60', activeIndicators.has('ma'),
-      times, calcMA(closes, 60), KRX_COLORS.MA_LONG, 1);   // 민트 (장기)
+      times, calcMA(closes, maP.p3), KRX_COLORS.MA_LONG, 1);     // 장기
 
-    // ── EMA — 보라 계열 (MA와 구분) ──
+    // ── EMA — 커스텀 기간 지원 ──
+    const emaP = (_p.ema || { p1: 12, p2: 26 });
     this._updateIndicatorLine('ema12', activeIndicators.has('ema'),
-      times, calcEMA(closes, 12), KRX_COLORS.EMA_12, 1);  // 라벤더
+      times, calcEMA(closes, emaP.p1), KRX_COLORS.EMA_12, 1);
     this._updateIndicatorLine('ema26', activeIndicators.has('ema'),
-      times, calcEMA(closes, 26), KRX_COLORS.EMA_26, 1);  // 슬레이트블루
+      times, calcEMA(closes, emaP.p2), KRX_COLORS.EMA_26, 1);
 
-    // ── 일목균형표 — 각 요소 고유색 ──
+    // ── 일목균형표 — 커스텀 기간 지원 ──
     if (activeIndicators.has('ich')) {
-      const ich = calcIchimoku(candles);
+      const ichP = (_p.ich || { tenkan: 9, kijun: 26, senkou: 52 });
+      const ich = calcIchimoku(candles, ichP.tenkan, ichP.kijun, ichP.senkou);
       this._updateIndicatorLine('ichTenkan', true, times,
-        ich.tenkan, KRX_COLORS.ICH_TENKAN, 1);                  // 마젠타
+        ich.tenkan, KRX_COLORS.ICH_TENKAN, 1);
       this._updateIndicatorLine('ichKijun', true, times,
-        ich.kijun, KRX_COLORS.ICH_KIJUN, 1);                   // 틸그린
+        ich.kijun, KRX_COLORS.ICH_KIJUN, 1);
       this._updateIndicatorLine('ichSpanA', true, times,
-        ich.spanA, KRX_COLORS.ICH_SPANA, 1);    // 연초록
+        ich.spanA, KRX_COLORS.ICH_SPANA, 1);
       this._updateIndicatorLine('ichSpanB', true, times,
-        ich.spanB, KRX_COLORS.ICH_SPANB, 1);    // 연빨강
+        ich.spanB, KRX_COLORS.ICH_SPANB, 1);
       this._updateIndicatorLine('ichChikou', true, times,
-        ich.chikou, KRX_COLORS.ICH_CHIKOU, 1);                  // 블루그레이
+        ich.chikou, KRX_COLORS.ICH_CHIKOU, 1);
     } else {
       ['ichTenkan', 'ichKijun', 'ichSpanA', 'ichSpanB', 'ichChikou'].forEach(k =>
         this._removeIndicatorLine(k));
@@ -403,20 +433,21 @@ class ChartManager {
     // ── 칼만 필터 ──
     if (activeIndicators.has('kalman')) {
       const kalman = calcKalman(closes);
-      this._updateIndicatorLine('kalman', true, times, kalman, KRX_COLORS.KALMAN, 2);  // 라임
+      this._updateIndicatorLine('kalman', true, times, kalman, KRX_COLORS.KALMAN, 2);
     } else {
       this._removeIndicatorLine('kalman');
     }
 
-    // ── 볼린저 밴드 ──
+    // ── 볼린저 밴드 — 커스텀 파라미터 지원 ──
     if (activeIndicators.has('bb')) {
-      const bb = calcBB(closes);
+      const bbP = (_p.bb || { period: 20, stdDev: 2 });
+      const bb = calcBB(closes, bbP.period, bbP.stdDev);
       this._updateIndicatorLine('bbUpper', true,
-        times, bb.map(b => b.upper), KRX_COLORS.BB, 1);              // 다크오렌지
+        times, bb.map(b => b.upper), KRX_COLORS.BB, 1);
       this._updateIndicatorLine('bbMid', true,
-        times, bb.map(b => b.mid), KRX_COLORS.BB_MID, 1);   // 다크오렌지 40%
+        times, bb.map(b => b.mid), KRX_COLORS.BB_MID, 1);
       this._updateIndicatorLine('bbLower', true,
-        times, bb.map(b => b.lower), KRX_COLORS.BB, 1);              // 다크오렌지
+        times, bb.map(b => b.lower), KRX_COLORS.BB, 1);
     } else {
       this._removeIndicatorLine('bbUpper');
       this._removeIndicatorLine('bbMid');
@@ -436,12 +467,14 @@ class ChartManager {
     }
   }
 
-  /** RSI 업데이트 */
-  updateRSI(candles) {
+  /** RSI 업데이트 — params로 커스텀 기간 지원 */
+  updateRSI(candles, params) {
     if (!this.rsiChart || !this.rsiSeries) return;
 
+    const rsiP = (params && params.rsi) ? params.rsi : { period: 14 };
     const closes = candles.map(c => c.close);
-    const rsi = calcRSI(closes, 14);
+    const rsi = calcRSI(closes, rsiP.period || 14);
+    this._lastRsiValues = rsi;  // [UX] 크로스헤어 툴팁용 저장
 
     this.rsiSeries.setData(
       rsi.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
@@ -449,12 +482,14 @@ class ChartManager {
     );
   }
 
-  /** MACD 업데이트 */
-  updateMACD(candles) {
+  /** MACD 업데이트 — params로 커스텀 파라미터 지원 */
+  updateMACD(candles, params) {
     if (!this.macdChart) return;
 
+    const macdP = (params && params.macd) ? params.macd : { fast: 12, slow: 26, signal: 9 };
     const closes = candles.map(c => c.close);
-    const { macdLine, signalLine, histogram } = calcMACD(closes);
+    const { macdLine, signalLine, histogram } = calcMACD(closes, macdP.fast || 12, macdP.slow || 26, macdP.signal || 9);
+    this._lastMacdValues = { macdLine, signalLine, histogram };  // [UX] 크로스헤어 툴팁용 저장
 
     this.macdHistSeries.setData(
       histogram.map((v, i) => v !== null ? {
@@ -604,6 +639,7 @@ class ChartManager {
   _updateIndicatorLine(key, show, times, values, color, lineWidth) {
     if (!show) {
       this._removeIndicatorLine(key);
+      delete this._lastDataKey[key];
       return;
     }
 
@@ -616,6 +652,11 @@ class ChartManager {
         crosshairMarkerVisible: false,
       });
     }
+
+    // [PERF] 동일 데이터 setData() 중복 호출 방지
+    const dataKey = key + '_' + values.length + '_' + (values[0] || 0) + '_' + (values[values.length - 1] || 0);
+    if (this._lastDataKey[key] === dataKey) return;
+    this._lastDataKey[key] = dataKey;
 
     const data = values
       .map((v, i) => v !== null ? { time: times[i], value: v } : null)
@@ -641,7 +682,8 @@ class ChartManager {
 
     if (!this.mainChart) return;
 
-    const charts = [this.mainChart, this.rsiChart, this.macdChart].filter(Boolean);
+    const charts = [this.mainChart, this.rsiChart, this.macdChart,
+      this.stochChart, this.cciChart, this.adxChart, this.willrChart, this.atrChart].filter(Boolean);
     if (charts.length < 2) return;
 
     charts.forEach(source => {
@@ -692,6 +734,149 @@ class ChartManager {
       this.macdSignalSeries = null;
       this.macdHistSeries = null;
       this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  [NEW] Stochastic 서브차트
+  // ══════════════════════════════════════════════════
+  createStochasticChart(container) {
+    this.destroyStochastic();
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+    this.stochChart = LightweightCharts.createChart(container, opts);
+    this.stochKSeries = this.stochChart.addLineSeries({ color: '#ff9800', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.stochDSeries = this.stochChart.addLineSeries({ color: '#e91e63', lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
+    this.stochKSeries.createPriceLine({ price: 80, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.stochKSeries.createPriceLine({ price: 20, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this._observeResize(container, this.stochChart);
+    this._rebuildSync();
+    return this.stochChart;
+  }
+  updateStochastic(candles) {
+    if (!this.stochChart || !this.stochKSeries) return;
+    const { k, d } = calcStochastic(candles);
+    this.stochKSeries.setData(k.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.stochDSeries.setData(d.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+  }
+  destroyStochastic() {
+    if (this.stochChart) {
+      this._resizeMap.forEach((e, c) => { if (e.chart === this.stochChart) { e.observer.disconnect(); this._resizeMap.delete(c); } });
+      this.stochChart.remove(); this.stochChart = null; this.stochKSeries = null; this.stochDSeries = null; this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  [NEW] CCI 서브차트
+  // ══════════════════════════════════════════════════
+  createCCIChart(container) {
+    this.destroyCCI();
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+    this.cciChart = LightweightCharts.createChart(container, opts);
+    this.cciSeries = this.cciChart.addLineSeries({ color: '#26C6DA', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.cciSeries.createPriceLine({ price: 100, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.cciSeries.createPriceLine({ price: -100, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this._observeResize(container, this.cciChart);
+    this._rebuildSync();
+    return this.cciChart;
+  }
+  updateCCI(candles) {
+    if (!this.cciChart || !this.cciSeries) return;
+    const cci = calcCCI(candles);
+    this.cciSeries.setData(cci.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+  }
+  destroyCCI() {
+    if (this.cciChart) {
+      this._resizeMap.forEach((e, c) => { if (e.chart === this.cciChart) { e.observer.disconnect(); this._resizeMap.delete(c); } });
+      this.cciChart.remove(); this.cciChart = null; this.cciSeries = null; this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  [NEW] ADX 서브차트 (+DI/-DI)
+  // ══════════════════════════════════════════════════
+  createADXChart(container) {
+    this.destroyADX();
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+    this.adxChart = LightweightCharts.createChart(container, opts);
+    this.adxSeries = this.adxChart.addLineSeries({ color: '#AB47BC', lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+    this.adxPlusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
+    this.adxMinusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
+    this.adxSeries.createPriceLine({ price: 25, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this._observeResize(container, this.adxChart);
+    this._rebuildSync();
+    return this.adxChart;
+  }
+  updateADX(candles) {
+    if (!this.adxChart || !this.adxSeries) return;
+    const { adx, plusDI, minusDI } = calcADX(candles);
+    this.adxSeries.setData(adx.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.adxPlusDISeries.setData(plusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.adxMinusDISeries.setData(minusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+  }
+  destroyADX() {
+    if (this.adxChart) {
+      this._resizeMap.forEach((e, c) => { if (e.chart === this.adxChart) { e.observer.disconnect(); this._resizeMap.delete(c); } });
+      this.adxChart.remove(); this.adxChart = null; this.adxSeries = null; this.adxPlusDISeries = null; this.adxMinusDISeries = null; this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  [NEW] Williams %R 서브차트
+  // ══════════════════════════════════════════════════
+  createWilliamsRChart(container) {
+    this.destroyWilliamsR();
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+    this.willrChart = LightweightCharts.createChart(container, opts);
+    this.willrSeries = this.willrChart.addLineSeries({ color: '#FF7043', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.willrSeries.createPriceLine({ price: -20, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.willrSeries.createPriceLine({ price: -80, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this._observeResize(container, this.willrChart);
+    this._rebuildSync();
+    return this.willrChart;
+  }
+  updateWilliamsR(candles) {
+    if (!this.willrChart || !this.willrSeries) return;
+    const willr = calcWilliamsR(candles);
+    this.willrSeries.setData(willr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+  }
+  destroyWilliamsR() {
+    if (this.willrChart) {
+      this._resizeMap.forEach((e, c) => { if (e.chart === this.willrChart) { e.observer.disconnect(); this._resizeMap.delete(c); } });
+      this.willrChart.remove(); this.willrChart = null; this.willrSeries = null; this._rebuildSync();
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  [NEW] ATR 서브차트
+  // ══════════════════════════════════════════════════
+  createATRChart(container) {
+    this.destroyATR();
+    const opts = this._baseOptions();
+    opts.timeScale = { ...opts.timeScale, visible: false };
+    opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
+    this.atrChart = LightweightCharts.createChart(container, opts);
+    this.atrSeries = this.atrChart.addLineSeries({ color: '#FFA726', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this._observeResize(container, this.atrChart);
+    this._rebuildSync();
+    return this.atrChart;
+  }
+  updateATR(candles) {
+    if (!this.atrChart || !this.atrSeries) return;
+    const atrVals = calcATR(candles);
+    this.atrSeries.setData(atrVals.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+  }
+  destroyATR() {
+    if (this.atrChart) {
+      this._resizeMap.forEach((e, c) => { if (e.chart === this.atrChart) { e.observer.disconnect(); this._resizeMap.delete(c); } });
+      this.atrChart.remove(); this.atrChart = null; this.atrSeries = null; this._rebuildSync();
     }
   }
 
@@ -757,6 +942,7 @@ class ChartManager {
     // renderer cleanup (stale 참조 방지)
     if (typeof patternRenderer !== 'undefined' && patternRenderer.cleanup) patternRenderer.cleanup();
     if (typeof signalRenderer !== 'undefined' && signalRenderer.cleanup) signalRenderer.cleanup();
+    if (typeof drawingTools !== 'undefined' && drawingTools.cleanup) drawingTools.cleanup();
 
     // 보이는 구간 구독 해제
     if (this._visibleRangeUnsub) {
@@ -782,6 +968,11 @@ class ChartManager {
     if (this.mainChart) { this.mainChart.remove(); this.mainChart = null; }
     if (this.rsiChart) { this.rsiChart.remove(); this.rsiChart = null; }
     if (this.macdChart) { this.macdChart.remove(); this.macdChart = null; }
+    if (this.stochChart) { this.stochChart.remove(); this.stochChart = null; }
+    if (this.cciChart) { this.cciChart.remove(); this.cciChart = null; }
+    if (this.adxChart) { this.adxChart.remove(); this.adxChart = null; }
+    if (this.willrChart) { this.willrChart.remove(); this.willrChart = null; }
+    if (this.atrChart) { this.atrChart.remove(); this.atrChart = null; }
 
     // 참조 초기화
     this.candleSeries = null;
@@ -790,6 +981,11 @@ class ChartManager {
     this.trendlineSeries = [];
     this.rsiSeries = null;
     this.rsiPriceLines = [];
+    this.stochKSeries = null; this.stochDSeries = null;
+    this.cciSeries = null;
+    this.adxSeries = null; this.adxPlusDISeries = null; this.adxMinusDISeries = null;
+    this.willrSeries = null;
+    this.atrSeries = null;
     this.macdLineSeries = null;
     this.macdSignalSeries = null;
     this.macdHistSeries = null;

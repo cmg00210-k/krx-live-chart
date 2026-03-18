@@ -26,3 +26,6 @@ data/
 
 # Claude Code (AI assistant local config)
 .claude/
+
+# Runtime state (login guard — prevents Kiwoom account lockout across restarts)
+server/.login_guard.json

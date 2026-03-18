@@ -11,7 +11,7 @@ KRX Live Chart — a frontend-only Korean stock market (KOSPI/KOSDAQ) charting w
 **No module system.** All JS files use global variables and classes. Script load order in `index.html` is critical:
 
 ```
-colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → app.js
+colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → drawingTools.js → app.js
 ```
 
 Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is used in app.js, `patternRenderer` from patternRenderer.js is used in chart.js/app.js).
@@ -22,19 +22,20 @@ Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is u
 |------|-----------------|------|-------|
 | `js/colors.js` | `KRX_COLORS` | Frozen color constants used by all JS files instead of hardcoded hex values | 20 |
 | `js/data.js` | `PAST_DATA`, `getPastData()`, `getFinancialData()` | Historical financial data; async loader tries `data/financials/{code}.json` first, falls back to hardcoded/seed data | 160 |
-| `js/api.js` | `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json) | 334 |
+| `js/api.js` | `_idb`, `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json, L1 memory + L2 IndexedDB + L3 network 3-tier caching, marketCap/sector fields) | 420 |
 | `js/realtimeProvider.js` | `realtimeProvider` | WebSocket client for Kiwoom OCX server, demo fallback | 230 |
 | `js/indicators.js` | `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()`, `IndicatorCache` | 9 technical indicator calculations + lazy-evaluation cache with VMA/volRatio | 378 |
 | `js/patterns.js` | `patternEngine` | PatternEngine class — 26 patterns (17 candle + 8 chart + S/R) with ATR normalization, quality scoring | 1488 |
 | `js/signalEngine.js` | `COMPOSITE_SIGNAL_DEFS`, `signalEngine` | SignalEngine class — 16 indicator signals (5 categories) + 6 composite signals (3 tiers) + divergence detection | 1129 |
 | `js/chart.js` | `chartManager` | ChartManager class using TradingView Lightweight Charts v4.2.3 (indicators delegated to indicators.js) | 697 |
-| `js/patternRenderer.js` | `patternRenderer` | ISeriesPrimitive-based Canvas pattern visualization (rects, polylines, hlines) | 405 |
+| `js/patternRenderer.js` | `patternRenderer` | ISeriesPrimitive-based HTS-grade Canvas pattern visualization v3.1 (glows, brackets, trendAreas, polylines, hlines, labels, connectors, forecastZones) with 3-tier visibility filtering and label collision avoidance | 1400+ |
 | `js/signalRenderer.js` | `signalRenderer` | ISeriesPrimitive-based Canvas signal visualization (diamonds, stars, vbands, divergence lines, volume highlight) | 469 |
 | `js/backtester.js` | `backtester` | PatternBacktester class — per-pattern N-day return statistics + backtest panel rendering | 497 |
 | `js/analysisWorker.js` | (Web Worker) | Offloads pattern + signal + backtest analysis to Web Worker thread; loads colors/indicators/patterns/signalEngine/backtester via importScripts | 103 |
 | `js/sidebar.js` | `sidebarManager` | Collapsible sidebar with KOSPI/KOSDAQ stock lists, accordion sections | 87 |
 | `js/patternPanel.js` | `PATTERN_ACADEMIC_META`, `renderPatternPanel()`, `renderPatternCards()`, etc. | 27-pattern academic metadata + pattern UI panel (summary bar, history table, return curve, cards) | 770 |
 | `js/financials.js` | `updateFinancials()`, `drawFinTrendChart()`, `drawOPMSparkline()`, etc. | Financial panel (D column): PER/PBR/PSR, CAGR, investment score, trend charts, sparklines | 510 |
+| `js/drawingTools.js` | `drawingTools` | Left vertical toolbar + ISeriesPrimitive drawing overlay (trendline, hline, vline, rect, fib, eraser) with localStorage persistence per stock | 480 |
 | `js/app.js` | (none — side effects only) | State management, UI event binding, initialization, Web Worker orchestration | 1650 |
 
 ### File Dependency Graph
@@ -68,6 +69,8 @@ patternPanel.js ← colors.js (KRX_COLORS), backtester.js (backtester)
   ↓
 financials.js ← data.js (getFinancialData), colors.js (KRX_COLORS), sidebar.js (sidebarManager)
   ↓
+drawingTools.js ← chart.js (chartManager.candleSeries — ISeriesPrimitive attach)
+  ↓
 app.js ← all of the above (orchestrates everything)
 
 analysisWorker.js ← (Web Worker, separate context)
@@ -81,12 +84,13 @@ analysisWorker.js ← (Web Worker, separate context)
 - **Time scale sync** across main/RSI/MACD charts uses `_syncUnsubs` array; `_rebuildSync()` unsubscribes all before re-subscribing.
 - **Pattern analysis** is throttled to 3-second intervals (`_lastPatternAnalysis` in app.js) to avoid performance issues.
 - **Pattern button** uses class `.pattern-btn` and is excluded from indicator handlers via `.ind-btn:not(.pattern-btn)`.
-- **PatternRenderer** uses ISeriesPrimitive plugin API (`attachPrimitive`/`detachPrimitive`) for Canvas2D direct drawing. Max 3 patterns on chart (`MAX_PATTERNS`), rest in side panel.
+- **PatternRenderer** (v3.1) uses ISeriesPrimitive plugin API for Canvas2D HTS-grade drawing. 9 draw layers (glows → brackets → trendAreas → polylines → hlines → connectors → labels → forecastZones → extendedLines). Max 5 patterns (`MAX_PATTERNS`), 3-tier visibility filtering (candle patterns: visible-only, chart patterns: extend structure lines when off-screen, S/R: always visible). Forecast Zones show target/stop areas with gradient fills and return % text. Pattern colors use dedicated `KRX_COLORS.PTN_BUY` (mint) / `PTN_SELL` (lavender) — distinct from main UP/DOWN colors.
 - **SignalRenderer** uses same ISeriesPrimitive pattern with dual PaneViews (bg `zOrder='bottom'` for vbands, fg `zOrder='top'` for diamonds/stars/divlines). Also highlights volumeSeries colors for breakout bars.
 - **SignalEngine** builds an `IndicatorCache` internally for lazy indicator computation, then runs 5 signal categories + composite matching + sentiment scoring.
 - **IndicatorCache** (indicators.js) uses lazy evaluation — each indicator computed only on first access, cached until `setCandles()` or `invalidate()` is called.
 - **Web Worker** (`analysisWorker.js`) offloads heavy analysis (pattern + signal + backtest) off the main thread. Messages use `version` field for stale-result rejection.
-- **KRX_COLORS** (colors.js) centralizes all color constants; JS files should reference `KRX_COLORS.UP` instead of hardcoding `'#E05050'`.
+- **KRX_COLORS** (colors.js) centralizes all color constants; JS files should reference `KRX_COLORS.UP` instead of hardcoding `'#E05050'`. Pattern-specific colors (`PTN_BUY`, `PTN_SELL`, `PTN_STRUCT`, `PTN_STOP`, `PTN_TARGET`) are separate from chart UP/DOWN colors.
+- **index.html** uses 4-column grid layout: A=sidebar (collapsible stock list with sort/filter), B=chart area + return stats, C=pattern panel (academic cards), D=financial panel (PER/PBR/ROE/CAGR/score). Responsive breakpoints at 1024px and 768px.
 
 ### Data Flow
 

@@ -476,7 +476,9 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = trend.direction !== 'neutral' ? Math.min(trend.strength, 1) : 0.3;
       const shadowScore = Math.min(range / a, 1);
-      const confidence = this._quality({ body: 0.5, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.5 });
+      // [ACC] Doji ATR 정규화: 저변동성 도지는 품질 감산 (노이즈 방지)
+      const atrPenalty = range < a * 0.3 ? 0.7 : 1.0;
+      const confidence = Math.round(this._quality({ body: 0.5, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.5 }) * atrPenalty);
 
       results.push({
         type: 'doji', name: '도지 (Doji)', nameShort: '도지',
@@ -517,7 +519,9 @@ class PatternEngine {
       if (prev.close < prev.open && curr.close > curr.open) {
         if (curr.open <= prev.close && curr.close >= prev.open) {
           const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
-          const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
+          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
           results.push({
             type: 'bullishEngulfing', name: '상승장악형 (Bullish Engulfing)', nameShort: '상승장악',
             signal: 'buy', strength: 'strong', confidence,
@@ -534,7 +538,9 @@ class PatternEngine {
       if (prev.close > prev.open && curr.close < curr.open) {
         if (curr.open >= prev.close && curr.close <= prev.open) {
           const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
-          const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
+          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
           results.push({
             type: 'bearishEngulfing', name: '하락장악형 (Bearish Engulfing)', nameShort: '하락장악',
             signal: 'sell', strength: 'strong', confidence,
@@ -573,13 +579,16 @@ class PatternEngine {
         if (curr.open > prev.close && curr.close < prev.open) {
           const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
           const bodyScore = Math.min(1 - currBody / prevBody, 1);
-          const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          // [ACC] 하라미 3캔들 확인: 다음 캔들이 현재 종가 위로 마감하면 확인됨
+          const hasConfirm = (i + 1 < candles.length) && candles[i + 1].close > curr.close;
+          let quality = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          if (!hasConfirm) quality = Math.round(quality * 0.8);  // 미확인 시 20% 감산
           results.push({
             type: 'bullishHarami', name: '상승잉태형 (Bullish Harami)', nameShort: '상승잉태',
-            signal: 'buy', strength: 'medium', confidence,
+            signal: 'buy', strength: 'medium', confidence: quality, confirmed: hasConfirm,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
             priceTarget: this._target(candles, i - 1, i, 'buy'),
-            description: `작은 양봉이 음봉 내에 — 반전 가능. 신뢰도 ${confidence}%`,
+            description: `작은 양봉이 음봉 내에 — 반전 가능. ${hasConfirm ? '확인됨' : '미확인'}. 신뢰도 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
           });
@@ -591,13 +600,16 @@ class PatternEngine {
         if (curr.open < prev.close && curr.close > prev.open) {
           const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
           const bodyScore = Math.min(1 - currBody / prevBody, 1);
-          const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          // [ACC] 하라미 3캔들 확인: 다음 캔들이 현재 종가 아래로 마감하면 확인됨
+          const hasConfirm = (i + 1 < candles.length) && candles[i + 1].close < curr.close;
+          let quality = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          if (!hasConfirm) quality = Math.round(quality * 0.8);  // 미확인 시 20% 감산
           results.push({
             type: 'bearishHarami', name: '하락잉태형 (Bearish Harami)', nameShort: '하락잉태',
-            signal: 'sell', strength: 'medium', confidence,
+            signal: 'sell', strength: 'medium', confidence: quality, confirmed: hasConfirm,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
             priceTarget: this._target(candles, i - 1, i, 'sell'),
-            description: `작은 음봉이 양봉 내에 — 반전 가능. 신뢰도 ${confidence}%`,
+            description: `작은 음봉이 양봉 내에 — 반전 가능. ${hasConfirm ? '확인됨' : '미확인'}. 신뢰도 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
           });

@@ -12,8 +12,8 @@ class RealtimeProvider {
     // ── WebSocket 상태 ──
     this._ws = null;
     this._wsReconnectTimer = null;
-    this._wsReconnectDelay = 3000;  // 재연결 대기 (ms)
-    this._wsMaxReconnect = 10;      // 최대 재연결 시도
+    this._wsReconnectDelay = 2000;  // 재연결 초기 대기 (ms) — 서버 기동 시간 고려
+    this._wsMaxReconnect = 20;      // 최대 재연결 시도 (~5분 커버리지)
     this._wsReconnectCount = 0;
     this._wsPingTimer = null;
 
@@ -23,6 +23,19 @@ class RealtimeProvider {
     this._timeframe = null;
     this._connected = false;
     this._mode = 'unknown';     // 'ws' | 'demo'
+
+    // ── 서버 상태 콜백 (app.js에서 등록) ──
+    // onServerStatus(status, message) — status: 'login_pending' | 'ready' | 'login_failed'
+    this.onServerStatus = null;
+
+    // ── 로그인 에러 수신 플래그 (Login Error Latch) ──
+    // true이면 서버가 로그인 실패 상태 — 재연결 시도 억제
+    // When true, server has login failure — suppress reconnection attempts
+    this._loginErrorReceived = false;
+
+    // ── 연결 상태 변경 콜백 (Connection Management UI) ──
+    // onConnectionChange(state) — state: 'connected' | 'reconnecting' | 'failed'
+    this.onConnectionChange = null;
   }
 
   get connected() { return this._connected; }
@@ -44,6 +57,13 @@ class RealtimeProvider {
     this._wsReconnectCount = 0;
 
     if (KRX_API_CONFIG.mode === 'ws') {
+      // 로그인 에러 수신 상태면 WS 연결 시도하지 않음 (계정 잠금 방지)
+      // Skip WS connection if loginError was previously received (account lock prevention)
+      if (this._loginErrorReceived) {
+        console.warn('[RealtimeProvider] 로그인 에러 상태 — WS 연결 생략 (계정 보호)');
+        this._emit({ error: true, message: 'Kiwoom 로그인 실패 상태 — 서버 재시작 필요' });
+        return;
+      }
       // WebSocket 모드: Kiwoom OCX 서버 연결
       this._connectWebSocket(stock, timeframe);
     }
@@ -57,6 +77,19 @@ class RealtimeProvider {
 
     this._connected = false;
     this._mode = 'unknown';
+  }
+
+  /**
+   * 새 WS 서버 주소로 재연결
+   * @param {string} wsUrl - 새 WebSocket 서버 주소
+   */
+  reconnectTo(wsUrl) {
+    this.stop();
+    this._wsReconnectCount = 0;
+    KRX_API_CONFIG.wsUrl = wsUrl;
+    if (this._stock) {
+      this.start(this._stock, this._timeframe);
+    }
   }
 
   // ══════════════════════════════════════════════════
@@ -84,6 +117,9 @@ class RealtimeProvider {
       this._wsReconnectCount = 0;
       console.log('[RealtimeProvider] WebSocket 연결됨:', wsUrl);
 
+      // 연결 상태 콜백 (Connection Management UI)
+      if (this.onConnectionChange) this.onConnectionChange('connected');
+
       // 종목 구독 요청
       this._wsSend({
         type: 'subscribe',
@@ -110,12 +146,24 @@ class RealtimeProvider {
       this._connected = false;
       this._stopPing();
 
+      // 연결 상태 콜백 (Connection Management UI)
+      if (this.onConnectionChange) {
+        this.onConnectionChange(
+          this._wsReconnectCount >= this._wsMaxReconnect ? 'failed' : 'reconnecting'
+        );
+      }
+
       // 의도적 종료가 아니면 재연결 시도
-      if (this._stock && this._wsReconnectCount < this._wsMaxReconnect) {
+      // 로그인 에러 수신 후에는 절대 재연결하지 않음 (계정 잠금 방지)
+      // NEVER reconnect after receiving loginError (account lock prevention)
+      if (this._loginErrorReceived) {
+        console.warn('[RealtimeProvider] 로그인 에러 수신 후 재연결 차단 (계정 보호)');
+        this._emit({ error: true, message: 'Kiwoom 로그인 실패 — 서버 재시작 필요' });
+      } else if (this._stock && this._wsReconnectCount < this._wsMaxReconnect) {
         this._wsReconnectCount++;
         const delay = Math.min(
           this._wsReconnectDelay * Math.pow(1.5, this._wsReconnectCount - 1),
-          30000
+          15000  // 서버 기동 + 로그인 대기 동안 빠른 재연결 유지
         );
         console.log(
           '[RealtimeProvider] 재연결 시도 %d/%d (%.1f초 후)',
@@ -208,12 +256,116 @@ class RealtimeProvider {
       // 서버에서 보낸 KOSPI/KOSDAQ 지수 데이터
       this._updateMarketIndex(data);
 
+    } else if (type === 'loginError') {
+      // ── Kiwoom 로그인 에러 (계정 잠금 방지) ──
+      // Login error from server — do NOT auto-reconnect to prevent account lockout
+      console.error('[RealtimeProvider] Kiwoom 로그인 에러:', data.message);
+
+      // 로그인 에러 래치 설정 — start() 호출 시에도 재연결 억제
+      // Set login error latch — suppresses reconnection even when start() is called
+      this._loginErrorReceived = true;
+
+      // 자동 재연결 즉시 중단 (로그인 에러에 재연결하면 계정 잠금 위험!)
+      // Stop auto-reconnect immediately — reconnecting on login errors risks account lockout!
+      this._wsReconnectCount = this._wsMaxReconnect;
+
+      // 사용자에게 에러 표시 (UI toast)
+      const isFatal = data.fatal || data.blocked;
+      this._showLoginError(data.message, isFatal);
+
+      // 에러 이벤트 emit (app.js 등에서 추가 처리 가능)
+      this._emit({
+        error: true,
+        loginError: true,
+        message: data.message,
+        fatal: data.fatal,
+        blocked: data.blocked,
+        attempts: data.attempts,
+        maxAttempts: data.maxAttempts,
+      });
+
+    } else if (type === 'serverStatus') {
+      // ── 서버 상태 알림 (로그인 대기 / 준비 완료 / 로그인 실패) ──
+      var status = data.status;    // 'login_pending' | 'ready' | 'login_failed'
+      var message = data.message || '';
+      console.log('[RealtimeProvider] 서버 상태:', status, message);
+
+      // 상태 이벤트 발송 (app.js에서 처리)
+      if (this.onServerStatus) {
+        this.onServerStatus(status, message);
+      }
+
+      // ready 상태 → 로그인 에러 래치 해제 (서버 로그인 성공)
+      // Ready status → clear login error latch (server login succeeded)
+      if (status === 'ready') {
+        this._loginErrorReceived = false;
+      }
+
+      // ready 상태이면 현재 구독 재전송 (로그인 완료 후 즉시 데이터 수신)
+      if (status === 'ready' && this._stock) {
+        this._wsSend({
+          type: 'subscribe',
+          code: this._stock.code,
+          market: this._stock.market || 'KOSPI',
+          timeframe: this._timeframe || '1d',
+        });
+      }
+
     } else if (type === 'pong') {
       // 핑/퐁 응답 — 연결 확인
     } else if (type === 'unsubscribed') {
       console.log('[RealtimeProvider] 구독 해제 완료');
     } else if (type === 'error') {
       console.warn('[RealtimeProvider] 서버 에러:', data.message);
+    }
+  }
+
+  /**
+   * 로그인 에러를 사용자에게 시각적으로 표시.
+   * Display login error to the user via a visible toast/banner.
+   */
+  _showLoginError(message, isFatal) {
+    // 기존 로그인 에러 토스트 제거
+    const existing = document.getElementById('login-error-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'login-error-toast';
+    toast.style.cssText = [
+      'position: fixed',
+      'top: 20px',
+      'left: 50%',
+      'transform: translateX(-50%)',
+      'z-index: 99999',
+      'padding: 16px 24px',
+      'border-radius: 8px',
+      'font-size: 14px',
+      'font-weight: 600',
+      'max-width: 600px',
+      'text-align: center',
+      'box-shadow: 0 4px 20px rgba(0,0,0,0.5)',
+      isFatal
+        ? 'background: #B71C1C; color: #fff; border: 2px solid #E53935'
+        : 'background: #E65100; color: #fff; border: 2px solid #FF6D00',
+    ].join('; ');
+
+    const icon = isFatal ? '[CRITICAL]' : '[WARNING]';
+    toast.textContent = `${icon} ${message}`;
+
+    // 닫기 버튼
+    const closeBtn = document.createElement('span');
+    closeBtn.textContent = ' X';
+    closeBtn.style.cssText = 'cursor: pointer; margin-left: 12px; opacity: 0.8;';
+    closeBtn.onclick = () => toast.remove();
+    toast.appendChild(closeBtn);
+
+    document.body.appendChild(toast);
+
+    // Fatal이 아니면 30초 후 자동 제거
+    if (!isFatal) {
+      setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+      }, 30000);
     }
   }
 

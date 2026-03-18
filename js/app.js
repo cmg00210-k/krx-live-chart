@@ -22,11 +22,41 @@ let _lastPatternAnalysis = 0;
 let _realtimeMode = false;
 let _realtimeUnsub = null;
 let _selectVersion = 0;
+let _tfVersion = 0;            // [OPT] 타임프레임 빠른 전환 시 stale fetch 무시용
 let _fallbackTimer = null;
 let _prevPrice = null;       // 가격 변화 flash 감지용
 let _kbNavTimer = null;      // 키보드 네비게이션 디바운스 타이머
 let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.json)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
+
+// ── 데이터 수신 시각 추적 (Data Freshness Indicator) ──
+var _lastDataTime = 0;
+var _freshnessTimer = null;
+
+/** 데이터 수신 시각 갱신 표시 (10초마다 자동 갱신) */
+function _updateFreshness() {
+  var el = document.getElementById('data-freshness');
+  if (!el) return;
+  if (!_lastDataTime) { el.textContent = ''; return; }
+
+  var diff = Math.floor((Date.now() - _lastDataTime) / 1000);
+  if (diff < 5) el.textContent = '방금';
+  else if (diff < 60) el.textContent = diff + '초 전';
+  else if (diff < 3600) el.textContent = Math.floor(diff / 60) + '분 전';
+  else el.textContent = Math.floor(diff / 3600) + '시간 전';
+
+  // 5분 이상 지연 시 경고 색상
+  el.style.color = diff > 300 ? 'var(--neutral)' : diff > 60 ? 'var(--text-sub)' : 'var(--text-muted)';
+}
+
+/** 캔들 데이터 수신 시 호출 — 최종 수신 시각 기록 */
+function _markDataFresh() {
+  _lastDataTime = Date.now();
+  _updateFreshness();
+}
+
+// 10초마다 freshness 텍스트 갱신
+_freshnessTimer = setInterval(_updateFreshness, 10000);
 
 // ── DOM 캐시 (빈번 조회 요소) ──
 const _dom = {};
@@ -42,6 +72,22 @@ function _cacheDom() {
   _dom.ohlcLow   = document.getElementById('ohlc-low');
   _dom.ohlcClose = document.getElementById('ohlc-close');
   _dom.ohlcVol   = document.getElementById('ohlc-vol');
+  // [NEW] 추가 지표 서브차트 DOM 캐시
+  _dom.stochContainer = document.getElementById('stoch-chart-container');
+  _dom.stochLabel = document.getElementById('stoch-label');
+  _dom.cciContainer = document.getElementById('cci-chart-container');
+  _dom.cciLabel = document.getElementById('cci-label');
+  _dom.adxContainer = document.getElementById('adx-chart-container');
+  _dom.adxLabel = document.getElementById('adx-label');
+  _dom.willrContainer = document.getElementById('willr-chart-container');
+  _dom.willrLabel = document.getElementById('willr-label');
+  _dom.atrContainer = document.getElementById('atr-chart-container');
+  _dom.atrLabel = document.getElementById('atr-label');
+  // [UX] 크로스헤어 지표값 DOM 캐시
+  _dom.ohlcRsi     = document.getElementById('ohlc-rsi');
+  _dom.ohlcRsiVal  = document.getElementById('ohlc-rsi-val');
+  _dom.ohlcMacd    = document.getElementById('ohlc-macd');
+  _dom.ohlcMacdVal = document.getElementById('ohlc-macd-val');
 }
 
 // ── 시그널 카테고리 필터 상태 ──
@@ -56,6 +102,8 @@ let _prevPatternCount = -1;    // 패턴 toast 중복 방지용
 let _dragVersion = 0;          // 드래그 분석 stale 결과 무시용
 let _dragDebounceTimer = null;  // 드래그 분석 150ms 디바운스
 let _dragClampFrom = 0;        // 드래그 분석 인덱스 오프셋 (Worker 결과 보정용)
+let _ohlcRafId = 0;            // [FIX] crosshair OHLC 바 RAF 디바운스 ID
+let _workerRestartCount = 0;   // [FIX] Worker 에러 시 재시작 카운터 (최대 3회)
 
 // 차트 패턴 구조선 보존 대상 타입 (이중바닥, 삼각형 등 넓은 구간에 걸치는 패턴)
 const _CHART_PATTERN_TYPES = new Set([
@@ -65,6 +113,58 @@ const _CHART_PATTERN_TYPES = new Set([
   'risingWedge', 'fallingWedge',
   'flag', 'supportBounce', 'resistanceReject',
 ]);
+
+// ── 즐겨찾기 (워치리스트) ──
+var WATCHLIST_KEY = 'krx_watchlist';
+function _getWatchlist() {
+  try { return JSON.parse(localStorage.getItem(WATCHLIST_KEY)) || []; } catch (e) { return []; }
+}
+function _saveWatchlist(list) { localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list)); }
+function _toggleWatchlist(code) {
+  var list = _getWatchlist();
+  var idx = list.indexOf(code);
+  if (idx >= 0) list.splice(idx, 1); else list.push(code);
+  _saveWatchlist(list);
+  return idx < 0; // true=추가됨
+}
+function _updateStarBtn() {
+  var btn = document.getElementById('watchlist-toggle-btn');
+  if (!btn || !currentStock) return;
+  var isWatched = _getWatchlist().includes(currentStock.code);
+  btn.textContent = isWatched ? '\u2605' : '\u2606';
+  btn.classList.toggle('active', isWatched);
+}
+
+// ── 지표 파라미터 (우클릭 커스터마이징) ──
+var DEFAULT_IND_PARAMS = {
+  ma: { p1: 5, p2: 20, p3: 60 },
+  ema: { p1: 12, p2: 26 },
+  bb: { period: 20, stdDev: 2 },
+  rsi: { period: 14 },
+  macd: { fast: 12, slow: 26, signal: 9 },
+  ich: { tenkan: 9, kijun: 26, senkou: 52 },
+};
+var _PARAM_LABELS = {
+  p1: '단기', p2: '중기', p3: '장기', period: '기간', stdDev: '표준편차',
+  fast: '빠른선', slow: '느린선', signal: '시그널', tenkan: '전환선', kijun: '기준선', senkou: '선행스팬',
+};
+function _loadIndParams() {
+  try {
+    var s = JSON.parse(localStorage.getItem('krx_ind_params'));
+    if (s) {
+      var merged = JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS));
+      for (var k in s) {
+        if (merged[k]) Object.assign(merged[k], s[k]);
+        else merged[k] = s[k];
+      }
+      return merged;
+    }
+    return JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS));
+  } catch (e) { return JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS)); }
+}
+function _saveIndParams(p) { localStorage.setItem('krx_ind_params', JSON.stringify(p)); }
+var indParams = _loadIndParams();
+var _activeParamInd = null;
 
 /**
  * 보존된 차트 패턴을 드래그 분석 결과에 병합 (중복 방지)
@@ -218,16 +318,148 @@ function _applyPrefsToUI() {
 }
 
 // ══════════════════════════════════════════════════════
+//  앱 로딩 오버레이 제어
+// ══════════════════════════════════════════════════════
+
+/** 로딩 오버레이 텍스트 변경 */
+function _setLoadingText(text, sub) {
+  var el = document.getElementById('app-loading-text');
+  var subEl = document.getElementById('app-loading-sub');
+  if (el) el.textContent = text || '';
+  if (subEl) subEl.textContent = sub || '';
+}
+
+/** 로딩 오버레이 페이드아웃 후 숨김 */
+function _hideLoadingOverlay() {
+  var overlay = document.getElementById('app-loading-overlay');
+  if (!overlay) return;
+  overlay.classList.add('fade-out');
+  setTimeout(function() { overlay.classList.add('hidden'); }, 400);
+}
+
+// ══════════════════════════════════════════════════════
+//  연결 가이드 (WS 서버 미감지 시)
+// ══════════════════════════════════════════════════════
+
+/**
+ * WS 서버 프로브 실패 시 로딩 오버레이에 연결 가이드를 표시.
+ * 사용자가 주소 입력 / 파일 모드 / 데모 모드를 선택하면 onResolved() 호출.
+ * @param {Function} onResolved - 모드 확정 후 호출될 콜백
+ */
+function _showConnectionGuide(onResolved) {
+  var overlay = document.getElementById('app-loading-overlay');
+  var spinner = overlay ? overlay.querySelector('.app-loading-spinner') : null;
+  var text = document.getElementById('app-loading-text');
+  var sub = document.getElementById('app-loading-sub');
+  var guide = document.getElementById('conn-guide');
+  var urlInput = document.getElementById('conn-guide-url');
+
+  // 스피너 + 텍스트 숨기고 가이드 표시
+  if (spinner) spinner.style.display = 'none';
+  if (text) text.style.display = 'none';
+  if (sub) sub.style.display = 'none';
+  if (guide) guide.style.display = '';
+  if (urlInput) urlInput.value = KRX_API_CONFIG.wsUrl || 'ws://localhost:8765';
+
+  // 연결 시도 버튼
+  var retryBtn = document.getElementById('conn-guide-retry');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', async function() {
+      var url = urlInput.value.trim();
+      if (!url) return;
+      this.textContent = '연결 중...'; this.disabled = true;
+      KRX_API_CONFIG.wsUrl = url;
+      _savePrefs({ wsUrl: url });
+      var ok = await dataService.probeWsServer(url, 5000);
+      if (ok) {
+        KRX_API_CONFIG.mode = 'ws';
+        guide.style.display = 'none';
+        if (spinner) spinner.style.display = '';
+        if (text) { text.style.display = ''; text.textContent = '연결 성공! 데이터 로드 중...'; }
+        if (sub) sub.style.display = '';
+        onResolved();
+      } else {
+        this.textContent = '연결'; this.disabled = false;
+        showToast('서버 연결 실패 — 주소를 확인하세요', 'error');
+      }
+    });
+  }
+
+  // 파일 모드 버튼
+  var fileBtn = document.getElementById('conn-guide-file');
+  if (fileBtn) {
+    fileBtn.addEventListener('click', function() {
+      KRX_API_CONFIG.mode = 'file';
+      guide.style.display = 'none';
+      onResolved();
+    });
+  }
+
+  // 데모 모드 버튼
+  var demoBtn = document.getElementById('conn-guide-demo');
+  if (demoBtn) {
+    demoBtn.addEventListener('click', function() {
+      KRX_API_CONFIG.mode = 'demo';
+      guide.style.display = 'none';
+      onResolved();
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  연결 설정 패널 상태 업데이트
+// ══════════════════════════════════════════════════════
+
+/**
+ * 연결 패널의 상태 표시 (dot + 텍스트) 업데이트
+ * @param {string} status - 연결 상태 키
+ */
+function _updateConnPanel(status) {
+  var dot = document.getElementById('conn-panel-dot');
+  var text = document.getElementById('conn-panel-text');
+  if (!dot || !text) return;
+  var map = {
+    'connected': ['ok', '연결됨'],
+    'ready': ['ok', '실시간 준비 완료'],
+    'login_pending': ['pending', '로그인 대기 중...'],
+    'reconnecting': ['pending', '재연결 중...'],
+    'disconnected': ['fail', '연결 끊김'],
+    'failed': ['fail', '연결 실패'],
+    'login_failed': ['fail', '로그인 실패'],
+  };
+  var m = map[status] || ['', status];
+  dot.className = 'conn-dot ' + m[0];
+  text.textContent = m[1];
+}
+
+// ══════════════════════════════════════════════════════
 //  초기화
 // ══════════════════════════════════════════════════════
 
 async function init() {
+  // 로딩 상태 표시: 종목 데이터 초기화 단계
+  _setLoadingText('CheeseStock 로딩 중...', '종목 데이터 초기화');
+
+  // WS 모드 의도 여부 기록 (initFromIndex 내부에서 mode가 file로 변경될 수 있음)
+  var _originalMode = KRX_API_CONFIG.mode;
+
   try {
     await dataService.initFromIndex();
   } catch (e) {
     showToast('종목 목록 로드 실패 — 기본 종목으로 시작합니다', 'error');
   }
 
+  // ── WS 모드 의도였으나 프로브 실패 → 연결 가이드 표시 ──
+  if (_originalMode === 'ws' && KRX_API_CONFIG.mode !== 'ws') {
+    _showConnectionGuide(function() { _continueInit(); });
+    return;
+  }
+
+  _continueInit();
+}
+
+/** init()에서 분리된 후속 초기화 (연결 가이드 해소 후 또는 직접 실행) */
+async function _continueInit() {
   // localStorage에서 이전 환경설정 복원
   var prefs = _loadPrefs();
 
@@ -289,12 +521,108 @@ async function init() {
   // 복원된 환경설정을 UI에 반영
   _applyPrefsToUI();
 
+  // 로딩 상태 표시: 차트 준비 단계
+  _setLoadingText('차트 준비 중...', currentStock.name + ' 데이터 로드');
+
+  // ── 서버 상태 콜백 등록 (로그인 대기 / 준비 완료 / 로그인 실패) ──
+  realtimeProvider.onServerStatus = function(status, message) {
+    // 연결 설정 패널 상태도 동시 업데이트
+    _updateConnPanel(status);
+
+    if (status === 'login_pending') {
+      // 로그인 대기 중 — 오버레이 유지, 워터마크에도 표시
+      _setLoadingText('Kiwoom 로그인 대기 중...', '로그인 창에서 인증해주세요');
+      if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
+        chartManager.setWatermark(currentStock.name + ' (로그인 대기 중...)');
+      }
+      updateLiveStatus('ws');
+    } else if (status === 'ready') {
+      // 로그인 완료 + 서버 준비 → 오버레이 숨김
+      _hideLoadingOverlay();
+      if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
+        chartManager.setWatermark(currentStock.name);
+      }
+      updateLiveStatus('live');
+      showToast('Kiwoom 실시간 연결 완료', 'success');
+    } else if (status === 'login_failed') {
+      // 로그인 실패 → 오버레이 숨기고 파일 모드 전환
+      _hideLoadingOverlay();
+      showToast('Kiwoom 로그인 실패 — 파일 모드로 전환', 'error');
+      updateLiveStatus('file');
+    }
+  };
+
+  // ── 연결 상태 변경 콜백 (Connection Management UI) ──
+  realtimeProvider.onConnectionChange = function(state) {
+    _updateConnPanel(state);
+  };
+
+  // ── 연결 설정 패널 토글 ──
+  document.getElementById('conn-settings-btn')?.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var panel = document.getElementById('conn-panel');
+    if (!panel) return;
+    var showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : '';
+    if (!showing) {
+      var urlInput = document.getElementById('conn-panel-url');
+      if (urlInput) urlInput.value = KRX_API_CONFIG.wsUrl || '';
+    }
+  });
+
+  // 외부 클릭 시 패널 닫기
+  document.addEventListener('click', function(e) {
+    var panel = document.getElementById('conn-panel');
+    if (panel && !panel.contains(e.target) && e.target.id !== 'conn-settings-btn') {
+      panel.style.display = 'none';
+    }
+  });
+
+  // 연결 패널 — 연결 버튼
+  document.getElementById('conn-panel-connect')?.addEventListener('click', async function() {
+    var url = document.getElementById('conn-panel-url')?.value.trim();
+    if (!url) return;
+    this.textContent = '연결 중...'; this.disabled = true;
+    KRX_API_CONFIG.wsUrl = url;
+    _savePrefs({ wsUrl: url });
+
+    var ok = await dataService.probeWsServer(url, 5000);
+    if (ok) {
+      KRX_API_CONFIG.mode = 'ws';
+      realtimeProvider.reconnectTo(url);
+      showToast('서버 연결 성공', 'success');
+      document.getElementById('conn-panel').style.display = 'none';
+    } else {
+      showToast('연결 실패', 'error');
+    }
+    this.textContent = '연결'; this.disabled = false;
+  });
+
+  // 연결 패널 — 파일 모드 전환
+  document.getElementById('conn-panel-file')?.addEventListener('click', function() {
+    KRX_API_CONFIG.mode = 'file';
+    realtimeProvider.stop();
+    updateLiveStatus('file');
+    document.getElementById('conn-panel').style.display = 'none';
+    showToast('파일 모드로 전환', 'info');
+  });
+
+  // 연결 패널 — 데모 모드 전환
+  document.getElementById('conn-panel-demo')?.addEventListener('click', function() {
+    KRX_API_CONFIG.mode = 'demo';
+    realtimeProvider.stop();
+    updateLiveStatus('demo');
+    document.getElementById('conn-panel').style.display = 'none';
+    showToast('데모 모드로 전환', 'info');
+  });
+
   // 차트 생성
   try {
     chartManager.createMainChart(_dom.mainContainer);
   } catch (e) {
     console.error('[KRX] 차트 초기화 실패:', e);
     showToast('차트 초기화 실패: ' + (e.message || '알 수 없는 오류'), 'error');
+    _hideLoadingOverlay();
     return;
   }
 
@@ -307,25 +635,47 @@ async function init() {
     candles = [];
   }
   if (candles.length > 0) {
+    _markDataFresh();  // 데이터 수신 시각 기록
     updateChartFull();
     updateStockInfo();
     updateOHLCBar(null);
-    chartManager.setWatermark(currentStock.name);
+    // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
+    if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
+      chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+    } else {
+      chartManager.setWatermark(currentStock.name);
+    }
+    // 데이터 로드 완료 → 로딩 오버레이 숨김
+    _hideLoadingOverlay();
   } else if (KRX_API_CONFIG.mode === 'ws') {
     // WS 모드: 서버 캔들 수신 대기 (realtimeProvider.onTick에서 처리)
+    // 오버레이는 유지 — serverStatus 'ready' 또는 onTick 수신 시 숨김
     console.log('[KRX] WS 모드 — 서버 캔들 수신 대기 중...');
     chartManager.setWatermark(currentStock.name + ' (서버 연결 중...)');
+    _setLoadingText('서버 연결 대기 중...', 'Kiwoom 서버 응답을 기다리는 중입니다');
+  } else if (KRX_API_CONFIG.mode === 'file') {
+    // file 모드: 데이터 파일 없음 안내 (가짜 데이터 표시하지 않음)
+    chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
+    _hideLoadingOverlay();
   } else {
     chartManager.setWatermark(currentStock.name);
+    _hideLoadingOverlay();
   }
 
   // 재무지표 초기화 (candles 로드 후 실행 → PER/PBR/PSR 계산 가능)
   updateFinancials();
 
-  chartManager.onCrosshairMove(updateOHLCBar);
+  // [FIX] OHLC 바 RAF 디바운스 — 60fps crosshair 이벤트를 16ms 프레임으로 제한
+  chartManager.onCrosshairMove(function(param) {
+    cancelAnimationFrame(_ohlcRafId);
+    _ohlcRafId = requestAnimationFrame(function() { updateOHLCBar(param); });
+  });
 
   // 패턴 호버 툴팁 콜백 등록
   chartManager.onPatternHover(handlePatternTooltip);
+
+  // ── 드로잉 도구 초기화 ──
+  _initDrawingTools();
 
   // ── 드래그 시 보이는 구간의 패턴 즉시 감지 ──
   // KNOWSTOCK chart_widget.py 참고: 드래그 → _offset 변경 → _visible_slice() → repaint
@@ -431,6 +781,9 @@ async function init() {
   // 실시간 데이터 시작
   startRealtimeTick();
 
+  // 즐겨찾기 별 버튼 초기 갱신
+  _updateStarBtn();
+
   // 지수 폴백: WS 미연결 시 최신 지수 가져오기
   _fetchIndexFallback();
 
@@ -483,9 +836,28 @@ function _loadIndexFromJSON() {
 // ══════════════════════════════════════════════════════
 
 async function _preloadSidebarData() {
-  // 사이드바 종목들의 일봉 데이터를 로컬 파일에서 병렬 로드
-  var stocks = (typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : []).slice(0, 30);
-  var batchSize = 6;
+  // 사이드바 종목들의 일봉 데이터를 프리로드 (프로그레시브 렌더링)
+  //
+  // [최적화 v2]
+  //   1. 시총 순 정렬 → 삼성전자/SK하이닉스 등 대형주 우선 로드
+  //   2. 배치 크기 3으로 축소 → UI 블로킹 최소화
+  //   3. 배치 사이 setTimeout(0) → 브라우저에 렌더 기회 양보
+  //   4. 매 배치 완료 시 sidebarManager.updatePrices() → 스파크라인 점진 표시
+
+  // 사이드바에 표시된 종목 목록 (이미 시총 순 정렬됨) 사용, 없으면 ALL_STOCKS 폴백
+  var stocks;
+  if (typeof sidebarManager !== 'undefined' && sidebarManager.getFilteredStocks) {
+    stocks = sidebarManager.getFilteredStocks();
+  } else {
+    stocks = (typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : []);
+  }
+
+  // 시총 내림차순 정렬 (중요 종목 우선 로드)
+  stocks = stocks.slice(0, 30).sort(function(a, b) {
+    return (b.marketCap || b.base || 0) - (a.marketCap || a.base || 0);
+  });
+
+  var batchSize = 3;  // 6 → 3으로 축소 (UI 반응성 개선)
 
   for (var batch = 0; batch < stocks.length; batch += batchSize) {
     var batchStocks = stocks.slice(batch, batch + batchSize);
@@ -502,16 +874,18 @@ async function _preloadSidebarData() {
           if (candles && candles.length > 0) {
             dataService.cache[key] = { candles: candles, lastUpdate: Date.now() };
           }
-        }).catch(function() {});
+        }).catch(function(err) { console.warn('[KRX] 프리로드 실패:', s.code, err.message || err); });
       })(stock, cacheKey));
     }
 
     if (promises.length > 0) {
       await Promise.all(promises);
-      // 배치마다 중간 갱신 → 체감 속도 향상
+      // 배치마다 중간 갱신 → 스파크라인 점진 표시 (체감 속도 향상)
       if (typeof sidebarManager !== 'undefined' && sidebarManager.updatePrices) {
         sidebarManager.updatePrices();
       }
+      // UI 스레드에 제어권 반환 → 브라우저 멈춤 방지
+      await new Promise(function(r) { setTimeout(r, 0); });
     }
   }
 }
@@ -718,11 +1092,20 @@ function _initAnalysisWorker() {
     };
 
     _analysisWorker.onerror = function (err) {
-      console.warn('[Worker] 치명적 에러, 메인 스레드 폴백:', err.message);
-      showToast('분석 Worker 오류 — 메인 스레드로 전환', 'error');
+      console.warn('[Worker] 치명적 에러:', err.message);
       _analysisWorker = null;
       _workerReady = false;
       _workerPending = false;
+
+      // [FIX] Worker 에러 복구: 최대 3회 재시작 시도 (지수 백오프)
+      if (_workerRestartCount < 3) {
+        _workerRestartCount++;
+        console.log('[Worker] 재시작 시도 %d/3 (%ds 후)', _workerRestartCount, _workerRestartCount);
+        showToast('분석 Worker 재시작 중... (' + _workerRestartCount + '/3)', 'warning');
+        setTimeout(function() { _initAnalysisWorker(); }, 1000 * _workerRestartCount);
+      } else {
+        showToast('분석 Worker 오류 — 메인 스레드로 전환', 'error');
+      }
     };
 
   } catch (err) {
@@ -736,16 +1119,67 @@ function _initAnalysisWorker() {
 //  실시간 데이터 (Kiwoom WebSocket → 데모 폴백)
 // ══════════════════════════════════════════════════════
 
+// ── rAF 배치 틱 업데이트 ──────────────────────────────
+// WS에서 16ms(60fps) 안에 여러 틱이 올 수 있음.
+// 매 틱마다 차트를 다시 그리면 CPU 낭비 → 프레임당 1회만 렌더.
+// 데이터(candles, price 등)는 즉시 반영하되, 무거운 렌더링만 배치.
+var _pendingTickData = null;  // 다음 rAF에서 적용할 마지막 틱 데이터
+var _tickRafId = 0;
+
+/**
+ * rAF 콜백 — 배치된 틱 데이터로 차트 렌더링 1회 실행
+ */
+function _flushTickRender() {
+  _tickRafId = 0;
+  var data = _pendingTickData;
+  if (!data) return;
+  _pendingTickData = null;
+
+  // 캔들이 있을 때만 차트 업데이트
+  if (data.candles && data.candles.length > 0) {
+    candles = data.candles;
+    _markDataFresh();  // WS 캔들 수신 시각 기록
+
+    // WS에서 받은 캔들을 dataService 캐시에도 반영 (L1 메모리 + L2 IDB)
+    if (currentStock) {
+      var cacheKey = currentStock.code + '-' + currentTimeframe;
+      var cacheEntry = { candles: candles, lastUpdate: Date.now() };
+      dataService.cache[cacheKey] = cacheEntry;
+      // 일봉이면 IndexedDB에도 저장 (다음 페이지 로드 시 즉시 사용)
+      if (currentTimeframe === '1d' && typeof _idb !== 'undefined') {
+        _idb.set(cacheKey, cacheEntry);
+      }
+    }
+
+    updateChartFull();
+    updateStockInfo();
+    updateOHLCBar(null);
+    sidebarManager.updatePrices();
+
+    // 서버 캔들 수신 성공 → 워터마크를 종목명으로 복원 + 로딩 오버레이 숨김
+    if (currentStock) {
+      chartManager.setWatermark(currentStock.name);
+    }
+    _hideLoadingOverlay();
+  }
+
+  chartManager.updatePriceLines(data.currentPrice, data.dayHigh, data.dayLow, data.previousClose);
+}
+
 function startRealtimeTick() {
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
   if (_realtimeUnsub) { _realtimeUnsub(); _realtimeUnsub = null; }
   if (_fallbackTimer) { clearTimeout(_fallbackTimer); _fallbackTimer = null; }
+  // rAF 배치 초기화
+  _pendingTickData = null;
+  if (_tickRafId) { cancelAnimationFrame(_tickRafId); _tickRafId = 0; }
 
   _realtimeUnsub = realtimeProvider.onTick((data) => {
+    // 에러는 즉시 처리 (배치하지 않음 — 사용자 피드백 지연 방지)
     if (data.error) {
       updateLiveStatus('offline');
-      // WS 모드: 재연결을 기다림 (데모 데이터 생성 안 함)
-      // WS 외: 데모 모드 전환 (정적 차트 유지)
+      // WS 모드: 재연결을 기다림
+      // WS 외: 정적 차트 모드 전환 (file=실제 데이터, demo=시뮬레이션)
       if (KRX_API_CONFIG.mode !== 'ws' && !tickTimer && !_realtimeMode) {
         startDemoTick();
       }
@@ -756,34 +1190,25 @@ function startRealtimeTick() {
     if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
     if (_fallbackTimer) { clearTimeout(_fallbackTimer); _fallbackTimer = null; }
 
-    // WebSocket 연결 상태 표시 (캔들 유무와 무관하게)
-    const liveLabel = realtimeProvider.mode === 'ws' ? 'ws' : 'live';
+    // WebSocket 연결 상태 표시 (경량 — 즉시 처리)
+    var liveLabel = realtimeProvider.mode === 'ws' ? 'ws' : 'live';
     updateLiveStatus(liveLabel);
 
-    // 캔들이 있을 때만 차트 업데이트
-    if (data.candles && data.candles.length > 0) {
-      candles = data.candles;
-
-      // WS에서 받은 캔들을 dataService 캐시에도 반영
-      if (currentStock) {
-        const cacheKey = `${currentStock.code}-${currentTimeframe}`;
-        dataService.cache[cacheKey] = { candles, lastUpdate: Date.now() };
-      }
-
-      updateChartFull();
-      updateStockInfo();
-      updateOHLCBar(null);
-      sidebarManager.updatePrices();
-
-      // 서버 캔들 수신 성공 → 워터마크를 종목명으로 복원
-      if (currentStock) {
-        chartManager.setWatermark(currentStock.name);
-      }
-    } else {
+    // 빈 캔들은 로그만 남기고 배치하지 않음
+    if (!data.candles || data.candles.length === 0) {
       console.log('[KRX] WS 캔들 수신: 빈 배열 (실시간 틱 대기 중)');
+      // 가격 라인은 캔들 없이도 업데이트 가능
+      chartManager.updatePriceLines(data.currentPrice, data.dayHigh, data.dayLow, data.previousClose);
+      return;
     }
 
-    chartManager.updatePriceLines(data.currentPrice, data.dayHigh, data.dayLow, data.previousClose);
+    // 최신 틱 데이터만 보관 (이전 미렌더링 틱은 덮어씀)
+    _pendingTickData = data;
+
+    // 이미 rAF 예약되어 있으면 다음 프레임에서 최신 데이터로 렌더
+    if (!_tickRafId) {
+      _tickRafId = requestAnimationFrame(_flushTickRender);
+    }
   });
 
   realtimeProvider.start(currentStock, currentTimeframe);
@@ -804,8 +1229,12 @@ function startRealtimeTick() {
             const fallbackCandles = await dataService._fileGetCandles(currentStock);
             if (fallbackCandles.length > 0) {
               candles = fallbackCandles;
+              _markDataFresh();  // 폴백 데이터 수신 시각 기록
               const cacheKey = `${currentStock.code}-${currentTimeframe}`;
-              dataService.cache[cacheKey] = { candles, lastUpdate: Date.now() };
+              const cacheEntry = { candles, lastUpdate: Date.now() };
+              dataService.cache[cacheKey] = cacheEntry;
+              // 일봉 file 폴백도 IDB에 저장 (다음 로드 시 즉시 사용)
+              if (typeof _idb !== 'undefined') { _idb.set(cacheKey, cacheEntry); }
               updateChartFull();
               updateStockInfo();
               updateOHLCBar(null);
@@ -814,30 +1243,21 @@ function startRealtimeTick() {
                 currentStock.code, candles.length);
             }
           } else {
-            // 분봉: 데모 데이터로 폴백 (서버 연결 시 실시간으로 교체됨)
-            var demoCandles = dataService._demoGenerateCandles(currentStock, currentTimeframe);
-            if (demoCandles.length > 0) {
-              candles = demoCandles;
-              var cacheKey2 = currentStock.code + '-' + currentTimeframe;
-              dataService.cache[cacheKey2] = { candles: candles, lastUpdate: Date.now() };
-              updateChartFull();
-              updateStockInfo();
-              updateOHLCBar(null);
-              chartManager.setWatermark(currentStock.name + ' (데모)');
-              console.log('[KRX] WS 미연결 — 데모 분봉 폴백: %s %s (%d건)',
-                currentStock.code, currentTimeframe, candles.length);
-            }
+            // 분봉: 서버 미연결 시 빈 차트 + 안내 메시지 (가짜 데이터 생성 안 함)
+            chartManager.setWatermark(currentStock.name + ' (분봉 — 서버 연결 필요)');
+            console.log('[KRX] WS 미연결 — 분봉 데이터 없음: %s %s (서버 재연결 대기)',
+              currentStock.code, currentTimeframe);
           }
         }
         // 서버 재연결 시 onTick 콜백에서 자동 복구
       }
     }, 10000);
   } else {
-    // file/demo 모드: 짧은 대기 후 데모 전환
+    // file/demo 모드: 짧은 대기 후 정적 차트 모드 전환
     _fallbackTimer = setTimeout(() => {
       _fallbackTimer = null;
       if (!realtimeProvider.connected && !tickTimer) {
-        console.log('[KRX] 실시간 연결 실패, 데모 모드 시작');
+        console.log('[KRX] 실시간 연결 실패, 정적 모드 시작 (%s)', KRX_API_CONFIG.mode);
         startDemoTick();
       }
     }, 4000);
@@ -846,8 +1266,13 @@ function startRealtimeTick() {
 
 function startDemoTick() {
   _realtimeMode = false;
-  updateLiveStatus('demo');
-  // 데모 모드: 정적 차트만 표시 (랜덤 틱 생성하지 않음)
+  // rAF 배치 취소 (데모/정적 모드에서는 WS 틱 없음)
+  _pendingTickData = null;
+  if (_tickRafId) { cancelAnimationFrame(_tickRafId); _tickRafId = 0; }
+  // file 모드: 실제 데이터임을 표시 / demo 모드: 시뮬레이션 데이터임을 경고
+  var statusLabel = (KRX_API_CONFIG.mode === 'file') ? 'file' : 'demo';
+  updateLiveStatus(statusLabel);
+  // 정적 차트만 표시 (랜덤 틱 생성하지 않음)
   // 키움 서버 연결 전까지는 초기 로드된 데이터로 정적 차트 유지
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
 }
@@ -871,7 +1296,7 @@ function updateChartFull() {
     detectedSignals = [];
   }
 
-  chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns);
+  chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
 
   // 시그널 Canvas 시각화 (카테고리 필터 적용)
   const filteredSignals = _filterSignalsByCategory(detectedSignals);
@@ -889,7 +1314,9 @@ function updateChartFull() {
     _dom.rsiContainer.style.display = 'block';
     if (_dom.rsiLabel) _dom.rsiLabel.style.display = 'block';
     if (!chartManager.rsiChart) chartManager.createRSIChart(_dom.rsiContainer);
-    chartManager.updateRSI(candles);
+    chartManager.updateRSI(candles, indParams);
+    // 서브차트 라벨에 커스텀 기간 반영
+    if (_dom.rsiLabel) _dom.rsiLabel.textContent = 'RSI (' + (indParams.rsi ? indParams.rsi.period : 14) + ')';
   } else {
     _dom.rsiContainer.style.display = 'none';
     if (_dom.rsiLabel) _dom.rsiLabel.style.display = 'none';
@@ -900,11 +1327,74 @@ function updateChartFull() {
     _dom.macdContainer.style.display = 'block';
     if (_dom.macdLabel) _dom.macdLabel.style.display = 'block';
     if (!chartManager.macdChart) chartManager.createMACDChart(_dom.macdContainer);
-    chartManager.updateMACD(candles);
+    chartManager.updateMACD(candles, indParams);
+    // 서브차트 라벨에 커스텀 파라미터 반영
+    var mp = indParams.macd || { fast: 12, slow: 26, signal: 9 };
+    if (_dom.macdLabel) _dom.macdLabel.textContent = 'MACD (' + mp.fast + ', ' + mp.slow + ', ' + mp.signal + ')';
   } else {
     _dom.macdContainer.style.display = 'none';
     if (_dom.macdLabel) _dom.macdLabel.style.display = 'none';
     chartManager.destroyMACD();
+  }
+
+  // [NEW] Stochastic
+  if (activeIndicators.has('stoch') && _dom.stochContainer) {
+    _dom.stochContainer.style.display = 'block';
+    if (_dom.stochLabel) _dom.stochLabel.style.display = 'block';
+    if (!chartManager.stochChart) chartManager.createStochasticChart(_dom.stochContainer);
+    chartManager.updateStochastic(candles);
+  } else if (_dom.stochContainer) {
+    _dom.stochContainer.style.display = 'none';
+    if (_dom.stochLabel) _dom.stochLabel.style.display = 'none';
+    chartManager.destroyStochastic();
+  }
+
+  // [NEW] CCI
+  if (activeIndicators.has('cci') && _dom.cciContainer) {
+    _dom.cciContainer.style.display = 'block';
+    if (_dom.cciLabel) _dom.cciLabel.style.display = 'block';
+    if (!chartManager.cciChart) chartManager.createCCIChart(_dom.cciContainer);
+    chartManager.updateCCI(candles);
+  } else if (_dom.cciContainer) {
+    _dom.cciContainer.style.display = 'none';
+    if (_dom.cciLabel) _dom.cciLabel.style.display = 'none';
+    chartManager.destroyCCI();
+  }
+
+  // [NEW] ADX
+  if (activeIndicators.has('adx') && _dom.adxContainer) {
+    _dom.adxContainer.style.display = 'block';
+    if (_dom.adxLabel) _dom.adxLabel.style.display = 'block';
+    if (!chartManager.adxChart) chartManager.createADXChart(_dom.adxContainer);
+    chartManager.updateADX(candles);
+  } else if (_dom.adxContainer) {
+    _dom.adxContainer.style.display = 'none';
+    if (_dom.adxLabel) _dom.adxLabel.style.display = 'none';
+    chartManager.destroyADX();
+  }
+
+  // [NEW] Williams %R
+  if (activeIndicators.has('willr') && _dom.willrContainer) {
+    _dom.willrContainer.style.display = 'block';
+    if (_dom.willrLabel) _dom.willrLabel.style.display = 'block';
+    if (!chartManager.willrChart) chartManager.createWilliamsRChart(_dom.willrContainer);
+    chartManager.updateWilliamsR(candles);
+  } else if (_dom.willrContainer) {
+    _dom.willrContainer.style.display = 'none';
+    if (_dom.willrLabel) _dom.willrLabel.style.display = 'none';
+    chartManager.destroyWilliamsR();
+  }
+
+  // [NEW] ATR
+  if (activeIndicators.has('atr') && _dom.atrContainer) {
+    _dom.atrContainer.style.display = 'block';
+    if (_dom.atrLabel) _dom.atrLabel.style.display = 'block';
+    if (!chartManager.atrChart) chartManager.createATRChart(_dom.atrContainer);
+    chartManager.updateATR(candles);
+  } else if (_dom.atrContainer) {
+    _dom.atrContainer.style.display = 'none';
+    if (_dom.atrLabel) _dom.atrLabel.style.display = 'none';
+    chartManager.destroyATR();
   }
 
 }
@@ -1097,6 +1587,39 @@ function updateOHLCBar(data) {
   oC.textContent = d.close != null ? d.close.toLocaleString() : '—';
   oC.className = 'ohlc-val ' + cls;
   if (oV && d.volume != null) oV.textContent = formatVol(d.volume);
+
+  // [UX] 크로스헤어 RSI/MACD 지표값 표시 (캐시된 계산값 사용, 재계산 없음)
+  var idx = d._idx;  // crosshair 콜백에서 전달받은 인덱스
+  if (idx == null && candles.length) idx = candles.length - 1;
+
+  if (_dom.ohlcRsi) {
+    if (activeIndicators.has('rsi') && chartManager._lastRsiValues && idx != null) {
+      var rsiVal = chartManager._lastRsiValues[idx];
+      if (rsiVal != null) {
+        _dom.ohlcRsi.style.display = '';
+        _dom.ohlcRsiVal.textContent = rsiVal.toFixed(1);
+        _dom.ohlcRsiVal.style.color = rsiVal > 70 ? KRX_COLORS.UP : rsiVal < 30 ? KRX_COLORS.DOWN : '';
+      } else {
+        _dom.ohlcRsi.style.display = 'none';
+      }
+    } else {
+      _dom.ohlcRsi.style.display = 'none';
+    }
+  }
+  if (_dom.ohlcMacd) {
+    if (activeIndicators.has('macd') && chartManager._lastMacdValues && idx != null) {
+      var macdVal = chartManager._lastMacdValues.macdLine[idx];
+      if (macdVal != null) {
+        _dom.ohlcMacd.style.display = '';
+        _dom.ohlcMacdVal.textContent = macdVal.toFixed(0);
+        _dom.ohlcMacdVal.style.color = macdVal >= 0 ? KRX_COLORS.UP : KRX_COLORS.DOWN;
+      } else {
+        _dom.ohlcMacd.style.display = 'none';
+      }
+    } else {
+      _dom.ohlcMacd.style.display = 'none';
+    }
+  }
 }
 
 function formatVol(v) {
@@ -1118,12 +1641,21 @@ function updateLiveStatus(status) {
   dot.className = 'live-dot ' + status;
   if (label) {
     label.className = 'live-label ' + status;
-    label.textContent = status === 'live' ? 'LIVE' : status === 'ws' ? 'WS' : status === 'demo' ? 'DEMO' : 'OFFLINE';
+    // 상태별 라벨 텍스트 — file 모드 추가 (실제 데이터 사용 중 표시)
+    var labelMap = {
+      live: 'LIVE',
+      ws: 'WS',
+      file: 'FILE',
+      demo: 'DEMO',
+      offline: 'OFFLINE'
+    };
+    label.textContent = labelMap[status] || 'OFFLINE';
   }
   dot.title = {
     live: 'Kiwoom 실시간',
     ws: 'Kiwoom WebSocket 실시간',
-    demo: '데모 모드',
+    file: '파일 모드 (실제 일봉 데이터)',
+    demo: '데모 모드 (시뮬레이션)',
     offline: '연결 끊김'
   }[status] || '';
 
@@ -1133,7 +1665,8 @@ function updateLiveStatus(status) {
     var toastMap = {
       live: ['Kiwoom 실시간 연결됨', 'success'],
       ws:   ['WebSocket 실시간 연결됨', 'success'],
-      demo: ['데모 모드로 전환됨', 'info'],
+      file: ['파일 모드 — 실제 일봉 데이터', 'info'],
+      demo: ['데모 모드 (시뮬레이션 데이터)', 'warning'],
       offline: ['실시간 연결 끊김', 'warning']
     };
     var t = toastMap[status];
@@ -1179,6 +1712,8 @@ function updateMarketState() {
 }
 
 function startMarketStateTimer() {
+  // [FIX] 기존 타이머 정리 (중복 방지)
+  if (_marketStateTimer) clearInterval(_marketStateTimer);
   updateMarketState();
   // 매 30초마다 갱신
   _marketStateTimer = setInterval(updateMarketState, 30000);
@@ -1203,11 +1738,30 @@ async function selectStock(code) {
     sidebarManager.setRecentStock(code);
   }
 
+  // [FIX] 레이스 컨디션 수정: 비동기 getCandles() 전에 worker/drag 버전 증가
+  _lastPatternAnalysis = 0;
+  _workerVersion++;
+  _workerPending = false;
+  _dragVersion++;
+  if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
+  _chartPatternStructLines = [];
+  _prevPrice = null;
+  _prevPatternCount = -1;
+  if (typeof backtester !== 'undefined') backtester.invalidateCache();
+
   // 로딩 shimmer 표시
   _dom.mainContainer.classList.add('chart-loading');
 
   chartManager.destroyAll();
   chartManager.createMainChart(_dom.mainContainer);
+  _cacheDom();  // [FIX] 차트 재생성 후 DOM 캐시 갱신
+
+  // 드로잉 도구 재연결 (차트 재생성 후)
+  if (typeof drawingTools !== 'undefined') {
+    drawingTools.detach();
+    drawingTools.setStockCode(code);
+    _initDrawingTools();
+  }
 
   try {
     candles = await dataService.getCandles(currentStock, currentTimeframe);
@@ -1221,34 +1775,38 @@ async function selectStock(code) {
   // 로딩 해제
   _dom.mainContainer.classList.remove('chart-loading');
 
-  _lastPatternAnalysis = 0;
-  _workerVersion++;          // Worker 결과 version 갱신 → stale 결과 무시
-  _workerPending = false;    // 이전 요청 무효화
-  _dragVersion++;            // 드래그 분석 stale 결과 무효화
-  if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
-  _chartPatternStructLines = [];  // 종목 변경 시 보존된 차트 패턴 초기화
-  _prevPrice = null;         // 종목 변경 시 flash 초기화
-  _prevPatternCount = -1;    // 종목 변경 시 패턴 toast 리셋
-  // 백테스트 캐시 무효화
-  if (typeof backtester !== 'undefined') backtester.invalidateCache();
-
   if (candles.length > 0) {
+    _markDataFresh();  // 종목 변경 데이터 수신 시각 기록
     updateChartFull();
     updateStockInfo();
     updateOHLCBar(null);
-    chartManager.setWatermark(currentStock.name);
+    // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
+    if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
+      chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+    } else {
+      chartManager.setWatermark(currentStock.name);
+    }
   } else if (KRX_API_CONFIG.mode === 'ws') {
     console.log('[KRX] WS 모드 — 서버 캔들 수신 대기 중...');
     chartManager.setWatermark(currentStock.name + ' (서버 연결 중...)');
+  } else if (KRX_API_CONFIG.mode === 'file') {
+    chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
   } else {
     chartManager.setWatermark(currentStock.name);
   }
   updateFinancials();
 
-  chartManager.onCrosshairMove(updateOHLCBar);
+  // [FIX] OHLC 바 RAF 디바운스
+  chartManager.onCrosshairMove(function(param) {
+    cancelAnimationFrame(_ohlcRafId);
+    _ohlcRafId = requestAnimationFrame(function() { updateOHLCBar(param); });
+  });
   chartManager.onPatternHover(handlePatternTooltip);
 
   startRealtimeTick();
+
+  // 즐겨찾기 별 버튼 갱신
+  _updateStarBtn();
 }
 
 // ══════════════════════════════════════════════════════
@@ -1671,34 +2229,59 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     currentTimeframe = btn.dataset.tf;
     _savePrefs({ timeframe: currentTimeframe });
 
+    // [OPT] 빠른 타임프레임 전환 시 이전 fetch 결과 무시
+    var myTfVersion = ++_tfVersion;
+
+    // [FIX] 레이스 컨디션 수정: 비동기 fetch 전에 상태 초기화
+    _lastPatternAnalysis = 0;
+    _workerVersion++;
+    _workerPending = false;
+    _dragVersion++;
+    if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
+    _chartPatternStructLines = [];
+    _prevPrice = null;
+    _prevPatternCount = -1;
+
     // 로딩 shimmer 표시
     _dom.mainContainer.classList.add('chart-loading');
 
     chartManager.destroyAll();
     chartManager.createMainChart(_dom.mainContainer);
-    chartManager.onCrosshairMove(updateOHLCBar);
+    _cacheDom();  // [FIX] 차트 재생성 후 DOM 캐시 갱신
+    // [FIX] OHLC 바 RAF 디바운스
+    chartManager.onCrosshairMove(function(param) {
+      cancelAnimationFrame(_ohlcRafId);
+      _ohlcRafId = requestAnimationFrame(function() { updateOHLCBar(param); });
+    });
     chartManager.onPatternHover(handlePatternTooltip);
+    // 드로잉 도구 재연결 (차트 재생성 후)
+    if (typeof drawingTools !== 'undefined') {
+      drawingTools.detach();
+      _initDrawingTools();
+    }
     candles = await dataService.getCandles(currentStock, currentTimeframe);
+
+    // [OPT] stale 결과 무시 — 이미 다른 타임프레임으로 전환됨
+    if (myTfVersion !== _tfVersion) return;
 
     // 로딩 해제
     _dom.mainContainer.classList.remove('chart-loading');
-
-    _lastPatternAnalysis = 0;
-    _workerVersion++;          // Worker 결과 version 갱신
-    _workerPending = false;
-    _dragVersion++;            // 드래그 분석 stale 결과 무효화
-    if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
-    _chartPatternStructLines = [];  // 타임프레임 변경 시 보존된 차트 패턴 초기화
-    _prevPrice = null;         // 타임프레임 변경 시 flash 초기화
-    _prevPatternCount = -1;    // 타임프레임 변경 시 패턴 toast 리셋
     if (candles.length > 0) {
+      _markDataFresh();  // 타임프레임 변경 데이터 수신 시각 기록
       updateChartFull();
       updateStockInfo();
       updateOHLCBar(null);
-      chartManager.setWatermark(currentStock.name);
+      // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
+      if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
+        chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+      } else {
+        chartManager.setWatermark(currentStock.name);
+      }
     } else if (KRX_API_CONFIG.mode === 'ws') {
       console.log('[KRX] WS 모드 — %s 캔들 서버 수신 대기 중...', currentTimeframe);
       chartManager.setWatermark(currentStock.name + ' (' + currentTimeframe + ' 로드 중...)');
+    } else if (KRX_API_CONFIG.mode === 'file') {
+      chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
     } else {
       chartManager.setWatermark(currentStock.name);
     }
@@ -1919,9 +2502,82 @@ if (patternBtn) {
 })();
 
 // ══════════════════════════════════════════════════════
+//  드로잉 도구 초기화
+//
+//  좌측 수직 툴바 버튼 이벤트 + 차트 클릭 핸들러 연결
+//  drawingTools.js에 정의된 드로잉 엔진과 app.js를 연결하는 글루 코드
+// ══════════════════════════════════════════════════════
+
+function _initDrawingTools() {
+  if (typeof drawingTools === 'undefined') return;
+
+  // 드로잉 도구 연결: primitive를 차트에 부착
+  drawingTools.attach(chartManager);
+  drawingTools.setStockCode(currentStock ? currentStock.code : null);
+
+  // 툴바 버튼 클릭 이벤트
+  document.querySelectorAll('.draw-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      drawingTools.setTool(btn.dataset.tool);
+    });
+  });
+
+  // 메인 차트 클릭 이벤트 — 드로잉 포인트 수집
+  // Lightweight Charts의 subscribeClick 사용 (price/time 좌표 제공)
+  if (chartManager.mainChart) {
+    chartManager.mainChart.subscribeClick(function(param) {
+      if (!drawingTools.getActiveTool()) return;
+      if (!param.time) return;
+
+      // 클릭한 가격 좌표 계산: point.y → coordinateToPrice 사용 (정밀한 위치)
+      var price = null;
+      var targetSeries = chartManager.candleSeries;
+      // 라인 차트 모드: _priceLine 시리즈로 폴백
+      if (!targetSeries || (chartType === 'line' && chartManager.indicatorSeries._priceLine)) {
+        targetSeries = chartManager.indicatorSeries._priceLine || chartManager.candleSeries;
+      }
+      if (param.point && targetSeries) {
+        price = targetSeries.coordinateToPrice(param.point.y);
+      }
+      if (price == null) {
+        // 폴백: seriesData에서 close 가격
+        var sd = param.seriesData && param.seriesData.get(targetSeries);
+        if (sd) price = sd.close;
+      }
+      if (price == null) return;
+
+      drawingTools.handleChartClick(price, param.time);
+    });
+  }
+
+  // 메인 차트 크로스헤어 이동 — 프리뷰 업데이트
+  // 기존 onCrosshairMove 콜백에 추가로 등록 (subscribeCrosshairMove는 다중 구독 지원)
+  if (chartManager.mainChart) {
+    chartManager.mainChart.subscribeCrosshairMove(function(param) {
+      if (!drawingTools.getActiveTool()) return;
+      if (!param.time) return;
+
+      var price = null;
+      var moveSeries = chartManager.candleSeries;
+      if (!moveSeries || (chartType === 'line' && chartManager.indicatorSeries._priceLine)) {
+        moveSeries = chartManager.indicatorSeries._priceLine || chartManager.candleSeries;
+      }
+      if (param.point && moveSeries) {
+        price = moveSeries.coordinateToPrice(param.point.y);
+      }
+      if (price == null) return;
+
+      drawingTools.handleChartMouseMove(price, param.time);
+    });
+  }
+}
+
+
+// ══════════════════════════════════════════════════════
 //  키보드 단축키
 //
 //  1-6: 타임프레임 전환, C: 차트타입 순환, P: 패턴 토글
+//  T/H/V/R/G: 드로잉 도구, Del: 삭제 도구
 //  / 또는 F: 검색 포커스, Escape: 검색 블러 + 팝업 닫기
 //  입력 필드 포커스 중에는 무시 (Escape 제외)
 // ══════════════════════════════════════════════════════
@@ -1968,6 +2624,10 @@ document.addEventListener('keydown', (e) => {
       rpEl.classList.remove('rp-sheet-open');
       if (finBtn) { finBtn.classList.remove('rp-open'); finBtn.innerHTML = '\u22EE'; }
       if (rpBd) rpBd.classList.remove('rp-bd-visible');
+    }
+    // 드로잉 도구 해제
+    if (typeof drawingTools !== 'undefined' && drawingTools.getActiveTool()) {
+      drawingTools.setTool(drawingTools.getActiveTool()); // 토글 해제
     }
     return;
   }
@@ -2037,6 +2697,27 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // 드로잉 도구 단축키: T=추세선, H=수평선, V=수직선, R=사각형, G=피보나치, Delete=삭제
+  if (typeof drawingTools !== 'undefined') {
+    const drawKeyMap = {
+      t: 'trendline', T: 'trendline',
+      h: 'hline', H: 'hline',
+      v: 'vline', V: 'vline',
+      r: 'rect', R: 'rect',
+      g: 'fib', G: 'fib',
+    };
+    if (drawKeyMap[key]) {
+      drawingTools.setTool(drawKeyMap[key]);
+      e.preventDefault();
+      return;
+    }
+    if (key === 'Delete') {
+      drawingTools.setTool('eraser');
+      e.preventDefault();
+      return;
+    }
+  }
+
   // / 또는 F: 검색 포커스
   if (key === '/' || key === 'f' || key === 'F') {
     if (searchInput) {
@@ -2047,6 +2728,191 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 });
+
+
+// ══════════════════════════════════════════════════════
+//  스크린샷 내보내기
+// ══════════════════════════════════════════════════════
+document.getElementById('screenshot-btn')?.addEventListener('click', function() {
+  var chartWrap = document.getElementById('chart-wrap');
+  if (!chartWrap) return;
+
+  var allCanvases = chartWrap.querySelectorAll('canvas');
+  if (!allCanvases.length) {
+    showToast('캡처할 차트가 없습니다', 'warning');
+    return;
+  }
+
+  // 전체 chart-wrap 영역을 하나의 이미지로 합성
+  var rect = chartWrap.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  var outCanvas = document.createElement('canvas');
+  outCanvas.width = rect.width * dpr;
+  outCanvas.height = rect.height * dpr;
+  var ctx = outCanvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // 배경색 채우기
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-main').trim() || '#141414';
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  // 각 canvas를 상대 위치에 그리기 (메인 + RSI + MACD 서브차트 포함)
+  allCanvases.forEach(function(c) {
+    var cRect = c.getBoundingClientRect();
+    try {
+      ctx.drawImage(c, cRect.left - rect.left, cRect.top - rect.top, cRect.width, cRect.height);
+    } catch (e) { /* cross-origin canvas 무시 */ }
+  });
+
+  // 워터마크
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '12px Pretendard, sans-serif';
+  ctx.fillText('CheeseStock — ' + (currentStock ? currentStock.name : '') + ' ' + currentTimeframe, 10, rect.height - 10);
+
+  // 다운로드
+  var link = document.createElement('a');
+  link.download = (currentStock ? currentStock.code : 'chart') + '_' + currentTimeframe + '_' + new Date().toISOString().slice(0, 10) + '.png';
+  link.href = outCanvas.toDataURL('image/png');
+  link.click();
+  showToast('스크린샷 저장 완료', 'success');
+});
+
+
+// ══════════════════════════════════════════════════════
+//  즐겨찾기 토글 버튼
+// ══════════════════════════════════════════════════════
+document.getElementById('watchlist-toggle-btn')?.addEventListener('click', function () {
+  if (!currentStock) return;
+  var added = _toggleWatchlist(currentStock.code);
+  _updateStarBtn();
+  showToast(currentStock.name + (added ? ' 즐겨찾기 추가' : ' 즐겨찾기 제거'), 'info');
+  // 사이드바 즐겨찾기 섹션 갱신
+  if (typeof sidebarManager !== 'undefined' && sidebarManager.renderWatchlist) {
+    sidebarManager.renderWatchlist();
+  }
+});
+
+
+// ══════════════════════════════════════════════════════
+//  지표 파라미터 우클릭 팝업
+// ══════════════════════════════════════════════════════
+
+/** 지표 체크박스에 커스텀 표시 업데이트 */
+function _markCustomParams() {
+  document.querySelectorAll('#ind-dropdown-menu .ind-check').forEach(function (label) {
+    var cb = label.querySelector('input[data-ind]');
+    if (!cb) return;
+    var ind = cb.dataset.ind;
+    var defaults = DEFAULT_IND_PARAMS[ind];
+    var current = indParams[ind];
+    if (!defaults || !current) { label.classList.remove('param-custom'); return; }
+    var isCustom = false;
+    for (var k in defaults) {
+      if (current[k] !== defaults[k]) { isCustom = true; break; }
+    }
+    label.classList.toggle('param-custom', isCustom);
+  });
+}
+
+/** 팝업 열기 */
+function _openParamPopup(ind, anchorEl) {
+  var popup = document.getElementById('ind-param-popup');
+  var fields = document.getElementById('ind-param-fields');
+  if (!popup || !fields) return;
+
+  var params = indParams[ind];
+  if (!params) return;
+
+  _activeParamInd = ind;
+
+  // 필드 생성
+  var html = '';
+  for (var key in params) {
+    var label = _PARAM_LABELS[key] || key;
+    html += '<div class="ind-param-row">' +
+      '<label>' + label + '</label>' +
+      '<input type="number" data-key="' + key + '" value="' + params[key] + '" min="1" max="999" step="' + (key === 'stdDev' ? '0.1' : '1') + '">' +
+      '</div>';
+  }
+  fields.innerHTML = html;
+
+  // 타이틀 업데이트
+  var nameMap = { ma: 'MA', ema: 'EMA', bb: '볼린저', rsi: 'RSI', macd: 'MACD', ich: '일목균형표' };
+  popup.querySelector('.ind-param-title').textContent = (nameMap[ind] || ind) + ' 설정';
+
+  // 위치 계산
+  var rect = anchorEl.getBoundingClientRect();
+  popup.style.display = '';
+  popup.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+  popup.style.top = (rect.bottom + 4) + 'px';
+}
+
+/** 팝업 닫기 */
+function _closeParamPopup() {
+  var popup = document.getElementById('ind-param-popup');
+  if (popup) popup.style.display = 'none';
+  _activeParamInd = null;
+}
+
+// 적용 버튼
+document.getElementById('ind-param-apply')?.addEventListener('click', function () {
+  if (!_activeParamInd) return;
+  var fields = document.getElementById('ind-param-fields');
+  if (!fields) return;
+
+  var ind = _activeParamInd;
+  var params = indParams[ind] || {};
+  fields.querySelectorAll('input[data-key]').forEach(function (input) {
+    var val = parseFloat(input.value);
+    if (!isNaN(val) && val > 0) {
+      params[input.dataset.key] = val;
+    }
+  });
+  indParams[ind] = params;
+  _saveIndParams(indParams);
+  _markCustomParams();
+  _closeParamPopup();
+  updateChartFull();
+  showToast(ind.toUpperCase() + ' 파라미터 적용 완료', 'success');
+});
+
+// 초기화 버튼
+document.getElementById('ind-param-reset')?.addEventListener('click', function () {
+  if (!_activeParamInd || !DEFAULT_IND_PARAMS[_activeParamInd]) return;
+  var ind = _activeParamInd;
+  indParams[ind] = JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS[ind]));
+  _saveIndParams(indParams);
+  _markCustomParams();
+  _closeParamPopup();
+  updateChartFull();
+  showToast(ind.toUpperCase() + ' 파라미터 초기화', 'info');
+});
+
+// 팝업 외부 클릭 시 닫기
+document.addEventListener('click', function (e) {
+  var popup = document.getElementById('ind-param-popup');
+  if (!popup || popup.style.display === 'none') return;
+  if (!popup.contains(e.target)) {
+    _closeParamPopup();
+  }
+});
+
+// 지표 체크박스에 우클릭 이벤트 바인딩
+document.querySelectorAll('#ind-dropdown-menu .ind-check').forEach(function (label) {
+  label.addEventListener('contextmenu', function (e) {
+    var cb = label.querySelector('input[data-ind]');
+    if (!cb) return;
+    var ind = cb.dataset.ind;
+    // 파라미터가 정의된 지표만 팝업 열기
+    if (!DEFAULT_IND_PARAMS[ind]) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _openParamPopup(ind, label);
+  });
+});
+
+// 초기 커스텀 표시
+_markCustomParams();
 
 
 // ══════════════════════════════════════════════════════

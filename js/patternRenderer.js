@@ -1268,14 +1268,16 @@ const patternRenderer = (() => {
 
           if (isBuy) {
             zone.returnColor = 'rgba(150,220,200,0.9)';
-            zone.targetFillNear = 'rgba(150,220,200,0.14)';
-            zone.targetFillFar  = 'rgba(150,220,200,0.03)';
-            zone.targetBorder   = 'rgba(150,220,200,0.40)';
+            // [UX] 포캐스트존 가시성 향상: 0.14→0.22
+            zone.targetFillNear = 'rgba(150,220,200,0.22)';
+            zone.targetFillFar  = 'rgba(150,220,200,0.05)';
+            zone.targetBorder   = 'rgba(150,220,200,0.45)';
           } else {
             zone.returnColor = 'rgba(190,170,220,0.9)';
-            zone.targetFillNear = 'rgba(190,170,220,0.14)';
-            zone.targetFillFar  = 'rgba(190,170,220,0.03)';
-            zone.targetBorder   = 'rgba(190,170,220,0.40)';
+            // [UX] 포캐스트존 가시성 향상: 0.14→0.22
+            zone.targetFillNear = 'rgba(190,170,220,0.22)';
+            zone.targetFillFar  = 'rgba(190,170,220,0.05)';
+            zone.targetBorder   = 'rgba(190,170,220,0.45)';
           }
         }
       }
@@ -1287,13 +1289,15 @@ const patternRenderer = (() => {
           zone.yStop = stopCoord.y;
 
           if (isBuy) {
-            zone.stopFill   = 'rgba(190,170,220,0.06)';
-            zone.stopStripe = 'rgba(190,170,220,0.10)';
-            zone.stopBorder = 'rgba(190,170,220,0.30)';
+            // [UX] 손절존 가시성 향상: 0.06→0.10, 0.10→0.16
+            zone.stopFill   = 'rgba(190,170,220,0.10)';
+            zone.stopStripe = 'rgba(190,170,220,0.16)';
+            zone.stopBorder = 'rgba(190,170,220,0.35)';
           } else {
-            zone.stopFill   = 'rgba(150,220,200,0.06)';
-            zone.stopStripe = 'rgba(150,220,200,0.10)';
-            zone.stopBorder = 'rgba(150,220,200,0.30)';
+            // [UX] 손절존 가시성 향상
+            zone.stopFill   = 'rgba(150,220,200,0.10)';
+            zone.stopStripe = 'rgba(150,220,200,0.16)';
+            zone.stopBorder = 'rgba(150,220,200,0.35)';
           }
         }
       }

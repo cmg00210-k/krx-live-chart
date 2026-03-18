@@ -20,6 +20,32 @@
 </head>
 <body>
 
+  <!-- ═══ 앱 로딩 오버레이 (JS 실행 전 즉시 표시) ═══ -->
+  <div id="app-loading-overlay" class="app-loading-overlay">
+    <div class="app-loading-content">
+      <div class="app-loading-spinner"></div>
+      <div class="app-loading-text" id="app-loading-text">CheeseStock 로딩 중...</div>
+      <div class="app-loading-sub" id="app-loading-sub">데이터를 준비하고 있습니다</div>
+      <!-- 연결 가이드 (WS 서버 미감지 시 표시) -->
+      <div id="conn-guide" class="conn-guide" style="display:none">
+        <div class="conn-guide-title">서버에 연결할 수 없습니다</div>
+        <div class="conn-guide-row">
+          <input id="conn-guide-url" type="text" class="conn-input" placeholder="ws://localhost:8765" spellcheck="false">
+          <button id="conn-guide-retry" class="conn-btn primary">연결</button>
+        </div>
+        <div class="conn-guide-or">또는</div>
+        <div class="conn-guide-alts">
+          <button id="conn-guide-file" class="conn-btn secondary">파일 모드</button>
+          <button id="conn-guide-demo" class="conn-btn secondary">데모 모드</button>
+        </div>
+        <div class="conn-guide-help">
+          <p>같은 PC: <code>CheeseStock.bat</code> 실행 후 새로고침</p>
+          <p>같은 네트워크: 서버 PC의 <code>IP:8765</code> 입력</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ HEADER ═══ -->
   <div id="header">
     <button id="sidebar-toggle" title="종목 목록">&#9776;</button>
@@ -76,6 +102,14 @@
         <button class="sb-chip sb-pattern-only-chip" data-filter="patternOnly" style="display:none">패턴 감지만</button>
       </div>
       <div class="sb-body">
+        <!-- 즐겨찾기 섹션 -->
+        <div class="sb-section" id="sb-watchlist-section" style="display:none">
+          <div class="sb-header" id="sb-watchlist-header">
+            <span>즐겨찾기</span>
+            <span class="sb-count" id="sb-watchlist-count">0</span>
+          </div>
+          <div class="sb-list" id="sb-watchlist-items"></div>
+        </div>
         <div class="sb-section sb-recent-section" id="sb-recent-section" style="display:none">
           <div class="sb-header" id="sb-recent-header">
             <span>최근 본 종목</span>
@@ -101,10 +135,30 @@
         <div class="sh-left">
           <div class="sh-identity">
             <span id="stock-name" class="sh-name">삼성전자</span>
+            <button id="watchlist-toggle-btn" class="watchlist-star" title="즐겨찾기 추가/제거">&#9734;</button>
             <span id="stock-code" class="sh-code">005930</span>
             <span id="stock-market" class="sh-market">KOSPI</span>
             <span id="live-status" class="live-dot demo" title="데모 모드"></span>
             <span id="live-label" class="live-label demo">DEMO</span>
+            <span id="data-freshness" class="data-freshness" title="마지막 데이터 수신 시각"></span>
+            <button id="conn-settings-btn" class="conn-settings-btn" title="서버 연결 설정">&#9881;</button>
+            <!-- 연결 설정 드롭다운 패널 -->
+            <div id="conn-panel" class="conn-panel" style="display:none">
+              <div class="conn-panel-title">서버 연결 설정</div>
+              <label class="conn-label">서버 주소</label>
+              <div class="conn-panel-row">
+                <input id="conn-panel-url" type="text" class="conn-input" spellcheck="false">
+                <button id="conn-panel-connect" class="conn-btn primary">연결</button>
+              </div>
+              <div class="conn-panel-status">
+                <span id="conn-panel-dot" class="conn-dot"></span>
+                <span id="conn-panel-text">대기</span>
+              </div>
+              <div class="conn-panel-modes">
+                <button id="conn-panel-file" class="conn-btn secondary">파일 모드</button>
+                <button id="conn-panel-demo" class="conn-btn secondary">데모 모드</button>
+              </div>
+            </div>
           </div>
           <div class="sh-price-row">
             <span id="stock-price" class="sh-price">&mdash;</span>
@@ -154,12 +208,19 @@
             <label class="ind-check"><input type="checkbox" data-ind="rsi"> RSI</label>
             <label class="ind-check"><input type="checkbox" data-ind="macd"> MACD</label>
             <label class="ind-check"><input type="checkbox" data-ind="vol"> 거래량</label>
+            <label class="ind-check"><input type="checkbox" data-ind="stoch"> Stochastic</label>
+            <label class="ind-check"><input type="checkbox" data-ind="cci"> CCI</label>
+            <label class="ind-check"><input type="checkbox" data-ind="adx"> ADX</label>
+            <label class="ind-check"><input type="checkbox" data-ind="willr"> Williams %R</label>
+            <label class="ind-check"><input type="checkbox" data-ind="atr"> ATR</label>
             <label class="ind-check"><input type="checkbox" data-ind="ich"> 일목균형표</label>
             <label class="ind-check"><input type="checkbox" data-ind="kalman"> 칼만 필터</label>
           </div>
         </div>
         <div class="sep"></div>
         <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">패턴</button>
+        <div class="sep"></div>
+        <button id="screenshot-btn" class="sh-action-btn" title="차트 스크린샷 저장">📷</button>
         <!-- 시그널 필터 드롭다운 -->
         <div class="ind-dropdown-wrap" id="signal-filter-wrap" style="display:none">
           <button class="ind-dropdown-btn has-active" id="signal-filter-toggle">시그널 ▼</button>
@@ -177,12 +238,37 @@
 
       <!-- 차트 래퍼 -->
       <div id="chart-wrap">
+        <!-- 드로잉 툴바 (좌측 수직) -->
+        <div id="draw-toolbar" class="draw-toolbar">
+          <button class="draw-btn" data-tool="trendline" title="추세선 (T)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="2" y1="14" x2="14" y2="2" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="hline" title="수평선 (H)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="1" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="vline" title="수직선 (V)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="8" y1="1" x2="8" y2="15" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn" data-tool="rect" title="사각형 (R)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><rect x="2" y="3" width="12" height="10" fill="none" stroke="currentColor" stroke-width="1.5" rx="1"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="fib" title="피보나치 (G)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="2" y1="3" x2="14" y2="3" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="2" y1="6.5" x2="14" y2="6.5" stroke="currentColor" stroke-width="1" opacity="0.7"/><line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn" data-tool="eraser" title="삭제 (Del)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+        </div>
         <div id="ohlc-bar">
           <span class="ohlc-label">O</span><span id="ohlc-open" class="ohlc-val">&mdash;</span>
           <span class="ohlc-label">H</span><span id="ohlc-high" class="ohlc-val">&mdash;</span>
           <span class="ohlc-label">L</span><span id="ohlc-low" class="ohlc-val">&mdash;</span>
           <span class="ohlc-label">C</span><span id="ohlc-close" class="ohlc-val">&mdash;</span>
           <span class="ohlc-label">Vol</span><span id="ohlc-vol" class="ohlc-val">&mdash;</span>
+          <span id="ohlc-rsi" class="ohlc-label" style="display:none"><span class="ohlc-key">RSI</span> <span id="ohlc-rsi-val" class="ohlc-val">&mdash;</span></span>
+          <span id="ohlc-macd" class="ohlc-label" style="display:none"><span class="ohlc-key">MACD</span> <span id="ohlc-macd-val" class="ohlc-val">&mdash;</span></span>
         </div>
         <div id="main-chart-container"></div>
         <!-- 패턴/시그널 호버 툴팁 -->
@@ -213,6 +299,27 @@
         <div class="sub-chart-wrap">
           <div class="sub-chart-label" id="macd-label" style="display:none">MACD (12, 26, 9)</div>
           <div id="macd-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <!-- [NEW] 추가 지표 서브차트 -->
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="stoch-label" style="display:none">Stochastic (14, 3)</div>
+          <div id="stoch-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="cci-label" style="display:none">CCI (20)</div>
+          <div id="cci-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="adx-label" style="display:none">ADX (14)</div>
+          <div id="adx-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="willr-label" style="display:none">Williams %R (14)</div>
+          <div id="willr-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="atr-label" style="display:none">ATR (14)</div>
+          <div id="atr-chart-container" class="sub-chart" style="display:none"></div>
         </div>
       </div>
 
@@ -441,6 +548,16 @@
   <!-- ═══ TOAST CONTAINER ═══ -->
   <div id="toast-container"></div>
 
+  <!-- 지표 파라미터 팝업 -->
+  <div id="ind-param-popup" class="ind-param-popup" style="display:none">
+    <div class="ind-param-title">지표 설정</div>
+    <div id="ind-param-fields"></div>
+    <div class="ind-param-actions">
+      <button id="ind-param-reset" class="ind-param-btn">초기화</button>
+      <button id="ind-param-apply" class="ind-param-btn primary">적용</button>
+    </div>
+  </div>
+
   <!-- JS: 순서 중요 -->
   <script src="js/colors.js"></script>
   <script src="js/data.js"></script>
@@ -456,6 +573,7 @@
   <script src="js/sidebar.js"></script>
   <script src="js/patternPanel.js"></script>
   <script src="js/financials.js"></script>
+  <script src="js/drawingTools.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

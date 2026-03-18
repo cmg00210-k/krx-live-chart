@@ -59,6 +59,71 @@ SCREEN_REALTIME = "2001"    # 실시간 체결 화면번호
 SCREEN_INDEX = "2002"       # 지수 실시간 화면번호
 TR_THROTTLE_MS = 250        # TR 요청 간격 (ms) — 초당 4회 제한
 
+# ── 로그인 보호 설정 (Login Protection) ──
+# 키움 계정은 비밀번호 5회 연속 실패 시 잠금됨 (해제에 3~4일 소요).
+# Kiwoom accounts lock after 5 consecutive failed password attempts (3-4 day unlock).
+# 안전 마진을 위해 최대 2회만 시도.
+MAX_LOGIN_ATTEMPTS = 2          # 최대 로그인 시도 횟수 (절대 5 이상 금지!)
+LOGIN_COOLDOWN_SEC = 60         # 로그인 실패 후 재시도 대기 (초)
+# 비밀번호 오류로 추정되는 에러코드 (자동 재시도 금지)
+# Error codes that indicate password/auth failure (NEVER auto-retry)
+LOGIN_FATAL_ERRORS = {-101, -100, -106}  # -101: 비밀번호 오류/연결 실패, -100: 사용자 취소, -106: 이중 로그인
+
+# ── 영구 로그인 시도 카운터 (Persistent Login Guard) ──
+# 프로세스 재시작 시에도 시도 횟수를 보존하여 계정 잠금 방지.
+# Preserves attempt count across process restarts to prevent account lockout.
+# 파일 위치: server/.login_guard.json
+# 만료 시간: LOGIN_GUARD_EXPIRY_SEC 이후 자동 리셋 (정상 로그인 후 또는 시간 경과).
+LOGIN_GUARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".login_guard.json")
+LOGIN_GUARD_EXPIRY_SEC = 3600    # 1시간 후 자동 리셋 (비밀번호 수정 후 여유 시간)
+LOGIN_GUARD_MAX_TOTAL = 3        # 재시작 포함 총 최대 시도 (키움 5회 한도의 안전 마진)
+
+
+def _load_login_guard() -> dict:
+    """영구 로그인 가드 파일 로드. 만료 시 리셋.
+    Load persistent login guard file. Reset if expired.
+    """
+    try:
+        if os.path.exists(LOGIN_GUARD_FILE):
+            with open(LOGIN_GUARD_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 만료 확인
+            first_attempt = data.get("first_attempt_time", 0)
+            if first_attempt and (time.time() - first_attempt) > LOGIN_GUARD_EXPIRY_SEC:
+                log.info("[LOGIN_GUARD] 가드 파일 만료 (%.0f분 경과) → 리셋",
+                         (time.time() - first_attempt) / 60)
+                _reset_login_guard()
+                return {"total_attempts": 0, "first_attempt_time": 0,
+                        "locked": False, "last_error": None}
+            return data
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        log.warning("[LOGIN_GUARD] 가드 파일 읽기 실패: %s → 리셋", e)
+    return {"total_attempts": 0, "first_attempt_time": 0,
+            "locked": False, "last_error": None}
+
+
+def _save_login_guard(data: dict):
+    """영구 로그인 가드 파일 저장.
+    Save persistent login guard file.
+    """
+    try:
+        with open(LOGIN_GUARD_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        log.error("[LOGIN_GUARD] 가드 파일 저장 실패: %s", e)
+
+
+def _reset_login_guard():
+    """로그인 가드 파일 삭제 (로그인 성공 시 또는 만료 시).
+    Delete login guard file (on successful login or expiry).
+    """
+    try:
+        if os.path.exists(LOGIN_GUARD_FILE):
+            os.remove(LOGIN_GUARD_FILE)
+            log.info("[LOGIN_GUARD] 가드 파일 리셋 완료")
+    except OSError as e:
+        log.warning("[LOGIN_GUARD] 가드 파일 삭제 실패: %s", e)
+
 
 # ══════════════════════════════════════════════════════
 #  KRX 장 상태 판별
@@ -266,6 +331,18 @@ class KiwoomProvider(DataProvider):
         # 종목명 캐시
         self._name_cache: Dict[str, str] = {}
 
+        # ── 로그인 보호 상태 (Login Protection State) ──
+        # 계정 잠금 방지: 시도 횟수 추적 + 쿨다운 + 치명적 에러 차단
+        # Account lock prevention: attempt tracking + cooldown + fatal error blocking
+        self._login_attempt_count = 0           # 누적 로그인 시도 횟수
+        self._login_last_attempt_time = 0.0     # 마지막 시도 시간 (time.time())
+        self._login_locked = False              # True이면 로그인 시도 완전 차단
+        self._login_last_error: Optional[int] = None  # 마지막 에러코드
+
+        # 로그인 에러 → WS 클라이언트 브로드캐스트용 콜백
+        # Callback for broadcasting login errors to all WS clients
+        self._login_error_callback = None
+
         # 이벤트 연결
         self.ocx.OnEventConnect.connect(self._on_event_connect)
         self.ocx.OnReceiveTrData.connect(self._on_receive_tr_data)
@@ -294,33 +371,248 @@ class KiwoomProvider(DataProvider):
                         func_str.split("(")[0], exc)
             return None
 
-    # ── 로그인 ──
+    # ── 로그인 (Login with Account Lock Protection) ──
+    #
+    # [중요] 키움 계정 잠금 방지
+    # Kiwoom locks the account after 5 consecutive failed password attempts.
+    # Unlocking requires 3-4 business days via customer service.
+    # This code enforces:
+    #   1. Hard limit of MAX_LOGIN_ATTEMPTS (default: 2) attempts
+    #   2. LOGIN_COOLDOWN_SEC (default: 60s) between attempts
+    #   3. Permanent block on fatal errors (wrong password, etc.)
+    #   4. Clear error broadcasting to all WebSocket clients
+
+    def set_login_error_callback(self, callback):
+        """로그인 에러 발생 시 WS 클라이언트에 브로드캐스트할 콜백 등록.
+        Register callback to broadcast login errors to WS clients.
+        """
+        self._login_error_callback = callback
+
+    def _can_attempt_login(self) -> bool:
+        """로그인 시도 가능 여부 확인.
+        Check if a login attempt is allowed (account lock prevention).
+
+        Returns False and logs reason if:
+        - Permanently locked (fatal error encountered)
+        - Max attempts exceeded (in-memory)
+        - Persistent guard: total attempts across restarts exceeded
+        - Cooldown period active
+        """
+        # 치명적 에러 후 영구 차단 (비밀번호 오류 등)
+        # Permanently blocked after fatal error (wrong password, etc.)
+        if self._login_locked:
+            log.error(
+                "[KIWOOM] 로그인 차단됨 — 치명적 에러 발생 이력 (에러코드: %s). "
+                "서버를 재시작하기 전에 비밀번호를 확인하세요.",
+                self._login_last_error
+            )
+            log.error(
+                "[KIWOOM] LOGIN BLOCKED — fatal error previously occurred (code: %s). "
+                "Verify your password before restarting the server.",
+                self._login_last_error
+            )
+            return False
+
+        # ── 영구 가드 확인 (재시작 간 누적 카운터) ──
+        # Persistent guard check (cumulative counter across restarts)
+        guard = _load_login_guard()
+        if guard.get("locked"):
+            log.error(
+                "[KIWOOM] 영구 가드 차단됨 — 이전 세션에서 치명적 에러 발생 "
+                "(에러코드: %s). .login_guard.json 삭제 후 재시작하세요.",
+                guard.get("last_error")
+            )
+            log.error(
+                "[KIWOOM] PERSISTENT GUARD BLOCKED — fatal error in previous session "
+                "(code: %s). Delete .login_guard.json and restart.",
+                guard.get("last_error")
+            )
+            self._login_locked = True
+            self._login_last_error = guard.get("last_error")
+            return False
+
+        if guard.get("total_attempts", 0) >= LOGIN_GUARD_MAX_TOTAL:
+            log.error(
+                "[KIWOOM] 재시작 포함 총 로그인 시도 %d/%d회 초과 — 계정 잠금 방지를 위해 차단합니다. "
+                ".login_guard.json 삭제 후 비밀번호 확인 후 재시작하세요.",
+                guard["total_attempts"], LOGIN_GUARD_MAX_TOTAL
+            )
+            log.error(
+                "[KIWOOM] TOTAL login attempts across restarts %d/%d exceeded — "
+                "blocked to prevent account lockout. "
+                "Delete .login_guard.json after verifying password, then restart.",
+                guard["total_attempts"], LOGIN_GUARD_MAX_TOTAL
+            )
+            return False
+
+        # 최대 시도 횟수 초과 (세션 내)
+        # Max attempts exceeded (within this session)
+        if self._login_attempt_count >= MAX_LOGIN_ATTEMPTS:
+            log.error(
+                "[KIWOOM] 로그인 시도 횟수 초과 (%d/%d) — 계정 잠금 방지를 위해 중단합니다. "
+                "수동으로 HTS에서 로그인을 확인한 후 서버를 재시작하세요.",
+                self._login_attempt_count, MAX_LOGIN_ATTEMPTS
+            )
+            log.error(
+                "[KIWOOM] Login attempt limit reached (%d/%d) — stopped to prevent account lockout. "
+                "Verify login via HTS manually, then restart the server.",
+                self._login_attempt_count, MAX_LOGIN_ATTEMPTS
+            )
+            return False
+
+        # 쿨다운 확인
+        # Cooldown check
+        elapsed = time.time() - self._login_last_attempt_time
+        if self._login_attempt_count > 0 and elapsed < LOGIN_COOLDOWN_SEC:
+            remaining = LOGIN_COOLDOWN_SEC - elapsed
+            log.warning(
+                "[KIWOOM] 로그인 쿨다운 중 — %.0f초 후 재시도 가능 (계정 보호)",
+                remaining
+            )
+            log.warning(
+                "[KIWOOM] Login cooldown active — retry possible in %.0f seconds (account protection)",
+                remaining
+            )
+            return False
+
+        return True
 
     def login(self, auto=True):
-        """CommConnect() — 로그인. auto=True면 자동로그인 시도."""
+        """CommConnect() — 로그인. 계정 잠금 방지 로직 포함.
+        CommConnect() — Login with account lock prevention.
+
+        auto=True면 자동로그인 시도 (HTS 자동로그인 설정 필요).
+        Returns False if login attempt was blocked.
+        """
+        if not self._can_attempt_login():
+            self._broadcast_login_error(
+                "로그인 시도가 차단되었습니다 (계정 잠금 방지). "
+                "서버를 재시작하거나 HTS에서 수동 로그인하세요.",
+                blocked=True
+            )
+            return False
+
+        self._login_attempt_count += 1
+        self._login_last_attempt_time = time.time()
+
+        # ── 영구 가드 업데이트 (Persistent guard update) ──
+        guard = _load_login_guard()
+        guard["total_attempts"] = guard.get("total_attempts", 0) + 1
+        if not guard.get("first_attempt_time"):
+            guard["first_attempt_time"] = time.time()
+        _save_login_guard(guard)
+
         if auto:
-            # 키움 자동로그인: OpenAPI 레지스트리 설정
-            # HTS에서 자동로그인 설정이 되어있으면 CommConnect()만으로 자동 진행
-            log.info("Kiwoom 자동로그인 시도...")
+            log.info(
+                "[KIWOOM] 자동로그인 시도 %d/%d (총 누적: %d/%d)...",
+                self._login_attempt_count, MAX_LOGIN_ATTEMPTS,
+                guard["total_attempts"], LOGIN_GUARD_MAX_TOTAL,
+            )
         else:
-            log.info("Kiwoom 수동로그인 시작...")
+            log.info(
+                "[KIWOOM] 수동로그인 시작 (시도 %d/%d, 총 누적: %d/%d)...",
+                self._login_attempt_count, MAX_LOGIN_ATTEMPTS,
+                guard["total_attempts"], LOGIN_GUARD_MAX_TOTAL,
+            )
+
         self._login_event.clear()
         self._call("CommConnect()")
+        return True
 
     def _on_event_connect(self, err_code):
-        """OnEventConnect 이벤트 핸들러"""
+        """OnEventConnect 이벤트 핸들러.
+        Login result callback from Kiwoom OCX.
+
+        err_code == 0: 성공
+        err_code != 0: 실패 — 에러코드에 따라 재시도 차단 여부 결정
+        """
         if err_code == 0:
             self._connected = True
+            # 로그인 성공 → 영구 가드 리셋 (누적 카운터 초기화)
+            # Login success → reset persistent guard (clear cumulative counter)
+            _reset_login_guard()
             user_id = self._call("GetLoginInfo(QString)", "USER_ID") or ""
             accounts = self._call("GetLoginInfo(QString)", "ACCNO") or ""
             server = self._call("GetLoginInfo(QString)", "GetServerGubun") or ""
             server_name = "모의투자" if server == "1" else "실서버"
-            log.info("Kiwoom 로그인 성공 (ID: %s, 서버: %s, 계좌수: %d)",
-                     user_id, server_name, len(accounts.split(";")) - 1)
+            log.info(
+                "[KIWOOM] 로그인 성공 (ID: %s, 서버: %s, 계좌수: %d, 시도: %d회)",
+                user_id, server_name, len(accounts.split(";")) - 1,
+                self._login_attempt_count
+            )
         else:
             self._connected = False
-            log.error("Kiwoom 로그인 실패 (에러코드: %d)", err_code)
+            self._login_last_error = err_code
+
+            # 치명적 에러 판별 — 비밀번호 오류 시 절대 재시도 금지
+            # Fatal error check — NEVER retry on password errors
+            if err_code in LOGIN_FATAL_ERRORS:
+                self._login_locked = True
+                # 영구 가드에도 잠금 기록 (재시작해도 차단 유지)
+                # Record lock in persistent guard (survives restarts)
+                guard = _load_login_guard()
+                guard["locked"] = True
+                guard["last_error"] = err_code
+                _save_login_guard(guard)
+                log.critical(
+                    "[KIWOOM] *** 로그인 치명적 실패 (에러코드: %d) ***", err_code
+                )
+                log.critical(
+                    "[KIWOOM] *** 자동 재시도 영구 차단됨 — 비밀번호 확인 필요 ***"
+                )
+                log.critical(
+                    "[KIWOOM] *** FATAL LOGIN FAILURE (code: %d) ***", err_code
+                )
+                log.critical(
+                    "[KIWOOM] *** Auto-retry permanently disabled — verify password ***"
+                )
+                log.critical(
+                    "[KIWOOM] *** 해제: .login_guard.json 삭제 후 비밀번호 확인 후 재시작 ***"
+                )
+                self._broadcast_login_error(
+                    f"로그인 실패 (에러코드: {err_code}). "
+                    "비밀번호를 확인하세요. 자동 재시도가 차단되었습니다. "
+                    "서버 재시작으로도 해제 불가 — .login_guard.json 삭제 필요.",
+                    fatal=True
+                )
+            else:
+                log.error(
+                    "[KIWOOM] 로그인 실패 (에러코드: %d, 시도: %d/%d)",
+                    err_code, self._login_attempt_count, MAX_LOGIN_ATTEMPTS
+                )
+                remaining = MAX_LOGIN_ATTEMPTS - self._login_attempt_count
+                if remaining > 0:
+                    log.warning(
+                        "[KIWOOM] 남은 로그인 시도: %d회 (쿨다운 %d초 후 가능)",
+                        remaining, LOGIN_COOLDOWN_SEC
+                    )
+                else:
+                    log.error(
+                        "[KIWOOM] 로그인 시도 소진 — 서버를 재시작하세요."
+                    )
+                self._broadcast_login_error(
+                    f"로그인 실패 (에러코드: {err_code}, 시도: {self._login_attempt_count}/{MAX_LOGIN_ATTEMPTS}). "
+                    f"남은 시도: {remaining}회.",
+                    fatal=False
+                )
+
         self._login_event.set()
+
+    def _broadcast_login_error(self, message: str, fatal: bool = False,
+                                blocked: bool = False):
+        """로그인 에러를 WS 클라이언트에 브로드캐스트.
+        Broadcast login error to all connected WS clients.
+        """
+        if self._login_error_callback:
+            self._login_error_callback({
+                "type": "loginError",
+                "message": message,
+                "fatal": fatal,          # True = 비밀번호 오류 (재시도 금지)
+                "blocked": blocked,      # True = 시도 차단됨
+                "attempts": self._login_attempt_count,
+                "maxAttempts": MAX_LOGIN_ATTEMPTS,
+                "errorCode": self._login_last_error,
+            })
 
     def wait_for_login(self, timeout: float = 120.0) -> bool:
         """로그인 완료까지 대기 (QTimer 기반)"""
@@ -1251,6 +1543,19 @@ class ServerController:
         self._last_broadcast: Dict[str, float] = {}
         self._broadcast_interval = 0.5  # 최소 0.5초 간격
 
+        # ── 서버 상태 추적 (Server status tracking) ──
+        # 브라우저 클라이언트에게 현재 서버 상태를 알려주기 위한 상태 관리
+        # Tracks current server status for broadcasting to browser clients
+        self._server_status: str = "initializing"   # initializing | login_pending | ready | login_failed
+        self._server_status_message: str = "서버 초기화 중..."
+
+        # ── 대기 중인 구독 요청 큐 (Pending subscribe queue) ──
+        # 로그인 완료 전에 들어온 subscribe 요청을 저장했다가
+        # 로그인 성공 후 자동으로 처리
+        # Stores subscribe requests received before login completes,
+        # automatically processed after successful login
+        self._pending_subscribes: List[dict] = []
+
         # QTimer: 명령 큐 처리
         self._cmd_timer = QTimer()
         self._cmd_timer.timeout.connect(self._process_commands)
@@ -1260,6 +1565,62 @@ class ServerController:
         if isinstance(provider, KiwoomProvider):
             provider.set_realtime_callback(self._on_realtime_tick)
             provider.set_index_callback(self._on_index_tick)
+
+    def set_server_status(self, status: str, message: str = ""):
+        """서버 상태 변경 + 모든 WS 클라이언트에 브로드캐스트.
+        Update server status and broadcast to all connected WS clients.
+
+        Args:
+            status: 'initializing' | 'login_pending' | 'ready' | 'login_failed'
+            message: 사용자에게 표시할 한국어 메시지
+        """
+        self._server_status = status
+        self._server_status_message = message
+        log.info("[STATUS] 서버 상태 변경: %s — %s", status, message)
+
+        # 모든 연결된 클라이언트에 브로드캐스트
+        # Broadcast to all connected clients
+        status_msg = {
+            "type": "serverStatus",
+            "status": status,
+            "message": message,
+        }
+        self.ws.broadcast_all(status_msg)
+
+        # 새 클라이언트 연결 시 즉시 전송할 캐시 갱신
+        # Update cached init message for newly connecting clients
+        self.ws._init_messages["serverStatus"] = json.dumps(
+            status_msg, ensure_ascii=False
+        )
+
+    def get_server_status_msg(self) -> dict:
+        """현재 서버 상태 메시지 딕셔너리 반환.
+        Return current server status as a dict (for sending to a single client).
+        """
+        return {
+            "type": "serverStatus",
+            "status": self._server_status,
+            "message": self._server_status_message,
+        }
+
+    def flush_pending_subscribes(self):
+        """대기 중인 구독 요청을 모두 처리 (로그인 성공 후 호출).
+        Process all queued subscribe requests (called after successful login).
+        """
+        if not self._pending_subscribes:
+            return
+
+        count = len(self._pending_subscribes)
+        log.info("[PENDING] 대기 중인 구독 요청 %d건 처리 시작", count)
+
+        for sub in self._pending_subscribes:
+            self._handle_subscribe(
+                sub["code"], sub["client_id"],
+                sub["market"], sub["timeframe"]
+            )
+
+        self._pending_subscribes.clear()
+        log.info("[PENDING] 대기 구독 %d건 처리 완료", count)
 
     def _process_commands(self):
         """WebSocket 명령 큐 처리 (메인 스레드)"""
@@ -1283,7 +1644,36 @@ class ServerController:
 
     def _handle_subscribe(self, code: str, client_id: int,
                           market: str, timeframe: str):
-        """종목 구독 처리 (메인 스레드)"""
+        """종목 구독 처리 (메인 스레드).
+        Handle stock subscribe request (main thread).
+
+        로그인 전이면 큐에 저장하고 대기 상태 알림 전송.
+        If not yet logged in, queue the request and notify the client.
+        """
+        # ── 로그인 전 구독 요청 → 큐에 저장 (Pending subscribe queue) ──
+        # provider가 아직 연결되지 않았으면 캔들 조회가 불가능하므로
+        # 큐에 저장하고 로그인 완료 후 자동 처리
+        if isinstance(self.provider, KiwoomProvider) and not self.provider._connected:
+            self._pending_subscribes.append({
+                "code": code,
+                "client_id": client_id,
+                "market": market,
+                "timeframe": timeframe,
+            })
+            # 클라이언트에 대기 상태 알림
+            # Notify client that subscribe is queued
+            self.ws.send_to_client(client_id, {
+                "type": "serverStatus",
+                "status": "login_pending",
+                "message": "Kiwoom 로그인 대기 중... 로그인 후 자동 구독됩니다.",
+            })
+            log.info(
+                "[PENDING] 구독 요청 큐 저장: %s (%s) → client %d (로그인 대기)",
+                code, timeframe, client_id
+            )
+            return
+
+        # ── 정상 구독 처리 (Normal subscribe flow) ──
         # 히스토리 캔들 전송
         candles = get_cached_candles(self.provider, code, timeframe)
         state = get_market_state()
@@ -1497,18 +1887,70 @@ def main():
     controller = ServerController(provider, ws_bridge)
 
     # Kiwoom 로그인 (KiwoomProvider인 경우)
+    # Login with account lock protection
     if isinstance(provider, KiwoomProvider):
-        provider.login()
+        # 로그인 에러 → 모든 WS 클라이언트에 브로드캐스트
+        # Wire login error broadcasting to all WS clients
+        def _on_login_error(error_msg: dict):
+            ws_bridge.broadcast_all(error_msg)
+        provider.set_login_error_callback(_on_login_error)
 
-        # 로그인 완료 후 지수 실시간 등록
+        # 로그인 시작 → 대기 상태 브로드캐스트
+        # Login starting → broadcast pending status to all clients
+        controller.set_server_status(
+            "login_pending",
+            "Kiwoom 로그인 대기 중..."
+        )
+
+        login_ok = provider.login()
+
+        if not login_ok:
+            log.error("[KIWOOM] 초기 로그인 시도 차단됨 — 서버는 오프라인 모드로 동작합니다.")
+            log.error("[KIWOOM] Initial login attempt blocked — server will run in offline mode.")
+            controller.set_server_status(
+                "login_failed",
+                "로그인 시도 차단됨 — 오프라인 모드"
+            )
+
+        # 로그인 완료 후 지수 실시간 등록 + 대기 구독 처리
+        # Post-login: subscribe to market indices + flush pending subscribes
         def _post_login():
             if provider.is_connected():
                 provider.subscribe_index_realtime()
+
+                # 로그인 성공 → ready 상태 브로드캐스트
+                # Login success → broadcast ready status
+                controller.set_server_status(
+                    "ready",
+                    "실시간 데이터 준비 완료"
+                )
+
+                # 대기 중인 구독 요청 처리
+                # Flush pending subscribe requests queued during login
+                controller.flush_pending_subscribes()
+
                 log.info("서버 준비 완료 — 클라이언트 연결 대기 중")
+                log.info("Server ready — waiting for client connections")
             else:
-                log.error("Kiwoom 연결 실패 — 재시작 필요")
+                # 로그인 실패 → 실패 상태 브로드캐스트
+                # Login failed → broadcast failure status
+                controller.set_server_status(
+                    "login_failed",
+                    "로그인 실패 — 캐시/파일 데이터로 동작합니다. HTS에서 수동 로그인 후 서버를 재시작하세요."
+                )
+                log.error(
+                    "[KIWOOM] 연결 실패 — 서버는 캐시/파일 데이터로 동작합니다. "
+                    "수동으로 HTS 로그인 후 서버를 재시작하세요."
+                )
+                log.error(
+                    "[KIWOOM] Connection failed — server will serve cached/file data. "
+                    "Login via HTS manually, then restart the server."
+                )
 
         # 로그인은 비동기(이벤트 기반)이므로 타이머로 상태 체크
+        # Login is async (event-based), so poll status with QTimer
+        # [중요] 로그인 실패 시 절대 자동 재시도하지 않음!
+        # [IMPORTANT] NEVER auto-retry login on failure!
         login_check_timer = QTimer()
         login_check_count = [0]
 
@@ -1517,13 +1959,41 @@ def main():
             if provider.is_connected():
                 login_check_timer.stop()
                 _post_login()
-            elif login_check_count[0] > 600:  # 60초 타임아웃
+            elif provider._login_locked:
+                # 치명적 에러 — 즉시 중단 (비밀번호 오류 등)
+                # Fatal error — stop immediately (wrong password, etc.)
                 login_check_timer.stop()
-                log.error("Kiwoom 로그인 타임아웃 (60초)")
+                controller.set_server_status(
+                    "login_failed",
+                    f"로그인 치명적 실패 (에러코드: {provider._login_last_error}) — 비밀번호 확인 후 재시작 필요"
+                )
+                log.critical(
+                    "[KIWOOM] 로그인 영구 차단 — 비밀번호 확인 후 재시작 필요"
+                )
+                log.critical(
+                    "[KIWOOM] Login permanently blocked — verify password and restart"
+                )
+            elif login_check_count[0] > 1200:  # 120초 타임아웃 (was 60s)
+                login_check_timer.stop()
+                controller.set_server_status(
+                    "login_failed",
+                    "로그인 타임아웃 (120초) — HTS에서 수동 로그인 후 서버 재시작"
+                )
+                log.error(
+                    "[KIWOOM] 로그인 타임아웃 (120초). 자동 재시도하지 않습니다. "
+                    "HTS에서 수동 로그인 후 서버를 재시작하세요."
+                )
+                log.error(
+                    "[KIWOOM] Login timed out (120s). Will NOT auto-retry. "
+                    "Login via HTS manually, then restart the server."
+                )
 
         login_check_timer.timeout.connect(_check_login)
         login_check_timer.start(100)  # 100ms마다 체크
     else:
+        # Kiwoom 이외 provider는 즉시 ready
+        # Non-Kiwoom provider → immediately ready
+        controller.set_server_status("ready", "서버 준비 완료")
         log.info("서버 준비 완료 — 클라이언트 연결 대기 중")
 
     # 종료 시 정리

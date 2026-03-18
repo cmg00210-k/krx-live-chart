@@ -17,11 +17,74 @@
 //
 // ══════════════════════════════════════════════════════
 
+// ── IndexedDB 캐시 (일봉 OHLCV 영구 저장) ──────────────
+// 페이지 리로드 시 네트워크 재요청 없이 IndexedDB에서 즉시 로드.
+// 모든 연산은 async + fail-silent — IndexedDB 미지원 환경에서도 안전.
+const _idb = {
+  db: null,
+  DB_NAME: 'krx_cache',
+  STORE: 'candles',
+  VERSION: 1,
+
+  async open() {
+    if (this.db) return this.db;
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(this.DB_NAME, this.VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.STORE)) {
+            db.createObjectStore(this.STORE);  // key = "code-timeframe"
+          }
+        };
+        req.onsuccess = (e) => { this.db = e.target.result; resolve(this.db); };
+        req.onerror = () => { console.warn('[IDB] 열기 실패'); resolve(null); };
+      } catch (e) {
+        // IndexedDB 미지원 (예: 프라이빗 모드 일부 브라우저)
+        console.warn('[IDB] IndexedDB 사용 불가:', e.message);
+        resolve(null);
+      }
+    });
+  },
+
+  async get(key) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(this.STORE, 'readonly');
+        const store = tx.objectStore(this.STORE);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+  },
+
+  async set(key, value) {
+    const db = await this.open();
+    if (!db) return;
+    try {
+      const tx = db.transaction(this.STORE, 'readwrite');
+      tx.objectStore(this.STORE).put(value, key);
+    } catch (e) { /* 쓰기 실패 무시 */ }
+  }
+};
+
 const KRX_API_CONFIG = {
   mode: 'ws',     // 'ws' | 'file' | 'demo' (향후 'koscom' 추가)
   wsUrl: 'ws://localhost:8765',  // WebSocket 서버 주소 (Kiwoom OCX)
   dataDir: 'data', // file 모드에서 JSON 파일 경로
 };
+
+// ── 저장된 서버 주소 로드 (localStorage) ──────────────
+// 사용자가 연결 설정에서 변경한 wsUrl을 복원
+try {
+  var _savedPrefs = JSON.parse(localStorage.getItem('krx-prefs'));
+  if (_savedPrefs && _savedPrefs.wsUrl) {
+    KRX_API_CONFIG.wsUrl = _savedPrefs.wsUrl;
+  }
+} catch (e) { /* localStorage 접근 불가 — 무시 */ }
 
 // ── 기본 종목 목록 (index.json 로드 전 폴백) ──────────
 // base: 0 → 하드코딩 가격 제거. index.json 로드 시 lastClose로 대체됨.
@@ -100,6 +163,11 @@ const TIMEFRAMES = {
   '1d':  { label: '일봉',   seconds: 86400, count: 200 },
 };
 
+// ── 캔들 배열 메모리 상한 (장시간 세션 메모리 누수 방지) ──
+const MAX_CANDLES_DAILY = 2000;      // 일봉 최대 ~8년
+const MAX_CANDLES_INTRADAY = 500;    // 분봉 최대 ~2일
+const MAX_CACHE_ENTRIES = 50;        // 캐시 최대 종목 수
+
 // ══════════════════════════════════════════════════════
 //  KRX 데이터 서비스 클래스
 // ══════════════════════════════════════════════════════
@@ -113,6 +181,29 @@ class KRXDataService {
    * 실패 시 DEFAULT_STOCKS 폴백
    */
   async initFromIndex() {
+    // ── 모드 자동감지: WS 서버 프로브 → file → demo ──
+    // 3초 이내 WS 서버 연결 가능 여부 확인. 실패 시 file 모드로 전환.
+    if (KRX_API_CONFIG.mode === 'ws') {
+      try {
+        var probeWs = new WebSocket(KRX_API_CONFIG.wsUrl);
+        var probeOk = await new Promise(function(resolve) {
+          probeWs.onopen = function() { probeWs.close(); resolve(true); };
+          probeWs.onerror = function() { resolve(false); };
+          setTimeout(function() {
+            try { probeWs.close(); } catch(e) {}
+            resolve(false);
+          }, 3000);
+        });
+        if (!probeOk) {
+          console.log('[KRX] WS 서버 미감지 — file 모드로 전환');
+          KRX_API_CONFIG.mode = 'file';
+        }
+      } catch(e) {
+        console.log('[KRX] WS 프로브 실패:', e.message, '— file 모드로 전환');
+        KRX_API_CONFIG.mode = 'file';
+      }
+    }
+
     if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws') return;
 
     try {
@@ -167,13 +258,32 @@ class KRXDataService {
     });
   }
 
-  /** 캔들 데이터 가져오기 (TTL 캐싱) */
+  /** 캔들 데이터 가져오기 (L1 메모리 → L2 IndexedDB → L3 네트워크) */
   async getCandles(stock, timeframe) {
     const key = `${stock.code}-${timeframe}`;
+
+    // ── L1: 메모리 캐시 확인 ──
     const cached = this.cache[key];
-    const TTL = timeframe === '1d' ? 3600000 : 60000; // 일봉 1시간, 분봉 1분
+    // [OPT] 분봉 캐시 TTL 5분으로 증가 (불필요한 재생성 방지)
+    const TTL = timeframe === '1d' ? 3600000 : 300000; // 일봉 1시간, 분봉 5분
     if (cached && (Date.now() - cached.lastUpdate) < TTL) return cached.candles;
 
+    // ── L2: IndexedDB 캐시 확인 (일봉만 — 분봉은 실시간성 필요) ──
+    if (timeframe === '1d') {
+      try {
+        const idbData = await _idb.get(key);
+        if (idbData && idbData.candles && idbData.candles.length > 0) {
+          // IDB 데이터가 24시간 이내면 네트워크 요청 없이 바로 사용
+          if (Date.now() - (idbData.lastUpdate || 0) < 86400000) {
+            this.cache[key] = idbData;  // L1 캐시에도 복사
+            console.log('[IDB] 캐시 히트: %s (%d건)', key, idbData.candles.length);
+            return idbData.candles;
+          }
+        }
+      } catch (e) { /* IDB 읽기 실패 — L3로 진행 */ }
+    }
+
+    // ── L3: 네트워크/소스 fetch ──
     let candles;
     if (KRX_API_CONFIG.mode === 'ws') {
       // WS 모드: 서버가 subscribe 응답으로 candles 전송.
@@ -182,16 +292,33 @@ class KRXDataService {
       // 서버 미연결 시에도 빈 배열 반환 — 재연결 후 자동 수신.
       candles = [];
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe === '1d') {
+      // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
       candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // file 모드 + 분봉: 분봉 JSON 파일은 없으므로 데모 폴백
+      // file 모드 + 분봉: 분봉 JSON 없음 → 일봉 데이터를 그대로 표시
+      // 데모 데이터 생성 대신 실제 일봉으로 대체 (데이터 무결성 유지)
+      candles = await this._fileGetCandles(stock);
+    } else if (KRX_API_CONFIG.mode === 'demo') {
+      // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
       candles = this._demoGenerateCandles(stock, timeframe);
     } else {
-      candles = this._demoGenerateCandles(stock, timeframe);
+      // 알 수 없는 모드: 빈 배열 반환 (가짜 데이터 생성하지 않음)
+      console.warn('[KRX] 알 수 없는 데이터 모드:', KRX_API_CONFIG.mode);
+      candles = [];
     }
 
     if (candles.length > 0) {
-      this.cache[key] = { candles, lastUpdate: Date.now() };
+      // 캔들 정제: 검증 + 시간순 정렬 + 메모리 상한
+      candles = this._sanitizeCandles(candles, timeframe);
+
+      const cacheEntry = { candles, lastUpdate: Date.now() };
+      this.cache[key] = cacheEntry;
+      this._pruneCache();  // 캐시 크기 제한 확인
+
+      // IndexedDB에 비동기 저장 (일봉만 — fire-and-forget, await 안 함)
+      if (timeframe === '1d') {
+        _idb.set(key, cacheEntry);
+      }
     }
     return candles;
   }
@@ -234,6 +361,27 @@ class KRXDataService {
     return candles;
   }
 
+  /**
+   * WS 서버 연결 가능 여부 확인 (프로브)
+   * @param {string} wsUrl - WebSocket 서버 주소
+   * @param {number} timeout - 타임아웃 (ms), 기본 3000
+   * @returns {Promise<boolean>} 연결 가능하면 true
+   */
+  async probeWsServer(wsUrl, timeout) {
+    timeout = timeout || 3000;
+    try {
+      var ws = new WebSocket(wsUrl);
+      return await new Promise(function(resolve) {
+        ws.onopen = function() { ws.close(); resolve(true); };
+        ws.onerror = function() { resolve(false); };
+        setTimeout(function() {
+          try { ws.close(); } catch(e) {}
+          resolve(false);
+        }, timeout);
+      });
+    } catch(e) { return false; }
+  }
+
   /** 캐시 초기화 */
   clearCache(stockCode) {
     if (stockCode) {
@@ -242,6 +390,90 @@ class KRXDataService {
       });
     } else {
       this.cache = {};
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  캔들 데이터 검증 + 메모리 관리
+  // ══════════════════════════════════════════════════
+
+  /**
+   * 개별 캔들 OHLCV 유효성 검증
+   * @param {Object} c - 현재 캔들
+   * @param {Object|null} prev - 이전 캔들 (가격 제한폭 비교용)
+   * @returns {boolean} 유효하면 true
+   */
+  _validateCandle(c, prev) {
+    // OHLC 관계 검증
+    if (c.high < c.low) return false;
+    if (c.open > c.high || c.open < c.low) return false;
+    if (c.close > c.high || c.close < c.low) return false;
+
+    // 거래량 음수 검증
+    if (c.volume != null && c.volume < 0) return false;
+
+    // 가격 0 이하 검증
+    if (c.open <= 0 || c.high <= 0 || c.low <= 0 || c.close <= 0) return false;
+
+    // KRX 가격 제한폭 검증 (전일 대비 ±30% + 5% 여유)
+    if (prev && prev.close > 0) {
+      var change = Math.abs(c.close - prev.close) / prev.close;
+      if (change > 0.35) {
+        console.warn('[KRX] 가격 제한폭 초과 의심:', c.close, 'vs 전일', prev.close);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 캔들 배열 정제: 검증 + 시간순 정렬 + 길이 상한 적용
+   * @param {Array} candles - 원본 캔들 배열
+   * @param {string} timeframe - 타임프레임 ('1d', '5m' 등)
+   * @returns {Array} 정제된 캔들 배열 (새 배열 반환, 원본 변경 없음)
+   */
+  _sanitizeCandles(candles, timeframe) {
+    if (!candles || candles.length === 0) return candles;
+
+    // 시간순 정렬 보장
+    candles.sort(function(a, b) {
+      var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
+      var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
+      return ta - tb;
+    });
+
+    // OHLCV 유효성 필터링
+    var self = this;
+    var validated = candles.filter(function(c, i) {
+      return self._validateCandle(c, i > 0 ? candles[i - 1] : null);
+    });
+
+    // 메모리 상한 적용 (최신 데이터 유지)
+    var maxLen = timeframe === '1d' ? MAX_CANDLES_DAILY : MAX_CANDLES_INTRADAY;
+    if (validated.length > maxLen) {
+      validated = validated.slice(validated.length - maxLen);
+    }
+
+    return validated;
+  }
+
+  /**
+   * 캐시 크기 제한 (최대 MAX_CACHE_ENTRIES 종목)
+   * 가장 오래된 항목부터 삭제
+   */
+  _pruneCache() {
+    var keys = Object.keys(this.cache);
+    if (keys.length <= MAX_CACHE_ENTRIES) return;
+
+    var cache = this.cache;
+    keys.sort(function(a, b) {
+      return (cache[a].lastUpdate || 0) - (cache[b].lastUpdate || 0);
+    });
+
+    // 가장 오래된 항목 삭제
+    for (var i = 0; i < keys.length - MAX_CACHE_ENTRIES; i++) {
+      delete this.cache[keys[i]];
     }
   }
 
@@ -273,8 +505,8 @@ class KRXDataService {
       }));
     } catch (e) {
       console.warn(`[KRX] 파일 로드 실패 (${stock.code}):`, e.message);
-      // 파일이 없으면 데모 데이터로 폴백
-      return this._demoGenerateCandles(stock, '1d');
+      // 파일이 없으면 빈 배열 반환 (가짜 데이터 생성 안 함 — 데이터 무결성 원칙)
+      return [];
     }
   }
 
@@ -312,11 +544,15 @@ class KRXDataService {
     let trendDir = 0;
     let trendLen = 0;
 
+    // [OPT] 루프 밖에서 일봉 여부/기본 거래량 결정 (분기 비용 절감)
+    const isDaily = timeframe === '1d';
+    const baseVol = isDaily ? 500000 : 50000;
+
     for (let i = 0; i < count; i++) {
       const t = now - (count - 1 - i) * tf.seconds;
 
       // 일봉: 주말 건너뛰기
-      if (timeframe === '1d') {
+      if (isDaily) {
         const d = new Date(t * 1000);
         if (d.getDay() === 0 || d.getDay() === 6) continue;
       }
@@ -331,12 +567,12 @@ class KRXDataService {
       const drift = trendDir + (seededRandom() - 0.5) * vol;
       const open = price;
       const close = Math.max(100, Math.round(open + open * drift));
-      const wickUp = Math.round(Math.abs(close - open) * seededRandom() * 0.8);
-      const wickDn = Math.round(Math.abs(close - open) * seededRandom() * 0.8);
+      const diff = Math.abs(close - open);  // [OPT] 한 번만 계산
+      const wickUp = Math.round(diff * seededRandom() * 0.8);
+      const wickDn = Math.round(diff * seededRandom() * 0.8);
       const high = Math.max(open, close) + wickUp;
       const low = Math.min(open, close) - wickDn;
 
-      const baseVol = timeframe === '1d' ? 500000 : 50000;
       const volume = Math.round(baseVol + seededRandom() * baseVol * 4);
 
       candles.push({ time: t, open, high, low, close, volume });

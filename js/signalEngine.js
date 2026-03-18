@@ -19,7 +19,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['hammer', 'rsiOversoldExit'],
     optional: ['volumeBreakout'],
     optionalBonus: 5,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '해머 캔들 + RSI 과매도 탈출 + 거래량 급증 — 바닥 반등 확률 높음',
   },
   {
@@ -32,7 +32,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['shootingStar', 'macdBearishCross'],
     optional: ['volumeSelloff'],
     optionalBonus: 5,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '유성형 캔들 + MACD 데드크로스 + 투매 거래량 — 천장 하락 확률 높음',
   },
 
@@ -47,7 +47,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['goldenCross'],
     optional: ['rsiOversoldExit', 'volumeBreakout'],
     optionalBonus: 4,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '골든크로스 + RSI/거래량 보조 확인 — 추세 전환 신호',
   },
   {
@@ -60,7 +60,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['deadCross'],
     optional: ['macdBearishCross', 'rsiOverboughtExit'],
     optionalBonus: 4,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '데드크로스 + MACD/RSI 보조 확인 — 하락 추세 전환 신호',
   },
 
@@ -75,7 +75,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['bbLowerBounce'],
     optional: ['rsiOversold', 'volumeBreakout'],
     optionalBonus: 3,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '볼린저 하단 반등 + RSI 과매도 영역 — 단기 반등 가능',
   },
   {
@@ -88,7 +88,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['bbUpperBreak'],
     optional: ['rsiOverbought', 'volumeSelloff'],
     optionalBonus: 3,
-    window: 3,
+    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '볼린저 상단 돌파 + RSI 과매수 영역 — 과열 후 조정 가능',
   },
 ];
@@ -186,7 +186,8 @@ class SignalEngine {
 
       const prevDiff = ma5[i - 1] - ma20[i - 1];
       const currDiff = ma5[i] - ma20[i];
-      const minGap = atr[i] * 0.3;  // ATR 대비 최소 이격도 (0.1→0.3 상향, false signal 감소)
+      // [ACC] ATR 대비 최소 이격도 0.3→0.4 상향: 횡보장 허위 크로스 감소
+      const minGap = atr[i] * 0.4;
 
       // 골든크로스: MA5가 MA20을 상향 돌파
       if (prevDiff <= 0 && currDiff > 0 && Math.abs(currDiff) >= minGap) {
@@ -371,9 +372,9 @@ class SignalEngine {
       }
     }
 
-    // MACD 다이버전스
+    // MACD 다이버전스 — [ACC] lookback 20→40: 주요 추세 반전 포착 확대
     signals.push(...this._detectDivergence(
-      candles, macdLine, 'macd', 20
+      candles, macdLine, 'macd', 40
     ));
 
     return signals;
@@ -452,9 +453,9 @@ class SignalEngine {
       }
     }
 
-    // RSI 다이버전스
+    // RSI 다이버전스 — [ACC] lookback 20→40: 주요 추세 반전 포착 확대
     signals.push(...this._detectDivergence(
-      candles, rsi, 'rsi', 20
+      candles, rsi, 'rsi', 40
     ));
 
     return signals;
