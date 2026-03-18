@@ -303,19 +303,23 @@ class KRXDataService {
       // 서버 미연결 시에도 빈 배열 반환 — 재연결 후 자동 수신.
       candles = [];
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe === '1d') {
-      // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
+      // file 모드 + 일봉: JSON 파일 로드, 없으면 데모 폴백
       candles = await this._fileGetCandles(stock);
+      if (candles.length === 0) {
+        console.log('[KRX] 파일 없음, 데모 폴백:', stock.code);
+        candles = this._demoGenerateCandles(stock, timeframe);
+      }
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
       // [OPT] file 모드 + 분봉: 일봉 캐시 재사용 (동일 JSON 이중 fetch 방지)
-      // 분봉 JSON 파일이 없으므로 일봉 데이터를 그대로 표시.
-      // L1 캐시에 일봉 데이터가 있으면 네트워크 요청 없이 즉시 반환.
-      // 주의: slice()로 복사 — _sanitizeCandles가 sort()로 원본 훼손 방지
       var dailyKey = stock.code + '-1d';
       var dailyCached = this.cache[dailyKey];
       if (dailyCached && dailyCached.candles && dailyCached.candles.length > 0) {
         candles = dailyCached.candles.slice();
       } else {
         candles = await this._fileGetCandles(stock);
+        if (candles.length === 0) {
+          candles = this._demoGenerateCandles(stock, timeframe);
+        }
       }
     } else if (KRX_API_CONFIG.mode === 'demo') {
       // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
