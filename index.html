@@ -126,7 +126,6 @@
             <span class="sb-count" id="sb-all-count">0</span>
           </div>
           <div class="sb-list" id="sb-all"></div>
-          <button class="sb-load-more" id="sb-load-more" style="display:none">더보기</button>
         </div>
       </div>
     </div>
@@ -575,6 +574,13 @@
   <div class="tv-attribution">
     Powered by <a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener">TradingView Lightweight Charts</a>
   </div>
+
+  <!-- Service Worker 등록 (오프라인 캐싱) -->
+  <script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function() {});
+  }
+  </script>
 
   <!-- JS: 순서 중요 -->
   <script src="js/colors.js"></script>

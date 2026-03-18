@@ -867,6 +867,10 @@ html, body {
   outline-offset: -1px;
 }
 
+/* ── 22b. 가상 스크롤 (R13) ── */
+.sb-virtual-spacer { width: 100%; }
+.sb-virtual-content { width: 100%; will-change: transform; }
+
 /* ── 23. 최근 본 종목 섹션 ── */
 .sb-recent-section {
   background: rgba(160,136,48,0.03);
@@ -3129,100 +3133,144 @@ html, body {
 }
 
 
-/* ═══ 온보딩 오버레이 ═══════════════════════════════ */
+/* ═══ 온보딩 툴팁 투어 (5단계) ═══════════════════════ */
 
+/* 반투명 오버레이 — pointer-events:none으로 앱 사용 차단 안 함 */
 .onboarding-overlay {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  z-index: 9999;
-  display: flex; align-items: center; justify-content: center;
-  animation: onboardFadeIn .3s ease;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 9998;
+  pointer-events: none;
+  animation: obFadeIn .3s ease;
 }
 
-.onboarding-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px 28px 24px;
-  max-width: 420px;
-  width: 90%;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-  animation: onboardSlideUp .35s ease;
+/* 하이라이트된 요소: 오버레이 위로 올라오며 골드 글로우 */
+.onboarding-highlight {
+  position: relative;
+  z-index: 9999 !important;
+  box-shadow:
+    0 0 0 3px rgba(160, 136, 48, 0.55),
+    0 0 16px rgba(160, 136, 48, 0.25);
+  border-radius: 4px;
+  pointer-events: auto;
+  transition: box-shadow .25s ease;
 }
 
-.onboarding-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 20px;
-  text-align: center;
-  font-family: var(--font-sans);
+/* 툴팁 카드 */
+.onboarding-tooltip {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg-element, #1E1E1E);
+  border: 1px solid var(--accent, #A08830);
+  border-radius: 8px;
+  padding: 16px;
+  max-width: 280px;
+  width: max-content;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  animation: obSlideIn .25s ease;
+  font-family: var(--font-sans, 'Pretendard', sans-serif);
 }
 
-.onboarding-tips {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-bottom: 24px;
+/* 툴팁 화살표 (CSS triangle) */
+.onboarding-tooltip::before {
+  content: '';
+  position: absolute;
+  width: 10px; height: 10px;
+  background: var(--bg-element, #1E1E1E);
+  border: 1px solid var(--accent, #A08830);
+  transform: rotate(45deg);
 }
 
-.onboarding-tip {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+/* 화살표 위치 변형 */
+.onboarding-tooltip[data-pos="right"]::before {
+  left: -6px; top: 20px;
+  border-right: none; border-top: none;
+}
+.onboarding-tooltip[data-pos="bottom"]::before {
+  top: -6px; left: 24px;
+  border-bottom: none; border-right: none;
+}
+.onboarding-tooltip[data-pos="left"]::before {
+  right: -6px; top: 20px;
+  border-left: none; border-bottom: none;
+}
+.onboarding-tooltip[data-pos="center"]::before {
+  display: none; /* 중앙 배치 시 화살표 숨김 */
+}
+
+.ob-text {
+  color: var(--text, #E0E0E0);
   font-size: 13px;
-  color: var(--text);
   line-height: 1.55;
-  font-family: var(--font-sans);
+  margin-bottom: 12px;
 }
 
-.onboarding-tip-icon {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+.ob-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--accent);
-  margin-top: 1px;
+  gap: 8px;
 }
 
-.onboarding-tip-label {
-  font-weight: 600;
-  color: var(--accent);
+.ob-counter {
+  color: var(--text-muted, #808080);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
 }
 
-.onboarding-dismiss {
-  display: block;
-  width: 100%;
-  padding: 10px 0;
-  background: var(--accent);
+.ob-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted, #808080);
+  cursor: pointer;
+  font-size: 11px;
+  margin-left: auto;
+  padding: 4px 8px;
+  font-family: var(--font-sans, sans-serif);
+  transition: color .15s;
+}
+.ob-skip:hover { color: var(--text-sub, #A0A0A0); }
+
+.ob-next {
+  padding: 6px 16px;
+  background: var(--accent, #A08830);
   color: #0A0A0A;
   border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  font-family: var(--font-sans);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  font-family: var(--font-sans, sans-serif);
   transition: opacity .15s, transform .1s;
 }
-.onboarding-dismiss:hover {
-  opacity: 0.9;
+.ob-next:hover { opacity: 0.9; }
+.ob-next:active { transform: scale(0.97); }
+
+/* 진행 바 (스텝 하단) */
+.ob-progress {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
 }
-.onboarding-dismiss:active {
-  transform: scale(0.98);
+.ob-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--border, #252525);
+  transition: background .2s;
+}
+.ob-dot.active {
+  background: var(--accent, #A08830);
+}
+.ob-dot.done {
+  background: rgba(160, 136, 48, 0.4);
 }
 
-@keyframes onboardFadeIn {
+@keyframes obFadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-@keyframes onboardSlideUp {
-  from { opacity: 0; transform: translateY(20px); }
+@keyframes obSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 

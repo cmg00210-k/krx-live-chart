@@ -894,74 +894,206 @@ async function _preloadSidebarData() {
 }
 
 // ══════════════════════════════════════════════════════
-//  온보딩 오버레이 (첫 방문자)
+//  온보딩 툴팁 투어 (5단계, 첫 방문자)
+//
+//  localStorage 'krx_onboarding_v2' 키로 완료 여부 관리.
+//  오버레이는 pointer-events:none → 앱 사용을 차단하지 않음.
+//  각 스텝의 target 요소가 DOM에 없으면 자동 스킵.
 // ══════════════════════════════════════════════════════
 
-function showOnboarding() {
-  if (localStorage.getItem('krx-onboarded')) return;
+var ONBOARDING_KEY = 'krx_onboarding_v2';
 
-  var tips = [
-    { icon: '\uD83D\uDD0D', label: '종목 검색', text: '사이드바 또는 상단 검색창 사용' },
-    { icon: '\uD83D\uDCC8', label: '차트 분석', text: '패턴이 자동으로 감지됩니다' },
-    { icon: '\u2328',  label: '단축키',   text: '1-6 타임프레임, C 차트유형, P 패턴, / 검색' },
-    { icon: '\uD83D\uDCCA', label: '재무지표', text: '우측 패널에서 DART 기반 재무분석 확인' }
+function showOnboarding() {
+  // 이미 투어 완료했으면 표시하지 않음
+  if (localStorage.getItem(ONBOARDING_KEY)) return;
+
+  // ── 5단계 투어 정의 ──
+  var steps = [
+    {
+      target: '#sidebar',
+      text: '종목을 클릭하여 차트를 확인하세요.\n검색창에서 종목명/코드로 빠르게 찾을 수 있습니다.',
+      position: 'right'
+    },
+    {
+      target: '#main-chart-container',
+      text: '마우스 휠로 줌, 드래그로 스크롤할 수 있습니다.\n크로스헤어로 OHLCV를 실시간 확인합니다.',
+      position: 'center'
+    },
+    {
+      target: '#draw-toolbar',
+      text: '추세선, 수평선, 피보나치 등 6가지 드로잉 도구를 제공합니다.\n키보드 단축키(T/H/V/R/G)도 지원합니다.',
+      position: 'right'
+    },
+    {
+      target: '#ind-dropdown-toggle',
+      text: '13가지 기술적 지표를 추가할 수 있습니다.\n우클릭으로 파라미터(기간, 표준편차 등)를 변경하세요.',
+      position: 'bottom'
+    },
+    {
+      target: '#pattern-toggle',
+      text: '패턴 버튼으로 26종 캔들/차트 패턴을 자동 감지합니다.\n감지 결과는 차트 위에 시각화되고 수익률 통계도 확인할 수 있습니다.',
+      position: 'bottom'
+    }
   ];
 
-  var overlay = document.createElement('div');
-  overlay.className = 'onboarding-overlay';
+  var currentStep = 0;
+  var overlay = null;
 
-  var card = document.createElement('div');
-  card.className = 'onboarding-card';
-
-  var title = document.createElement('div');
-  title.className = 'onboarding-title';
-  title.textContent = 'CheeseStock \uC2DC\uC791\uD558\uAE30';
-
-  var list = document.createElement('ul');
-  list.className = 'onboarding-tips';
-
-  tips.forEach(function (tip) {
-    var li = document.createElement('li');
-    li.className = 'onboarding-tip';
-
-    var iconEl = document.createElement('span');
-    iconEl.className = 'onboarding-tip-icon';
-    iconEl.textContent = tip.icon;
-
-    var textEl = document.createElement('span');
-    var labelEl = document.createElement('span');
-    labelEl.className = 'onboarding-tip-label';
-    labelEl.textContent = tip.label + ': ';
-    textEl.appendChild(labelEl);
-    textEl.appendChild(document.createTextNode(tip.text));
-
-    li.appendChild(iconEl);
-    li.appendChild(textEl);
-    list.appendChild(li);
-  });
-
-  var btn = document.createElement('button');
-  btn.className = 'onboarding-dismiss';
-  btn.textContent = '\uC2DC\uC791\uD558\uAE30';
-
-  function dismiss() {
-    localStorage.setItem('krx-onboarded', '1');
-    overlay.style.animation = 'onboardFadeIn .2s ease reverse forwards';
-    setTimeout(function () {
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    }, 200);
+  // ── 진행 바 (도트) HTML 생성 ──
+  function _buildProgressDots(activeIdx) {
+    var html = '<div class="ob-progress">';
+    for (var i = 0; i < steps.length; i++) {
+      var cls = 'ob-dot';
+      if (i === activeIdx) cls += ' active';
+      else if (i < activeIdx) cls += ' done';
+      html += '<span class="' + cls + '"></span>';
+    }
+    html += '</div>';
+    return html;
   }
 
-  btn.addEventListener('click', dismiss);
-  overlay.addEventListener('click', function (e) {
-    if (e.target === overlay) dismiss();
-  });
+  // ── 이전 툴팁 / 하이라이트 제거 ──
+  function _cleanup() {
+    var prev = document.querySelector('.onboarding-tooltip');
+    if (prev) prev.remove();
+    var hl = document.querySelector('.onboarding-highlight');
+    if (hl) hl.classList.remove('onboarding-highlight');
+  }
 
-  card.appendChild(title);
-  card.appendChild(list);
-  card.appendChild(btn);
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
+  // ── 투어 종료 (완료 또는 건너뛰기) ──
+  function _endTour() {
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    _cleanup();
+    if (overlay && overlay.parentNode) {
+      overlay.style.animation = 'obFadeIn .2s ease reverse forwards';
+      setTimeout(function() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 200);
+    }
+  }
+
+  // ── 특정 스텝 표시 ──
+  function _showStep(idx) {
+    _cleanup();
+
+    // 모든 스텝 완료
+    if (idx >= steps.length) {
+      _endTour();
+      return;
+    }
+
+    var step = steps[idx];
+    var target = document.querySelector(step.target);
+
+    // target 요소가 없으면 다음 스텝으로 건너뜀
+    if (!target) {
+      _showStep(idx + 1);
+      return;
+    }
+
+    currentStep = idx;
+
+    // 하이라이트 적용
+    target.classList.add('onboarding-highlight');
+
+    // 대상 요소가 보이도록 스크롤
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // 툴팁 생성
+    var tooltip = document.createElement('div');
+    tooltip.className = 'onboarding-tooltip';
+    tooltip.setAttribute('data-pos', step.position);
+
+    var isLast = (idx === steps.length - 1);
+
+    tooltip.innerHTML =
+      '<div class="ob-text">' + step.text.replace(/\n/g, '<br>') + '</div>' +
+      '<div class="ob-actions">' +
+        '<span class="ob-counter">' + (idx + 1) + ' / ' + steps.length + '</span>' +
+        '<button class="ob-skip">\uAC74\uB108\uB6F0\uAE30</button>' +
+        '<button class="ob-next">' + (isLast ? '\uC644\uB8CC' : '\uB2E4\uC74C') + '</button>' +
+      '</div>' +
+      _buildProgressDots(idx);
+
+    document.body.appendChild(tooltip);
+
+    // ── 위치 계산 ──
+    var rect = target.getBoundingClientRect();
+    var tw = tooltip.offsetWidth;
+    var th = tooltip.offsetHeight;
+    var gap = 12; // 요소와 툴팁 사이 간격
+
+    var left, top;
+
+    switch (step.position) {
+      case 'right':
+        left = rect.right + gap;
+        top = rect.top + Math.min(20, rect.height / 2 - th / 2);
+        // 화면 오른쪽 넘어가면 왼쪽으로 배치
+        if (left + tw > window.innerWidth - 8) {
+          left = rect.left - tw - gap;
+          tooltip.setAttribute('data-pos', 'left');
+        }
+        break;
+      case 'bottom':
+        left = rect.left + rect.width / 2 - tw / 2;
+        top = rect.bottom + gap;
+        // 화면 아래 넘어가면 위로
+        if (top + th > window.innerHeight - 8) {
+          top = rect.top - th - gap;
+          tooltip.setAttribute('data-pos', 'top');
+        }
+        break;
+      case 'center':
+        // 차트 영역 중앙에 표시
+        left = rect.left + rect.width / 2 - tw / 2;
+        top = rect.top + rect.height / 2 - th / 2;
+        break;
+      default:
+        left = rect.right + gap;
+        top = rect.top;
+    }
+
+    // 화면 경계 보정
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - th - 8));
+
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+
+    // ── 이벤트 바인딩 ──
+    tooltip.querySelector('.ob-next').addEventListener('click', function() {
+      _showStep(idx + 1);
+    });
+
+    tooltip.querySelector('.ob-skip').addEventListener('click', function() {
+      _endTour();
+    });
+  }
+
+  // ── 투어 시작 (앱 로드 완료 후 1.5초 딜레이) ──
+  setTimeout(function() {
+    // 오버레이 생성
+    overlay = document.createElement('div');
+    overlay.className = 'onboarding-overlay';
+    document.body.appendChild(overlay);
+
+    // 오버레이 클릭 시에도 다음 스텝 (pointer-events:none이므로 실제로는 작동하지 않지만 안전 장치)
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) _showStep(currentStep + 1);
+    });
+
+    // Esc 키로 투어 종료
+    var _escHandler = function(e) {
+      if (e.key === 'Escape') {
+        _endTour();
+        document.removeEventListener('keydown', _escHandler);
+      }
+    };
+    document.addEventListener('keydown', _escHandler);
+
+    _showStep(0);
+  }, 1500);
 }
 
 // ══════════════════════════════════════════════════════

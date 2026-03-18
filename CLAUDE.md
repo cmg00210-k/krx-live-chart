@@ -32,7 +32,7 @@ Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is u
 | `js/signalRenderer.js` | `signalRenderer` | ISeriesPrimitive-based Canvas signal visualization (diamonds, stars, vbands, divergence lines, volume highlight) | 469 |
 | `js/backtester.js` | `backtester` | PatternBacktester class — per-pattern N-day return statistics + WLS regression return prediction + backtest panel rendering | 517 |
 | `js/analysisWorker.js` | (Web Worker) | Offloads pattern + signal + backtest analysis to Web Worker thread; loads colors/indicators/patterns/signalEngine/backtester via importScripts | 103 |
-| `js/sidebar.js` | `sidebarManager` | Collapsible sidebar with KOSPI/KOSDAQ stock lists, accordion sections | 87 |
+| `js/sidebar.js` | `sidebarManager` | Collapsible sidebar with KOSPI/KOSDAQ stock lists, virtual scroll (2700+ stocks, ~40 DOM), accordion sections | 87 |
 | `js/patternPanel.js` | `PATTERN_ACADEMIC_META`, `renderPatternPanel()`, `renderPatternCards()`, etc. | 27-pattern academic metadata + pattern UI panel (summary bar, history table, return curve, cards) | 770 |
 | `js/financials.js` | `updateFinancials()`, `drawFinTrendChart()`, `drawOPMSparkline()`, etc. | Financial panel (D column): PER/PBR/PSR, CAGR, investment score, trend charts, sparklines | 510 |
 | `js/drawingTools.js` | `drawingTools` | Left vertical toolbar + ISeriesPrimitive drawing overlay (trendline, hline, vline, rect, fib, eraser) with localStorage persistence per stock | 480 |
@@ -90,6 +90,8 @@ analysisWorker.js ← (Web Worker, separate context)
 - **IndicatorCache** (indicators.js) uses lazy evaluation — each indicator computed only on first access, cached until `setCandles()` or `invalidate()` is called.
 - **Web Worker** (`analysisWorker.js`) offloads heavy analysis (pattern + signal + backtest) off the main thread. Messages use `version` field for stale-result rejection.
 - **KRX_COLORS** (colors.js) centralizes all color constants; JS files should reference `KRX_COLORS.UP` instead of hardcoding `'#E05050'`. Pattern-specific colors (`PTN_BUY`, `PTN_SELL`, `PTN_STRUCT`, `PTN_STOP`, `PTN_TARGET`) are separate from chart UP/DOWN colors.
+- **Virtual Scroll** (sidebar.js v11.0) renders only ~40 DOM elements for 2700+ stocks. `.sb-body` is the scroll container; `#sb-all` contains a spacer div (total height) + absolute-positioned content div. `_renderVisibleItems()` recalculates on scroll via rAF throttling. Item height varies by view mode (42px default, 56px analysis).
+- **Service Worker** (`sw.js`) provides offline caching. Cache-First for static assets (JS/CSS/HTML), Network-First for data files (`data/*.json`), stale-while-revalidate for CDN resources. WebSocket connections are not intercepted. Cache version `cheesestock-v1` enables future cache busting.
 - **index.html** uses 4-column grid layout: A=sidebar (collapsible stock list with sort/filter), B=chart area + return stats, C=pattern panel (academic cards), D=financial panel (PER/PBR/ROE/CAGR/score). Responsive breakpoints at 1024px and 768px.
 
 ### Data Flow

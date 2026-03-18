@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 사이드바 매니저 v10.1
-//  16개 기능:
+//  KRX LIVE — 사이드바 매니저 v11.0
+//  17개 기능:
 //    R1:  키보드 ↑↓ 네비게이션
 //    R2:  최근 본 종목 섹션
 //    R3:  코드→tooltip, 거래량 컬럼
@@ -13,8 +13,8 @@
 //    R10: RSI 지표 값
 //    R11: 드래그 앤 드롭 재정렬
 //    R12: IntersectionObserver 스파크라인 뷰포트 최적화
+//    R13: 가상 스크롤 (2700+ 종목, DOM ~40개 유지)
 //    S3:  시가총액 값 표시 (row2)
-//    S4:  30개 스크롤 + "더보기" 버튼
 //    S6:  패턴명 row3 → 호버 툴팁
 // ══════════════════════════════════════════════════════
 
@@ -38,14 +38,16 @@ const sidebarManager = (() => {
   let _customOrder = null;           // R11: 사용자 정의 정렬 순서
 
   const MAX_RECENT = 5;
-  const DISPLAY_COUNT = 30;           // S4: 한 번에 표시할 종목 수
 
   const _prevPrices = {};
   const _stockChangeCache = {};
   const _stockPatternCache = {};     // code → { candle, indicator, volume, total, names }
 
-  // ── S4: 스크롤 + 더보기 상태 ──
-  let _displayCount = DISPLAY_COUNT;
+  // ── R13: 가상 스크롤 상태 ──
+  var VIRTUAL_ITEM_HEIGHT = 42;      // 기본 모드 아이템 높이 (px), 모드별 자동 조정
+  var VIRTUAL_BUFFER = 5;            // 뷰포트 위아래 여분 렌더링 수
+  var _vsState = null;               // { spacer, content, scrollParent, startIdx, endIdx }
+  var _vsRafPending = false;         // requestAnimationFrame 중복 방지
   let _filteredStocks = [];          // 현재 필터/정렬 적용된 전체 종목 배열
 
   // ── R5: 3모드 순환 순서 ──
@@ -695,20 +697,20 @@ const sidebarManager = (() => {
       // 검색 입력 중에는 키보드 네비게이션 비활성
       if (document.activeElement && document.activeElement.id === 'sb-search-input') return;
 
-      const items = sidebar.querySelectorAll('.sb-item[data-code]');
-      if (!items.length) return;
+      var maxIdx = _filteredStocks.length - 1;
+      if (maxIdx < 0) return;
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        _kbFocusIndex = Math.min(_kbFocusIndex + 1, items.length - 1);
-        _applyKbFocus(items);
+        _kbFocusIndex = Math.min(_kbFocusIndex + 1, maxIdx);
+        _applyKbFocus();
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         _kbFocusIndex = Math.max(_kbFocusIndex - 1, 0);
-        _applyKbFocus(items);
-      } else if (e.key === 'Enter' && _kbFocusIndex >= 0 && _kbFocusIndex < items.length) {
+        _applyKbFocus();
+      } else if (e.key === 'Enter' && _kbFocusIndex >= 0 && _kbFocusIndex <= maxIdx) {
         e.preventDefault();
-        const code = items[_kbFocusIndex].dataset.code;
+        var code = _filteredStocks[_kbFocusIndex].code;
         if (code && typeof selectStock === 'function') {
           selectStock(code);
         }
@@ -716,13 +718,37 @@ const sidebarManager = (() => {
     });
   }
 
-  function _applyKbFocus(items) {
-    items.forEach(function (el, idx) {
-      el.classList.toggle('kb-focus', idx === _kbFocusIndex);
-    });
-    if (_kbFocusIndex >= 0 && _kbFocusIndex < items.length) {
-      items[_kbFocusIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  /** R1+R13: 가상 스크롤 환경에서 키보드 포커스 적용
+   *  논리 인덱스 기반으로 스크롤 위치 조정 후 DOM 하이라이트 */
+  function _applyKbFocus() {
+    if (_kbFocusIndex < 0 || _kbFocusIndex >= _filteredStocks.length) return;
+
+    // 해당 인덱스가 보이도록 스크롤 (가상 스크롤)
+    var focusCode = _filteredStocks[_kbFocusIndex].code;
+    if (_vsState && _vsState.scrollParent) {
+      var el = document.getElementById('sb-all');
+      if (el) {
+        var itemH = _getItemHeight();
+        var targetTop = el.offsetTop + (_kbFocusIndex * itemH);
+        var scrollTop = _vsState.scrollParent.scrollTop;
+        var viewH = _vsState.scrollParent.clientHeight;
+        // 포커스 아이템이 뷰포트 밖이면 스크롤
+        if (targetTop < scrollTop || targetTop + itemH > scrollTop + viewH) {
+          _vsState.scrollParent.scrollTo({
+            top: Math.max(0, targetTop - viewH / 2 + itemH / 2),
+            behavior: 'smooth',
+          });
+        }
+      }
     }
+
+    // DOM에 있는 아이템에 kb-focus 클래스 적용
+    // (스크롤 후 _renderVisibleItems가 호출되므로 약간의 지연 필요)
+    requestAnimationFrame(function() {
+      document.querySelectorAll('#sb-all .sb-item').forEach(function(item) {
+        item.classList.toggle('kb-focus', item.dataset.code === focusCode);
+      });
+    });
   }
 
 
@@ -879,45 +905,163 @@ const sidebarManager = (() => {
 
 
   // ════════════════════════════════════════════════════
-  //  S4: 스크롤 + 더보기 렌더링
+  //  R13: 가상 스크롤 렌더링
+  //  2700+ 종목을 DOM ~40개로 효율적으로 표시.
+  //  .sb-body가 스크롤 컨테이너, #sb-all 내부에
+  //  spacer(전체 높이)와 content(보이는 아이템)를 배치.
   // ════════════════════════════════════════════════════
 
-  /** 현재 _displayCount 만큼 종목을 sb-all 컨테이너에 렌더링 */
-  function _renderList() {
-    const el = document.getElementById('sb-all');
+  /** 뷰 모드별 아이템 높이 반환 (px) */
+  function _getItemHeight() {
+    // analysis 모드: 스파크라인+메타 2행 → 더 높음
+    if (_viewMode === 'analysis') return 56;
+    // default 모드: row1 + row2 (등락률+거래량)
+    return 42;
+  }
+
+  /** 가상 스크롤 초기화 — sb-all 내부에 spacer + content 구조 생성 */
+  function _initVirtualScroll() {
+    var el = document.getElementById('sb-all');
     if (!el) return;
 
-    const listStocks = _filteredStocks.slice(0, _displayCount);
-    _renderItems(el, listStocks, false, 0, null);
+    // 기존 "더보기" 버튼 제거 (더 이상 불필요)
+    var loadMoreBtn = document.getElementById('sb-load-more');
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 
-    // "더보기" 버튼 표시/숨김
-    _updateLoadMoreUI();
-  }
+    // 스크롤 부모 = .sb-body (overflow-y: auto인 컨테이너)
+    var scrollParent = el.closest('.sb-body');
+    if (!scrollParent) return;
 
-  /** "더보기" 버튼 상태 갱신 */
-  function _updateLoadMoreUI() {
-    const btn = document.getElementById('sb-load-more');
-    if (!btn) return;
-    const remaining = _filteredStocks.length - _displayCount;
-    if (remaining > 0) {
-      const nextBatch = Math.min(remaining, DISPLAY_COUNT);
-      btn.textContent = '더보기 (+' + nextBatch + ')';
-      btn.style.display = '';
-    } else {
-      btn.style.display = 'none';
+    // 이미 초기화된 경우 재사용
+    if (_vsState && _vsState.spacer && _vsState.content) {
+      _vsState.scrollParent = scrollParent;
+      return;
     }
+
+    // 기존 내용 비우기
+    el.innerHTML = '';
+    el.style.position = 'relative';
+
+    // spacer: 전체 높이를 차지해 정확한 스크롤바 생성
+    var spacer = document.createElement('div');
+    spacer.className = 'sb-virtual-spacer';
+    spacer.style.cssText = 'width:100%;pointer-events:none;';
+    el.appendChild(spacer);
+
+    // content: 보이는 아이템만 렌더링하는 절대 위치 컨테이너
+    var content = document.createElement('div');
+    content.className = 'sb-virtual-content';
+    content.style.cssText = 'position:absolute;left:0;right:0;top:0;';
+    el.appendChild(content);
+
+    _vsState = {
+      spacer: spacer,
+      content: content,
+      scrollParent: scrollParent,
+      startIdx: -1,
+      endIdx: -1,
+    };
+
+    // 스크롤 이벤트 (rAF 스로틀)
+    scrollParent.addEventListener('scroll', _onVirtualScroll, { passive: true });
   }
 
-  /** "더보기" 버튼 이벤트 바인딩 (init에서 1회 호출) */
-  function _initLoadMore() {
-    const btn = document.getElementById('sb-load-more');
-    if (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        _displayCount += DISPLAY_COUNT;
-        _renderList();
+  /** 스크롤 이벤트 핸들러 — rAF로 스로틀링 */
+  function _onVirtualScroll() {
+    if (_vsRafPending) return;
+    _vsRafPending = true;
+    requestAnimationFrame(function() {
+      _vsRafPending = false;
+      _renderVisibleItems();
+    });
+  }
+
+  /** 현재 스크롤 위치 기반으로 보이는 아이템만 렌더링 */
+  function _renderVisibleItems() {
+    if (!_vsState || !_vsState.scrollParent) return;
+
+    var scrollParent = _vsState.scrollParent;
+    var el = document.getElementById('sb-all');
+    if (!el) return;
+
+    var itemH = _getItemHeight();
+    var totalItems = _filteredStocks.length;
+
+    // #sb-all의 scrollParent 내 오프셋 계산
+    // (.sb-body 스크롤 위치 - #sb-all의 상대 위치)
+    var elTop = el.offsetTop;  // sb-body 내에서의 y 위치
+    var scrollTop = scrollParent.scrollTop;
+    var viewHeight = scrollParent.clientHeight;
+
+    // sb-all 영역 기준 스크롤 오프셋
+    var relativeScrollTop = scrollTop - elTop;
+
+    // 보이는 범위 계산
+    var startIdx, endIdx;
+    if (relativeScrollTop < 0) {
+      // #sb-all 위쪽이 아직 보이지 않음 (즐겨찾기/최근 섹션 영역)
+      startIdx = 0;
+      endIdx = Math.min(totalItems,
+        Math.ceil((viewHeight - elTop + scrollTop) / itemH) + VIRTUAL_BUFFER);
+    } else {
+      startIdx = Math.max(0, Math.floor(relativeScrollTop / itemH) - VIRTUAL_BUFFER);
+      endIdx = Math.min(totalItems,
+        Math.ceil((relativeScrollTop + viewHeight) / itemH) + VIRTUAL_BUFFER);
+    }
+
+    // 범위가 변경되지 않았으면 스킵 (불필요한 DOM 갱신 방지)
+    if (startIdx === _vsState.startIdx && endIdx === _vsState.endIdx) return;
+    _vsState.startIdx = startIdx;
+    _vsState.endIdx = endIdx;
+
+    // 보이는 아이템 HTML 생성
+    var isPatternMode = _currentSort === 'pattern';
+    var html = '';
+    for (var i = startIdx; i < endIdx; i++) {
+      html += _renderItemHTML(_filteredStocks[i], isPatternMode);
+    }
+
+    // content 위치 조정 및 렌더
+    _vsState.content.style.top = (startIdx * itemH) + 'px';
+    _vsState.content.innerHTML = html;
+
+    // 활성 종목 표시 복원
+    if (typeof currentStock !== 'undefined' && currentStock) {
+      _vsState.content.querySelectorAll('.sb-item').forEach(function(item) {
+        item.classList.toggle('active', item.dataset.code === currentStock.code);
       });
     }
+
+    // 스파크라인 그리기 (보이는 아이템만)
+    _drawVisibleSparklines(_vsState.content);
+  }
+
+  /** 전체 종목 목록의 가상 스크롤 렌더링 (build에서 호출) */
+  function _renderList() {
+    var el = document.getElementById('sb-all');
+    if (!el) return;
+
+    // 가상 스크롤 구조 보장
+    _initVirtualScroll();
+    if (!_vsState) return;
+
+    // 아이템 높이 갱신 (뷰 모드 변경 대응)
+    var itemH = _getItemHeight();
+    var totalHeight = _filteredStocks.length * itemH;
+
+    // spacer 높이 갱신 (스크롤바 크기 결정)
+    _vsState.spacer.style.height = totalHeight + 'px';
+
+    // .sb-list의 max-height 제한 해제 (CSS에서 2000px 제한됨)
+    el.style.maxHeight = 'none';
+    el.style.overflow = 'visible';
+
+    // 렌더 범위 초기화 (강제 재렌더)
+    _vsState.startIdx = -1;
+    _vsState.endIdx = -1;
+
+    // 보이는 아이템 렌더링
+    _renderVisibleItems();
   }
 
 
@@ -947,8 +1091,7 @@ const sidebarManager = (() => {
       if (e.target.closest('.sb-sort-select') || e.target.closest('.sb-chip') ||
           e.target.closest('.sb-view-group') || e.target.closest('.sb-view-opt') ||
           e.target.closest('.sb-sort-dir') ||
-          e.target.closest('.sb-pattern-only-chip') ||
-          e.target.closest('.sb-load-more')) return;
+          e.target.closest('.sb-pattern-only-chip')) return;
 
       const item = e.target.closest('.sb-item[data-code]');
       if (item) {
@@ -1067,8 +1210,7 @@ const sidebarManager = (() => {
     // ── 이벤트 위임 + 드래그 앤 드롭 ──
     _setupEventDelegation();
 
-    // S4: 더보기 버튼 이벤트
-    _initLoadMore();
+    // R13: 가상 스크롤은 _renderList()에서 자동 초기화
 
     // R1: 키보드 네비게이션
     _initKeyboardNav();
@@ -1142,14 +1284,11 @@ const sidebarManager = (() => {
     // R12: 통합 정렬 (KOSPI/KOSDAQ 구분 없이)
     _filteredStocks = _sortStocks(source, sortBy);
 
-    // 필터/정렬 변경 시 표시 수 리셋 (keepPage 제외)
-    if (!keepPage) _displayCount = DISPLAY_COUNT;
-
     // 총 종목 수 표시
     const allCount = document.getElementById('sb-all-count');
     if (allCount) allCount.textContent = _filteredStocks.length;
 
-    // S4: 현재 목록 렌더링
+    // R13: 가상 스크롤 렌더링
     _renderList();
 
     // [FIX] build 직후 즉시 가격/등락률 표시 (index.json 요약 데이터 사용)
@@ -1176,14 +1315,38 @@ const sidebarManager = (() => {
   // ════════════════════════════════════════════════════
 
   function setActive(code) {
+    // 현재 DOM에 있는 모든 sb-item에 active 토글
     document.querySelectorAll('.sb-item').forEach(function (el) {
       el.classList.toggle('active', el.dataset.code === code);
     });
     scrollToActive(code);
   }
 
+  /** 해당 종목이 보이도록 가상 스크롤 위치 조정 후 스크롤 */
   function scrollToActive(code) {
-    const activeEl = document.querySelector('.sb-item[data-code="' + code + '"]');
+    // R13: 가상 스크롤 — 종목이 DOM에 없을 수 있으므로 인덱스로 스크롤
+    if (_vsState && _vsState.scrollParent) {
+      var idx = -1;
+      for (var i = 0; i < _filteredStocks.length; i++) {
+        if (_filteredStocks[i].code === code) { idx = i; break; }
+      }
+      if (idx >= 0) {
+        var el = document.getElementById('sb-all');
+        if (el) {
+          var itemH = _getItemHeight();
+          var targetScroll = el.offsetTop + (idx * itemH);
+          var viewH = _vsState.scrollParent.clientHeight;
+          // 종목이 뷰포트 중앙에 오도록 스크롤
+          _vsState.scrollParent.scrollTo({
+            top: Math.max(0, targetScroll - viewH / 2 + itemH / 2),
+            behavior: 'smooth',
+          });
+        }
+        return;
+      }
+    }
+    // 폴백: 즐겨찾기/최근 섹션에 있을 수 있음
+    var activeEl = document.querySelector('.sb-item[data-code="' + code + '"]');
     if (activeEl) {
       activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
@@ -1197,58 +1360,65 @@ const sidebarManager = (() => {
   function updatePrices() {
     _updateMarketIndex();
 
-    const stocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : (typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : []);
-    for (let si = 0; si < stocks.length; si++) {
-      const s = stocks[si];
-      const priceEl = document.getElementById('sb-' + s.code);
+    // R13: 가상 스크롤 — 현재 DOM에 존재하는 아이템만 갱신
+    // (전체 ALL_STOCKS 순회 대신 보이는 아이템의 data-code만 처리)
+    var visibleItems = document.querySelectorAll('.sb-item[data-code]');
+    for (var vi = 0; vi < visibleItems.length; vi++) {
+      var itemEl = visibleItems[vi];
+      var code = itemEl.dataset.code;
+      if (!code) continue;
+
+      var s = (typeof ALL_STOCKS !== 'undefined')
+        ? ALL_STOCKS.find(function(st) { return st.code === code; })
+        : null;
+      if (!s) continue;
+
+      var priceEl = itemEl.querySelector('.sb-price');
       if (!priceEl) continue;
 
-      const cdls = _getCachedCandles(s.code);
+      var cdls = _getCachedCandles(s.code);
       var newPrice, changePct, lastVol;
 
       if (cdls && cdls.length) {
         // 캐시된 캔들 우선 (실시간/최근 로드 데이터)
-        const last = cdls[cdls.length - 1];
+        var last = cdls[cdls.length - 1];
         newPrice = last.close;
         lastVol = last.volume || 0;
-        const prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
-        const prevClose = prevCandle ? prevCandle.close : last.open;
+        var prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
+        var prevClose = prevCandle ? prevCandle.close : last.open;
         changePct = prevClose > 0 ? ((last.close - prevClose) / prevClose * 100) : 0;
       } else if (s.base && s.base > 0) {
-        // [OPT] index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
+        // index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
         newPrice = s.base;
         changePct = s.changePercent || 0;
         lastVol = s.volume || 0;
       } else {
-        continue;  // 데이터 없음 — 건너뜀
+        continue;
       }
 
       priceEl.textContent = newPrice.toLocaleString();
       priceEl.className = 'sb-price';
 
       // 등락률
-      const changeEl = document.getElementById('sb-chg-' + s.code);
+      var changeEl = itemEl.querySelector('.sb-change');
       if (changeEl) {
         var pctNum = parseFloat(changePct.toFixed(2));
         var pctStr = pctNum.toFixed(2);
-        const arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
+        var arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
         changeEl.textContent = arrow + (pctNum >= 0 ? '+' : '') + pctStr + '%';
         changeEl.className = 'sb-change ' + (pctNum >= 0 ? 'up' : 'dn');
         _stockChangeCache[s.code] = pctNum;
       }
 
       // R3: 거래량 갱신
-      const itemEl = priceEl.closest('.sb-item');
-      if (itemEl) {
-        const volSpan = itemEl.querySelector('.sb-volume');
-        if (volSpan) volSpan.textContent = _formatVolume(lastVol);
-      }
+      var volSpan = itemEl.querySelector('.sb-volume');
+      if (volSpan) volSpan.textContent = _formatVolume(lastVol);
 
-      // 가격 flash 효과 (캐시된 캔들이 있을 때만 — 요약 데이터는 정적)
+      // 가격 flash 효과 (캐시된 캔들이 있을 때만)
       if (!cdls || !cdls.length) continue;
-      const prev = _prevPrices[s.code];
+      var prev = _prevPrices[s.code];
       if (prev !== undefined && prev !== newPrice) {
-        const flashCls = newPrice > prev ? 'price-flash-up' : 'price-flash-down';
+        var flashCls = newPrice > prev ? 'price-flash-up' : 'price-flash-down';
         priceEl.classList.add(flashCls);
         priceEl.addEventListener('animationend', function () {
           this.classList.remove('price-flash-up', 'price-flash-down');
@@ -1257,8 +1427,10 @@ const sidebarManager = (() => {
       _prevPrices[s.code] = newPrice;
     }
 
-    // R9: 스파크라인 — IntersectionObserver로 새로 캐시된 데이터 반영
-    _initSparkObserver();
+    // R13: 가상 스크롤 — 보이는 아이템 스파크라인 재그리기
+    if (_vsState && _vsState.content) {
+      _drawVisibleSparklines(_vsState.content);
+    }
   }
 
 
