@@ -124,7 +124,7 @@ Rendering path:
 - **file**: Loads real OHLCV from `data/kospi/`, `data/kosdaq/` JSON files. Daily from local JSON, intraday uses demo fallback. Stock list from `data/index.json` (~2,733 stocks).
 - **demo**: Deterministic simulated data using stock code hash as random seed.
 
-`data/` folder is in `.gitignore` — generated locally by `scripts/download_ohlcv.py`.
+`data/` folder is in `.gitignore` — generated locally by `scripts/download_ohlcv.py`. Exception: `data/index.json` is tracked in git (stock list for public site).
 
 ### WebSocket Server (Kiwoom OCX)
 
@@ -136,7 +136,7 @@ Architecture:
 ```
 
 Requirements:
-- Python 3.9 32-bit (`C:\Users\seth1\AppData\Local\Programs\Python\Python39-32`)
+- Python 3.9 32-bit (default: `%LOCALAPPDATA%\Programs\Python\Python39-32`, override: `KRX_PYTHON32` env var)
 - PyQt5 (32-bit)
 - Kiwoom OpenAPI+ OCX registered (`C:\OpenAPI\khopenapi.ocx`)
 - Kiwoom HTS logged in
@@ -210,6 +210,16 @@ Output: `data/financials/{code}.json` — quarterly + annual financial data
 5. Use with `--api-key YOUR_KEY`
 
 Without `data/financials/` folder, the app uses hardcoded data (Samsung/SK Hynix) or seed-based dummy data for other stocks. Run `--demo` mode for quick testing without an API key.
+
+## Dual Developer Setup
+
+Two developers each run their own Kiwoom OCX server independently:
+- **seth1**: Production server (Cloudflare Tunnel → `wss://ws.cheesestock.co.kr`)
+- **최민규**: Local development (`ws://localhost:8765`)
+- Both have independent Kiwoom accounts (동일 계정 동시 로그인 불가)
+- DART API keys: each developer registers their own at https://opendart.fss.or.kr/
+- Python path: set `KRX_PYTHON32` env var if not default location (see `docs/developer-setup.md`)
+- Git workflow: feature branches → merge to main
 
 ## Collaboration Rules (from GUIDE.md)
 

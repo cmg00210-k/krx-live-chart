@@ -12,8 +12,13 @@ echo.
 
 cd /d "%~dp0"
 
-:: Python 3.9-32bit 경로 (Kiwoom OCX는 32bit 전용)
-set PYTHON32=C:\Users\seth1\AppData\Local\Programs\Python\Python39-32\python.exe
+:: Python 3.9-32bit 경로 (환경변수 KRX_PYTHON32 우선, 없으면 기본 경로)
+:: Kiwoom OCX는 32bit 전용 — 각 개발자의 설치 경로가 다를 수 있음
+if defined KRX_PYTHON32 (
+    set PYTHON32=%KRX_PYTHON32%
+) else (
+    set PYTHON32=%LOCALAPPDATA%\Programs\Python\Python39-32\python.exe
+)
 
 :: Python 존재 확인
 if not exist "%PYTHON32%" (
