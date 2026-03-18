@@ -6,4 +6,4 @@ Disallow: /scripts/
 Disallow: /core_data/
 Disallow: /pattern_impl/
 
-Sitemap: https://www.cheesestock.co.kr/sitemap.xml
+Sitemap: https://cheesestock.co.kr/sitemap.xml
