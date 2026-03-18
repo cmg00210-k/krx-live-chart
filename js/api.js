@@ -300,10 +300,17 @@ class KRXDataService {
       // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
       candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // [FIX] file 모드 + 분봉: 404 fetch 제거 → 일봉 데이터 즉시 표시
-      // generate_intraday.py 실행 전에는 분봉 JSON 파일이 없으므로
-      // 불필요한 404 fetch(30-100ms 지연)를 건너뛰고 바로 일봉 폴백
-      candles = await this._fileGetCandles(stock);
+      // [OPT] file 모드 + 분봉: 일봉 캐시 재사용 (동일 JSON 이중 fetch 방지)
+      // 분봉 JSON 파일이 없으므로 일봉 데이터를 그대로 표시.
+      // L1 캐시에 일봉 데이터가 있으면 네트워크 요청 없이 즉시 반환.
+      // 주의: slice()로 복사 — _sanitizeCandles가 sort()로 원본 훼손 방지
+      var dailyKey = stock.code + '-1d';
+      var dailyCached = this.cache[dailyKey];
+      if (dailyCached && dailyCached.candles && dailyCached.candles.length > 0) {
+        candles = dailyCached.candles.slice();
+      } else {
+        candles = await this._fileGetCandles(stock);
+      }
     } else if (KRX_API_CONFIG.mode === 'demo') {
       // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
       candles = this._demoGenerateCandles(stock, timeframe);
@@ -451,12 +458,21 @@ class KRXDataService {
   _sanitizeCandles(candles, timeframe) {
     if (!candles || candles.length === 0) return candles;
 
-    // 시간순 정렬 보장
-    candles.sort(function(a, b) {
-      var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
-      var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
-      return ta - tb;
-    });
+    // [OPT] 정렬 전 이미 정렬되어 있는지 빠른 검증 (대부분의 JSON은 이미 정렬됨)
+    var needsSort = false;
+    for (var si = 1; si < candles.length; si++) {
+      var prevT = candles[si - 1].time;
+      var curT = candles[si].time;
+      // 같은 타입끼리 비교 (string "YYYY-MM-DD"는 사전순 = 시간순)
+      if (curT < prevT) { needsSort = true; break; }
+    }
+    if (needsSort) {
+      candles.sort(function(a, b) {
+        var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
+        var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
+        return ta - tb;
+      });
+    }
 
     // OHLCV 유효성 필터링
     var self = this;

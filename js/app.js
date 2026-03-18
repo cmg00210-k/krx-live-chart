@@ -1421,8 +1421,24 @@ function updateChartFull() {
     if (_analysisWorker && _workerReady) {
       _requestWorkerAnalysis();
     } else {
-      // 폴백: 메인 스레드 동기 분석
-      _analyzeOnMainThread();
+      // [OPT] 메인 스레드 동기 분석을 지연 실행 — 차트 렌더링 우선
+      // 패턴 분석(50-200ms)이 차트 최초 렌더를 차단하지 않도록
+      // 먼저 빈 패턴으로 차트를 그린 뒤, 다음 프레임에서 분석 + 재렌더
+      var _deferredVersion = _workerVersion;
+      setTimeout(function() {
+        if (_deferredVersion !== _workerVersion) return;  // stale 방지
+        _analyzeOnMainThread();
+        // 분석 완료 후 차트 + 렌더러만 갱신 (재귀 방지: 직접 호출)
+        chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
+        var filtSigs = _filterSignalsByCategory(detectedSignals);
+        if (typeof signalRenderer !== 'undefined') {
+          signalRenderer.render(chartManager, candles, filtSigs, {
+            volumeActive: activeIndicators.has('vol'),
+            chartType: chartType,
+          });
+        }
+        chartManager.setHoverData(candles, detectedPatterns, filtSigs);
+      }, 0);
     }
 
     _lastPatternAnalysis = now;
@@ -1884,8 +1900,22 @@ async function selectStock(code) {
   _prevPatternCount = -1;
   if (typeof backtester !== 'undefined') backtester.invalidateCache();
 
-  // 로딩 shimmer 표시
+  // [OPT] 로딩 shimmer를 기존 차트 위에 표시 (빈 차트 노출 방지)
   _dom.mainContainer.classList.add('chart-loading');
+
+  // [OPT] 데이터를 먼저 fetch — 차트 destroy/recreate 전에 데이터 준비
+  var newCandles;
+  try {
+    newCandles = await dataService.getCandles(currentStock, currentTimeframe);
+  } catch (e) {
+    console.error('[KRX] 캔들 데이터 로드 실패:', e);
+    showToast(currentStock.name + ' 데이터 로드 실패', 'error');
+    newCandles = [];
+  }
+  if (version !== _selectVersion) return;
+
+  // 데이터 준비 완료 → 차트 재생성 + 즉시 데이터 투입
+  candles = newCandles;
 
   chartManager.destroyAll();
   chartManager.createMainChart(_dom.mainContainer);
@@ -1897,15 +1927,6 @@ async function selectStock(code) {
     drawingTools.setStockCode(code);
     _initDrawingTools();
   }
-
-  try {
-    candles = await dataService.getCandles(currentStock, currentTimeframe);
-  } catch (e) {
-    console.error('[KRX] 캔들 데이터 로드 실패:', e);
-    showToast(currentStock.name + ' 데이터 로드 실패', 'error');
-    candles = [];
-  }
-  if (version !== _selectVersion) return;
 
   // 로딩 해제
   _dom.mainContainer.classList.remove('chart-loading');
@@ -2377,8 +2398,26 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     _prevPrice = null;
     _prevPatternCount = -1;
 
-    // 로딩 shimmer 표시
+    // [OPT] 로딩 shimmer를 기존 차트 위에 표시 (빈 차트 노출 방지)
     _dom.mainContainer.classList.add('chart-loading');
+
+    // [OPT] 데이터를 먼저 fetch — 차트 destroy/recreate 전에 데이터 준비
+    // 캐시 히트 시 즉시 반환 (~0ms), 네트워크 fetch 시에만 대기
+    // 기존: destroyAll → createChart → await fetch (빈 차트 노출)
+    // 변경: await fetch → destroyAll → createChart → setData (즉시 렌더)
+    var newCandles;
+    try {
+      newCandles = await dataService.getCandles(currentStock, currentTimeframe);
+    } catch (e) {
+      console.error('[KRX] 캔들 데이터 로드 실패:', e);
+      newCandles = [];
+    }
+
+    // [OPT] stale 결과 무시 — 이미 다른 타임프레임으로 전환됨
+    if (myTfVersion !== _tfVersion) return;
+
+    // 데이터 준비 완료 → 차트 재생성 + 즉시 데이터 투입
+    candles = newCandles;
 
     chartManager.destroyAll();
     chartManager.createMainChart(_dom.mainContainer);
@@ -2394,10 +2433,6 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
       drawingTools.detach();
       _initDrawingTools();
     }
-    candles = await dataService.getCandles(currentStock, currentTimeframe);
-
-    // [OPT] stale 결과 무시 — 이미 다른 타임프레임으로 전환됨
-    if (myTfVersion !== _tfVersion) return;
 
     // 로딩 해제
     _dom.mainContainer.classList.remove('chart-loading');
@@ -2643,6 +2678,11 @@ if (patternBtn) {
 //  drawingTools.js에 정의된 드로잉 엔진과 app.js를 연결하는 글루 코드
 // ══════════════════════════════════════════════════════
 
+// [OPT] 드로잉 버튼 이벤트 리스너는 한 번만 등록 (중복 방지 플래그)
+var _drawBtnsInitialized = false;
+// [OPT] mouseup 이벤트 리스너도 한 번만 등록
+var _drawMouseUpInitialized = false;
+
 function _initDrawingTools() {
   if (typeof drawingTools === 'undefined') return;
 
@@ -2650,33 +2690,34 @@ function _initDrawingTools() {
   drawingTools.attach(chartManager);
   drawingTools.setStockCode(currentStock ? currentStock.code : null);
 
-  // 툴바 버튼 클릭 이벤트
-  document.querySelectorAll('.draw-btn').forEach(function(btn) {
-    var tool = btn.dataset.tool;
-    // 색상 버튼은 도구 전환 대신 색상 선택기를 토글
-    if (tool === 'color') {
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        drawingTools.toggleColorPicker();
+  // [OPT] 툴바 버튼 클릭 이벤트 — 한 번만 등록 (매 TF 전환마다 누적 방지)
+  if (!_drawBtnsInitialized) {
+    _drawBtnsInitialized = true;
+    document.querySelectorAll('.draw-btn').forEach(function(btn) {
+      var tool = btn.dataset.tool;
+      // 색상 버튼은 도구 전환 대신 색상 선택기를 토글
+      if (tool === 'color') {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          drawingTools.toggleColorPicker();
+        });
+        return;
+      }
+      btn.addEventListener('click', function() {
+        drawingTools.setTool(tool);
       });
-      return;
-    }
-    btn.addEventListener('click', function() {
-      drawingTools.setTool(tool);
     });
-  });
+  }
 
-  // 메인 차트 클릭 이벤트 — 드로잉 포인트 수집
-  // Lightweight Charts의 subscribeClick 사용 (price/time 좌표 제공)
+  // 메인 차트 클릭/크로스헤어 이벤트 — 차트 재생성마다 재등록 필요
+  // (destroyAll()로 차트 객체가 교체되므로 subscribeClick/subscribeCrosshairMove 재등록)
   if (chartManager.mainChart) {
     chartManager.mainChart.subscribeClick(function(param) {
       if (!drawingTools.getActiveTool()) return;
       if (!param.time) return;
 
-      // 클릭한 가격 좌표 계산: point.y → coordinateToPrice 사용 (정밀한 위치)
       var price = null;
       var targetSeries = chartManager.candleSeries;
-      // 라인 차트 모드: _priceLine 시리즈로 폴백
       if (!targetSeries || (chartType === 'line' && chartManager.indicatorSeries._priceLine)) {
         targetSeries = chartManager.indicatorSeries._priceLine || chartManager.candleSeries;
       }
@@ -2684,7 +2725,6 @@ function _initDrawingTools() {
         price = targetSeries.coordinateToPrice(param.point.y);
       }
       if (price == null) {
-        // 폴백: seriesData에서 close 가격
         var sd = param.seriesData && param.seriesData.get(targetSeries);
         if (sd) price = sd.close;
       }
@@ -2692,11 +2732,7 @@ function _initDrawingTools() {
 
       drawingTools.handleChartClick(price, param.time);
     });
-  }
 
-  // 메인 차트 크로스헤어 이동 — 프리뷰 + 드래그 이동 업데이트
-  // 기존 onCrosshairMove 콜백에 추가로 등록 (subscribeCrosshairMove는 다중 구독 지원)
-  if (chartManager.mainChart) {
     chartManager.mainChart.subscribeCrosshairMove(function(param) {
       if (!drawingTools.getActiveTool()) return;
       if (!param.time) return;
@@ -2715,14 +2751,17 @@ function _initDrawingTools() {
     });
   }
 
-  // 차트 컨테이너에서 mouseup 이벤트 — 드래그 이동 종료
-  var chartWrapEl = document.getElementById('chart-wrap');
-  if (chartWrapEl) {
-    chartWrapEl.addEventListener('mouseup', function() {
-      if (typeof drawingTools !== 'undefined') {
-        drawingTools.handleChartMouseUp();
-      }
-    });
+  // [OPT] mouseup 이벤트 — 한 번만 등록 (DOM 요소는 변경되지 않음)
+  if (!_drawMouseUpInitialized) {
+    _drawMouseUpInitialized = true;
+    var chartWrapEl = document.getElementById('chart-wrap');
+    if (chartWrapEl) {
+      chartWrapEl.addEventListener('mouseup', function() {
+        if (typeof drawingTools !== 'undefined') {
+          drawingTools.handleChartMouseUp();
+        }
+      });
+    }
   }
 }
 

@@ -41,6 +41,7 @@ class ChartManager {
     // 시간축 동기화 구독 해제 함수들
     this._syncUnsubs = [];
     this._syncing = false;
+    this._syncScheduled = false;  // [OPT] 마이크로태스크 디바운스 플래그
 
     // 가격선 참조 (현재가/고가/저가)
     this._currentPriceLine = null;
@@ -691,8 +692,20 @@ class ChartManager {
 
   // ══════════════════════════════════════════════════
   //  시간축 동기화 (구독 해제 → 재구독)
+  //  [OPT] 디바운스: 여러 서브차트가 연속 생성/파괴될 때 한 번만 실행
   // ══════════════════════════════════════════════════
   _rebuildSync() {
+    // [OPT] 연속 호출 시 마지막 호출만 실행 (마이크로태스크 디바운스)
+    // 7개 서브차트 생성 시 7회 → 1회로 축소
+    if (this._syncScheduled) return;
+    this._syncScheduled = true;
+    Promise.resolve().then(() => {
+      this._syncScheduled = false;
+      this._doRebuildSync();
+    });
+  }
+
+  _doRebuildSync() {
     // 기존 구독 모두 해제
     this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
     this._syncUnsubs = [];
@@ -980,6 +993,7 @@ class ChartManager {
     // 동기화 구독 해제
     this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
     this._syncUnsubs = [];
+    this._syncScheduled = false;  // [OPT] 디바운스 플래그 리셋
 
     // 리사이즈 옵저버 해제
     this._resizeMap.forEach(entry => entry.observer.disconnect());
