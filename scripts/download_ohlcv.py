@@ -28,9 +28,17 @@ import os
 import json
 import time
 import argparse
+import logging
 from datetime import datetime, timedelta
 
 sys.stdout.reconfigure(encoding='utf-8')
+
+# ── 로깅 설정 (--cron 모드에서 파일 출력용) ──
+logger = logging.getLogger('krx_downloader')
+logger.setLevel(logging.INFO)
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(logging.Formatter('%(message)s'))
+logger.addHandler(_console_handler)
 
 from pykrx import stock
 import FinanceDataReader as fdr
@@ -42,7 +50,7 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 def get_all_stocks():
     """KRX 전체 상장종목 리스트 (FinanceDataReader 사용, 재시도 포함)"""
-    print("  종목 리스트 로딩 중...")
+    logger.info("  종목 리스트 로딩 중...")
 
     for attempt in range(3):
         try:
@@ -50,7 +58,7 @@ def get_all_stocks():
             kosdaq = fdr.StockListing('KOSDAQ')
             break
         except Exception as e:
-            print(f"  ⚠ 종목 리스트 로드 실패 (시도 {attempt+1}/3): {e}")
+            logger.warning(f"  종목 리스트 로드 실패 (시도 {attempt+1}/3): {e}")
             if attempt < 2:
                 time.sleep(3)
             else:
@@ -69,7 +77,7 @@ def get_all_stocks():
         if code and name and len(code) == 6:
             stocks.append({"code": code, "name": name, "market": "KOSDAQ"})
 
-    print(f"  KOSPI {len(kospi)}개 + KOSDAQ {len(kosdaq)}개 = {len(stocks)}개")
+    logger.info(f"  KOSPI {len(kospi)}개 + KOSDAQ {len(kosdaq)}개 = {len(stocks)}개")
     return stocks
 
 
@@ -161,12 +169,12 @@ def fetch_market_caps(date_str):
                             if cap_억 > 0:
                                 market_caps[code] = cap_억
             except Exception as e:
-                print(f"  ⚠ {market} 시총 조회 실패: {e}")
+                logger.warning(f"  {market} 시총 조회 실패: {e}")
 
-        print(f"  시가총액 데이터: {len(market_caps)}종목 로드 완료")
+        logger.info(f"  시가총액 데이터: {len(market_caps)}종목 로드 완료")
 
     except Exception as e:
-        print(f"  ⚠ 시가총액 조회 전체 실패: {e}")
+        logger.warning(f"  시가총액 조회 전체 실패: {e}")
 
     return market_caps
 
@@ -203,9 +211,9 @@ def fetch_sector_info():
                             'sector': sector,
                             'industry': industry,
                         }
-        print(f"  섹터 정보: {len(sector_map)}종목 로드 완료")
+        logger.info(f"  섹터 정보: {len(sector_map)}종목 로드 완료")
     except Exception as e:
-        print(f"  섹터 정보 조회 실패: {e}")
+        logger.warning(f"  섹터 정보 조회 실패: {e}")
     return sector_map
 
 
@@ -223,9 +231,9 @@ def _fetch_indices():
         if df is not None and not df.empty:
             indices['kosdaq'] = float(df.iloc[-1]['Close'])
         if indices:
-            print(f"  지수 조회 완료: KOSPI {indices.get('kospi', '?')}, KOSDAQ {indices.get('kosdaq', '?')}")
+            logger.info(f"  지수 조회 완료: KOSPI {indices.get('kospi', '?')}, KOSDAQ {indices.get('kosdaq', '?')}")
     except Exception as e:
-        print(f"  지수 조회 실패: {e}")
+        logger.warning(f"  지수 조회 실패: {e}")
     return indices
 
 
@@ -280,38 +288,56 @@ def main():
     parser.add_argument("--code", type=str, help="특정 종목 코드만")
     parser.add_argument("--top", type=int, help="시가총액 상위 N개만")
     parser.add_argument("--delay", type=float, default=0.8, help="요청 간 대기(초, 기본: 0.8)")
+    parser.add_argument("--cron", action="store_true",
+                        help="무인 실행 모드 (프롬프트 없음, 로그 파일 출력)")
     args = parser.parse_args()
+
+    # ── --cron 모드: 로그를 파일로 리다이렉트, 인터랙티브 프롬프트 비활성화 ──
+    if args.cron:
+        log_dir = os.path.join(PROJECT_ROOT, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(
+            log_dir,
+            f"download_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        # 파일 핸들러 추가, 콘솔 핸들러 제거
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.addHandler(file_handler)
+        logger.removeHandler(_console_handler)
+        logger.info(f"[CRON] 로그 파일: {log_file}")
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=args.years * 365)).strftime("%Y%m%d")
 
-    print(f"═══════════════════════════════════════════")
-    print(f"  KRX OHLCV 다운로더")
-    print(f"  기간: {start_date} ~ {end_date} ({args.years}년)")
-    print(f"  저장: data/kospi/, data/kosdaq/")
-    print(f"═══════════════════════════════════════════")
-    print()
+    logger.info(f"═══════════════════════════════════════════")
+    logger.info(f"  KRX OHLCV 다운로더{' [CRON]' if args.cron else ''}")
+    logger.info(f"  기간: {start_date} ~ {end_date} ({args.years}년)")
+    logger.info(f"  저장: data/kospi/, data/kosdaq/")
+    logger.info(f"═══════════════════════════════════════════")
 
     # ── 종목 리스트 가져오기 ──
     if args.code:
         # 단일 종목 모드
         name = stock.get_market_ticker_name(args.code) or args.code
         targets = [{"code": args.code, "name": name, "market": "KOSPI"}]
-        print(f"  단일 종목: {name}({args.code})")
+        logger.info(f"  단일 종목: {name}({args.code})")
     else:
         targets = get_all_stocks()
 
         if args.market:
             targets = [s for s in targets if s["market"] == args.market]
-            print(f"  필터: {args.market}만 ({len(targets)}개)")
+            logger.info(f"  필터: {args.market}만 ({len(targets)}개)")
 
         if args.top:
             targets = targets[:args.top]
-            print(f"  필터: 상위 {args.top}개")
+            logger.info(f"  필터: 상위 {args.top}개")
 
-    print(f"\n── 다운로드 시작 ({len(targets)}개 종목) ──\n")
+    logger.info(f"  다운로드 시작 ({len(targets)}개 종목)")
 
     success = 0
     fail = 0
@@ -327,7 +353,7 @@ def main():
         elif "error" in result:
             fail += 1
             if (i + 1) % 50 == 0 or fail <= 3:
-                print(f"  ✗ [{i+1}/{len(targets)}] {s['name']}({s['code']}): {result['error']}")
+                logger.info(f"  X [{i+1}/{len(targets)}] {s['name']}({s['code']}): {result['error']}")
         else:
             success += 1
             entry = {
@@ -368,20 +394,20 @@ def main():
                 elapsed = time.time() - start_time
                 rate = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (len(targets) - i - 1) / rate if rate > 0 else 0
-                print(f"  ✓ [{i+1}/{len(targets)}] {s['name']}({s['code']}): "
-                      f"{result['count']}봉 {result['size_kb']:.0f}KB "
-                      f"| 남은 시간: {int(eta//60)}분 {int(eta%60)}초")
+                logger.info(f"  V [{i+1}/{len(targets)}] {s['name']}({s['code']}): "
+                            f"{result['count']}봉 {result['size_kb']:.0f}KB "
+                            f"| 남은 시간: {int(eta//60)}분 {int(eta%60)}초")
 
         # KRX 서버 부하 방지
         if i < len(targets) - 1:
             time.sleep(args.delay)
 
     # ── 시가총액 데이터 조회 ──
-    print(f"\n── 시가총액 데이터 조회 ──\n")
+    logger.info(f"  시가총액 데이터 조회 중...")
     market_caps = fetch_market_caps(end_date)
 
     # ── 섹터/업종 정보 조회 ──
-    print(f"\n── 섹터/업종 정보 조회 ──\n")
+    logger.info(f"  섹터/업종 정보 조회 중...")
     sector_map = fetch_sector_info()
 
     # ── 인덱스 파일 생성 (시총 + 섹터 포함) ──
@@ -396,13 +422,26 @@ def main():
 
     elapsed = time.time() - start_time
 
-    print(f"\n═══════════════════════════════════════════")
-    print(f"  완료! ({int(elapsed//60)}분 {int(elapsed%60)}초 소요)")
-    print(f"  성공: {success} | 실패: {fail} | 건너뜀: {skip}")
-    print(f"  인덱스: {len(stocks_meta)}종목 (data/index.json)")
-    print(f"  총 용량: {total_size / 1024 / 1024:.1f}MB")
-    print(f"═══════════════════════════════════════════")
+    logger.info(f"═══════════════════════════════════════════")
+    logger.info(f"  완료! ({int(elapsed//60)}분 {int(elapsed%60)}초 소요)")
+    logger.info(f"  성공: {success} | 실패: {fail} | 건너뜀: {skip}")
+    logger.info(f"  인덱스: {len(stocks_meta)}종목 (data/index.json)")
+    logger.info(f"  총 용량: {total_size / 1024 / 1024:.1f}MB")
+    logger.info(f"═══════════════════════════════════════════")
+
+    # --cron 모드: 종료 코드 반환 (실패가 전체의 50% 초과 시 에러)
+    if args.cron:
+        total = success + fail + skip
+        if total > 0 and fail > total * 0.5:
+            logger.error(f"  [CRON] 실패율 과다: {fail}/{total} — 종료 코드 1")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        exit_code = main()
+        sys.exit(exit_code or 0)
+    except Exception as e:
+        logger.error(f"[FATAL] {e}")
+        sys.exit(1)

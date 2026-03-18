@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 드로잉 도구 v1.0
+//  KRX LIVE — 드로잉 도구 v2.0
 //  좌측 수직 툴바 + ISeriesPrimitive 기반 캔버스 렌더링
 //
-//  도구 목록 (Phase 1):
+//  도구 목록:
+//    0. 선택/이동 (select) — 기존 드로잉 선택 + 드래그 이동
 //    1. 추세선 (trendline) — 2점 클릭
 //    2. 수평선 (hline) — 1점 클릭
 //    3. 수직선 (vline) — 1점 클릭
@@ -10,9 +11,14 @@
 //    5. 피보나치 되돌림 (fib) — 2점 클릭 (고/저)
 //    6. 삭제 (eraser) — 클릭한 드로잉 제거
 //
+//  v2.0 신기능:
+//    - 선택 도구 (S): 기존 드로잉 클릭 선택 → 드래그로 이동
+//    - 색상 선택기: 우클릭 또는 툴바 스와치로 드로잉 색상 변경
+//    - 선택 앵커 핸들 (하이라이트 표시)
+//
 //  렌더링: ISeriesPrimitive (patternRenderer.js 와 동일 패턴)
-//  저장: localStorage (종목별)
-//  단축키: T=추세선, H=수평선, V=수직선, R=사각형, G=피보나치, Del=삭제, Esc=해제
+//  저장: localStorage (종목별, color 필드 포함)
+//  단축키: S=선택, T=추세선, H=수평선, V=수직선, R=사각형, G=피보나치, Del=삭제, Esc=해제
 // ══════════════════════════════════════════════════════
 
 const drawingTools = (() => {
@@ -30,6 +36,13 @@ const drawingTools = (() => {
   // 임시 프리뷰 상태 (마우스 이동 중 미완성 드로잉 미리보기)
   let _previewPoint = null;     // { price, time } — 마우스 추적 좌표
 
+  // ── 선택/이동 상태 ──
+  let _selectedDrawing = null;  // 현재 선택된 드로잉 객체 (또는 null)
+  let _dragState = null;        // 드래그 중 상태: { drawing, startPrice, startTime, origPoints }
+
+  // ── 색상 선택기 상태 ──
+  let _currentColor = null;     // 사용자 선택 색상 (null이면 도구별 기본값 사용)
+
   // localStorage 키
   const STORAGE_KEY = 'krx_drawings_v1';
 
@@ -37,17 +50,37 @@ const drawingTools = (() => {
   const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
   const FIB_LABELS = ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%'];
 
-  // 드로잉 색상
-  const COLORS = {
-    trendline: '#A08830',     // 금색 (accent, 어두운 톤)
+  // 사용자 선택 가능 색상 팔레트 (6개)
+  const DRAW_COLORS = [
+    '#C9A84C',   // gold (기본 추세선)
+    '#787B86',   // gray (기본 수평/수직선)
+    '#2962FF',   // blue (TradingView 관례)
+    '#E05050',   // red (KRX 상승)
+    '#5086DC',   // blue (KRX 하락)
+    '#26C6DA',   // cyan
+  ];
+
+  // 드로잉 기본 색상 (도구별)
+  const DEFAULT_COLORS = {
+    trendline: '#C9A84C',     // 금색 (accent)
     hline:     '#787B86',     // 회색
     vline:     '#787B86',     // 회색
-    rect:      'rgba(41,98,255,0.25)',   // 파란색 반투명
+    rect:      '#2962FF',     // 파란색 (테두리 기준)
+    fib:       '#787B86',     // 회색
+  };
+
+  // 렌더링에서 쓰는 기본 색상 (하위 호환)
+  const COLORS = {
+    trendline: '#A08830',
+    hline:     '#787B86',
+    vline:     '#787B86',
+    rect:      'rgba(41,98,255,0.25)',
     rectBorder:'#2962ff',
-    fib:       '#787B86',     // 회색 (레벨 선)
-    fibFill:   'rgba(41,98,255,0.06)',   // 레벨 간 채우기
-    eraser:    '#E05050',     // 빨강 (삭제 모드 표시용)
-    preview:   'rgba(160,136,48,0.5)',   // 프리뷰 (반투명 금색)
+    fib:       '#787B86',
+    fibFill:   'rgba(41,98,255,0.06)',
+    eraser:    '#E05050',
+    preview:   'rgba(160,136,48,0.5)',
+    select:    '#26C6DA',     // 선택 앵커 핸들 색상 (시안)
   };
 
 
@@ -67,12 +100,13 @@ const drawingTools = (() => {
 
   function _saveDrawings() {
     try {
-      // 직렬화 가능한 필드만 저장
+      // 직렬화 가능한 필드만 저장 (color 필드 추가)
       const serializable = _drawings.map(d => ({
         id: d.id,
         type: d.type,
         points: d.points,
         stockCode: d.stockCode,
+        color: d.color || null,   // 사용자 지정 색상 (null이면 기본값)
       }));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
     } catch (e) {
@@ -83,6 +117,26 @@ const drawingTools = (() => {
   /** 고유 ID 생성 */
   function _genId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  }
+
+  /**
+   * 드로잉의 실제 렌더링 색상 결정
+   * 우선순위: 사용자 지정 색상 > 도구별 기본값
+   */
+  function _getDrawingColor(d) {
+    if (d.color) return d.color;
+    return DEFAULT_COLORS[d.type] || COLORS.trendline;
+  }
+
+  /**
+   * 색상으로부터 반투명 채우기 생성 (rect, fib 용)
+   */
+  function _colorToFill(hexColor, alpha) {
+    // hex → rgba 변환
+    const r = parseInt(hexColor.slice(1, 3), 16);
+    const g = parseInt(hexColor.slice(3, 5), 16);
+    const b = parseInt(hexColor.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
   }
 
 
@@ -127,13 +181,22 @@ const drawingTools = (() => {
 
             // ── 기존 드로잉 렌더링 ──
             drawings.forEach(d => {
-              _renderOneDrawing(ctx, d, toX, toY, w, h, false);
+              const isSelected = (_selectedDrawing && d.id === _selectedDrawing.id);
+              _renderOneDrawing(ctx, d, toX, toY, w, h, false, isSelected);
             });
+
+            // ── 선택된 드로잉의 앵커 핸들 렌더링 ──
+            if (_selectedDrawing) {
+              const sel = drawings.find(d => d.id === _selectedDrawing.id);
+              if (sel) {
+                _renderSelectionHandles(ctx, sel, toX, toY);
+              }
+            }
 
             // ── 프리뷰 렌더링 (미완성 드로잉 미리보기) ──
             const preview = src._getPreviewDrawing();
             if (preview) {
-              _renderOneDrawing(ctx, preview, toX, toY, w, h, true);
+              _renderOneDrawing(ctx, preview, toX, toY, w, h, true, false);
             }
 
             ctx.restore();
@@ -148,31 +211,33 @@ const drawingTools = (() => {
   //  개별 드로잉 렌더링 함수
   // ══════════════════════════════════════════════════
 
-  function _renderOneDrawing(ctx, d, toX, toY, canvasW, canvasH, isPreview) {
+  function _renderOneDrawing(ctx, d, toX, toY, canvasW, canvasH, isPreview, isSelected) {
     const alpha = isPreview ? 0.5 : 1.0;
 
     if (d.type === 'hline' && d.points.length >= 1) {
-      _drawHLine(ctx, d, toX, toY, canvasW, alpha);
+      _drawHLine(ctx, d, toX, toY, canvasW, alpha, isSelected);
     } else if (d.type === 'vline' && d.points.length >= 1) {
-      _drawVLine(ctx, d, toX, toY, canvasH, alpha);
+      _drawVLine(ctx, d, toX, toY, canvasH, alpha, isSelected);
     } else if (d.type === 'trendline' && d.points.length >= 2) {
-      _drawTrendline(ctx, d, toX, toY, canvasW, alpha);
+      _drawTrendline(ctx, d, toX, toY, canvasW, alpha, isSelected);
     } else if (d.type === 'rect' && d.points.length >= 2) {
-      _drawRect(ctx, d, toX, toY, alpha);
+      _drawRect(ctx, d, toX, toY, alpha, isSelected);
     } else if (d.type === 'fib' && d.points.length >= 2) {
-      _drawFib(ctx, d, toX, toY, canvasW, alpha);
+      _drawFib(ctx, d, toX, toY, canvasW, alpha, isSelected);
     }
   }
 
   /** 수평선 렌더링 */
-  function _drawHLine(ctx, d, toX, toY, canvasW, alpha) {
+  function _drawHLine(ctx, d, toX, toY, canvasW, alpha, isSelected) {
     const y = toY(d.points[0].price);
     if (y == null || isNaN(y)) return;
 
+    const color = _getDrawingColor(d);
+
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = COLORS.hline;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 3]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.setLineDash(isSelected ? [] : [5, 3]);
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(canvasW, y);
@@ -182,7 +247,7 @@ const drawingTools = (() => {
     // 가격 라벨
     const priceText = Math.round(d.points[0].price).toLocaleString('ko-KR');
     ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillStyle = COLORS.hline;
+    ctx.fillStyle = color;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     ctx.fillText(priceText, 4, y - 3);
@@ -190,14 +255,16 @@ const drawingTools = (() => {
   }
 
   /** 수직선 렌더링 */
-  function _drawVLine(ctx, d, toX, toY, canvasH, alpha) {
+  function _drawVLine(ctx, d, toX, toY, canvasH, alpha, isSelected) {
     const x = toX(d.points[0].time);
     if (x == null || isNaN(x)) return;
 
+    const color = _getDrawingColor(d);
+
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = COLORS.vline;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 3]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.setLineDash(isSelected ? [] : [5, 3]);
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, canvasH);
@@ -207,7 +274,7 @@ const drawingTools = (() => {
   }
 
   /** 추세선 렌더링 (양방향 무한 연장) */
-  function _drawTrendline(ctx, d, toX, toY, canvasW, alpha) {
+  function _drawTrendline(ctx, d, toX, toY, canvasW, alpha, isSelected) {
     const x1 = toX(d.points[0].time);
     const y1 = toY(d.points[0].price);
     const x2 = toX(d.points[1].time);
@@ -216,9 +283,11 @@ const drawingTools = (() => {
     if (x1 == null || y1 == null || x2 == null || y2 == null) return;
     if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) return;
 
+    const color = _getDrawingColor(d);
+
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = COLORS.trendline;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
     ctx.setLineDash([]);
 
     // 두 점 사이 직선 + 양방향 연장
@@ -249,7 +318,7 @@ const drawingTools = (() => {
     [{ x: x1, y: y1 }, { x: x2, y: y2 }].forEach(pt => {
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.trendline;
+      ctx.fillStyle = color;
       ctx.fill();
     });
 
@@ -257,7 +326,7 @@ const drawingTools = (() => {
   }
 
   /** 사각형 렌더링 */
-  function _drawRect(ctx, d, toX, toY, alpha) {
+  function _drawRect(ctx, d, toX, toY, alpha, isSelected) {
     const x1 = toX(d.points[0].time);
     const y1 = toY(d.points[0].price);
     const x2 = toX(d.points[1].time);
@@ -271,15 +340,17 @@ const drawingTools = (() => {
     const rw = Math.abs(x2 - x1);
     const rh = Math.abs(y2 - y1);
 
+    const color = _getDrawingColor(d);
+
     ctx.globalAlpha = alpha;
 
-    // 채우기
-    ctx.fillStyle = COLORS.rect;
+    // 채우기 (색상 기반 반투명)
+    ctx.fillStyle = _colorToFill(color, 0.12);
     ctx.fillRect(rx, ry, rw, rh);
 
     // 테두리
-    ctx.strokeStyle = COLORS.rectBorder;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isSelected ? 2 : 1;
     ctx.setLineDash([]);
     ctx.strokeRect(rx, ry, rw, rh);
 
@@ -287,7 +358,7 @@ const drawingTools = (() => {
   }
 
   /** 피보나치 되돌림 렌더링 */
-  function _drawFib(ctx, d, toX, toY, canvasW, alpha) {
+  function _drawFib(ctx, d, toX, toY, canvasW, alpha, isSelected) {
     const price1 = d.points[0].price;
     const price2 = d.points[1].price;
     const x1 = toX(d.points[0].time);
@@ -300,6 +371,8 @@ const drawingTools = (() => {
     const lowPrice = Math.min(price1, price2);
     const range = highPrice - lowPrice;
     if (range <= 0) return;
+
+    const color = _getDrawingColor(d);
 
     ctx.globalAlpha = alpha;
     ctx.font = "10px 'JetBrains Mono', monospace";
@@ -316,15 +389,15 @@ const drawingTools = (() => {
         const nextPrice = highPrice - range * FIB_LEVELS[i + 1];
         const nextY = toY(nextPrice);
         if (nextY != null && !isNaN(nextY)) {
-          ctx.fillStyle = COLORS.fibFill;
+          ctx.fillStyle = _colorToFill(color, 0.06);
           ctx.fillRect(0, Math.min(y, nextY), canvasW, Math.abs(nextY - y));
         }
       }
 
       // 수평선
       const lineAlpha = (level === 0 || level === 0.5 || level === 1) ? 0.8 : 0.4;
-      ctx.strokeStyle = COLORS.fib;
-      ctx.lineWidth = (level === 0.5) ? 1.2 : 0.8;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSelected ? ((level === 0.5) ? 2 : 1.2) : ((level === 0.5) ? 1.2 : 0.8);
       ctx.setLineDash((level === 0 || level === 1) ? [] : [4, 3]);
       ctx.globalAlpha = alpha * lineAlpha;
       ctx.beginPath();
@@ -334,7 +407,7 @@ const drawingTools = (() => {
 
       // 라벨 (좌측)
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = COLORS.fib;
+      ctx.fillStyle = color;
       ctx.textAlign = 'left';
       const label = FIB_LABELS[i] + '  ' + Math.round(price).toLocaleString('ko-KR');
       ctx.fillText(label, 4, y);
@@ -342,6 +415,47 @@ const drawingTools = (() => {
 
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
+  }
+
+
+  // ══════════════════════════════════════════════════
+  //  선택 앵커 핸들 렌더링 (select 모드)
+  // ══════════════════════════════════════════════════
+
+  /**
+   * 선택된 드로잉의 앵커 포인트에 정사각형 핸들 표시
+   * 시안(#26C6DA) 색상으로 눈에 잘 띄게 함
+   */
+  function _renderSelectionHandles(ctx, d, toX, toY) {
+    const handleSize = 5;   // 핸들 반지름 (픽셀)
+    const handleColor = COLORS.select;
+
+    // 드로잉 포인트들의 (x,y) 좌표 수집
+    const anchors = [];
+    d.points.forEach(pt => {
+      const x = toX(pt.time);
+      const y = toY(pt.price);
+      if (x != null && y != null && !isNaN(x) && !isNaN(y)) {
+        anchors.push({ x, y });
+      }
+    });
+
+    if (!anchors.length) return;
+
+    ctx.save();
+    ctx.globalAlpha = 1.0;
+
+    anchors.forEach(a => {
+      // 외곽 사각형 (흰색 테두리 + 색상 채우기)
+      ctx.fillStyle = handleColor;
+      ctx.fillRect(a.x - handleSize, a.y - handleSize, handleSize * 2, handleSize * 2);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      ctx.strokeRect(a.x - handleSize, a.y - handleSize, handleSize * 2, handleSize * 2);
+    });
+
+    ctx.restore();
   }
 
 
@@ -390,21 +504,56 @@ const drawingTools = (() => {
     /** 미완성 프리뷰 드로잉 생성 */
     _getPreviewDrawing() {
       if (!_activeTool || !_clickPoints.length || !_previewPoint) return null;
-      if (_activeTool === 'hline' || _activeTool === 'vline' || _activeTool === 'eraser') return null;
+      if (_activeTool === 'hline' || _activeTool === 'vline' || _activeTool === 'eraser' || _activeTool === 'select') return null;
 
       // 첫 번째 클릭 포인트 + 현재 마우스 위치로 프리뷰 생성
       return {
         type: _activeTool,
         points: [..._clickPoints, _previewPoint],
         stockCode: _currentStockCode,
+        color: _currentColor,
       };
     }
   }
 
 
   // ══════════════════════════════════════════════════
-  //  히트 테스트 — 삭제 도구용 (가장 가까운 드로잉 찾기)
+  //  히트 테스트 — 범용 (가장 가까운 드로잉 찾기)
   // ══════════════════════════════════════════════════
+
+  /**
+   * 마우스 좌표에서 가장 가까운 드로잉 찾기 (범용)
+   * @param {number} price - 클릭한 가격
+   * @param {string} time  - 클릭한 시간
+   * @param {number} threshold - 최대 허용 거리 (픽셀, 기본 20)
+   * @returns {Object|null} 가장 가까운 드로잉 객체 또는 null
+   */
+  function _findNearestDrawing(price, time, threshold) {
+    if (threshold == null) threshold = 20;
+    if (!_chartRef || !_chartRef.mainChart || !_chartRef.candleSeries) return null;
+
+    const ts = _chartRef.mainChart.timeScale();
+    const series = _chartRef.candleSeries;
+    const clickX = ts.timeToCoordinate(time);
+    const clickY = series.priceToCoordinate(price);
+    if (clickX == null || clickY == null) return null;
+
+    const visibleDrawings = _drawings.filter(d => d.stockCode === _currentStockCode);
+    if (!visibleDrawings.length) return null;
+
+    let bestDist = Infinity;
+    let bestDrawing = null;
+
+    visibleDrawings.forEach(d => {
+      const dist = _distToDrawing(d, clickX, clickY, ts, series);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDrawing = d;
+      }
+    });
+
+    return (bestDrawing && bestDist < threshold) ? bestDrawing : null;
+  }
 
   /**
    * 마우스 좌표에서 가장 가까운 드로잉을 찾아 삭제
@@ -413,38 +562,19 @@ const drawingTools = (() => {
    * @returns {boolean} 삭제 성공 여부
    */
   function _removeNearestDrawing(price, time) {
-    if (!_chartRef || !_chartRef.mainChart || !_chartRef.candleSeries) return false;
+    const target = _findNearestDrawing(price, time, 20);
+    if (!target) return false;
 
-    const ts = _chartRef.mainChart.timeScale();
-    const series = _chartRef.candleSeries;
-    const clickX = ts.timeToCoordinate(time);
-    const clickY = series.priceToCoordinate(price);
-    if (clickX == null || clickY == null) return false;
-
-    const visibleDrawings = _drawings.filter(d => d.stockCode === _currentStockCode);
-    if (!visibleDrawings.length) return false;
-
-    let bestDist = Infinity;
-    let bestIdx = -1;
-
-    visibleDrawings.forEach((d, vi) => {
-      const dist = _distToDrawing(d, clickX, clickY, ts, series);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = vi;
+    const globalIdx = _drawings.indexOf(target);
+    if (globalIdx >= 0) {
+      // 선택된 드로잉이 삭제 대상이면 선택 해제
+      if (_selectedDrawing && _selectedDrawing.id === target.id) {
+        _selectedDrawing = null;
       }
-    });
-
-    // 20px 이내만 삭제
-    if (bestIdx >= 0 && bestDist < 20) {
-      const target = visibleDrawings[bestIdx];
-      const globalIdx = _drawings.indexOf(target);
-      if (globalIdx >= 0) {
-        _drawings.splice(globalIdx, 1);
-        _saveDrawings();
-        _refresh();
-        return true;
-      }
+      _drawings.splice(globalIdx, 1);
+      _saveDrawings();
+      _refresh();
+      return true;
     }
     return false;
   }
@@ -528,18 +658,241 @@ const drawingTools = (() => {
 
 
   // ══════════════════════════════════════════════════
+  //  색상 선택기 (Color Picker)
+  // ══════════════════════════════════════════════════
+
+  /**
+   * 색상 선택기 DOM 초기화 — draw-toolbar 옆에 팝업 생성
+   * 최초 1회만 호출 (attach 시)
+   */
+  function _initColorPicker() {
+    // 이미 존재하면 스킵
+    if (document.getElementById('draw-color-picker')) return;
+
+    const picker = document.createElement('div');
+    picker.id = 'draw-color-picker';
+    picker.className = 'draw-color-picker';
+    picker.style.display = 'none';
+
+    DRAW_COLORS.forEach(hex => {
+      const swatch = document.createElement('div');
+      swatch.className = 'draw-color-swatch';
+      swatch.style.background = hex;
+      swatch.dataset.color = hex;
+      // 기본 선택 (첫 번째)
+      if (hex === DRAW_COLORS[0]) swatch.classList.add('active');
+      swatch.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _setColor(hex);
+      });
+      picker.appendChild(swatch);
+    });
+
+    // draw-toolbar의 부모에 추가 (chart-wrap 내부)
+    const toolbar = document.getElementById('draw-toolbar');
+    if (toolbar && toolbar.parentElement) {
+      toolbar.parentElement.appendChild(picker);
+    }
+  }
+
+  /**
+   * 색상 선택 → _currentColor 업데이트 + 선택된 드로잉에 적용
+   */
+  function _setColor(hex) {
+    _currentColor = hex;
+
+    // 색상 선택기 스와치 활성화 상태 갱신
+    const picker = document.getElementById('draw-color-picker');
+    if (picker) {
+      picker.querySelectorAll('.draw-color-swatch').forEach(sw => {
+        sw.classList.toggle('active', sw.dataset.color === hex);
+      });
+    }
+
+    // 선택된 드로잉이 있으면 즉시 색상 변경
+    if (_selectedDrawing) {
+      _selectedDrawing.color = hex;
+      _saveDrawings();
+      _refresh();
+    }
+  }
+
+  /**
+   * 색상 선택기 토글 (표시/숨김)
+   */
+  function _toggleColorPicker(show) {
+    const picker = document.getElementById('draw-color-picker');
+    if (!picker) return;
+
+    if (show === undefined) {
+      show = picker.style.display === 'none';
+    }
+    picker.style.display = show ? 'flex' : 'none';
+
+    // 현재 색상에 맞게 활성 스와치 표시
+    if (show) {
+      const activeColor = _selectedDrawing ? (_selectedDrawing.color || _getDrawingColor(_selectedDrawing)) : (_currentColor || DRAW_COLORS[0]);
+      picker.querySelectorAll('.draw-color-swatch').forEach(sw => {
+        sw.classList.toggle('active', sw.dataset.color === activeColor);
+      });
+    }
+  }
+
+  /** 외부 클릭 시 색상 선택기 닫기 (최초 1회만 등록) */
+  let _dismissRegistered = false;
+  function _setupColorPickerDismiss() {
+    if (_dismissRegistered) return;
+    _dismissRegistered = true;
+    document.addEventListener('click', (e) => {
+      const picker = document.getElementById('draw-color-picker');
+      if (!picker || picker.style.display === 'none') return;
+      // 색상 선택기 내부 클릭이면 무시
+      if (picker.contains(e.target)) return;
+      // 색상 버튼 클릭이면 무시 (토글은 버튼 핸들러에서 처리)
+      if (e.target.closest('.draw-color-btn')) return;
+      _toggleColorPicker(false);
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════
+  //  선택/이동 로직 (select 모드)
+  // ══════════════════════════════════════════════════
+
+  /**
+   * select 모드에서 차트 클릭 시 호출
+   * - 드로잉 근처 클릭 → 선택 (드래그 시작 준비)
+   * - 빈 곳 클릭 → 선택 해제
+   */
+  function _handleSelectClick(price, time) {
+    const hit = _findNearestDrawing(price, time, 20);
+
+    if (hit) {
+      _selectedDrawing = hit;
+      // 드래그 시작 상태 저장 (mousedown에서 시작, mousemove로 이동)
+      _dragState = {
+        drawing: hit,
+        startPrice: price,
+        startTime: time,
+        origPoints: hit.points.map(p => ({ ...p })),  // 깊은 복사
+        isDragging: false,  // 실제로 이동했는지 여부
+      };
+    } else {
+      _selectedDrawing = null;
+      _dragState = null;
+    }
+
+    _refresh();
+  }
+
+  /**
+   * select 모드에서 마우스 이동 시 호출 (드래그 이동)
+   * 선택된 드로잉의 모든 포인트를 delta만큼 이동
+   */
+  function _handleSelectMouseMove(price, time) {
+    if (!_dragState || !_dragState.drawing) return;
+
+    const dPrice = price - _dragState.startPrice;
+
+    // 시간 좌표 차이 계산 — time이 문자열("YYYY-MM-DD")일 수 있으므로
+    // 픽셀 좌표 기반으로 역산하여 각 포인트의 time을 조정
+    // 간단한 접근: time delta를 일수 단위로 계산
+    const dTime = _calcTimeDelta(_dragState.startTime, time);
+
+    if (Math.abs(dPrice) < 0.001 && dTime === 0) return;
+
+    _dragState.isDragging = true;
+
+    // 원래 포인트에 delta를 적용하여 이동
+    const drawing = _dragState.drawing;
+    drawing.points = _dragState.origPoints.map(orig => ({
+      price: orig.price + dPrice,
+      time: _addTimeDelta(orig.time, dTime),
+    }));
+
+    _refresh();
+  }
+
+  /**
+   * select 모드에서 마우스 릴리즈 시 호출 (드래그 종료)
+   */
+  function _handleSelectMouseUp() {
+    if (_dragState && _dragState.isDragging) {
+      _saveDrawings();
+    }
+    if (_dragState) {
+      _dragState = null;
+    }
+  }
+
+  /**
+   * 시간 좌표 간의 차이를 일수 단위로 계산
+   * "YYYY-MM-DD" 문자열 또는 Unix timestamp 지원
+   */
+  function _calcTimeDelta(t1, t2) {
+    const d1 = _timeToUnix(t1);
+    const d2 = _timeToUnix(t2);
+    if (d1 == null || d2 == null) return 0;
+    // 86400초 = 1일
+    return Math.round((d2 - d1) / 86400) * 86400;
+  }
+
+  /**
+   * 시간 좌표에 delta(초)를 더함
+   * 입력 형식 보존 (문자열이면 문자열로 반환)
+   */
+  function _addTimeDelta(t, deltaSec) {
+    if (deltaSec === 0) return t;
+
+    if (typeof t === 'string') {
+      // "YYYY-MM-DD" → Unix → +delta → "YYYY-MM-DD"
+      const unix = _timeToUnix(t);
+      if (unix == null) return t;
+      const newDate = new Date((unix + deltaSec) * 1000);
+      const yyyy = newDate.getFullYear();
+      const mm = String(newDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(newDate.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 숫자(Unix timestamp)
+    return t + deltaSec;
+  }
+
+  /**
+   * 시간 좌표 → Unix timestamp 변환
+   */
+  function _timeToUnix(t) {
+    if (typeof t === 'number') return t;
+    if (typeof t === 'string') {
+      const d = new Date(t + 'T00:00:00');
+      return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
+    }
+    return null;
+  }
+
+
+  // ══════════════════════════════════════════════════
   //  공개 API
   // ══════════════════════════════════════════════════
 
   /**
    * 도구 선택/해제 토글
-   * @param {string} toolName - 'trendline' | 'hline' | 'vline' | 'rect' | 'fib' | 'eraser'
+   * @param {string} toolName - 'select' | 'trendline' | 'hline' | 'vline' | 'rect' | 'fib' | 'eraser'
    */
   function setTool(toolName) {
     // 같은 도구 다시 클릭 → 해제
     _activeTool = (_activeTool === toolName) ? null : toolName;
     _clickPoints = [];
     _previewPoint = null;
+
+    // 도구 변경 시 드래그 상태 초기화
+    _dragState = null;
+
+    // 도구 변경 시 선택 해제 (select 외의 도구로 전환 시)
+    if (_activeTool !== 'select') {
+      _selectedDrawing = null;
+    }
 
     // 버튼 활성화 상태 갱신
     document.querySelectorAll('.draw-btn').forEach(btn => {
@@ -548,7 +901,17 @@ const drawingTools = (() => {
 
     // 차트 커서 모드 전환
     const mc = document.getElementById('main-chart-container');
-    if (mc) mc.classList.toggle('drawing-mode', !!_activeTool);
+    if (mc) {
+      mc.classList.remove('drawing-mode', 'select-mode');
+      if (_activeTool === 'select') {
+        mc.classList.add('select-mode');
+      } else if (_activeTool) {
+        mc.classList.add('drawing-mode');
+      }
+    }
+
+    // 색상 선택기: select 모드에서 선택된 드로잉이 있으면 열 수 있게 준비
+    // (자동으로 열지는 않음 — 우클릭으로 열기)
 
     _refresh();
   }
@@ -558,6 +921,11 @@ const drawingTools = (() => {
     return _activeTool;
   }
 
+  /** 현재 선택된 드로잉 반환 */
+  function getSelectedDrawing() {
+    return _selectedDrawing;
+  }
+
   /**
    * 차트 클릭 이벤트 처리 (app.js에서 호출)
    * @param {number} price - 클릭한 가격 좌표
@@ -565,6 +933,12 @@ const drawingTools = (() => {
    */
   function handleChartClick(price, time) {
     if (!_activeTool) return;
+
+    // ── 선택 도구 ──
+    if (_activeTool === 'select') {
+      _handleSelectClick(price, time);
+      return;
+    }
 
     // ── 삭제 도구 ──
     if (_activeTool === 'eraser') {
@@ -582,6 +956,7 @@ const drawingTools = (() => {
         type: 'hline',
         points: [{ price, time }],
         stockCode: _currentStockCode,
+        color: _currentColor,
       });
       _saveDrawings();
       _refresh();
@@ -594,6 +969,7 @@ const drawingTools = (() => {
         type: 'vline',
         points: [{ price, time }],
         stockCode: _currentStockCode,
+        color: _currentColor,
       });
       _saveDrawings();
       _refresh();
@@ -609,6 +985,7 @@ const drawingTools = (() => {
         type: _activeTool,
         points: _clickPoints.slice(),
         stockCode: _currentStockCode,
+        color: _currentColor,
       });
       _clickPoints = [];
       _previewPoint = null;
@@ -618,11 +995,18 @@ const drawingTools = (() => {
   }
 
   /**
-   * 차트 마우스 이동 이벤트 처리 (프리뷰용)
+   * 차트 마우스 이동 이벤트 처리 (프리뷰 + 드래그 이동)
    * @param {number} price - 현재 마우스 가격 좌표
    * @param {string} time  - 현재 마우스 시간 좌표
    */
   function handleChartMouseMove(price, time) {
+    // ── select 모드 드래그 이동 ──
+    if (_activeTool === 'select' && _dragState) {
+      _handleSelectMouseMove(price, time);
+      return;
+    }
+
+    // ── 생성 도구 프리뷰 ──
     if (!_activeTool || !_clickPoints.length) {
       if (_previewPoint) {
         _previewPoint = null;
@@ -633,6 +1017,24 @@ const drawingTools = (() => {
 
     _previewPoint = { price, time };
     _refresh();
+  }
+
+  /**
+   * 마우스 릴리즈 이벤트 처리 (드래그 종료)
+   * app.js에서 mouseup 이벤트에 연결
+   */
+  function handleChartMouseUp() {
+    if (_activeTool === 'select') {
+      _handleSelectMouseUp();
+    }
+  }
+
+  /**
+   * 색상 선택기 토글 (외부 호출용)
+   * @param {boolean} [show] - true=표시, false=숨김, 생략=토글
+   */
+  function toggleColorPicker(show) {
+    _toggleColorPicker(show);
   }
 
   /**
@@ -653,6 +1055,10 @@ const drawingTools = (() => {
     _primitive = new DrawingOverlayPrimitive();
     cm.candleSeries.attachPrimitive(_primitive);
     _attachedSeries = cm.candleSeries;
+
+    // 색상 선택기 DOM 초기화 (최초 1회)
+    _initColorPicker();
+    _setupColorPickerDismiss();
   }
 
   /**
@@ -675,6 +1081,8 @@ const drawingTools = (() => {
     _currentStockCode = code;
     _clickPoints = [];
     _previewPoint = null;
+    _selectedDrawing = null;
+    _dragState = null;
     _refresh();
   }
 
@@ -683,6 +1091,8 @@ const drawingTools = (() => {
    */
   function clearAll() {
     _drawings = _drawings.filter(d => d.stockCode !== _currentStockCode);
+    _selectedDrawing = null;
+    _dragState = null;
     _saveDrawings();
     _refresh();
   }
@@ -694,12 +1104,18 @@ const drawingTools = (() => {
     _activeTool = null;
     _clickPoints = [];
     _previewPoint = null;
+    _selectedDrawing = null;
+    _dragState = null;
     // 버튼 상태 리셋
     document.querySelectorAll('.draw-btn').forEach(btn => {
       btn.classList.remove('active');
     });
     const mc = document.getElementById('main-chart-container');
-    if (mc) mc.classList.remove('drawing-mode');
+    if (mc) {
+      mc.classList.remove('drawing-mode', 'select-mode');
+    }
+    // 색상 선택기 닫기
+    _toggleColorPicker(false);
   }
 
 
@@ -707,12 +1123,17 @@ const drawingTools = (() => {
   return {
     setTool,
     getActiveTool,
+    getSelectedDrawing,
     handleChartClick,
     handleChartMouseMove,
+    handleChartMouseUp,
+    toggleColorPicker,
     attach,
     detach,
     setStockCode,
     clearAll,
     cleanup,
+    // 상수 (외부 참조용)
+    DRAW_COLORS,
   };
 })();

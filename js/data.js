@@ -165,7 +165,16 @@ async function getFinancialData(code, period) {
   }
 
   // 3. 기존 하드코딩/시드 폴백
-  return getPastData(code, period);
+  // [FIX-TRUST] 시드/하드코딩 데이터는 source 표시를 위해 캐시에 기록
+  const fallback = getPastData(code, period);
+  const isHardcoded = !!PAST_DATA[code];
+  const existing = _financialCache[code] || {};
+  _financialCache[code] = {
+    quarterly: period === 'quarter' ? fallback : (existing.quarterly || []),
+    annual: period === 'annual' ? fallback : (existing.annual || []),
+    source: isHardcoded ? 'hardcoded' : 'seed',
+  };
+  return fallback;
 }
 
 /**

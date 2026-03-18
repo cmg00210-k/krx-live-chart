@@ -41,6 +41,7 @@ class ChartManager {
     // 시간축 동기화 구독 해제 함수들
     this._syncUnsubs = [];
     this._syncing = false;
+    this._syncScheduled = false;  // [OPT] 마이크로태스크 디바운스 플래그
 
     // 가격선 참조 (현재가/고가/저가)
     this._currentPriceLine = null;
@@ -89,10 +90,27 @@ class ChartManager {
         textColor: KRX_COLORS.CHART_TEXT,
         fontSize: 11,
         fontFamily: "'JetBrains Mono', 'Pretendard', monospace",
+        attributionLogo: false,  // TradingView 로고 제거 (푸터 링크로 대체)
       },
       localization: {
         locale: 'ko-KR',
+        dateFormat: 'yyyy-MM-dd',  // 한국식 연-월-일
         priceFormatter: (price) => Math.round(price).toLocaleString('ko-KR'),
+        timeFormatter: (businessDayOrTimestamp) => {
+          // businessDay 객체이면 날짜 포맷 (일봉)
+          if (typeof businessDayOrTimestamp === 'object' && businessDayOrTimestamp.year) {
+            return businessDayOrTimestamp.year + '-' +
+              String(businessDayOrTimestamp.month).padStart(2, '0') + '-' +
+              String(businessDayOrTimestamp.day).padStart(2, '0');
+          }
+          // Unix timestamp이면 KST(UTC+9)로 변환하여 표시
+          // 한국은 서머타임 미적용 — 항상 +9시간 고정
+          var d = new Date(businessDayOrTimestamp * 1000);
+          var h = d.getUTCHours() + 9;  // KST = UTC+9
+          var m = d.getUTCMinutes();
+          if (h >= 24) h -= 24;         // 자정 넘김 보정
+          return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+        },
       },
       grid: {
         vertLines: { color: KRX_COLORS.CHART_GRID_VERT },
@@ -199,10 +217,13 @@ class ChartManager {
           const data = param.seriesData.get(this.candleSeries);
           if (data && data.open != null) {
             // [UX] _idx 추가: 크로스헤어 위치의 캔들 인덱스 (지표값 조회용)
+            // [FIX] _idx: Math.round()로 float 타임스탬프 비교 안정화
             let _idx = null;
-            if (this._hoverCandles.length) {
+            if (this._hoverCandles.length && param.time != null) {
+              const pt = typeof param.time === 'number' ? Math.round(param.time) : param.time;
               for (let ci = this._hoverCandles.length - 1; ci >= 0; ci--) {
-                if (String(this._hoverCandles[ci].time) === String(param.time)) { _idx = ci; break; }
+                const ct = typeof this._hoverCandles[ci].time === 'number' ? Math.round(this._hoverCandles[ci].time) : this._hoverCandles[ci].time;
+                if (ct === pt || String(ct) === String(pt)) { _idx = ci; break; }
               }
             }
             this._ohlcCallback({ open: data.open, high: data.high, low: data.low, close: data.close, volume: null, type: 'crosshair', _idx });
@@ -674,8 +695,20 @@ class ChartManager {
 
   // ══════════════════════════════════════════════════
   //  시간축 동기화 (구독 해제 → 재구독)
+  //  [OPT] 디바운스: 여러 서브차트가 연속 생성/파괴될 때 한 번만 실행
   // ══════════════════════════════════════════════════
   _rebuildSync() {
+    // [OPT] 연속 호출 시 마지막 호출만 실행 (마이크로태스크 디바운스)
+    // 7개 서브차트 생성 시 7회 → 1회로 축소
+    if (this._syncScheduled) return;
+    this._syncScheduled = true;
+    Promise.resolve().then(() => {
+      this._syncScheduled = false;
+      this._doRebuildSync();
+    });
+  }
+
+  _doRebuildSync() {
     // 기존 구독 모두 해제
     this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
     this._syncUnsubs = [];
@@ -891,6 +924,7 @@ class ChartManager {
 
     const isMainChart = (chart === this.mainChart);
     let rafId = null;
+    let _lastResizeWidth = 0;  // [FIX] 실제 리사이즈 vs 줌 제스처 구분용
     const ro = new ResizeObserver(entries => {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
@@ -900,12 +934,15 @@ class ChartManager {
           if (width > 0 && height > 0) {
             try {
               const applyOpts = { width, height };
-              // 메인 차트: 리사이즈 시 barSpacing 재계산 (약 12개 캔들 유지)
-              if (isMainChart) {
+              // [FIX] barSpacing은 실제 컨테이너 크기 변경(>10px) 시에만 재계산
+              // 줌 제스처 중 ResizeObserver가 발동해도 barSpacing을 건드리지 않음
+              // → 줌 리셋 버그 방지 (Lightweight Charts가 줌 중 applyOptions 호출 시 뷰 리셋)
+              if (isMainChart && Math.abs(width - _lastResizeWidth) > 10) {
                 applyOpts.timeScale = {
                   barSpacing: Math.max(6, Math.floor(width / 17)),
                 };
               }
+              _lastResizeWidth = width;
               chart.applyOptions(applyOpts);
             } catch (e) {}
           }
@@ -959,6 +996,7 @@ class ChartManager {
     // 동기화 구독 해제
     this._syncUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
     this._syncUnsubs = [];
+    this._syncScheduled = false;  // [OPT] 디바운스 플래그 리셋
 
     // 리사이즈 옵저버 해제
     this._resizeMap.forEach(entry => entry.observer.disconnect());

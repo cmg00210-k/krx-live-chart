@@ -21,7 +21,89 @@ var _latestFinRoe = 0;
 //  재무지표 패널 (우측 탭)
 // ══════════════════════════════════════════════════════
 
+/**
+ * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
+ * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
+ */
+function _clearAllFinancials() {
+  // 모든 fin-* 텍스트 요소를 "—"로 설정하고 색상 클래스 제거
+  var ids = [
+    'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
+    'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
+    'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
+  ];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) {
+      el.textContent = '\u2014';  // em dash
+      el.className = '';
+    }
+  }
+
+  // 캔버스 차트 클리어 (이전 종목의 잔류 데이터 방지)
+  var canvasIds = ['opm-sparkline', 'fin-trend-canvas', 'fin-per-band'];
+  for (var c = 0; c < canvasIds.length; c++) {
+    var canvas = document.getElementById(canvasIds[c]);
+    if (canvas) {
+      var ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // 추이 차트 데이터 캐시 초기화 (탭 전환 시 이전 종목 데이터 렌더링 방지)
+  _finTrendData = [];
+
+  // 업종 비교 / 동종업종 비교 영역 초기화
+  var compareEl = document.getElementById('fin-compare');
+  if (compareEl) compareEl.innerHTML = '';
+  var peersEl = document.getElementById('fin-peers');
+  if (peersEl) peersEl.innerHTML = '';
+}
+
+/**
+ * 데이터 출처별 경고 배너 표시
+ * @param {string|null} source - 'dart' | 'hardcoded' | 'seed' | null
+ */
+function _showDartWarning(source) {
+  var el = document.getElementById('fin-seed-warning');
+  if (!el) return;
+
+  if (source === 'dart') {
+    // DART 실제 데이터 — 경고 숨김
+    el.style.display = 'none';
+  } else if (source === 'hardcoded') {
+    // 하드코딩 데이터 (삼성전자/SK하이닉스) — 일부 추정치 포함 가능
+    el.style.display = 'block';
+    el.textContent = '참고용 데이터 (DART 미연동 \u2014 일부 추정치 포함)';
+    el.style.background = 'rgba(255,180,50,0.10)';
+    el.style.borderColor = 'rgba(255,180,50,0.20)';
+    el.style.color = 'rgba(255,180,50,0.65)';
+  } else {
+    // seed 생성 또는 알 수 없는 출처 — DART 연동 안내
+    el.style.display = 'block';
+    el.textContent = 'DART 데이터 미연동 \u2014 download_financials.py를 실행하세요';
+    el.style.background = 'rgba(244,67,54,0.10)';
+    el.style.borderColor = 'rgba(244,67,54,0.25)';
+    el.style.color = 'rgba(244,67,54,0.75)';
+  }
+}
+
 async function updateFinancials() {
+  // [FIX] 새 종목 전환 시 이전 데이터 잔류 방지: 모든 fin-* 요소 초기화
+  var _finIds = [
+    'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
+    'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
+    'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
+  ];
+  for (var _i = 0; _i < _finIds.length; _i++) {
+    var _el = document.getElementById(_finIds[_i]);
+    if (_el) _el.textContent = '\u2014';
+  }
+
   var data;
   try {
     data = await getFinancialData(currentStock.code, 'quarter');
@@ -36,6 +118,21 @@ async function updateFinancials() {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   const setHtml = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
   const setClass = (id, cls) => { const el = document.getElementById(id); if (el) el.className = cls; };
+
+  // ── 데이터 출처 확인: seed 데이터는 표시하지 않음 ──
+  const _cached = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
+  const _finSource = _cached ? _cached.source : null;
+
+  // [CLEAN-DATA] source가 'dart' 또는 'hardcoded'가 아닌 경우 (seed 생성 가짜 데이터)
+  // → 모든 재무 지표를 "—"로 표시하고 캔버스 차트 초기화 후 조기 종료
+  if (_finSource !== 'dart' && _finSource !== 'hardcoded') {
+    _clearAllFinancials();
+    _showDartWarning('seed');
+    return;
+  }
+
+  // [FIX-TRUST] 데이터 출처별 경고 배너 표시
+  _showDartWarning(_finSource);
 
   // 기간 표시
   set('fin-period', latest.p || '—');
@@ -70,9 +167,10 @@ async function updateFinancials() {
   const ni = Number(latest.ni) || 0;
 
   // NPM (순이익률): data.js toDisplay()에서 이미 계산, 또는 여기서 폴백
+  // [FIX-3] 문자열 "14.5%" 등 파싱 안전 처리 — parseFloat 강제
   let npmVal = null;
   if (latest.npm != null) {
-    npmVal = latest.npm;
+    npmVal = parseFloat(latest.npm) || 0;
   } else if (rev !== 0) {
     npmVal = +(ni / rev * 100).toFixed(1);
   }
@@ -84,11 +182,18 @@ async function updateFinancials() {
   }
 
   // ROA: data.js toDisplay()에서 이미 계산, 또는 여기서 폴백
+  // [FIX-2] 평균총자산 기반 ROA: (당기 + 전기 총자산) / 2 사용
+  //         전분기 데이터 없으면 기말 총자산 폴백 (한계 주석 표기)
   let roaVal = null;
   if (latest.roa != null) {
-    roaVal = latest.roa;
+    roaVal = parseFloat(latest.roa) || 0;
   } else if (latest.total_assets && Number(latest.total_assets) !== 0) {
-    roaVal = +(ni / Number(latest.total_assets) * 100).toFixed(1);
+    const curAssets = Number(latest.total_assets);
+    const prevQ = data.length > 1 ? data[1] : null;
+    const prevAssets = prevQ && prevQ.total_assets ? Number(prevQ.total_assets) : 0;
+    // 평균총자산 = (당기 + 전기) / 2; 전기 없으면 기말잔액 폴백
+    const avgAssets = prevAssets > 0 ? (curAssets + prevAssets) / 2 : curAssets;
+    roaVal = +(ni / avgAssets * 100).toFixed(1);
   }
   if (roaVal != null) {
     set('fin-roa', roaVal.toFixed(1) + '%');
@@ -98,15 +203,20 @@ async function updateFinancials() {
   }
 
   // 부채비율: debt_ratio (DART) 또는 total_liabilities/total_equity로 계산
+  // [FIX-10] 자본총계 < 0 → "자본잠식" 표시 (부채비율 계산 불가)
   let debtRatio = null;
-  if (latest.debt_ratio != null) {
+  const totalEquityRaw = Number(latest.total_equity) || 0;
+  if (totalEquityRaw < 0) {
+    set('fin-debt-ratio', '자본잠식');
+    setClass('fin-debt-ratio', 'fin-grid-value dn');
+  } else if (latest.debt_ratio != null) {
     debtRatio = parseFloat(latest.debt_ratio);
-  } else if (latest.total_liabilities && latest.total_equity && Number(latest.total_equity) !== 0) {
-    debtRatio = +(Number(latest.total_liabilities) / Number(latest.total_equity) * 100).toFixed(1);
-  }
-  if (debtRatio != null) {
     set('fin-debt-ratio', debtRatio.toFixed(1) + '%');
     // 부채비율: 200% 초과 = 위험(dn), 나머지 = 기본 흰색
+    setClass('fin-debt-ratio', 'fin-grid-value' + (debtRatio > 200 ? ' dn' : ''));
+  } else if (latest.total_liabilities && latest.total_equity && totalEquityRaw !== 0) {
+    debtRatio = +(Number(latest.total_liabilities) / totalEquityRaw * 100).toFixed(1);
+    set('fin-debt-ratio', debtRatio.toFixed(1) + '%');
     setClass('fin-debt-ratio', 'fin-grid-value' + (debtRatio > 200 ? ' dn' : ''));
   } else {
     set('fin-debt-ratio', '—');
@@ -119,15 +229,28 @@ async function updateFinancials() {
   const mcapEok = _getMarketCapEok(currentStock.code, currentPrice, latest.shares_outstanding);
 
   // EPS 결정: DART 직접값 → shares_outstanding 기반 계산 → 0
+  // [FIX-4] shares_outstanding 단위 검증 + [FIX-9] 0 나누기 방어
   let epsNum = Number(latest.eps) || 0;
-  if (!epsNum && latest.shares_outstanding && ni) {
-    // ni(억원) → 원 환산 후 주당 계산
-    epsNum = Math.round(ni * 100000000 / latest.shares_outstanding);
+  if (!epsNum && latest.shares_outstanding && latest.shares_outstanding > 0 && ni) {
+    let shares = Number(latest.shares_outstanding);
+    // 단위 보정: 100 미만이면 백만주 단위로 추정 → 원래 주수로 변환
+    if (shares < 100) {
+      console.warn('[KRX-FIN] shares_outstanding < 100, 백만주 단위 추정:', shares, '→', shares * 1000000);
+      shares = shares * 1000000;
+    } else if (shares > 0 && shares < 1000) {
+      console.warn('[KRX-FIN] shares_outstanding 비정상 범위:', shares, '— EPS 계산 생략');
+      shares = 0;
+    }
+    if (shares > 0) {
+      // ni(억원) → 원 환산 후 주당 계산
+      epsNum = Math.round(ni * 100000000 / shares);
+    }
   }
 
   // BPS 결정: DART 직접값 → shares_outstanding 기반 계산
+  // [FIX-9] shares_outstanding > 0 가드 추가 (0 나누기 방어)
   let bpsNum = typeof latest.bps === 'number' ? latest.bps : null;
-  if (!bpsNum && latest.shares_outstanding && latest.total_equity) {
+  if (!bpsNum && latest.shares_outstanding && latest.shares_outstanding > 0 && latest.total_equity) {
     // total_equity(억원) → 원 환산 후 주당 계산
     bpsNum = Math.round(Number(latest.total_equity) * 100000000 / latest.shares_outstanding);
   }
@@ -145,14 +268,15 @@ async function updateFinancials() {
   // PER 계산 우선순위:
   //   1순위: currentPrice / EPS (주당순이익 직접 or shares 기반)
   //   2순위: mcapEok / niEok   (시총/순이익 — shares 없을 때)
+  // [FIX] 이중 반올림 방지: toFixed(1) 한 번만 적용
   let perVal = null;
   if (currentPrice && epsNum > 0) {
-    perVal = +(currentPrice / epsNum).toFixed(2);
+    perVal = +(currentPrice / epsNum).toFixed(1);
   } else if (!epsNum && mcapEok && ni > 0) {
-    perVal = +(mcapEok / ni).toFixed(2);
+    perVal = +(mcapEok / ni).toFixed(1);
   }
   if (perVal != null && perVal > 0) {
-    set('fin-per', perVal.toFixed(1) + '배');
+    set('fin-per', perVal + '배');
     setClass('fin-per', 'fin-grid-value');
   } else if (currentPrice && (epsNum <= 0 || ni <= 0)) {
     set('fin-per', '적자');
@@ -302,41 +426,42 @@ function _calcCAGR(annualData, set, setClass) {
 function _calcInvestmentScore(params, set, setClass) {
   const { perVal, pbrVal, debtRatio, roe, opm, annualData } = params;
   let score = 0;
-  let factors = 0;
+  // [FIX-1] 활성화된 항목의 최대 배점을 동적 합산 (하드코딩 제거)
+  let maxPossible = 0;
 
-  // ── 수익성 (30점) ──
+  // ── 수익성 (30점): ROE 15점 + OPM 15점 ──
   if (roe != null && !isNaN(roe)) {
-    factors++;
+    maxPossible += 15;
     if (roe >= 15) score += 15;
     else if (roe >= 10) score += 12;
     else if (roe >= 5) score += 8;
     else if (roe >= 0) score += 4;
   }
   if (opm != null && !isNaN(opm)) {
-    factors++;
+    maxPossible += 15;
     if (opm >= 20) score += 15;
     else if (opm >= 10) score += 12;
     else if (opm >= 5) score += 8;
     else if (opm >= 0) score += 4;
   }
 
-  // ── 밸류에이션 (30점) ──
+  // ── 밸류에이션 (30점): PER 15점 + PBR 15점 ──
   if (perVal != null && perVal > 0) {
-    factors++;
+    maxPossible += 15;
     if (perVal < 10) score += 15;
     else if (perVal <= 15) score += 12;
     else if (perVal <= 25) score += 8;
     else if (perVal <= 40) score += 4;
   }
   if (pbrVal != null && pbrVal > 0) {
-    factors++;
+    maxPossible += 15;
     if (pbrVal < 0.7) score += 15;
     else if (pbrVal <= 1.0) score += 12;
     else if (pbrVal <= 2.0) score += 8;
     else if (pbrVal <= 3.0) score += 4;
   }
 
-  // ── 성장성 (20점) ──
+  // ── 성장성 (20점): 매출 CAGR ──
   if (annualData && annualData.length >= 2) {
     const newest = annualData[0];
     const oldest = annualData.length >= 4 ? annualData[3] : annualData[annualData.length - 1];
@@ -344,7 +469,7 @@ function _calcInvestmentScore(params, set, setClass) {
     const rEnd = Number(newest.rev) || 0;
     const rStart = Number(oldest.rev) || 0;
     if (rStart > 0 && rEnd > 0 && yrs > 0) {
-      factors++;
+      maxPossible += 20;
       const cagr = (Math.pow(rEnd / rStart, 1 / yrs) - 1) * 100;
       if (cagr >= 20) score += 20;
       else if (cagr >= 10) score += 16;
@@ -353,23 +478,23 @@ function _calcInvestmentScore(params, set, setClass) {
     }
   }
 
-  // ── 안정성 (20점) ──
+  // ── 안정성 (20점): 부채비율 ──
   if (debtRatio != null && !isNaN(debtRatio)) {
-    factors++;
+    maxPossible += 20;
     if (debtRatio < 50) score += 20;
     else if (debtRatio <= 100) score += 16;
     else if (debtRatio <= 200) score += 10;
     else if (debtRatio <= 300) score += 4;
   }
 
-  if (factors < 2) {
+  // 최소 2개 항목 활성 필요 (최소 maxPossible >= 30)
+  if (maxPossible < 30) {
     set('fin-score', '—');
     set('fin-grade', '—');
     return;
   }
 
-  // 비례 보정: 활성 항목 기준 최대 점수로 환산
-  const maxPossible = factors <= 2 ? 30 : factors <= 4 ? 60 : 100;
+  // [FIX-1] 활성 항목의 실제 최대 배점 기준으로 정규화
   const normalizedScore = Math.round(score / maxPossible * 100);
   const finalScore = Math.min(100, Math.max(0, normalizedScore));
 
@@ -400,9 +525,12 @@ function _calcInvestmentScore(params, set, setClass) {
  */
 function _calcFinChanges(data) {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  // [FIX-5] 흑자전환/적자전환 마커도 색상 반영
   const setChangeClass = (id, val) => {
     const el = document.getElementById(id);
     if (!el) return;
+    if (val === '__흑자전환__') { el.className = 'fin-change up'; return; }
+    if (val === '__적자전환__') { el.className = 'fin-change dn'; return; }
     el.className = 'fin-change' + (val > 0 ? ' up' : val < 0 ? ' dn' : '');
   };
 
@@ -410,13 +538,23 @@ function _calcFinChanges(data) {
   const prevQ = data.length > 1 ? data[1] : null;   // 전분기
   const prevY = data.length > 4 ? data[4] : null;    // 전년 동기
 
+  // [FIX-5] prev=0 → 흑자전환/적자전환 특수 마커 반환
+  const TURNAROUND_POS = '__흑자전환__';
+  const TURNAROUND_NEG = '__적자전환__';
   const calcPct = (cur, prev) => {
-    if (prev == null || prev === 0) return null;
+    if (prev == null) return null;
+    if (prev === 0) {
+      if (cur > 0) return TURNAROUND_POS;
+      if (cur < 0) return TURNAROUND_NEG;
+      return null; // 0→0: 변화 없음
+    }
     return ((cur - prev) / Math.abs(prev) * 100);
   };
 
   const fmtPct = (label, pct) => {
     if (pct == null) return label + ' —';
+    if (pct === TURNAROUND_POS) return label + ' 흑자전환';
+    if (pct === TURNAROUND_NEG) return label + ' 적자전환';
     const sign = pct >= 0 ? '+' : '';
     return label + ' ' + sign + pct.toFixed(1) + '%';
   };
@@ -458,15 +596,16 @@ function drawOPMSparkline(data) {
   const paddingL = 16;     // 좌측 여백 (첫 라벨 잘림 방지)
   const paddingR = 16;     // 우측 여백
 
-  // 부모 너비에 맞게 동적 계산, height 80px로 확장
-  const w = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200;
+  // [FIX] 부모 너비에 맞게 동적 계산 — 최소 100px 보장
+  const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200), 100);
   const h = 80;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   // 차트 그리기 영역 (상단/하단 라벨 제외)
   const chartTop = topLabelH;
@@ -608,14 +747,16 @@ function drawFinTrendChart(data, metric) {
   const dpr = window.devicePixelRatio || 1;
 
   const labelHeight = 14;
-  const w = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190;
+  // [FIX] 최소 너비 보장 (scrollbar-gutter 등으로 인한 축소 대응)
+  const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190), 100);
   const h = 70;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   const chartH = h - labelHeight;
 
@@ -888,6 +1029,8 @@ function _getPeerFinancials(code) {
     // data.js의 _financialCache는 전역 const — 직접 접근 가능
     if (typeof _financialCache !== 'undefined' && _financialCache[code]) {
       var cached = _financialCache[code];
+      // [CLEAN-DATA] seed 생성 가짜 데이터는 peer 비교에서도 표시하지 않음
+      if (cached.source !== 'dart' && cached.source !== 'hardcoded') return result;
       var q = cached.quarterly || [];
       if (q.length > 0) {
         var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
@@ -1039,6 +1182,8 @@ function _getLatestEPS() {
 
   if (typeof _financialCache !== 'undefined' && _financialCache[currentStock.code]) {
     var data = _financialCache[currentStock.code];
+    // [CLEAN-DATA] seed 생성 가짜 데이터의 EPS는 사용하지 않음
+    if (data.source !== 'dart' && data.source !== 'hardcoded') return 0;
     var q = data.quarterly || [];
     if (q.length > 0) {
       var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
@@ -1076,21 +1221,34 @@ function _getLatestEPS() {
  * PER 밴드 차트 렌더링
  * Canvas에 주가 라인 + PER 배수(8x/12x/16x/20x) 수평 밴드 라인을 그린다.
  */
+var _perBandRetries = 0;  // 재시도 횟수 제한용
+
 function _drawPERBandChart() {
   var canvas = document.getElementById('fin-per-band');
   if (!canvas) return;
   var ctx = canvas.getContext('2d');
   var dpr = window.devicePixelRatio || 1;
 
-  // 캔버스 크기 동적 계산
-  var parentW = canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 340;
+  // [FIX] 캔버스 크기 동적 계산 — 패널 미표시/레이아웃 전 안전 처리
+  var rawW = canvas.parentElement ? canvas.parentElement.clientWidth : 0;
+  if (rawW <= 0) {
+    // 패널이 아직 레이아웃되지 않음 — 최대 5회 재시도 (50ms 간격)
+    if (_perBandRetries < 5) {
+      _perBandRetries++;
+      setTimeout(_drawPERBandChart, 50);
+    }
+    return;
+  }
+  _perBandRetries = 0;  // 성공 시 카운터 리셋
+  var parentW = Math.max(rawW - 8, 100);  // 최소 100px 보장
   var h = 100;
   canvas.width = parentW * dpr;
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, parentW, h);
 
   // 데이터: 일봉 캔들에서 종가 추출
   if (!currentStock || typeof dataService === 'undefined') return;

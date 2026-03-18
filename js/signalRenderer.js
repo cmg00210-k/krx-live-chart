@@ -436,9 +436,11 @@ const signalRenderer = (() => {
     }
 
     // 시리즈 재생성 감지 → primitive 재연결 (라인 모드: _priceLine 시리즈 사용)
+    // [FIX-6] 라인 모드 _priceLine null 안전 처리
     const ct = (opts && opts.chartType) || 'candle';
     const targetSeries = (ct === 'line' && cm.indicatorSeries._priceLine)
       ? cm.indicatorSeries._priceLine : cm.candleSeries;
+    if (!targetSeries) return;
     if (_attachedSeries !== targetSeries) {
       if (_primitive && _attachedSeries) {
         try { _attachedSeries.detachPrimitive(_primitive); } catch (e) {}

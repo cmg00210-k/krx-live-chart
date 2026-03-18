@@ -72,7 +72,7 @@ const _idb = {
 };
 
 const KRX_API_CONFIG = {
-  mode: 'ws',     // 'ws' | 'file' | 'demo' (향후 'koscom' 추가)
+  mode: 'ws',     // 'ws' | 'file' | 'demo' | 'koscom'
   wsUrl: 'ws://localhost:8765',  // WebSocket 서버 주소 (Kiwoom OCX)
   dataDir: 'data', // file 모드에서 JSON 파일 경로
 };
@@ -204,7 +204,7 @@ class KRXDataService {
       }
     }
 
-    if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws') return;
+    if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;
 
     try {
       const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
@@ -281,6 +281,12 @@ class KRXDataService {
           // IDB 데이터가 24시간 이내면 네트워크 요청 없이 바로 사용
           if (Date.now() - (idbData.lastUpdate || 0) < 86400000) {
             this.cache[key] = idbData;  // L1 캐시에도 복사
+            // [FIX-TRUST] IDB 캐시 데이터도 출처 태그 (file 기반 캐시)
+            if (!idbData.candles._dataSource) {
+              Object.defineProperty(idbData.candles, '_dataSource', {
+                value: 'file', writable: true, enumerable: false, configurable: true,
+              });
+            }
             console.log('[IDB] 캐시 히트: %s (%d건)', key, idbData.candles.length);
             return idbData.candles;
           }
@@ -300,21 +306,47 @@ class KRXDataService {
       // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
       candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // file 모드 + 분봉: 분봉 JSON 없음 → 일봉 데이터를 그대로 표시
-      // 데모 데이터 생성 대신 실제 일봉으로 대체 (데이터 무결성 유지)
-      candles = await this._fileGetCandles(stock);
+      // [OPT] file 모드 + 분봉: 일봉 캐시 재사용 (동일 JSON 이중 fetch 방지)
+      // 분봉 JSON 파일이 없으므로 일봉 데이터를 그대로 표시.
+      // L1 캐시에 일봉 데이터가 있으면 네트워크 요청 없이 즉시 반환.
+      // 주의: slice()로 복사 — _sanitizeCandles가 sort()로 원본 훼손 방지
+      var dailyKey = stock.code + '-1d';
+      var dailyCached = this.cache[dailyKey];
+      if (dailyCached && dailyCached.candles && dailyCached.candles.length > 0) {
+        candles = dailyCached.candles.slice();
+      } else {
+        candles = await this._fileGetCandles(stock);
+      }
     } else if (KRX_API_CONFIG.mode === 'demo') {
       // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
       candles = this._demoGenerateCandles(stock, timeframe);
+    } else if (KRX_API_CONFIG.mode === 'koscom') {
+      // 코스콤 모드: 향후 구현 예정 (사업화 시 전환)
+      console.warn('[KRX] Koscom API는 아직 구현되지 않았습니다');
+      try {
+        candles = await koscomService.getCandles(stock, timeframe);
+      } catch (e) {
+        console.warn('[Koscom]', e.message);
+        candles = [];
+      }
     } else {
       // 알 수 없는 모드: 빈 배열 반환 (가짜 데이터 생성하지 않음)
       console.warn('[KRX] 알 수 없는 데이터 모드:', KRX_API_CONFIG.mode);
       candles = [];
     }
 
+    // [FIX-TRUST] 캔들 데이터 출처 추적 — 가짜 데이터를 실제처럼 표시 방지
+    // candles._dataSource: 'ws' | 'file' | 'demo' | 'idb' | 'koscom'
+    var candleSource = KRX_API_CONFIG.mode;
+
     if (candles.length > 0) {
       // 캔들 정제: 검증 + 시간순 정렬 + 메모리 상한
       candles = this._sanitizeCandles(candles, timeframe);
+
+      // 데이터 출처를 캔들 배열에 태그 (배열 자체의 비-열거형 속성)
+      Object.defineProperty(candles, '_dataSource', {
+        value: candleSource, writable: true, enumerable: false, configurable: true,
+      });
 
       const cacheEntry = { candles, lastUpdate: Date.now() };
       this.cache[key] = cacheEntry;
@@ -441,12 +473,21 @@ class KRXDataService {
   _sanitizeCandles(candles, timeframe) {
     if (!candles || candles.length === 0) return candles;
 
-    // 시간순 정렬 보장
-    candles.sort(function(a, b) {
-      var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
-      var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
-      return ta - tb;
-    });
+    // [OPT] 정렬 전 이미 정렬되어 있는지 빠른 검증 (대부분의 JSON은 이미 정렬됨)
+    var needsSort = false;
+    for (var si = 1; si < candles.length; si++) {
+      var prevT = candles[si - 1].time;
+      var curT = candles[si].time;
+      // 같은 타입끼리 비교 (string "YYYY-MM-DD"는 사전순 = 시간순)
+      if (curT < prevT) { needsSort = true; break; }
+    }
+    if (needsSort) {
+      candles.sort(function(a, b) {
+        var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
+        var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
+        return ta - tb;
+      });
+    }
 
     // OHLCV 유효성 필터링
     var self = this;
@@ -515,6 +556,39 @@ class KRXDataService {
     }
   }
 
+  /**
+   * 보간 분봉 JSON 파일 로드 (generate_intraday.py가 생성한 파일)
+   * 파일명 형식: {code}_{timeframe}.json (예: 005930_5m.json)
+   * @param {Object} stock - 종목 객체
+   * @param {string} timeframe - 타임프레임 ('1m', '5m', '15m', '1h')
+   * @returns {Array} 캔들 배열 (없으면 빈 배열)
+   */
+  async _fileGetIntradayCandles(stock, timeframe) {
+    try {
+      const market = (stock.market || 'kospi').toLowerCase();
+      const filePath = `${KRX_API_CONFIG.dataDir}/${market}/${stock.code}_${timeframe}.json`;
+
+      const res = await fetch(filePath);
+      if (!res.ok) return [];
+
+      const data = await res.json();
+      if (!data.candles || !data.candles.length) return [];
+
+      // 분봉 time은 Unix 타임스탬프 (숫자) — LWC가 직접 지원
+      return data.candles.map(c => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }));
+    } catch (e) {
+      // 분봉 파일 없음 — 조용히 빈 배열 반환 (일봉 폴백으로 진행)
+      return [];
+    }
+  }
+
   // ══════════════════════════════════════════════════
   //  데모 모드: 시뮬레이션 데이터 생성
   // ══════════════════════════════════════════════════
@@ -553,13 +627,67 @@ class KRXDataService {
     const isDaily = timeframe === '1d';
     const baseVol = isDaily ? 500000 : 50000;
 
-    for (let i = 0; i < count; i++) {
-      const t = now - (count - 1 - i) * tf.seconds;
+    // ── 분봉: KRX 장시간(09:00~15:30 KST) 내 타임슬롯 사전 생성 ──
+    // 한국은 서머타임 미적용 — KST = UTC+9 고정
+    // 분봉 타임스탬프를 KRX 거래시간에 맞춰야 차트 시간축이 자연스러움
+    let intradaySlots = [];
+    if (!isDaily) {
+      const KST_OFFSET = 9 * 3600;                       // UTC+9 (초)
+      const MARKET_OPEN_KST = 9 * 3600;                  // 09:00 KST (초)
+      const MARKET_CLOSE_KST = 15 * 3600 + 30 * 60;      // 15:30 KST (초)
+      const slotsPerDay = Math.floor((MARKET_CLOSE_KST - MARKET_OPEN_KST) / tf.seconds);
 
-      // 일봉: 주말 건너뛰기
+      // 오늘 KST 날짜 기준으로 역순 거래일 탐색
+      const nowKstMs = (now + KST_OFFSET) * 1000;
+      const todayKST = new Date(nowKstMs);
+      let dayOffset = 0;
+      let slotsNeeded = count;
+
+      while (slotsNeeded > 0) {
+        const dayDate = new Date(todayKST);
+        dayDate.setUTCDate(dayDate.getUTCDate() - dayOffset);
+        const dayOfWeek = dayDate.getUTCDay();
+
+        // 주말 건너뛰기
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          // 해당 거래일 자정(UTC) 타임스탬프
+          const dayStartUTC = Math.floor(Date.UTC(
+            dayDate.getUTCFullYear(), dayDate.getUTCMonth(), dayDate.getUTCDate()
+          ) / 1000);
+
+          // 이 거래일에서 채울 슬롯 수 (마지막 거래일은 필요한 만큼만)
+          const slotsThisDay = Math.min(slotsPerDay, slotsNeeded);
+          const startSlot = slotsPerDay - slotsThisDay;  // 장 마감쪽부터 채움
+
+          for (let s = startSlot; s < slotsPerDay; s++) {
+            // KST 시각 → UTC 타임스탬프 변환
+            const kstSeconds = MARKET_OPEN_KST + s * tf.seconds;
+            const utcTimestamp = dayStartUTC + kstSeconds - KST_OFFSET;
+            intradaySlots.push(utcTimestamp);
+          }
+          slotsNeeded -= slotsThisDay;
+        }
+        dayOffset++;
+        if (dayOffset > 30) break;  // 안전 상한 (~1개월)
+      }
+
+      // 시간순 정렬 (역순 탐색으로 생성했으므로)
+      intradaySlots.sort((a, b) => a - b);
+    }
+
+    for (let i = 0; i < count; i++) {
+      let t;
+
       if (isDaily) {
-        const d = new Date(t * 1000);
-        if (d.getDay() === 0 || d.getDay() === 6) continue;
+        t = now - (count - 1 - i) * tf.seconds;
+        // 일봉: 주말 건너뛰기 (KST 기준 — UTC+9)
+        const kstMs = t * 1000 + 9 * 3600000;
+        const d = new Date(kstMs);
+        if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      } else {
+        // 분봉: 미리 계산된 KST 장시간 슬롯 사용
+        if (i >= intradaySlots.length) break;
+        t = intradaySlots[i];
       }
 
       // 트렌드 변경
@@ -589,5 +717,85 @@ class KRXDataService {
 
 }
 
+// ══════════════════════════════════════════════════════
+//  Koscom API 스텁 (향후 전환용)
+//
+//  코스콤 정보분배 API (sandbox-apigw.koscom.co.kr) 대응.
+//  현재는 미구현 — 실제 전환 시 getCandles/getRealTimeQuote 구현 필요.
+//  사업화 시 pykrx → 코스콤 전환 필수 (라이선스 요건).
+// ══════════════════════════════════════════════════════
+class KoscomDataService {
+  constructor() {
+    this.apiKey = null;
+    this.baseUrl = 'https://sandbox-apigw.koscom.co.kr/v3';
+    this.connected = false;
+  }
+
+  /**
+   * API 키 설정
+   * @param {string} key - 코스콤 API 인증키
+   */
+  setApiKey(key) {
+    this.apiKey = key;
+  }
+
+  /**
+   * 캔들 데이터 조회 (미구현)
+   * @param {Object} stock - 종목 객체 { code, name, market }
+   * @param {string} timeframe - 타임프레임 ('1d', '5m' 등)
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getCandles(stock, timeframe) {
+    throw new Error('[Koscom] 미구현 — Kiwoom OCX 또는 file 모드 사용');
+  }
+
+  /**
+   * 실시간 시세 조회 (미구현)
+   * @param {string} stockCode - 종목 코드
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getRealTimeQuote(stockCode) {
+    throw new Error('[Koscom] 미구현');
+  }
+
+  /**
+   * 종목 기본 정보 조회 (미구현)
+   * @param {string} stockCode - 종목 코드
+   * @throws {Error} 항상 에러 — 아직 구현되지 않음
+   */
+  async getStockInfo(stockCode) {
+    throw new Error('[Koscom] 미구현');
+  }
+}
+
+// 코스콤 서비스 인스턴스 (향후 전환 시 사용)
+const koscomService = new KoscomDataService();
+
 // 글로벌 인스턴스
 const dataService = new KRXDataService();
+
+// ══════════════════════════════════════════════════════
+//  [FIX-TRUST] 데이터 출처 확인 유틸리티
+//
+//  실제 시장 데이터인지 확인. 데모/시뮬레이션 데이터일 경우
+//  UI 경고를 표시하여 사용자가 가짜 데이터로 투자 판단을
+//  내리는 것을 방지.
+// ══════════════════════════════════════════════════════
+
+/**
+ * 현재 데이터 모드가 실제 시장 데이터인지 확인
+ * @returns {boolean} ws/file 모드이면 true, demo이면 false
+ */
+function isRealData() {
+  return KRX_API_CONFIG.mode === 'ws' || KRX_API_CONFIG.mode === 'file';
+}
+
+/**
+ * 캔들 배열의 데이터 출처 확인
+ * @param {Array} candleArray - 캔들 배열
+ * @returns {string} 'ws' | 'file' | 'demo' | 'unknown'
+ */
+function getCandleSource(candleArray) {
+  if (!candleArray) return 'unknown';
+  return candleArray._dataSource || KRX_API_CONFIG.mode || 'unknown';
+}

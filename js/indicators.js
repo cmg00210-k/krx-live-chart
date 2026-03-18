@@ -183,6 +183,146 @@ function calcHurst(closes, minWindow = 10) {
   return (n * sxy - sx * sy) / (n * sx2 - sx * sx);
 }
 
+/**
+ * 가중 다중 선형 회귀 (WLS — Weighted Least Squares)
+ *
+ * 학술 근거: Reschenhofer et al. (2021)
+ *   "Time-dependent WLS for Stock Returns"
+ *   — WLS가 OLS보다 유의미하게 높은 예측력
+ *
+ * @param {number[][]} X - 설계 행렬 (n x p, 절편 열 포함)
+ * @param {number[]} y - 종속 변수 (n x 1)
+ * @param {number[]} weights - 가중치 (n x 1), null이면 OLS
+ * @returns {{ coeffs, rSquared, stdErrors, tStats, df, fitted, sigmaHat2, invXtWX }}
+ *          또는 표본 부족/특이행렬 시 null
+ */
+function calcWLSRegression(X, y, weights) {
+  var n = X.length, p = X[0].length;
+  if (n < p + 2) return null;  // 최소 표본 부족
+
+  // X^T W X  (p x p)
+  var XtWX = [];
+  for (var j = 0; j < p; j++) {
+    XtWX[j] = new Array(p).fill(0);
+  }
+  // X^T W y  (p x 1)
+  var XtWy = new Array(p).fill(0);
+
+  for (var i = 0; i < n; i++) {
+    var w = weights ? weights[i] : 1;
+    for (var j = 0; j < p; j++) {
+      XtWy[j] += X[i][j] * w * y[i];
+      for (var k = 0; k < p; k++) {
+        XtWX[j][k] += X[i][j] * w * X[i][k];
+      }
+    }
+  }
+
+  // (X^T W X)^{-1} via Gauss-Jordan 소거법
+  var inv = _invertMatrix(XtWX);
+  if (!inv) return null;  // 특이 행렬 (다중공선성 등)
+
+  // 회귀 계수: coeffs = inv * XtWy
+  var coeffs = new Array(p).fill(0);
+  for (var j = 0; j < p; j++) {
+    for (var k = 0; k < p; k++) {
+      coeffs[j] += inv[j][k] * XtWy[k];
+    }
+  }
+
+  // 적합값 + 잔차
+  var fitted = X.map(function(xi) {
+    return xi.reduce(function(s, v, j) { return s + v * coeffs[j]; }, 0);
+  });
+  var residuals = y.map(function(yi, i) { return yi - fitted[i]; });
+
+  // 가중 R-squared
+  var wSum = weights ? weights.reduce(function(a, b) { return a + b; }, 0) : n;
+  var yBarW = y.reduce(function(s, yi, i) {
+    return s + (weights ? weights[i] : 1) * yi;
+  }, 0) / wSum;
+
+  var ssRes = 0, ssTot = 0;
+  for (var i = 0; i < n; i++) {
+    var w = weights ? weights[i] : 1;
+    ssRes += w * residuals[i] * residuals[i];
+    ssTot += w * (y[i] - yBarW) * (y[i] - yBarW);
+  }
+  var rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+
+  // 계수 표준오차
+  var df = n - p;
+  var sigmaHat2 = df > 0 ? ssRes / df : 0;
+  var stdErrors = new Array(p).fill(0);
+  for (var j = 0; j < p; j++) {
+    stdErrors[j] = Math.sqrt(Math.max(0, sigmaHat2 * inv[j][j]));
+  }
+
+  // t-통계량
+  var tStats = coeffs.map(function(b, j) {
+    return stdErrors[j] > 0 ? b / stdErrors[j] : 0;
+  });
+
+  return {
+    coeffs: coeffs,
+    rSquared: rSquared,
+    stdErrors: stdErrors,
+    tStats: tStats,
+    df: df,
+    fitted: fitted,
+    sigmaHat2: sigmaHat2,
+    invXtWX: inv,
+  };
+}
+
+/**
+ * 행렬 역행렬 (Gauss-Jordan 소거법, 부분 피벗팅)
+ * 설계 행렬 크기 제한 없음 (일반적으로 5x5 이하)
+ * @param {number[][]} m - 정방 행렬 (n x n)
+ * @returns {number[][]|null} — 역행렬 또는 특이행렬 시 null
+ */
+function _invertMatrix(m) {
+  var n = m.length;
+  // 증강 행렬 [m | I] 구성
+  var aug = [];
+  for (var i = 0; i < n; i++) {
+    aug[i] = new Array(2 * n);
+    for (var j = 0; j < n; j++) aug[i][j] = m[i][j];
+    for (var j = 0; j < n; j++) aug[i][n + j] = (i === j) ? 1 : 0;
+  }
+
+  for (var col = 0; col < n; col++) {
+    // 부분 피벗팅: 최대 절대값 행 탐색
+    var maxRow = col;
+    for (var row = col + 1; row < n; row++) {
+      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+    }
+    // 행 교환
+    var temp = aug[col]; aug[col] = aug[maxRow]; aug[maxRow] = temp;
+
+    // 특이 행렬 판별
+    if (Math.abs(aug[col][col]) < 1e-12) return null;
+
+    // 피벗 행 정규화
+    var pivot = aug[col][col];
+    for (var j = 0; j < 2 * n; j++) aug[col][j] /= pivot;
+
+    // 다른 행에서 피벗 열 소거
+    for (var row = 0; row < n; row++) {
+      if (row === col) continue;
+      var factor = aug[row][col];
+      for (var j = 0; j < 2 * n; j++) aug[row][j] -= factor * aug[col][j];
+    }
+  }
+
+  // 역행렬 추출 (우측 n열)
+  var result = [];
+  for (var i = 0; i < n; i++) {
+    result[i] = aug[i].slice(n);
+  }
+  return result;
+}
+
 /** MACD (12, 26, 9) */
 function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
   const emaFast = calcEMA(closes, fast);
