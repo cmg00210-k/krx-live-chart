@@ -891,6 +891,7 @@ class ChartManager {
 
     const isMainChart = (chart === this.mainChart);
     let rafId = null;
+    let _lastResizeWidth = 0;  // [FIX] 실제 리사이즈 vs 줌 제스처 구분용
     const ro = new ResizeObserver(entries => {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
@@ -900,12 +901,15 @@ class ChartManager {
           if (width > 0 && height > 0) {
             try {
               const applyOpts = { width, height };
-              // 메인 차트: 리사이즈 시 barSpacing 재계산 (약 12개 캔들 유지)
-              if (isMainChart) {
+              // [FIX] barSpacing은 실제 컨테이너 크기 변경(>10px) 시에만 재계산
+              // 줌 제스처 중 ResizeObserver가 발동해도 barSpacing을 건드리지 않음
+              // → 줌 리셋 버그 방지 (Lightweight Charts가 줌 중 applyOptions 호출 시 뷰 리셋)
+              if (isMainChart && Math.abs(width - _lastResizeWidth) > 10) {
                 applyOpts.timeScale = {
                   barSpacing: Math.max(6, Math.floor(width / 17)),
                 };
               }
+              _lastResizeWidth = width;
               chart.applyOptions(applyOpts);
             } catch (e) {}
           }
