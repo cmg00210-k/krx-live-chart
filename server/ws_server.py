@@ -1332,7 +1332,7 @@ class WebSocketBridge:
                 self.host,
                 self.port,
                 ping_interval=30,
-                ping_timeout=10,
+                ping_timeout=30,  # [FIX] 10→30: 대량 캔들 전송 중 ping timeout 방지
                 max_size=10 * 1024 * 1024,
             ) as server:
                 log.info("WebSocket 서버 리스닝: ws://%s:%d", self.host, self.port)
