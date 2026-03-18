@@ -1,255 +1,147 @@
-# CheeseStock 배포 가이드 (www.cheesestock.co.kr)
+# CheeseStock 배포 가이드 (cheesestock.co.kr)
 
-## 아키텍처 개요
+## 현재 배포 구조 (2026-03-18 기준)
 
 ```
 [사용자 브라우저]
     │
-    ├── HTTPS ──→ [Vercel CDN] ──→ 정적 파일 (HTML/JS/CSS)
-    │               www.cheesestock.co.kr
-    │
-    └── WSS ───→ [Cloudflare Tunnel] ──→ [Kiwoom 서버 PC]
-                  ws.cheesestock.co.kr         ws://localhost:8765
+    └── HTTPS ──→ [AWS Lightsail] ──→ Nginx ──→ /var/www/cheesesstock
+                  cheesestock.co.kr              (정적 파일 서빙)
+                  52.79.112.255
+                  서울 (ap-northeast-2a)
 ```
 
-- **프론트엔드**: Vercel에서 정적 호스팅 (빌드 불필요)
-- **WebSocket 서버**: Kiwoom OCX 서버 PC에서 Cloudflare Tunnel을 통해 외부 노출
-- **DNS**: Cloudflare에서 관리
+- **호스팅**: AWS Lightsail (Ubuntu 22.04, 512MB RAM, 2 vCPUs, 20GB SSD)
+- **웹서버**: Nginx
+- **HTTPS**: Let's Encrypt (certbot), 만료일 2026-06-16 (자동 갱신)
+- **실시간 WS**: 미연결 (file 모드로 자동 전환, 데이터 없으면 demo 폴백)
 
 ---
 
-## 1. Vercel 배포 (프론트엔드)
+## 1. 코드 배포 (업데이트)
 
-### 1.1 Vercel 프로젝트 연결
+### 로컬에서 푸시
 
-1. [vercel.com](https://vercel.com)에서 GitHub 계정으로 로그인
-2. "New Project" → GitHub 리포지토리 `cmg00210-k/krx-live-chart` 선택
-3. Framework Preset: **Other** (빌드 시스템 없음)
-4. Build Command: (비워두기 — `vercel.json`에서 `null` 설정됨)
-5. Output Directory: `.` (루트 — `vercel.json`에서 설정됨)
-6. Branch: `feature/technical-analysis` (또는 `main` — 배포 대상 브랜치)
-7. "Deploy" 클릭
+```bash
+git add js/파일명.js
+git commit -m "feat: 변경 내용"
+git push origin main
+```
 
-### 1.2 커스텀 도메인 설정
+### 서버에서 pull
 
-1. Vercel 프로젝트 Settings → Domains
-2. `www.cheesestock.co.kr` 추가
-3. Vercel이 제공하는 CNAME 레코드를 Cloudflare DNS에 추가:
-   ```
-   타입: CNAME
-   이름: www
-   대상: cname.vercel-dns.com
-   프록시: DNS only (회색 구름) ← Vercel이 자체 SSL 발급하므로 Cloudflare 프록시 비활성화
-   ```
-4. Apex 도메인 (`cheesestock.co.kr`) 리다이렉트:
-   ```
-   타입: A
-   이름: @
-   값: 76.76.21.21
-   ```
+Lightsail 콘솔 → cheesesstock-prod → Connect → Connect using SSH
 
-### 1.3 vercel.json 설명
+```bash
+cd /var/www/cheesesstock
+git pull
+```
 
-프로젝트 루트의 `vercel.json`이 자동 적용됩니다:
-- `buildCommand: null` — 빌드 단계 건너뛰기
-- `cleanUrls: true` — `.html` 확장자 없는 깔끔한 URL
-- 보안 헤더: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
-- WebSocket 리라이트: `/ws/*` → `https://ws.cheesestock.co.kr/*`
-
-### 1.4 배포 제외 파일
-
-`.vercelignore` 파일로 불필요한 파일 제외:
-- `data/` — 주식 데이터 JSON (대용량)
-- `server/` — Kiwoom 서버 코드
-- `scripts/` — 다운로드 스크립트
-- `core_data/`, `pattern_impl/` — 학술 문서
-- `*.bat`, `*.py`, `*.md` — 비웹 파일 (`index.html`은 예외)
+Nginx는 정적 파일을 직접 서빙하므로 **재시작 불필요**.
 
 ---
 
-## 2. Cloudflare Tunnel (WebSocket 서버)
+## 2. 서버 접속 방법
 
-Kiwoom OCX 서버 PC (Windows, 로컬 네트워크)를 `wss://ws.cheesestock.co.kr`으로 외부 노출합니다.
-
-### 2.1 사전 요구사항
-
-- Kiwoom 서버 PC에서 `ws_server.py`가 `ws://localhost:8765`에서 실행 중
-- Cloudflare 계정 + `cheesestock.co.kr` 도메인이 Cloudflare DNS에 등록됨
-- 서버 PC에 인터넷 연결
-
-### 2.2 cloudflared 설치
-
-1. [Cloudflare Tunnel 다운로드 페이지](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)에서 Windows 64-bit 다운로드
-2. 또는 winget으로 설치:
-   ```powershell
-   winget install --id Cloudflare.cloudflared
-   ```
-3. 설치 확인:
-   ```powershell
-   cloudflared --version
-   ```
-
-### 2.3 Cloudflare 로그인 + 터널 생성
-
-```powershell
-# Cloudflare 인증 (브라우저 열림 → 도메인 선택)
-cloudflared tunnel login
-
-# 터널 생성
-cloudflared tunnel create cheesestock-ws
-
-# 생성된 터널 ID 확인 (예: a1b2c3d4-...)
-cloudflared tunnel list
-```
-
-### 2.4 터널 설정 파일 생성
-
-`C:\Users\<사용자>\.cloudflared\config.yml` 파일을 생성합니다:
-
-```yaml
-tunnel: <터널-ID>
-credentials-file: C:\Users\<사용자>\.cloudflared\<터널-ID>.json
-
-ingress:
-  - hostname: ws.cheesestock.co.kr
-    service: ws://localhost:8765
-    originRequest:
-      # WebSocket 지원 활성화
-      noTLSVerify: true
-      connectTimeout: 10s
-      # WebSocket idle timeout (Kiwoom 데이터 간격 고려)
-      tcpKeepAlive: 30s
-  - service: http_status:404
-```
-
-**중요**: `<터널-ID>`를 실제 터널 ID로 교체하세요.
-
-### 2.5 DNS 레코드 추가
-
-```powershell
-cloudflared tunnel route dns cheesestock-ws ws.cheesestock.co.kr
-```
-
-이 명령은 Cloudflare DNS에 자동으로 CNAME 레코드를 추가합니다:
-```
-타입: CNAME
-이름: ws
-대상: <터널-ID>.cfargotunnel.com
-프록시: 활성화 (주황 구름)
-```
-
-### 2.6 터널 실행
-
-#### 수동 실행 (테스트용)
-```powershell
-cloudflared tunnel run cheesestock-ws
-```
-
-#### Windows 서비스로 등록 (권장 — PC 재시작 시 자동 실행)
-```powershell
-# 관리자 권한 PowerShell에서 실행
-cloudflared service install
-```
-
-서비스 등록 후:
-- Windows 서비스 이름: `Cloudflared`
-- 시작 유형: 자동
-- 서비스 관리: `services.msc`에서 확인 가능
-
-### 2.7 실행 순서
-
-서버 PC 시작 시 순서:
-1. Cloudflare Tunnel 서비스 자동 시작 (Windows 서비스)
-2. `CheeseStock.bat` 또는 `server/start_server.bat` 실행 → Kiwoom 로그인 → `ws://localhost:8765` 시작
-3. Tunnel이 자동으로 `wss://ws.cheesestock.co.kr` ↔ `ws://localhost:8765` 연결
+1. [AWS Lightsail](https://lightsail.aws.amazon.com) 접속
+2. `cheesesstock-prod` 인스턴스 클릭
+3. **Connect** 탭 → **Connect using SSH** 버튼
 
 ---
 
-## 3. DNS 설정 (Cloudflare)
+## 3. Nginx 설정
 
-### 3.1 전체 DNS 레코드
+설정 파일 위치: `/etc/nginx/sites-enabled/cheesesstock`
 
-`cheesestock.co.kr` 도메인의 Cloudflare DNS 설정:
+주요 설정:
+- Root: `/var/www/cheesesstock`
+- HTTPS 자동 리다이렉트 (HTTP → HTTPS)
+- Let's Encrypt 인증서 자동 적용 (certbot이 설정)
 
-| 타입 | 이름 | 값 | 프록시 |
-|------|------|------|--------|
-| A | `@` | `76.76.21.21` | DNS only (회색) |
-| CNAME | `www` | `cname.vercel-dns.com` | DNS only (회색) |
-| CNAME | `ws` | `<터널-ID>.cfargotunnel.com` | Proxied (주황) |
-
-### 3.2 주의사항
-
-- `www` 레코드: Vercel이 자체 SSL을 발급하므로 **Cloudflare 프록시 비활성화** (회색 구름)
-- `ws` 레코드: Cloudflare Tunnel이므로 **프록시 활성화 필수** (주황 구름)
-- Apex 도메인 (`cheesestock.co.kr`): Vercel이 `www.cheesestock.co.kr`으로 리다이렉트 처리
-
----
-
-## 4. SSL 인증서
-
-### 4.1 Vercel (www.cheesestock.co.kr)
-
-- **자동 발급**: Vercel이 Let's Encrypt 인증서를 자동 발급/갱신
-- 설정 불필요 — 도메인 연결 시 자동 처리
-
-### 4.2 Cloudflare Tunnel (ws.cheesestock.co.kr)
-
-- **자동 발급**: Cloudflare가 엣지 인증서를 자동 발급
-- 클라이언트 ↔ Cloudflare: TLS 자동 (wss://)
-- Cloudflare ↔ 서버 PC: Tunnel 내부 암호화 (추가 설정 불필요)
-- `ws://localhost:8765` (로컬)에는 SSL 불필요 — Tunnel이 암호화 처리
-
----
-
-## 5. 자동 환경 감지
-
-`js/realtimeProvider.js`의 `RealtimeProvider` 생성자에서 배포 환경을 자동 감지합니다:
-
-```javascript
-if (window.location.hostname === 'www.cheesestock.co.kr' || window.location.hostname === 'cheesestock.co.kr') {
-  KRX_API_CONFIG.wsUrl = 'wss://ws.cheesestock.co.kr/ws';
-}
+Nginx 재시작 (설정 변경 시):
+```bash
+sudo nginx -t          # 설정 검증
+sudo systemctl reload nginx
 ```
 
-- **로컬 개발**: `localhost` → 기본값 `ws://localhost:8765` 유지
-- **배포 환경**: `cheesestock.co.kr` → `wss://ws.cheesestock.co.kr/ws`로 자동 전환
-- 사용자가 연결 설정 UI에서 수동 변경 가능 (localStorage에 저장됨)
+---
+
+## 4. HTTPS 인증서
+
+Let's Encrypt 인증서 (certbot):
+- 인증서 경로: `/etc/letsencrypt/live/cheesesstock.co.kr/`
+- 만료일: 2026-06-16
+- 자동 갱신: systemd timer 등록됨
+
+갱신 테스트:
+```bash
+sudo certbot renew --dry-run
+```
 
 ---
 
-## 6. 체크리스트
+## 5. 방화벽 (Lightsail Firewall)
 
-### 최초 배포
-- [ ] Cloudflare에 `cheesestock.co.kr` 도메인 등록 + 네임서버 변경
-- [ ] Vercel 프로젝트 생성 + GitHub 리포 연결
-- [ ] Vercel 커스텀 도메인 `www.cheesestock.co.kr` 추가
-- [ ] Cloudflare DNS에 A/CNAME 레코드 추가 (3.1 참조)
-- [ ] 서버 PC에 `cloudflared` 설치 + 터널 생성
-- [ ] `config.yml` 작성 + DNS 라우팅 설정
-- [ ] `cloudflared service install`로 Windows 서비스 등록
-- [ ] `https://www.cheesestock.co.kr` 접속 확인
-- [ ] 브라우저 F12 → Network → WebSocket이 `wss://ws.cheesestock.co.kr/ws`에 연결되는지 확인
+IPv4 + IPv6 모두 아래 포트 오픈:
+
+| Application | Protocol | Port |
+|-------------|----------|------|
+| SSH | TCP | 22 |
+| HTTP | TCP | 80 |
+| HTTPS | TCP | 443 |
+
+---
+
+## 6. 데이터 파일
+
+- **git에 포함**: `data/index.json`, `data/kospi/*.json` (35개), `data/kosdaq/*.json` (20개)
+- `git pull` 시 자동으로 서버에 배포됨
+- 데이터 없는 종목은 demo 모드로 자동 폴백
+
+추가 종목 데이터 다운로드 (서버에서):
+```bash
+pip3 install pykrx FinanceDataReader
+python3 scripts/download_ohlcv.py --top 100
+```
+
+---
+
+## 7. 데이터 모드 (공개 서버)
+
+공개 서버(`cheesestock.co.kr`)에서의 모드 순서:
+
+1. **ws 모드 프로브** → 실패 (Kiwoom 서버 없음)
+2. **file 모드 자동 전환** → JSON 파일 있으면 실제 데이터 표시
+3. **demo 폴백** → JSON 파일 없는 종목은 시뮬레이션 데이터
+
+> 로컬 개발 환경(`localhost`)에서만 WS 연결 가이드 팝업 표시.
+> 공개 서버에서는 팝업 없이 자동으로 file/demo 모드 진입.
+
+---
+
+## 8. 체크리스트
+
+### 최초 배포 (완료 ✅)
+- [x] AWS Lightsail 인스턴스 생성 (서울)
+- [x] Nginx 설치 및 설정
+- [x] 코드 업로드 (`git clone`)
+- [x] 도메인 연결 (`cheesestock.co.kr` → 52.79.112.255)
+- [x] HTTPS 설정 (certbot + Let's Encrypt)
+- [x] Lightsail 방화벽 포트 80/443 오픈
 
 ### 운영
-- [ ] Kiwoom 서버가 장 시작 전에 실행 중인지 확인
-- [ ] Cloudflare Tunnel 서비스가 실행 중인지 확인 (`services.msc`)
-- [ ] Vercel 배포가 최신 커밋을 반영하는지 확인 (자동 배포)
+- [ ] 코드 변경 시: `git push` → 서버에서 `git pull`
+- [ ] 인증서 갱신 확인 (3개월마다 자동 갱신, 만료 30일 전 알림 이메일)
+- [ ] 추가 종목 데이터 필요 시 서버에서 `download_ohlcv.py` 실행
 
 ---
 
-## 7. 트러블슈팅
+## 9. 트러블슈팅
 
-### WebSocket 연결 실패
-1. 서버 PC에서 `ws://localhost:8765` 직접 테스트 (브라우저 콘솔)
-2. `cloudflared tunnel run cheesestock-ws` 수동 실행 → 로그 확인
-3. Cloudflare Dashboard → Zero Trust → Tunnels에서 터널 상태 확인
-4. DNS 레코드가 올바른지 확인 (`nslookup ws.cheesestock.co.kr`)
-
-### Vercel 배포 실패
-1. Vercel Dashboard → Deployments → 빌드 로그 확인
-2. `.vercelignore`가 필요한 파일을 제외하지 않는지 확인
-3. `vercel.json` 문법 오류 확인
-
-### SSL 인증서 문제
-- Vercel: 도메인 DNS가 올바르게 설정되었는지 확인 (회색 구름)
-- Cloudflare: SSL/TLS 모드가 "Full" 이상인지 확인
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| 사이트 접속 불가 | Lightsail 방화벽 | 포트 80/443 오픈 확인 |
+| HTTPS 인증서 오류 | 인증서 만료 | `sudo certbot renew` |
+| 코드 업데이트 안됨 | git pull 미실행 | 서버에서 `git pull` |
+| 차트 데이터 없음 | data/ 파일 없음 | `download_ohlcv.py` 실행 |
+| Nginx 502 오류 | Nginx 설정 오류 | `sudo nginx -t` 후 재시작 |
