@@ -845,10 +845,16 @@ const sidebarManager = (() => {
     var tf = _tf();
     var sparkLabel = tf === '1d' ? '30D' : '\uC624\uB298';
 
+    // [FIX-TRUST] 데모 모드일 때 가격 옆에 데모 뱃지 표시
+    var _demoBadge = '';
+    if (typeof KRX_API_CONFIG !== 'undefined' && KRX_API_CONFIG.mode === 'demo') {
+      _demoBadge = '<span style="font-size:8px;color:#ff9800;background:rgba(255,152,0,0.12);padding:0 3px;border-radius:2px;margin-left:3px;vertical-align:middle;font-weight:700;letter-spacing:.3px;">DEMO</span>';
+    }
+
     return '<div class="sb-item' + (isPatternMode && pillsHtml ? ' has-pattern' : '') + '" data-code="' + s.code + '"' + patternAttr + ' draggable="true">' +
       '<div class="sb-row1">' +
         '<span class="sb-name" title="' + s.code + '">' + s.name + volBadge + pillsHtml + '</span>' +
-        '<span class="sb-price" id="sb-' + s.code + '">' + (price > 0 ? price.toLocaleString() : '\u2014') + '</span>' +
+        '<span class="sb-price" id="sb-' + s.code + '">' + (price > 0 ? price.toLocaleString() : '\u2014') + _demoBadge + '</span>' +
       '</div>' +
       '<div class="sb-row2">' +
         '<span class="' + sparkWrapClass + '">' +

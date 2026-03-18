@@ -22,6 +22,19 @@ var _latestFinRoe = 0;
 // ══════════════════════════════════════════════════════
 
 async function updateFinancials() {
+  // [FIX] 새 종목 전환 시 이전 데이터 잔류 방지: 모든 fin-* 요소 초기화
+  var _finIds = [
+    'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
+    'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
+    'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
+  ];
+  for (var _i = 0; _i < _finIds.length; _i++) {
+    var _el = document.getElementById(_finIds[_i]);
+    if (_el) _el.textContent = '\u2014';
+  }
+
   var data;
   try {
     data = await getFinancialData(currentStock.code, 'quarter');
@@ -40,14 +53,33 @@ async function updateFinancials() {
   // 기간 표시
   set('fin-period', latest.p || '—');
 
-  // [FIX-8] 시드/추정치 데이터 경고 배너 표시
-  // DART 연동 데이터: _financialCache에 source='dart' 존재
-  // 시드/하드코딩: _financialCache에 source 없거나 캐시 자체 없음
+  // [FIX-TRUST] 데이터 출처별 경고 배너 표시
+  // DART 연동: source='dart' → 경고 숨김
+  // 하드코딩(삼성/하이닉스): source='hardcoded' → 추정치 경고
+  // 시드 생성(기타): source='seed' → 가짜 데이터 강한 경고
   const _seedWarningEl = document.getElementById('fin-seed-warning');
   if (_seedWarningEl) {
     const cached = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
-    const isDartData = cached && cached.source === 'dart';
-    _seedWarningEl.style.display = isDartData ? 'none' : 'block';
+    const finSource = cached ? cached.source : null;
+
+    if (finSource === 'dart') {
+      // DART 실제 데이터 — 경고 숨김
+      _seedWarningEl.style.display = 'none';
+    } else if (finSource === 'hardcoded') {
+      // 하드코딩 데이터 (삼성전자/SK하이닉스) — 일부 추정치 포함 가능
+      _seedWarningEl.style.display = 'block';
+      _seedWarningEl.textContent = '참고용 데이터 (DART 미연동 — 일부 추정치 포함)';
+      _seedWarningEl.style.background = 'rgba(255,180,50,0.10)';
+      _seedWarningEl.style.borderColor = 'rgba(255,180,50,0.20)';
+      _seedWarningEl.style.color = 'rgba(255,180,50,0.65)';
+    } else {
+      // 시드 생성 데이터 — 완전 가짜, 강한 경고
+      _seedWarningEl.style.display = 'block';
+      _seedWarningEl.textContent = '\u26A0 재무 데이터 없음 (시뮬레이션 수치 \u2014 투자 참고 불가)';
+      _seedWarningEl.style.background = 'rgba(244,67,54,0.10)';
+      _seedWarningEl.style.borderColor = 'rgba(244,67,54,0.25)';
+      _seedWarningEl.style.color = 'rgba(244,67,54,0.75)';
+    }
   }
 
   // 주요손익지표 — 단위를 span.fin-unit으로 분리 (CSS 별도 스타일링)
@@ -181,14 +213,15 @@ async function updateFinancials() {
   // PER 계산 우선순위:
   //   1순위: currentPrice / EPS (주당순이익 직접 or shares 기반)
   //   2순위: mcapEok / niEok   (시총/순이익 — shares 없을 때)
+  // [FIX] 이중 반올림 방지: toFixed(1) 한 번만 적용
   let perVal = null;
   if (currentPrice && epsNum > 0) {
-    perVal = +(currentPrice / epsNum).toFixed(2);
+    perVal = +(currentPrice / epsNum).toFixed(1);
   } else if (!epsNum && mcapEok && ni > 0) {
-    perVal = +(mcapEok / ni).toFixed(2);
+    perVal = +(mcapEok / ni).toFixed(1);
   }
   if (perVal != null && perVal > 0) {
-    set('fin-per', perVal.toFixed(1) + '배');
+    set('fin-per', perVal + '배');
     setClass('fin-per', 'fin-grid-value');
   } else if (currentPrice && (epsNum <= 0 || ni <= 0)) {
     set('fin-per', '적자');
@@ -515,8 +548,9 @@ function drawOPMSparkline(data) {
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   // 차트 그리기 영역 (상단/하단 라벨 제외)
   const chartTop = topLabelH;
@@ -665,8 +699,9 @@ function drawFinTrendChart(data, metric) {
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   const chartH = h - labelHeight;
 
@@ -1152,8 +1187,9 @@ function _drawPERBandChart() {
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, parentW, h);
 
   // 데이터: 일봉 캔들에서 종가 추출
   if (!currentStock || typeof dataService === 'undefined') return;

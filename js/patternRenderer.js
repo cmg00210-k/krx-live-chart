@@ -395,9 +395,9 @@ const patternRenderer = (() => {
             // 화면 밖 라벨 스킵
             if (lb.x < -50 || lb.x > w + 50) return;
 
-            // OHLC 바 겹침 방지: 상단 30px 이내에 라벨 금지
-            // OHLC 바 높이(~24px) + top(8px) = ~32px → 안전 마진 30px
-            const OHLC_SAFE_Y = 30;
+            // OHLC 바 겹침 방지: 상단 40px 이내에 라벨 금지
+            // OHLC 바 높이(~24px) + top(8px) + 여유 = ~40px → 안전 마진 확대
+            const OHLC_SAFE_Y = 40;
 
             let labelY;
             if (lb.y != null) {

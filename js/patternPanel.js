@@ -323,7 +323,15 @@ function renderPatternPanel(patterns) {
     panel.innerHTML = '<div class="pattern-empty">감지된 패턴이 없습니다</div>';
     return;
   }
-  panel.innerHTML = patterns.map((p, idx) => {
+
+  // [FIX-TRUST] 데모/시뮬레이션 데이터 패턴 경고
+  var _demoWarningHtml = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _demoWarningHtml = '<div style="padding:4px 8px;margin:0 0 6px 0;background:rgba(255,152,0,0.10);border:1px solid rgba(255,152,0,0.25);border-radius:4px;font-size:10px;color:rgba(255,152,0,0.75);text-align:center;">' +
+      '\u26A0 시뮬레이션 데이터의 패턴 \u2014 실제 시장 신호 아님</div>';
+  }
+
+  panel.innerHTML = _demoWarningHtml + patterns.map((p, idx) => {
     const sc = p.signal === 'buy' ? 'buy' : p.signal === 'sell' ? 'sell' : 'neutral';
     const st = p.signal === 'buy' ? '매수' : p.signal === 'sell' ? '매도' : '중립';
     const str = p.strength === 'strong' ? '강' : p.strength === 'medium' ? '중' : '약';
@@ -381,8 +389,14 @@ function updatePatternSummaryBar(patterns) {
     ? ` data-tooltip="${topMeta.academicDesc.replace(/"/g, '&quot;')}"`
     : '';
 
+  // [FIX-TRUST] 데모 모드 시 패턴 요약에 경고 뱃지 추가
+  var _demoTag = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _demoTag = ' <span style="font-size:9px;color:rgba(255,152,0,0.65);font-weight:400;">(시뮬레이션)</span>';
+  }
+
   textEl.innerHTML =
-    `패턴 <span class="psb-count">${patterns.length}개</span> 감지` +
+    `패턴 <span class="psb-count">${patterns.length}개</span> 감지${_demoTag}` +
     ` | 최고: <span class="psb-top"${tooltipAttr}>${top.nameShort}</span>` +
     ` <span class="psb-conf ${confClass}">${confVal}%</span>` +
     ` (${signalText})`;
@@ -464,7 +478,13 @@ function updatePatternHistoryBar(patterns) {
     return;
   }
 
-  bar.innerHTML = items.join('');
+  // [FIX-TRUST] 데모 데이터 백테스트 경고 — 히스토리 바에도 표시
+  var _phDemoWarn = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _phDemoWarn = '<span class="ph-item" style="font-size:9px;color:rgba(255,152,0,0.6);white-space:nowrap;">\u26A0 시뮬레이션</span>';
+  }
+
+  bar.innerHTML = _phDemoWarn + items.join('');
   bar.style.display = 'flex';
 }
 
@@ -585,11 +605,13 @@ function updatePatternHistoryTable(patterns) {
       rowHtml += `<td class="php-expected">\u2014</td>`;
     }
 
-    // 95% 신뢰구간
+    // 95% 신뢰구간 — 0을 포함하면 통계적 비유의 (muted 표시)
     const ciLower = h5 ? h5.ci95Lower : null;
     const ciUpper = h5 ? h5.ci95Upper : null;
     if (ciLower != null && ciUpper != null) {
-      rowHtml += `<td class="php-ci" title="95% \uC2E0\uB8B0\uAD6C\uAC04">[${ciLower}%, ${ciUpper}%]</td>`;
+      const crossesZero = ciLower < 0 && ciUpper > 0;
+      const ciClass = crossesZero ? ' php-ci-muted' : '';
+      rowHtml += `<td class="php-ci${ciClass}" title="95% \uC2E0\uB8B0\uAD6C\uAC04${crossesZero ? ' (0 포함 — 통계적 비유의)' : ''}">[${ciLower}%, ${ciUpper}%]</td>`;
     } else {
       rowHtml += `<td class="php-ci">\u2014</td>`;
     }
@@ -603,7 +625,13 @@ function updatePatternHistoryTable(patterns) {
     return;
   }
 
-  tbody.innerHTML = rows.join('');
+  // [FIX-TRUST] 데모 데이터 백테스트 경고 행
+  var _demoRowWarn = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _demoRowWarn = '<tr><td colspan="10" style="text-align:center;font-size:9px;color:rgba(255,152,0,0.65);padding:3px 6px;background:rgba(255,152,0,0.06);">\u26A0 시뮬레이션 데이터 기반 통계 \u2014 실제 시장 수익률이 아닙니다</td></tr>';
+  }
+
+  tbody.innerHTML = _demoRowWarn + rows.join('');
 
   // 누적수익률 곡선 Canvas 그리기
   if (curvesData.length > 0) {
@@ -847,7 +875,14 @@ function updateReturnStatsGrid(patterns) {
 
   maxAbsReturn = Math.max(maxAbsReturn, 0.1); // 0 방지
 
-  const html = rowsData.map(r => {
+  // [FIX-TRUST] 데모 데이터 백테스트 경고 — 통계가 가짜 데이터 기반임을 명시
+  var demoBacktestWarn = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    demoBacktestWarn = '<div style="padding:3px 6px;margin:0 0 4px 0;background:rgba(255,152,0,0.08);border-radius:3px;font-size:9px;color:rgba(255,152,0,0.65);text-align:center;">' +
+      '\u26A0 참고용 \u2014 시뮬레이션 데이터 기반 통계</div>';
+  }
+
+  const html = demoBacktestWarn + rowsData.map(r => {
     const retCls = r.hs.mean > 0 ? 'up' : r.hs.mean < 0 ? 'dn' : '';
     const barW = Math.min(100, (Math.abs(r.hs.mean) / maxAbsReturn) * 100);
     const sign = r.hs.mean > 0 ? '+' : '';
@@ -906,6 +941,13 @@ function renderPatternCards(patterns) {
   if (topPatterns.length === 0) {
     container.innerHTML = '<div class="pp-empty">캔들스틱/차트 패턴이<br>감지되지 않았습니다.</div>';
     return;
+  }
+
+  // [FIX-TRUST] 데모 데이터 패턴 카드 경고 헤더
+  var _demoCardWarn = '';
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _demoCardWarn = '<div style="padding:4px 8px;margin:0 0 8px 0;background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.20);border-radius:4px;font-size:10px;color:rgba(255,152,0,0.65);text-align:center;line-height:1.4;">' +
+      '\u26A0 시뮬레이션 데이터 기반 분석<br>실제 시장 데이터가 아닙니다</div>';
   }
 
   const cards = [];
@@ -1029,5 +1071,5 @@ function renderPatternCards(patterns) {
     `);
   }
 
-  container.innerHTML = cards.join('');
+  container.innerHTML = _demoCardWarn + cards.join('');
 }

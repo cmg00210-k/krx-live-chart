@@ -281,6 +281,12 @@ class KRXDataService {
           // IDB 데이터가 24시간 이내면 네트워크 요청 없이 바로 사용
           if (Date.now() - (idbData.lastUpdate || 0) < 86400000) {
             this.cache[key] = idbData;  // L1 캐시에도 복사
+            // [FIX-TRUST] IDB 캐시 데이터도 출처 태그 (file 기반 캐시)
+            if (!idbData.candles._dataSource) {
+              Object.defineProperty(idbData.candles, '_dataSource', {
+                value: 'file', writable: true, enumerable: false, configurable: true,
+              });
+            }
             console.log('[IDB] 캐시 히트: %s (%d건)', key, idbData.candles.length);
             return idbData.candles;
           }
@@ -329,9 +335,18 @@ class KRXDataService {
       candles = [];
     }
 
+    // [FIX-TRUST] 캔들 데이터 출처 추적 — 가짜 데이터를 실제처럼 표시 방지
+    // candles._dataSource: 'ws' | 'file' | 'demo' | 'idb' | 'koscom'
+    var candleSource = KRX_API_CONFIG.mode;
+
     if (candles.length > 0) {
       // 캔들 정제: 검증 + 시간순 정렬 + 메모리 상한
       candles = this._sanitizeCandles(candles, timeframe);
+
+      // 데이터 출처를 캔들 배열에 태그 (배열 자체의 비-열거형 속성)
+      Object.defineProperty(candles, '_dataSource', {
+        value: candleSource, writable: true, enumerable: false, configurable: true,
+      });
 
       const cacheEntry = { candles, lastUpdate: Date.now() };
       this.cache[key] = cacheEntry;
@@ -758,3 +773,29 @@ const koscomService = new KoscomDataService();
 
 // 글로벌 인스턴스
 const dataService = new KRXDataService();
+
+// ══════════════════════════════════════════════════════
+//  [FIX-TRUST] 데이터 출처 확인 유틸리티
+//
+//  실제 시장 데이터인지 확인. 데모/시뮬레이션 데이터일 경우
+//  UI 경고를 표시하여 사용자가 가짜 데이터로 투자 판단을
+//  내리는 것을 방지.
+// ══════════════════════════════════════════════════════
+
+/**
+ * 현재 데이터 모드가 실제 시장 데이터인지 확인
+ * @returns {boolean} ws/file 모드이면 true, demo이면 false
+ */
+function isRealData() {
+  return KRX_API_CONFIG.mode === 'ws' || KRX_API_CONFIG.mode === 'file';
+}
+
+/**
+ * 캔들 배열의 데이터 출처 확인
+ * @param {Array} candleArray - 캔들 배열
+ * @returns {string} 'ws' | 'file' | 'demo' | 'unknown'
+ */
+function getCandleSource(candleArray) {
+  if (!candleArray) return 'unknown';
+  return candleArray._dataSource || KRX_API_CONFIG.mode || 'unknown';
+}

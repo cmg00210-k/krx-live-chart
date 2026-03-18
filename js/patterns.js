@@ -476,9 +476,9 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = trend.direction !== 'neutral' ? Math.min(trend.strength, 1) : 0.3;
       const shadowScore = Math.min(range / a, 1);
-      // [ACC] Doji ATR 정규화: 저변동성 도지는 품질 감산 (노이즈 방지)
-      const atrPenalty = range < a * 0.3 ? 0.7 : 1.0;
-      const confidence = Math.round(this._quality({ body: 0.5, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.5 }) * atrPenalty);
+      // [FIX] Doji 품질: 저변동성 도지 패널티 제거 — 도지 품질은 꼬리/추세 점수가 결정
+      // 천장/바닥의 작은 range 도지가 유효한 반전 신호이므로 감산하면 안됨
+      const confidence = Math.round(this._quality({ body: 0.5, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.5 }));
 
       results.push({
         type: 'doji', name: '도지 (Doji)', nameShort: '도지',

@@ -29,6 +29,31 @@ let _kbNavTimer = null;      // 키보드 네비게이션 디바운스 타이머
 let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.json)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 
+// ══════════════════════════════════════════════════════
+//  [FIX-TRUST] 데이터 출처 워터마크 헬퍼
+//
+//  데모 모드일 때 워터마크에 항상 "(데모 — 실제 데이터 아님)" 포함.
+//  사용자가 가짜 차트를 실제 시장 데이터로 오인하는 것을 방지.
+// ══════════════════════════════════════════════════════
+
+/**
+ * 현재 데이터 모드에 맞는 워터마크 텍스트 생성
+ * @param {string} stockName - 종목명
+ * @param {string} [suffix] - 추가 접미사 (예: '서버 연결 중...')
+ * @returns {string} 워터마크 텍스트
+ */
+function _buildWatermark(stockName, suffix) {
+  if (KRX_API_CONFIG.mode === 'demo') {
+    // 데모 모드: 항상 경고 표시
+    var demoSuffix = suffix ? suffix + ' | 데모' : '데모 — 실제 데이터 아님';
+    return stockName + ' (' + demoSuffix + ')';
+  }
+  if (suffix) {
+    return stockName + ' (' + suffix + ')';
+  }
+  return stockName;
+}
+
 // ── 데이터 수신 시각 추적 (Data Freshness Indicator) ──
 var _lastDataTime = 0;
 var _freshnessTimer = null;
@@ -533,14 +558,14 @@ async function _continueInit() {
       // 로그인 대기 중 — 오버레이 유지, 워터마크에도 표시
       _setLoadingText('Kiwoom 로그인 대기 중...', '로그인 창에서 인증해주세요');
       if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
-        chartManager.setWatermark(currentStock.name + ' (로그인 대기 중...)');
+        chartManager.setWatermark(_buildWatermark(currentStock.name, '로그인 대기 중...'));
       }
       updateLiveStatus('ws');
     } else if (status === 'ready') {
       // 로그인 완료 + 서버 준비 → 오버레이 숨김
       _hideLoadingOverlay();
       if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
-        chartManager.setWatermark(currentStock.name);
+        chartManager.setWatermark(_buildWatermark(currentStock.name));
       }
       updateLiveStatus('live');
       showToast('Kiwoom 실시간 연결 완료', 'success');
@@ -641,9 +666,9 @@ async function _continueInit() {
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-      chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+      chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
     } else {
-      chartManager.setWatermark(currentStock.name);
+      chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
     // 데이터 로드 완료 → 로딩 오버레이 숨김
     _hideLoadingOverlay();
@@ -651,14 +676,14 @@ async function _continueInit() {
     // WS 모드: 서버 캔들 수신 대기 (realtimeProvider.onTick에서 처리)
     // 오버레이는 유지 — serverStatus 'ready' 또는 onTick 수신 시 숨김
     console.log('[KRX] WS 모드 — 서버 캔들 수신 대기 중...');
-    chartManager.setWatermark(currentStock.name + ' (서버 연결 중...)');
+    chartManager.setWatermark(_buildWatermark(currentStock.name, '서버 연결 중...'));
     _setLoadingText('서버 연결 대기 중...', 'Kiwoom 서버 응답을 기다리는 중입니다');
   } else if (KRX_API_CONFIG.mode === 'file') {
     // file 모드: 데이터 파일 없음 안내 (가짜 데이터 표시하지 않음)
-    chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
+    chartManager.setWatermark(_buildWatermark(currentStock.name, '데이터 없음'));
     _hideLoadingOverlay();
   } else {
-    chartManager.setWatermark(currentStock.name);
+    chartManager.setWatermark(_buildWatermark(currentStock.name));
     _hideLoadingOverlay();
   }
 
@@ -1293,7 +1318,7 @@ function _flushTickRender() {
 
     // 서버 캔들 수신 성공 → 워터마크를 종목명으로 복원 + 로딩 오버레이 숨김
     if (currentStock) {
-      chartManager.setWatermark(currentStock.name);
+      chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
     _hideLoadingOverlay();
   }
@@ -1373,13 +1398,13 @@ function startRealtimeTick() {
               updateChartFull();
               updateStockInfo();
               updateOHLCBar(null);
-              chartManager.setWatermark(currentStock.name);
+              chartManager.setWatermark(_buildWatermark(currentStock.name));
               console.log('[KRX] WS 미연결 — file 폴백 일봉 로드: %s (%d건)',
                 currentStock.code, candles.length);
             }
           } else {
             // 분봉: 서버 미연결 시 빈 차트 + 안내 메시지 (가짜 데이터 생성 안 함)
-            chartManager.setWatermark(currentStock.name + ' (분봉 — 서버 연결 필요)');
+            chartManager.setWatermark(_buildWatermark(currentStock.name, '분봉 — 서버 연결 필요'));
             console.log('[KRX] WS 미연결 — 분봉 데이터 없음: %s %s (서버 재연결 대기)',
               currentStock.code, currentTimeframe);
           }
@@ -1817,7 +1842,7 @@ function updateLiveStatus(status) {
       live: ['Kiwoom 실시간 연결됨', 'success'],
       ws:   ['WebSocket 실시간 연결됨', 'success'],
       file: ['파일 모드 — 실제 일봉 데이터', 'info'],
-      demo: ['데모 모드 (시뮬레이션 데이터)', 'warning'],
+      demo: ['데모 모드 \u2014 표시되는 모든 데이터는 시뮬레이션입니다', 'warning'],
       offline: ['실시간 연결 끊김', 'warning']
     };
     var t = toastMap[status];
@@ -1938,17 +1963,17 @@ async function selectStock(code) {
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-      chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+      chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
     } else {
-      chartManager.setWatermark(currentStock.name);
+      chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
   } else if (KRX_API_CONFIG.mode === 'ws') {
     console.log('[KRX] WS 모드 — 서버 캔들 수신 대기 중...');
-    chartManager.setWatermark(currentStock.name + ' (서버 연결 중...)');
+    chartManager.setWatermark(_buildWatermark(currentStock.name, '서버 연결 중...'));
   } else if (KRX_API_CONFIG.mode === 'file') {
-    chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
+    chartManager.setWatermark(_buildWatermark(currentStock.name, '데이터 없음'));
   } else {
-    chartManager.setWatermark(currentStock.name);
+    chartManager.setWatermark(_buildWatermark(currentStock.name));
   }
   updateFinancials();
 
@@ -1981,7 +2006,12 @@ function updateStockInfo() {
 
   document.getElementById('stock-name').textContent = currentStock.name;
   document.getElementById('stock-code').textContent = currentStock.code;
-  document.getElementById('stock-market').textContent = currentStock.market;
+  // [FIX-TRUST] 데모 모드일 때 시장명 옆에 데모 표시
+  var _marketSuffix = currentStock.market;
+  if (typeof isRealData === 'function' && !isRealData()) {
+    _marketSuffix += ' (데모)';
+  }
+  document.getElementById('stock-market').textContent = _marketSuffix;
 
   const priceEl = document.getElementById('stock-price');
   const changeEl = document.getElementById('stock-change');
@@ -2443,17 +2473,17 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
       updateOHLCBar(null);
       // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
       if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-        chartManager.setWatermark(currentStock.name + ' (일봉 — 분봉 데이터 미제공)');
+        chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
       } else {
-        chartManager.setWatermark(currentStock.name);
+        chartManager.setWatermark(_buildWatermark(currentStock.name));
       }
     } else if (KRX_API_CONFIG.mode === 'ws') {
       console.log('[KRX] WS 모드 — %s 캔들 서버 수신 대기 중...', currentTimeframe);
-      chartManager.setWatermark(currentStock.name + ' (' + currentTimeframe + ' 로드 중...)');
+      chartManager.setWatermark(_buildWatermark(currentStock.name, currentTimeframe + ' 로드 중...'));
     } else if (KRX_API_CONFIG.mode === 'file') {
-      chartManager.setWatermark(currentStock.name + ' (데이터 없음)');
+      chartManager.setWatermark(_buildWatermark(currentStock.name, '데이터 없음'));
     } else {
-      chartManager.setWatermark(currentStock.name);
+      chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
     startRealtimeTick();
   });
