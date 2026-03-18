@@ -12,7 +12,7 @@ let currentStock = ALL_STOCKS[0];
 let currentTimeframe = '1d';  // 기본 일봉 (장외에서도 데이터 있음)
 let activeIndicators = new Set(['vol', 'ma']);
 let chartType = 'candle';
-let patternEnabled = false;
+let patternEnabled = true;
 let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
@@ -475,7 +475,9 @@ async function init() {
   }
 
   // ── WS 모드 의도였으나 프로브 실패 → 연결 가이드 표시 ──
-  if (_originalMode === 'ws' && KRX_API_CONFIG.mode !== 'ws') {
+  // 로컬 개발 환경에서만 가이드 표시 (공개 서버에서는 file 모드로 자동 진입)
+  var _isLocalDev = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:');
+  if (_originalMode === 'ws' && KRX_API_CONFIG.mode !== 'ws' && _isLocalDev) {
     _showConnectionGuide(function() { _continueInit(); });
     return;
   }
