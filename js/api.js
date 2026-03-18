@@ -553,13 +553,67 @@ class KRXDataService {
     const isDaily = timeframe === '1d';
     const baseVol = isDaily ? 500000 : 50000;
 
-    for (let i = 0; i < count; i++) {
-      const t = now - (count - 1 - i) * tf.seconds;
+    // ── 분봉: KRX 장시간(09:00~15:30 KST) 내 타임슬롯 사전 생성 ──
+    // 한국은 서머타임 미적용 — KST = UTC+9 고정
+    // 분봉 타임스탬프를 KRX 거래시간에 맞춰야 차트 시간축이 자연스러움
+    let intradaySlots = [];
+    if (!isDaily) {
+      const KST_OFFSET = 9 * 3600;                       // UTC+9 (초)
+      const MARKET_OPEN_KST = 9 * 3600;                  // 09:00 KST (초)
+      const MARKET_CLOSE_KST = 15 * 3600 + 30 * 60;      // 15:30 KST (초)
+      const slotsPerDay = Math.floor((MARKET_CLOSE_KST - MARKET_OPEN_KST) / tf.seconds);
 
-      // 일봉: 주말 건너뛰기
+      // 오늘 KST 날짜 기준으로 역순 거래일 탐색
+      const nowKstMs = (now + KST_OFFSET) * 1000;
+      const todayKST = new Date(nowKstMs);
+      let dayOffset = 0;
+      let slotsNeeded = count;
+
+      while (slotsNeeded > 0) {
+        const dayDate = new Date(todayKST);
+        dayDate.setUTCDate(dayDate.getUTCDate() - dayOffset);
+        const dayOfWeek = dayDate.getUTCDay();
+
+        // 주말 건너뛰기
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          // 해당 거래일 자정(UTC) 타임스탬프
+          const dayStartUTC = Math.floor(Date.UTC(
+            dayDate.getUTCFullYear(), dayDate.getUTCMonth(), dayDate.getUTCDate()
+          ) / 1000);
+
+          // 이 거래일에서 채울 슬롯 수 (마지막 거래일은 필요한 만큼만)
+          const slotsThisDay = Math.min(slotsPerDay, slotsNeeded);
+          const startSlot = slotsPerDay - slotsThisDay;  // 장 마감쪽부터 채움
+
+          for (let s = startSlot; s < slotsPerDay; s++) {
+            // KST 시각 → UTC 타임스탬프 변환
+            const kstSeconds = MARKET_OPEN_KST + s * tf.seconds;
+            const utcTimestamp = dayStartUTC + kstSeconds - KST_OFFSET;
+            intradaySlots.push(utcTimestamp);
+          }
+          slotsNeeded -= slotsThisDay;
+        }
+        dayOffset++;
+        if (dayOffset > 30) break;  // 안전 상한 (~1개월)
+      }
+
+      // 시간순 정렬 (역순 탐색으로 생성했으므로)
+      intradaySlots.sort((a, b) => a - b);
+    }
+
+    for (let i = 0; i < count; i++) {
+      let t;
+
       if (isDaily) {
-        const d = new Date(t * 1000);
-        if (d.getDay() === 0 || d.getDay() === 6) continue;
+        t = now - (count - 1 - i) * tf.seconds;
+        // 일봉: 주말 건너뛰기 (KST 기준 — UTC+9)
+        const kstMs = t * 1000 + 9 * 3600000;
+        const d = new Date(kstMs);
+        if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      } else {
+        // 분봉: 미리 계산된 KST 장시간 슬롯 사용
+        if (i >= intradaySlots.length) break;
+        t = intradaySlots[i];
       }
 
       // 트렌드 변경

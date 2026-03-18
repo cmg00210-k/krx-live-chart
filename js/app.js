@@ -2774,7 +2774,9 @@ document.getElementById('screenshot-btn')?.addEventListener('click', function() 
 
   // 다운로드
   var link = document.createElement('a');
-  link.download = (currentStock ? currentStock.code : 'chart') + '_' + currentTimeframe + '_' + new Date().toISOString().slice(0, 10) + '.png';
+  // [FIX] KST 날짜로 파일명 생성 (UTC→KST 보정)
+  var _kstNow = new Date(Date.now() + 9 * 3600000);
+  link.download = (currentStock ? currentStock.code : 'chart') + '_' + currentTimeframe + '_' + _kstNow.toISOString().slice(0, 10) + '.png';
   link.href = outCanvas.toDataURL('image/png');
   link.click();
   showToast('스크린샷 저장 완료', 'success');
