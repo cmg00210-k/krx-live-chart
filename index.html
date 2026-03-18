@@ -3,158 +3,605 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KRX 라이브 차트</title>
-  <!-- 폰트 CDN (OFL 1.1 라이선스, 상업적 사용 가능) -->
+  <title>CheeseStock — AI 기술적 분석 플랫폼</title>
+  <meta name="description" content="CheeseStock — KRX 한국 주식시장 실시간 차트 + 26패턴 기술적 분석">
+  <meta name="theme-color" content="#131722">
+  <meta property="og:title" content="CheeseStock — KRX Live Chart">
+  <meta property="og:description" content="한국 주식시장 실시간 차트, 캔들스틱 패턴 26종 자동 감지, 기술적 분석">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://www.cheesestock.com">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://www.cheesestock.com">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="css/style.css">
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
-  <!-- HEADER -->
+  <!-- ═══ 앱 로딩 오버레이 (JS 실행 전 즉시 표시) ═══ -->
+  <div id="app-loading-overlay" class="app-loading-overlay">
+    <div class="app-loading-content">
+      <div class="app-loading-spinner"></div>
+      <div class="app-loading-text" id="app-loading-text">CheeseStock 로딩 중...</div>
+      <div class="app-loading-sub" id="app-loading-sub">데이터를 준비하고 있습니다</div>
+      <!-- 연결 가이드 (WS 서버 미감지 시 표시) -->
+      <div id="conn-guide" class="conn-guide" style="display:none">
+        <div class="conn-guide-title">서버에 연결할 수 없습니다</div>
+        <div class="conn-guide-row">
+          <input id="conn-guide-url" type="text" class="conn-input" placeholder="ws://localhost:8765" spellcheck="false">
+          <button id="conn-guide-retry" class="conn-btn primary">연결</button>
+        </div>
+        <div class="conn-guide-or">또는</div>
+        <div class="conn-guide-alts">
+          <button id="conn-guide-file" class="conn-btn secondary">파일 모드</button>
+          <button id="conn-guide-demo" class="conn-btn secondary">데모 모드</button>
+        </div>
+        <div class="conn-guide-help">
+          <p>같은 PC: <code>CheeseStock.bat</code> 실행 후 새로고침</p>
+          <p>같은 네트워크: 서버 PC의 <code>IP:8765</code> 입력</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ HEADER ═══ -->
   <div id="header">
-    <div id="logo">KRX <span>LIVE</span></div>
+    <button id="sidebar-toggle" title="종목 목록">&#9776;</button>
+    <div id="logo"><span class="logo-cheese">Cheese</span><span>Stock</span></div>
     <div id="search-wrap">
       <span id="search-icon">&#128269;</span>
       <input id="search-input" type="text" placeholder="종목명 또는 코드 검색..." autocomplete="off">
       <div id="search-dropdown"></div>
     </div>
-    <div id="market-filter">
-      <button class="market-btn active" data-market="all">전체</button>
-      <button class="market-btn" data-market="KOSPI">KOSPI</button>
-      <button class="market-btn" data-market="KOSDAQ">KOSDAQ</button>
-    </div>
     <div id="ticker-strip">
-      <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val up" id="t-kospi">&mdash;</span></div>
-      <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val up" id="t-kosdaq">&mdash;</span></div>
+      <span id="market-state" class="market-state closed">장마감</span>
+      <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val" id="t-kospi">&mdash;</span></div>
+      <div class="ticker-item"><span class="ticker-name">KOSDAQ</span><span class="ticker-val" id="t-kosdaq">&mdash;</span></div>
       <div class="ticker-item"><span class="ticker-name">USD/KRW</span><span class="ticker-val" id="t-usd">&mdash;</span></div>
     </div>
   </div>
 
-  <!-- MAIN -->
+  <!-- 패턴 패널 토글 버튼 + 백드롭 (1024px 이하 반응형) -->
+  <button id="pp-toggle" title="패턴 패널 열기/닫기"><span class="pp-toggle-icon">&#9664;</span></button>
+  <div id="pp-backdrop"></div>
+
+  <!-- 모바일 사이드바 백드롭 (768px 이하) -->
+  <div id="sb-backdrop"></div>
+
+  <!-- 모바일 재무지표 바텀시트 토글 + 백드롭 (768px 이하) -->
+  <button id="fin-toggle" title="재무지표 열기">&#8942;</button>
+  <div id="rp-backdrop"></div>
+
+  <!-- ═══ MAIN (4열 그리드) ═══ -->
   <div id="main">
 
-    <!-- CHART AREA -->
-    <div id="chart-area">
-      <div id="watchlist"></div>
-      <div id="chart-toolbar">
-        <div id="stock-info">
-          <span id="stock-name">삼성전자</span>
-          <span id="stock-code" class="stock-code">005930</span>
-          <span id="stock-market" class="stock-market-tag">KOSPI</span>
-          <span id="stock-price" class="up">73,400</span>
-          <span id="stock-change" class="up">&#9650; 1,200 (+1.66%)</span>
+    <!-- ── A열: 좌측 사이드바 (접이식) ── -->
+    <div id="sidebar">
+      <div class="sb-controls">
+        <div class="sb-search-wrap">
+          <input id="sb-search-input" type="text" placeholder="종목 검색..." autocomplete="off">
         </div>
-        <div class="sep"></div>
-        <button class="tf-btn active" data-tf="1m">1분</button>
+        <div class="sb-sort-filter-row">
+          <select class="sb-sort-select" id="sb-sort-select">
+            <option value="mcap">시총순</option>
+            <option value="change">등락률순</option>
+            <option value="pattern">패턴순</option>
+            <option value="name">이름순</option>
+          </select>
+          <button class="sb-sort-dir" id="sb-sort-dir" title="정렬 방향">&#9660;</button>
+          <button class="sb-chip sb-vol-toggle" id="sb-vol-toggle" data-filter="highvol">대량거래</button>
+        </div>
+      </div>
+      <div class="sb-view-controls">
+        <div class="sb-view-group" id="sb-view-group">
+          <button class="sb-view-opt active" data-view="default" title="기본">기본</button>
+          <button class="sb-view-opt" data-view="analysis" title="상세">상세</button>
+        </div>
+        <button class="sb-chip sb-pattern-only-chip" data-filter="patternOnly" style="display:none">패턴 감지만</button>
+      </div>
+      <div class="sb-body">
+        <!-- 즐겨찾기 섹션 -->
+        <div class="sb-section" id="sb-watchlist-section" style="display:none">
+          <div class="sb-header" id="sb-watchlist-header">
+            <span>즐겨찾기</span>
+            <span class="sb-count" id="sb-watchlist-count">0</span>
+          </div>
+          <div class="sb-list" id="sb-watchlist-items"></div>
+        </div>
+        <div class="sb-section sb-recent-section" id="sb-recent-section" style="display:none">
+          <div class="sb-header" id="sb-recent-header">
+            <span>최근 본 종목</span>
+            <span class="sb-count" id="sb-recent-count">0</span>
+          </div>
+          <div class="sb-list" id="sb-recent"></div>
+        </div>
+        <div class="sb-section">
+          <div class="sb-header">
+            <span>종목 (시총순)</span>
+            <span class="sb-count" id="sb-all-count">0</span>
+          </div>
+          <div class="sb-list" id="sb-all"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── B열: 차트 영역 + 하단 수익률 ── -->
+    <div id="chart-area">
+      <!-- 종목 정보 헤더 -->
+      <div id="stock-header">
+        <div class="sh-left">
+          <div class="sh-identity">
+            <span id="stock-name" class="sh-name">삼성전자</span>
+            <button id="watchlist-toggle-btn" class="watchlist-star" title="즐겨찾기 추가/제거">&#9734;</button>
+            <span id="stock-code" class="sh-code">005930</span>
+            <span id="stock-market" class="sh-market">KOSPI</span>
+            <span id="live-status" class="live-dot demo" title="데모 모드"></span>
+            <span id="live-label" class="live-label demo">DEMO</span>
+            <span id="data-freshness" class="data-freshness" title="마지막 데이터 수신 시각"></span>
+            <button id="conn-settings-btn" class="conn-settings-btn" title="서버 연결 설정">&#9881;</button>
+            <!-- 연결 설정 드롭다운 패널 -->
+            <div id="conn-panel" class="conn-panel" style="display:none">
+              <div class="conn-panel-title">서버 연결 설정</div>
+              <label class="conn-label">서버 주소</label>
+              <div class="conn-panel-row">
+                <input id="conn-panel-url" type="text" class="conn-input" spellcheck="false">
+                <button id="conn-panel-connect" class="conn-btn primary">연결</button>
+              </div>
+              <div class="conn-panel-status">
+                <span id="conn-panel-dot" class="conn-dot"></span>
+                <span id="conn-panel-text">대기</span>
+              </div>
+              <div class="conn-panel-modes">
+                <button id="conn-panel-file" class="conn-btn secondary">파일 모드</button>
+                <button id="conn-panel-demo" class="conn-btn secondary">데모 모드</button>
+              </div>
+            </div>
+          </div>
+          <div class="sh-price-row">
+            <span id="stock-price" class="sh-price">&mdash;</span>
+            <span id="stock-change" class="sh-change">&mdash;</span>
+          </div>
+        </div>
+        <div class="sh-details">
+          <div class="sh-detail-item">
+            <span class="sh-detail-label">시가</span>
+            <span class="sh-detail-value" id="sh-open">&mdash;</span>
+          </div>
+          <div class="sh-detail-item">
+            <span class="sh-detail-label">고가</span>
+            <span class="sh-detail-value sh-high" id="sh-high">&mdash;</span>
+          </div>
+          <div class="sh-detail-item">
+            <span class="sh-detail-label">저가</span>
+            <span class="sh-detail-value sh-low" id="sh-low">&mdash;</span>
+          </div>
+          <div class="sh-detail-item">
+            <span class="sh-detail-label">거래량</span>
+            <span class="sh-detail-value" id="sh-volume">&mdash;</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 차트 툴바 -->
+      <div id="chart-toolbar">
+        <button class="tf-btn" data-tf="1m">1분</button>
         <button class="tf-btn" data-tf="5m">5분</button>
         <button class="tf-btn" data-tf="15m">15분</button>
         <button class="tf-btn" data-tf="30m">30분</button>
         <button class="tf-btn" data-tf="1h">1시간</button>
-        <button class="tf-btn" data-tf="1d">일봉</button>
+        <button class="tf-btn active" data-tf="1d">일봉</button>
         <div class="sep"></div>
         <button class="ct-btn active" data-ct="candle">캔들</button>
         <button class="ct-btn" data-ct="line">라인</button>
         <button class="ct-btn" data-ct="bar">바</button>
+        <button class="ct-btn" data-ct="heikin">HA</button>
         <div class="sep"></div>
-        <button class="ind-btn" data-ind="ma">MA</button>
-        <button class="ind-btn" data-ind="ema">EMA</button>
-        <button class="ind-btn" data-ind="bb">볼린저</button>
-        <button class="ind-btn" data-ind="rsi">RSI</button>
-        <button class="ind-btn" data-ind="macd">MACD</button>
-        <button class="ind-btn" data-ind="vol">거래량</button>
-        <button class="ind-btn" data-ind="ich">일목</button>
-        <button class="ind-btn" data-ind="kalman">칼만</button>
+        <div class="ind-dropdown-wrap">
+          <button class="ind-dropdown-btn" id="ind-dropdown-toggle">지표 ▼</button>
+          <div class="ind-dropdown-menu" id="ind-dropdown-menu">
+            <label class="ind-check"><input type="checkbox" data-ind="ma"> MA (이동평균)</label>
+            <label class="ind-check"><input type="checkbox" data-ind="ema"> EMA</label>
+            <label class="ind-check"><input type="checkbox" data-ind="bb"> 볼린저 밴드</label>
+            <label class="ind-check"><input type="checkbox" data-ind="rsi"> RSI</label>
+            <label class="ind-check"><input type="checkbox" data-ind="macd"> MACD</label>
+            <label class="ind-check"><input type="checkbox" data-ind="vol"> 거래량</label>
+            <label class="ind-check"><input type="checkbox" data-ind="stoch"> Stochastic</label>
+            <label class="ind-check"><input type="checkbox" data-ind="cci"> CCI</label>
+            <label class="ind-check"><input type="checkbox" data-ind="adx"> ADX</label>
+            <label class="ind-check"><input type="checkbox" data-ind="willr"> Williams %R</label>
+            <label class="ind-check"><input type="checkbox" data-ind="atr"> ATR</label>
+            <label class="ind-check"><input type="checkbox" data-ind="ich"> 일목균형표</label>
+            <label class="ind-check"><input type="checkbox" data-ind="kalman"> 칼만 필터</label>
+          </div>
+        </div>
         <div class="sep"></div>
         <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">패턴</button>
+        <div class="sep"></div>
+        <button id="screenshot-btn" class="sh-action-btn" title="차트 스크린샷 저장">📷</button>
+        <!-- 시그널 필터 드롭다운 -->
+        <div class="ind-dropdown-wrap" id="signal-filter-wrap" style="display:none">
+          <button class="ind-dropdown-btn has-active" id="signal-filter-toggle">시그널 ▼</button>
+          <div class="ind-dropdown-menu" id="signal-filter-menu">
+            <div class="ind-dropdown-section-title">시그널 카테고리 필터</div>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="ma" checked><span class="sf-dot" style="background:#FFD93D"></span> MA 크로스</label>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="macd" checked><span class="sf-dot" style="background:#2962ff"></span> MACD</label>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="rsi" checked><span class="sf-dot" style="background:#ff9800"></span> RSI</label>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="bb" checked><span class="sf-dot" style="background:#FF8C42"></span> 볼린저</label>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="volume" checked><span class="sf-dot" style="background:#78909C"></span> 거래량</label>
+            <label class="ind-check sf-check"><input type="checkbox" data-cat="composite" checked><span class="sf-dot" style="background:#A08830"></span> 복합</label>
+          </div>
+        </div>
       </div>
+
+      <!-- 차트 래퍼 -->
       <div id="chart-wrap">
+        <!-- 드로잉 툴바 (좌측 수직) -->
+        <div id="draw-toolbar" class="draw-toolbar">
+          <button class="draw-btn" data-tool="select" title="선택/이동 (S)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 2l7 5.5-3.5 0.8-1.5 4.2-1.5-4.2L1 7.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn" data-tool="trendline" title="추세선 (T)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="2" y1="14" x2="14" y2="2" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="hline" title="수평선 (H)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="1" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="vline" title="수직선 (V)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="8" y1="1" x2="8" y2="15" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn" data-tool="rect" title="사각형 (R)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><rect x="2" y="3" width="12" height="10" fill="none" stroke="currentColor" stroke-width="1.5" rx="1"/></svg>
+          </button>
+          <button class="draw-btn" data-tool="fib" title="피보나치 (G)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="2" y1="3" x2="14" y2="3" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="2" y1="6.5" x2="14" y2="6.5" stroke="currentColor" stroke-width="1" opacity="0.7"/><line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn draw-color-btn" data-tool="color" title="색상 선택">
+            <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2.5" fill="currentColor"/></svg>
+          </button>
+          <div class="draw-sep"></div>
+          <button class="draw-btn" data-tool="eraser" title="삭제 (Del)">
+            <svg viewBox="0 0 16 16" width="16" height="16"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+        </div>
+        <div id="ohlc-bar">
+          <span class="ohlc-label">O</span><span id="ohlc-open" class="ohlc-val">&mdash;</span>
+          <span class="ohlc-label">H</span><span id="ohlc-high" class="ohlc-val">&mdash;</span>
+          <span class="ohlc-label">L</span><span id="ohlc-low" class="ohlc-val">&mdash;</span>
+          <span class="ohlc-label">C</span><span id="ohlc-close" class="ohlc-val">&mdash;</span>
+          <span class="ohlc-label">Vol</span><span id="ohlc-vol" class="ohlc-val">&mdash;</span>
+          <span id="ohlc-rsi" class="ohlc-label" style="display:none"><span class="ohlc-key">RSI</span> <span id="ohlc-rsi-val" class="ohlc-val">&mdash;</span></span>
+          <span id="ohlc-macd" class="ohlc-label" style="display:none"><span class="ohlc-key">MACD</span> <span id="ohlc-macd-val" class="ohlc-val">&mdash;</span></span>
+        </div>
         <div id="main-chart-container"></div>
-        <div class="sub-chart-wrap" style="position:relative">
+        <!-- 패턴/시그널 호버 툴팁 -->
+        <div id="pattern-tooltip" class="pattern-tooltip"></div>
+        <!-- 패턴 요약 바 + 상세 팝업 -->
+        <div id="pattern-summary-wrap" style="display:none">
+          <div id="pattern-detail-popup" class="pattern-detail-popup">
+            <div class="pdp-header">
+              <span class="pdp-title">감지된 패턴</span>
+              <button class="pdp-close" id="pdp-close">&times;</button>
+            </div>
+            <div class="pdp-body" id="pattern-list"></div>
+          </div>
+          <div id="pattern-summary-bar">
+            <span class="psb-icon">&#9679;</span>
+            <span class="psb-text" id="psb-text">패턴 분석 대기 중...</span>
+            <button class="psb-detail-btn" id="psb-detail-btn" title="패턴 상세 보기">상세 &#9662;</button>
+          </div>
+        </div>
+        <!-- 패턴 과거 수익률 바 -->
+        <div id="pattern-history-bar" style="display:none"></div>
+        <!-- 서브 차트: RSI -->
+        <div class="sub-chart-wrap">
           <div class="sub-chart-label" id="rsi-label" style="display:none">RSI (14)</div>
           <div id="rsi-chart-container" class="sub-chart" style="display:none"></div>
         </div>
-        <div class="sub-chart-wrap" style="position:relative">
+        <!-- 서브 차트: MACD -->
+        <div class="sub-chart-wrap">
           <div class="sub-chart-label" id="macd-label" style="display:none">MACD (12, 26, 9)</div>
           <div id="macd-chart-container" class="sub-chart" style="display:none"></div>
         </div>
+        <!-- [NEW] 추가 지표 서브차트 -->
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="stoch-label" style="display:none">Stochastic (14, 3)</div>
+          <div id="stoch-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="cci-label" style="display:none">CCI (20)</div>
+          <div id="cci-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="adx-label" style="display:none">ADX (14)</div>
+          <div id="adx-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="willr-label" style="display:none">Williams %R (14)</div>
+          <div id="willr-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+        <div class="sub-chart-wrap">
+          <div class="sub-chart-label" id="atr-label" style="display:none">ATR (14)</div>
+          <div id="atr-chart-container" class="sub-chart" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- 과거 수익률 영역 (신규) -->
+      <div id="return-stats-area" style="display:none">
+        <div class="rs-header">
+          <span class="rs-title">패턴 발생 후 수익률</span>
+          <div class="rs-period-tabs">
+            <button class="rs-tab active" data-period="5d">5일</button>
+            <button class="rs-tab" data-period="10d">10일</button>
+            <button class="rs-tab" data-period="20d">20일</button>
+          </div>
+        </div>
+        <div class="rs-body">
+          <div class="rs-grid" id="rs-grid"></div>
+          <!-- 백테스트 수익률 테이블 -->
+          <table class="php-table">
+            <thead>
+              <tr>
+                <th class="php-th-name">패턴</th>
+                <th class="php-th-count">N</th>
+                <th>1일</th><th>3일</th><th>5일</th><th>10일</th><th>20일</th>
+                <th>승률</th>
+                <th>기대수익</th>
+                <th>95% CI</th>
+              </tr>
+            </thead>
+            <tbody id="php-tbody"></tbody>
+          </table>
+          <!-- 백테스트 진입 시점 안내 -->
+          <div class="php-entry-note">* 진입 시점 = 패턴 다음날 시가 (시장가 진입 가정)</div>
+          <!-- 누적수익률 곡선 캔버스 -->
+          <div class="php-curve-wrap">
+            <canvas id="php-curve-canvas"></canvas>
+          </div>
+        </div>
+        <div class="rs-footer">
+          <span class="rs-note">* 과거 수익률은 미래 수익을 보장하지 않습니다</span>
+        </div>
       </div>
     </div>
 
-    <!-- RIGHT PANEL (패턴 분석) -->
+    <!-- ── C열: 기술적 패턴 설명 (신규) ── -->
+    <div id="pattern-panel">
+      <div class="pp-header">기술적 패턴 분석</div>
+
+      <div class="pp-content" id="pp-content">
+        <!-- JS에서 동적 생성: 최대 3개 패턴 카드 -->
+        <div id="pp-cards">
+          <div class="pp-empty" id="pp-empty">
+            현재 감지된 패턴이 없습니다.<br>
+            다른 종목을 선택하거나<br>
+            타임프레임을 변경해 보세요.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── D열: 주요재무지표 (확대) ── -->
     <div id="right-panel">
-      <div id="pattern-panel">
-        <div id="pattern-header">
-          <span>&#128202; 패턴 분석</span>
+      <div class="rp-header">주요재무지표</div>
+      <div id="fin-content">
+        <!-- [FIX-8] 시드 데이터 경고 배너 -->
+        <div id="fin-seed-warning" style="display:none; padding:3px 8px; margin:0 0 4px 0; background:rgba(255,180,50,0.12); border:1px solid rgba(255,180,50,0.25); border-radius:4px; font-size:10px; color:rgba(255,180,50,0.7); text-align:center;">추정치 데이터 (DART 미연동)</div>
+        <!-- 기간 표시 -->
+        <div class="fin-period-row">
+          <span class="fin-period-label" id="fin-period">&mdash;</span>
+          <span class="fin-period-type">연결기준</span>
         </div>
-        <div id="pattern-list">
-          <div class="pattern-empty">패턴 버튼을 눌러 분석을 시작하세요</div>
+
+        <!-- 주요손익지표 -->
+        <div class="fin-section-title">주요손익 지표</div>
+
+        <div class="fin-row">
+          <span class="fin-row-label">매출액</span>
+          <span class="fin-row-value" id="fin-revenue">&mdash;</span>
         </div>
-        <div id="pattern-legend">
-          <div class="legend-title">감지 가능 패턴</div>
-          <div class="legend-item"><span class="dot buy"></span> 적삼병 (Three White Soldiers)</div>
-          <div class="legend-item"><span class="dot sell"></span> 흑삼병 (Three Black Crows)</div>
-          <div class="legend-item"><span class="dot buy"></span> 상승 삼각형 (Ascending Triangle)</div>
-          <div class="legend-item"><span class="dot sell"></span> 하락 삼각형 (Descending Triangle)</div>
-          <div class="legend-item"><span class="dot sell"></span> 상승 쐐기 (Rising Wedge)</div>
-          <div class="legend-item"><span class="dot buy"></span> 하락 쐐기 (Falling Wedge)</div>
-          <div class="legend-item"><span class="dot buy"></span> 해머 / 역해머</div>
-          <div class="legend-item"><span class="dot sell"></span> 교수형 / 유성형</div>
-          <div class="legend-item"><span class="dot neutral"></span> 도지 (Doji)</div>
-          <div class="legend-item"><span class="dot buy"></span> 상승 장악형 (Bullish Engulfing)</div>
-          <div class="legend-item"><span class="dot sell"></span> 하락 장악형 (Bearish Engulfing)</div>
-          <div class="legend-item"><span class="dot buy"></span> 상승 잉태형 (Bullish Harami)</div>
-          <div class="legend-item"><span class="dot sell"></span> 하락 잉태형 (Bearish Harami)</div>
-          <div class="legend-item"><span class="dot buy"></span> 샛별형 (Morning Star)</div>
-          <div class="legend-item"><span class="dot sell"></span> 석별형 (Evening Star)</div>
-          <div class="legend-item"><span class="dot buy"></span> 이중 바닥 (Double Bottom)</div>
-          <div class="legend-item"><span class="dot sell"></span> 이중 천장 (Double Top)</div>
-          <div class="legend-item"><span class="dot sell"></span> 머리어깨형 (H&S)</div>
-          <div class="legend-item"><span class="dot buy"></span> 역머리어깨형 (Inv H&S)</div>
+        <div class="fin-row-sub">
+          <span class="fin-change" id="fin-rev-yoy">YoY &mdash;</span>
+          <span class="fin-change" id="fin-rev-qoq">QoQ &mdash;</span>
+        </div>
+
+        <div class="fin-row">
+          <span class="fin-row-label">영업이익</span>
+          <span class="fin-row-value" id="fin-op">&mdash;</span>
+        </div>
+        <div class="fin-row-sub">
+          <span class="fin-change" id="fin-op-yoy">YoY &mdash;</span>
+          <span class="fin-change" id="fin-op-qoq">QoQ &mdash;</span>
+        </div>
+
+        <div class="fin-row">
+          <span class="fin-row-label">순이익</span>
+          <span class="fin-row-value" id="fin-ni">&mdash;</span>
+        </div>
+        <div class="fin-row-sub">
+          <span class="fin-change" id="fin-ni-yoy">YoY &mdash;</span>
+          <span class="fin-change" id="fin-ni-qoq">QoQ &mdash;</span>
+        </div>
+
+        <!-- 수익성 -->
+        <div class="fin-section-title">수익성 지표</div>
+
+        <div class="fin-grid">
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">영업이익률 <span class="fin-info" data-tooltip="영업이익을 매출액으로 나눈 비율. 본업의 수익성을 나타내며 업종 평균 대비 비교가 중요합니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-opm">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">ROE <span class="fin-info" data-tooltip="자기자본이익률. 주주가 투자한 자본 대비 순이익 비율로 경영 효율성을 측정합니다. 10% 이상이면 양호합니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-roe">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">EPS <span class="fin-info" data-tooltip="주당순이익 (Earnings Per Share). 순이익을 발행주식수로 나눈 값. PER 산출의 기초 지표입니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-eps">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">BPS <span class="fin-info" data-tooltip="주당순자산 (Book-value Per Share). 자본총계를 발행주식수로 나눈 값. PBR 산출의 기초 지표입니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-bps">&mdash;</span>
+          </div>
+        </div>
+
+        <!-- 밸류에이션 -->
+        <div class="fin-section-title">밸류에이션 지표</div>
+
+        <div class="fin-grid">
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">PER <span class="fin-info" data-tooltip="주가수익비율. 주가를 EPS로 나눈 값. 동종업종 대비 고평가/저평가 판단에 사용합니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-per">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">PBR <span class="fin-info" data-tooltip="주가순자산비율. 주가를 BPS로 나눈 값. 1배 미만이면 자산 대비 저평가로 볼 수 있습니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-pbr">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">PSR <span class="fin-info" data-tooltip="주가매출비율. 시가총액을 매출액으로 나눈 값. 적자 기업 밸류에이션에 유용합니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-psr">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">ROA <span class="fin-info" data-tooltip="총자산이익률. 순이익을 총자산으로 나눈 비율. 자산 활용의 효율성을 나타냅니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-roa">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">부채비율 <span class="fin-info" data-tooltip="부채총계를 자본총계로 나눈 비율. 200% 이하가 안정적이며 업종별로 차이가 있습니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-debt-ratio">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">NPM <span class="fin-info" data-tooltip="순이익률 (Net Profit Margin). 매출액 대비 순이익 비율. OPM보다 세금/이자 등 비영업 비용을 반영합니다.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-npm">&mdash;</span>
+          </div>
+        </div>
+
+        <!-- 성장성 지표 -->
+        <div class="fin-section-title">성장성 지표</div>
+
+        <div class="fin-grid fin-grid-2col">
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">매출 CAGR <span class="fin-info" data-tooltip="최근 3년 매출액 연평균 성장률">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-rev-cagr">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">순이익 CAGR <span class="fin-info" data-tooltip="최근 3년 순이익 연평균 성장률">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-ni-cagr">&mdash;</span>
+          </div>
+        </div>
+
+        <!-- 투자판단 -->
+        <div class="fin-section-title">투자판단</div>
+        <div class="fin-score-badge">
+          <div class="fin-score-main">
+            <span class="fin-grid-value fin-score" id="fin-score">&mdash;</span>
+            <span class="fin-score-grade" id="fin-grade">&mdash;</span>
+          </div>
+          <span class="fin-score-note">수익성·밸류에이션·성장성·안정성 종합 <span class="fin-info" data-tooltip="수익성(ROE, OPM), 밸류에이션(PER, PBR), 성장성(CAGR), 안정성(부채비율)을 종합한 0~100 점수입니다. 참고용이며 투자 권유가 아닙니다.">&#9432;</span></span>
+        </div>
+
+        <!-- 추이 차트 -->
+        <div class="fin-trend-section" id="fin-trend-section">
+          <div class="fin-trend-header">
+            <span class="fin-trend-title">추이</span>
+            <div class="fin-trend-tabs">
+              <button class="fin-trend-tab active" data-metric="revenue">매출</button>
+              <button class="fin-trend-tab" data-metric="op">영익</button>
+              <button class="fin-trend-tab" data-metric="eps">EPS</button>
+            </div>
+            <button class="fin-trend-toggle" id="fin-trend-toggle" title="접기/펼치기">&#9660;</button>
+          </div>
+          <div class="fin-trend-body" id="fin-trend-body">
+            <canvas id="fin-trend-canvas" width="350" height="80"></canvas>
+          </div>
+        </div>
+
+        <!-- 업종 비교 -->
+        <div class="fin-section-title">업종 비교</div>
+        <div class="fin-compare" id="fin-compare">
+          <div class="fin-compare-placeholder">데이터 준비 중...</div>
+        </div>
+
+        <!-- 동종업종 비교 -->
+        <div class="fin-section-title">동종업종 비교</div>
+        <div class="fin-peers" id="fin-peers">
+          <div class="fin-compare-placeholder">데이터 로딩 중...</div>
+        </div>
+
+        <!-- PER 밴드 차트 -->
+        <div class="fin-section-title">PER 밴드</div>
+        <div class="fin-per-band-wrap" id="fin-per-band-wrap">
+          <canvas id="fin-per-band" width="350" height="100"></canvas>
+        </div>
+
+        <!-- OPM 스파크라인 -->
+        <div class="fin-spark-wrap">
+          <span class="fin-spark-label">영업이익률 추이</span>
+          <canvas id="opm-sparkline" width="350" height="80"></canvas>
+        </div>
+
+        <!-- 면책 조항 -->
+        <div class="fin-footer">
+          <div class="fin-disclaimer">
+            <button class="fin-disclaimer-toggle" id="fin-disclaimer-toggle">면책 조항 &#9662;</button>
+            <div class="fin-disclaimer-body" id="fin-disclaimer-body">
+              본 데이터는 투자 권유가 아니며, 정확성을 보장하지 않습니다. DART 전자공시 원본을 반드시 확인하시기 바랍니다. 투자 판단의 책임은 투자자 본인에게 있습니다.
+            </div>
+          </div>
+          <div class="fin-source">출처: DART 전자공시</div>
         </div>
       </div>
     </div>
-
-    <!-- BOTTOM PANEL -->
-    <div id="bottom-panel">
-      <div id="bottom-header">
-        <span>&#128200; 과거 실적 데이터</span>
-        <button class="period-btn active" data-p="quarter">분기</button>
-        <button class="period-btn" data-p="annual">연간</button>
-      </div>
-      <div id="past-table-wrap">
-        <table id="past-table">
-          <thead>
-            <tr>
-              <th>기간</th>
-              <th>매출액 (억)</th>
-              <th>영업이익 (억)</th>
-              <th>순이익 (억)</th>
-              <th>영업이익률</th>
-              <th>EPS (원)</th>
-              <th>ROE (%)</th>
-            </tr>
-          </thead>
-          <tbody id="past-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- BOTTOM RIGHT -->
-    <div id="bottom-right"></div>
 
   </div>
 
-  <!-- JS: 순서 중요 (data → api → patterns → chart → app) -->
+  <!-- ═══ TOAST CONTAINER ═══ -->
+  <div id="toast-container"></div>
+
+  <!-- 지표 파라미터 팝업 -->
+  <div id="ind-param-popup" class="ind-param-popup" style="display:none">
+    <div class="ind-param-title">지표 설정</div>
+    <div id="ind-param-fields"></div>
+    <div class="ind-param-actions">
+      <button id="ind-param-reset" class="ind-param-btn">초기화</button>
+      <button id="ind-param-apply" class="ind-param-btn primary">적용</button>
+    </div>
+  </div>
+
+  <!-- ═══ TradingView 출처 표기 (로고 제거 대신 푸터 링크) ═══ -->
+  <div class="tv-attribution">
+    Powered by <a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener">TradingView Lightweight Charts</a>
+  </div>
+
+  <!-- Service Worker 등록 (오프라인 캐싱) -->
+  <script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function() {});
+  }
+  </script>
+
+  <!-- JS: 순서 중요 -->
+  <script src="js/colors.js"></script>
   <script src="js/data.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/realtimeProvider.js"></script>
+  <script src="js/indicators.js"></script>
   <script src="js/patterns.js"></script>
+  <script src="js/signalEngine.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/patternRenderer.js"></script>
+  <script src="js/signalRenderer.js"></script>
+  <script src="js/backtester.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/patternPanel.js"></script>
+  <script src="js/financials.js"></script>
+  <script src="js/drawingTools.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

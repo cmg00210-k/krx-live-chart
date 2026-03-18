@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /data/
+Disallow: /server/
+Disallow: /scripts/
+Disallow: /core_data/
+Disallow: /pattern_impl/
+
+Sitemap: https://www.cheesestock.com/sitemap.xml
