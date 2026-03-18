@@ -1,4 +1,4 @@
-# CheeseStock 배포 가이드 (www.cheesestock.com)
+# CheeseStock 배포 가이드 (www.cheesestock.co.kr)
 
 ## 아키텍처 개요
 
@@ -6,10 +6,10 @@
 [사용자 브라우저]
     │
     ├── HTTPS ──→ [Vercel CDN] ──→ 정적 파일 (HTML/JS/CSS)
-    │               www.cheesestock.com
+    │               www.cheesestock.co.kr
     │
     └── WSS ───→ [Cloudflare Tunnel] ──→ [Kiwoom 서버 PC]
-                  ws.cheesestock.com         ws://localhost:8765
+                  ws.cheesestock.co.kr         ws://localhost:8765
 ```
 
 - **프론트엔드**: Vercel에서 정적 호스팅 (빌드 불필요)
@@ -33,7 +33,7 @@
 ### 1.2 커스텀 도메인 설정
 
 1. Vercel 프로젝트 Settings → Domains
-2. `www.cheesestock.com` 추가
+2. `www.cheesestock.co.kr` 추가
 3. Vercel이 제공하는 CNAME 레코드를 Cloudflare DNS에 추가:
    ```
    타입: CNAME
@@ -41,7 +41,7 @@
    대상: cname.vercel-dns.com
    프록시: DNS only (회색 구름) ← Vercel이 자체 SSL 발급하므로 Cloudflare 프록시 비활성화
    ```
-4. Apex 도메인 (`cheesestock.com`) 리다이렉트:
+4. Apex 도메인 (`cheesestock.co.kr`) 리다이렉트:
    ```
    타입: A
    이름: @
@@ -54,7 +54,7 @@
 - `buildCommand: null` — 빌드 단계 건너뛰기
 - `cleanUrls: true` — `.html` 확장자 없는 깔끔한 URL
 - 보안 헤더: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
-- WebSocket 리라이트: `/ws/*` → `https://ws.cheesestock.com/*`
+- WebSocket 리라이트: `/ws/*` → `https://ws.cheesestock.co.kr/*`
 
 ### 1.4 배포 제외 파일
 
@@ -69,12 +69,12 @@
 
 ## 2. Cloudflare Tunnel (WebSocket 서버)
 
-Kiwoom OCX 서버 PC (Windows, 로컬 네트워크)를 `wss://ws.cheesestock.com`으로 외부 노출합니다.
+Kiwoom OCX 서버 PC (Windows, 로컬 네트워크)를 `wss://ws.cheesestock.co.kr`으로 외부 노출합니다.
 
 ### 2.1 사전 요구사항
 
 - Kiwoom 서버 PC에서 `ws_server.py`가 `ws://localhost:8765`에서 실행 중
-- Cloudflare 계정 + `cheesestock.com` 도메인이 Cloudflare DNS에 등록됨
+- Cloudflare 계정 + `cheesestock.co.kr` 도메인이 Cloudflare DNS에 등록됨
 - 서버 PC에 인터넷 연결
 
 ### 2.2 cloudflared 설치
@@ -111,7 +111,7 @@ tunnel: <터널-ID>
 credentials-file: C:\Users\<사용자>\.cloudflared\<터널-ID>.json
 
 ingress:
-  - hostname: ws.cheesestock.com
+  - hostname: ws.cheesestock.co.kr
     service: ws://localhost:8765
     originRequest:
       # WebSocket 지원 활성화
@@ -127,7 +127,7 @@ ingress:
 ### 2.5 DNS 레코드 추가
 
 ```powershell
-cloudflared tunnel route dns cheesestock-ws ws.cheesestock.com
+cloudflared tunnel route dns cheesestock-ws ws.cheesestock.co.kr
 ```
 
 이 명령은 Cloudflare DNS에 자동으로 CNAME 레코드를 추가합니다:
@@ -161,7 +161,7 @@ cloudflared service install
 서버 PC 시작 시 순서:
 1. Cloudflare Tunnel 서비스 자동 시작 (Windows 서비스)
 2. `CheeseStock.bat` 또는 `server/start_server.bat` 실행 → Kiwoom 로그인 → `ws://localhost:8765` 시작
-3. Tunnel이 자동으로 `wss://ws.cheesestock.com` ↔ `ws://localhost:8765` 연결
+3. Tunnel이 자동으로 `wss://ws.cheesestock.co.kr` ↔ `ws://localhost:8765` 연결
 
 ---
 
@@ -169,7 +169,7 @@ cloudflared service install
 
 ### 3.1 전체 DNS 레코드
 
-`cheesestock.com` 도메인의 Cloudflare DNS 설정:
+`cheesestock.co.kr` 도메인의 Cloudflare DNS 설정:
 
 | 타입 | 이름 | 값 | 프록시 |
 |------|------|------|--------|
@@ -181,18 +181,18 @@ cloudflared service install
 
 - `www` 레코드: Vercel이 자체 SSL을 발급하므로 **Cloudflare 프록시 비활성화** (회색 구름)
 - `ws` 레코드: Cloudflare Tunnel이므로 **프록시 활성화 필수** (주황 구름)
-- Apex 도메인 (`cheesestock.com`): Vercel이 `www.cheesestock.com`으로 리다이렉트 처리
+- Apex 도메인 (`cheesestock.co.kr`): Vercel이 `www.cheesestock.co.kr`으로 리다이렉트 처리
 
 ---
 
 ## 4. SSL 인증서
 
-### 4.1 Vercel (www.cheesestock.com)
+### 4.1 Vercel (www.cheesestock.co.kr)
 
 - **자동 발급**: Vercel이 Let's Encrypt 인증서를 자동 발급/갱신
 - 설정 불필요 — 도메인 연결 시 자동 처리
 
-### 4.2 Cloudflare Tunnel (ws.cheesestock.com)
+### 4.2 Cloudflare Tunnel (ws.cheesestock.co.kr)
 
 - **자동 발급**: Cloudflare가 엣지 인증서를 자동 발급
 - 클라이언트 ↔ Cloudflare: TLS 자동 (wss://)
@@ -206,13 +206,13 @@ cloudflared service install
 `js/realtimeProvider.js`의 `RealtimeProvider` 생성자에서 배포 환경을 자동 감지합니다:
 
 ```javascript
-if (window.location.hostname === 'www.cheesestock.com' || window.location.hostname === 'cheesestock.com') {
-  KRX_API_CONFIG.wsUrl = 'wss://ws.cheesestock.com/ws';
+if (window.location.hostname === 'www.cheesestock.co.kr' || window.location.hostname === 'cheesestock.co.kr') {
+  KRX_API_CONFIG.wsUrl = 'wss://ws.cheesestock.co.kr/ws';
 }
 ```
 
 - **로컬 개발**: `localhost` → 기본값 `ws://localhost:8765` 유지
-- **배포 환경**: `cheesestock.com` → `wss://ws.cheesestock.com/ws`로 자동 전환
+- **배포 환경**: `cheesestock.co.kr` → `wss://ws.cheesestock.co.kr/ws`로 자동 전환
 - 사용자가 연결 설정 UI에서 수동 변경 가능 (localStorage에 저장됨)
 
 ---
@@ -220,15 +220,15 @@ if (window.location.hostname === 'www.cheesestock.com' || window.location.hostna
 ## 6. 체크리스트
 
 ### 최초 배포
-- [ ] Cloudflare에 `cheesestock.com` 도메인 등록 + 네임서버 변경
+- [ ] Cloudflare에 `cheesestock.co.kr` 도메인 등록 + 네임서버 변경
 - [ ] Vercel 프로젝트 생성 + GitHub 리포 연결
-- [ ] Vercel 커스텀 도메인 `www.cheesestock.com` 추가
+- [ ] Vercel 커스텀 도메인 `www.cheesestock.co.kr` 추가
 - [ ] Cloudflare DNS에 A/CNAME 레코드 추가 (3.1 참조)
 - [ ] 서버 PC에 `cloudflared` 설치 + 터널 생성
 - [ ] `config.yml` 작성 + DNS 라우팅 설정
 - [ ] `cloudflared service install`로 Windows 서비스 등록
-- [ ] `https://www.cheesestock.com` 접속 확인
-- [ ] 브라우저 F12 → Network → WebSocket이 `wss://ws.cheesestock.com/ws`에 연결되는지 확인
+- [ ] `https://www.cheesestock.co.kr` 접속 확인
+- [ ] 브라우저 F12 → Network → WebSocket이 `wss://ws.cheesestock.co.kr/ws`에 연결되는지 확인
 
 ### 운영
 - [ ] Kiwoom 서버가 장 시작 전에 실행 중인지 확인
@@ -243,7 +243,7 @@ if (window.location.hostname === 'www.cheesestock.com' || window.location.hostna
 1. 서버 PC에서 `ws://localhost:8765` 직접 테스트 (브라우저 콘솔)
 2. `cloudflared tunnel run cheesestock-ws` 수동 실행 → 로그 확인
 3. Cloudflare Dashboard → Zero Trust → Tunnels에서 터널 상태 확인
-4. DNS 레코드가 올바른지 확인 (`nslookup ws.cheesestock.com`)
+4. DNS 레코드가 올바른지 확인 (`nslookup ws.cheesestock.co.kr`)
 
 ### Vercel 배포 실패
 1. Vercel Dashboard → Deployments → 빌드 로그 확인
