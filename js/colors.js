@@ -4,10 +4,10 @@
 // ══════════════════════════════════════════════════════
 
 const KRX_COLORS = Object.freeze({
-  UP: '#E05050', DOWN: '#5086DC', ACCENT: '#C9A84C', NEUTRAL: '#ffeb3b',
+  UP: '#E05050', DOWN: '#5086DC', ACCENT: '#A08830', NEUTRAL: '#ffeb3b',
   UP_FILL: (a) => `rgba(224,80,80,${a})`,
   DOWN_FILL: (a) => `rgba(80,134,220,${a})`,
-  ACCENT_FILL: (a) => `rgba(201,168,76,${a})`,
+  ACCENT_FILL: (a) => `rgba(160,136,48,${a})`,
   MA_SHORT: '#FF6B6B', MA_MID: '#FFD93D', MA_LONG: '#6BCB77',
   EMA_12: '#C77DFF', EMA_26: '#7B68EE',
   BB: '#FF8C42', BB_MID: 'rgba(255,140,66,0.4)',

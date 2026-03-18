@@ -201,7 +201,7 @@ Centralized in `js/colors.js` as `KRX_COLORS` frozen object:
 - 상승/매수: `KRX_COLORS.UP` = `#E05050` (빨강), CSS `var(--up)`
 - 하락/매도: `KRX_COLORS.DOWN` = `#5086DC` (파랑), CSS `var(--down)`
 - 중립: `KRX_COLORS.NEUTRAL` = `#ffeb3b` (노랑), CSS `var(--neutral)`
-- 구조선/accent: `KRX_COLORS.ACCENT` = `#C9A84C` (금색), CSS `var(--accent)`
+- 구조선/accent: `KRX_COLORS.ACCENT` = `#A08830` (어두운 금색), CSS `var(--accent)`
 - 반투명 채우기: `KRX_COLORS.UP_FILL(alpha)`, `KRX_COLORS.DOWN_FILL(alpha)`
 - 지표 색상은 방향과 무관, 각자 고유색 유지 (`KRX_COLORS.MA_SHORT`, `.EMA_12`, etc.)
 

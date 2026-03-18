@@ -508,8 +508,8 @@ function drawOPMSparkline(data) {
   ctx.lineTo(points[0].x, baseY);
   ctx.closePath();
   var gradient = ctx.createLinearGradient(0, chartTop, 0, chartTop + chartH);
-  gradient.addColorStop(0, 'rgba(201,168,76,0.20)');
-  gradient.addColorStop(1, 'rgba(201,168,76,0.02)');
+  gradient.addColorStop(0, 'rgba(160,136,48,0.20)');
+  gradient.addColorStop(1, 'rgba(160,136,48,0.02)');
   ctx.fillStyle = gradient;
   ctx.fill();
 
@@ -655,7 +655,7 @@ function drawFinTrendChart(data, metric) {
     ctx.lineTo(w, chartH);
     ctx.lineTo(0, chartH);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(201,168,76,0.08)';
+    ctx.fillStyle = 'rgba(160,136,48,0.08)';
     ctx.fill();
 
     // 라인
@@ -1116,7 +1116,7 @@ function _drawPERBandChart() {
   var bands = [
     { per: 8,  color: 'rgba(80,134,220,0.5)',  label: '8x' },   // 파랑 (저평가)
     { per: 12, color: 'rgba(107,203,119,0.5)',  label: '12x' },  // 초록
-    { per: 16, color: 'rgba(201,168,76,0.5)',   label: '16x' },  // 금색
+    { per: 16, color: 'rgba(160,136,48,0.5)',   label: '16x' },  // 금색
     { per: 20, color: 'rgba(224,80,80,0.5)',    label: '20x' },  // 빨강 (고평가)
   ];
 

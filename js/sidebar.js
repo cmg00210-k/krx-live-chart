@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 사이드바 매니저 v10.0
-//  15개 기능:
+//  KRX LIVE — 사이드바 매니저 v10.1
+//  16개 기능:
 //    R1:  키보드 ↑↓ 네비게이션
 //    R2:  최근 본 종목 섹션
 //    R3:  코드→tooltip, 거래량 컬럼
@@ -9,9 +9,10 @@
 //    R6:  빠른 필터 칩 (전체/상승/하락/대량거래)
 //    R7:  패턴명 표시
 //    R8:  패턴 감지 종목만 필터
-//    R9:  미니 스파크라인
+//    R9:  미니 스파크라인 (모든 뷰 모드, IntersectionObserver 지연 로드)
 //    R10: RSI 지표 값
 //    R11: 드래그 앤 드롭 재정렬
+//    R12: IntersectionObserver 스파크라인 뷰포트 최적화
 //    S3:  시가총액 값 표시 (row2)
 //    S4:  30개 스크롤 + "더보기" 버튼
 //    S6:  패턴명 row3 → 호버 툴팁
@@ -103,7 +104,7 @@ const sidebarManager = (() => {
     return vol.toLocaleString();
   }
 
-  /** 등락률 가져오기 (캐시 우선) */
+  /** 등락률 가져오기 (캐시 우선 → 캔들 → index.json 요약) */
   function _getChangePct(code) {
     if (_stockChangeCache[code] != null) return _stockChangeCache[code];
     const candles = _getCachedCandles(code);
@@ -115,6 +116,11 @@ const sidebarManager = (() => {
         _stockChangeCache[code] = pct;
         return pct;
       }
+    }
+    // [OPT] index.json 요약 폴백 — 정렬 시 즉시 등락률 사용
+    if (typeof ALL_STOCKS !== 'undefined') {
+      var stock = ALL_STOCKS.find(function(s) { return s.code === code; });
+      if (stock && stock.changePercent) return stock.changePercent;
     }
     return 0;
   }
@@ -514,9 +520,10 @@ const sidebarManager = (() => {
   }
 
   /** 보이는 아이템의 스파크라인 일괄 그리기 (rAF)
-   *  로딩 shimmer를 해제하고 캔버스에 종가 데이터를 그림 */
+   *  모든 뷰 모드에서 캐시된 데이터가 있는 종목은 스파크라인 표시.
+   *  데이터가 없는 종목은 shimmer 해제 (빈 상태 유지, 무한 shimmer 방지). */
   function _drawVisibleSparklines(container) {
-    if (_viewMode !== 'analysis') return;
+    // [FIX] analysis 모드 제한 제거 — 캐시된 데이터가 있으면 모든 모드에서 그리기
     var canvases = container.querySelectorAll('.sb-sparkline');
     if (!canvases.length) return;
 
@@ -526,12 +533,50 @@ const sidebarManager = (() => {
         if (!code) return;
         var closes = _getLast20Closes(code);
         var wrap = cvs.closest('.sb-spark-wrap');
-        if (closes) {
+        if (closes && closes.length > 1) {
           _drawSparkline(cvs, closes);
           // 로딩 shimmer 해제
           if (wrap) wrap.classList.remove('loading');
+        } else {
+          // 데이터 없음 → shimmer 해제 (빈 캔버스 유지, 무한 로딩 방지)
+          if (wrap) wrap.classList.remove('loading');
         }
       });
+    });
+  }
+
+  // ── IntersectionObserver 기반 스파크라인 지연 그리기 ──
+  var _sparkObserver = null;
+
+  /** 뷰포트에 보이는 스파크라인만 그리기 (스크롤 최적화)
+   *  캐시된 캔들 데이터가 있으면 즉시 그리고 관찰 해제.
+   *  데이터 없으면 shimmer 해제 후 관찰 해제 (무한 로딩 방지). */
+  function _initSparkObserver() {
+    if (_sparkObserver) _sparkObserver.disconnect();
+
+    _sparkObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var canvas = entry.target;
+        var code = canvas.dataset.code;
+        if (!code) return;
+
+        var closes = _getLast20Closes(code);
+        var wrap = canvas.closest('.sb-spark-wrap');
+        if (closes && closes.length > 1) {
+          _drawSparkline(canvas, closes);
+          if (wrap) wrap.classList.remove('loading');
+        } else {
+          // 데이터 미도착 → shimmer 해제 (빈 상태)
+          if (wrap) wrap.classList.remove('loading');
+        }
+        _sparkObserver.unobserve(canvas);  // 한 번 그리면 관찰 해제
+      });
+    }, { root: null, threshold: 0.1 });
+
+    // 모든 스파크라인 캔버스 관찰 시작
+    document.querySelectorAll('.sb-sparkline').forEach(function (cvs) {
+      _sparkObserver.observe(cvs);
     });
   }
 
@@ -689,18 +734,18 @@ const sidebarManager = (() => {
    */
   function _renderItemHTML(s, isPatternMode) {
     const cdls = _getCachedCandles(s.code);
-    // base: index.json lastClose (188700 등), 없으면 ALL_STOCKS에서 재조회
-    let basePrice = s.base;
-    if (!basePrice && typeof ALL_STOCKS !== 'undefined') {
-      var found = ALL_STOCKS.find(function(st) { return st.code === s.code; });
-      if (found) basePrice = found.base;
+    // [OPT] index.json 요약 데이터 조회 (prevClose/change/volume 사용)
+    var stock = null;
+    if (typeof ALL_STOCKS !== 'undefined') {
+      stock = ALL_STOCKS.find(function(st) { return st.code === s.code; });
     }
-    let price = basePrice || 0;
+    let price = 0;
     let changeText = '';
     let changeClass = '';
     let volume = 0;
 
     if (cdls && cdls.length) {
+      // 캐시된 캔들 우선 (실시간/최근 로드 데이터)
       const last = cdls[cdls.length - 1];
       price = last.close;
       volume = last.volume || 0;
@@ -712,6 +757,20 @@ const sidebarManager = (() => {
         changeText = arrow + (pct >= 0 ? '+' : '') + pct + '%';
         changeClass = pct >= 0 ? 'up' : 'dn';
       }
+    } else if (stock) {
+      // [OPT] index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
+      price = stock.base || 0;
+      volume = stock.volume || 0;
+      var chg = stock.change || 0;
+      var chgPct = stock.changePercent || 0;
+      if (chg !== 0 || chgPct !== 0) {
+        var arrow = chg > 0 ? '\u25B2 ' : chg < 0 ? '\u25BC ' : '';
+        changeText = arrow + (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
+        changeClass = chgPct >= 0 ? 'up' : 'dn';
+      }
+    } else {
+      // 최종 폴백: base만 사용
+      price = s.base || 0;
     }
 
     // ── 미니멀 모드 (R5) ──
@@ -816,8 +875,8 @@ const sidebarManager = (() => {
 
     container.innerHTML = html;
 
-    // R9: 스파크라인 일괄 그리기
-    _drawVisibleSparklines(container);
+    // R9: 스파크라인 — IntersectionObserver로 뷰포트 진입 시 그리기
+    _initSparkObserver();
   }
 
 
@@ -1144,33 +1203,47 @@ const sidebarManager = (() => {
       if (!priceEl) continue;
 
       const cdls = _getCachedCandles(s.code);
-      if (!cdls || !cdls.length) continue;
+      var newPrice, changePct, lastVol;
 
-      const last = cdls[cdls.length - 1];
-      const newPrice = last.close;
+      if (cdls && cdls.length) {
+        // 캐시된 캔들 우선 (실시간/최근 로드 데이터)
+        const last = cdls[cdls.length - 1];
+        newPrice = last.close;
+        lastVol = last.volume || 0;
+        const prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
+        const prevClose = prevCandle ? prevCandle.close : last.open;
+        changePct = prevClose > 0 ? ((last.close - prevClose) / prevClose * 100) : 0;
+      } else if (s.base && s.base > 0) {
+        // [OPT] index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
+        newPrice = s.base;
+        changePct = s.changePercent || 0;
+        lastVol = s.volume || 0;
+      } else {
+        continue;  // 데이터 없음 — 건너뜀
+      }
+
       priceEl.textContent = newPrice.toLocaleString();
       priceEl.className = 'sb-price';
 
       // 등락률
-      const prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
-      const prevClose = prevCandle ? prevCandle.close : last.open;
       const changeEl = document.getElementById('sb-chg-' + s.code);
-      if (changeEl && prevClose > 0) {
-        const changePct = ((last.close - prevClose) / prevClose * 100).toFixed(2);
-        const arrow = changePct > 0 ? '\u25B2 ' : changePct < 0 ? '\u25BC ' : '';
-        changeEl.textContent = arrow + (changePct >= 0 ? '+' : '') + changePct + '%';
-        changeEl.className = 'sb-change ' + (changePct >= 0 ? 'up' : 'dn');
-        _stockChangeCache[s.code] = parseFloat(changePct);
+      if (changeEl) {
+        var pctStr = changePct.toFixed(2);
+        const arrow = pctStr > 0 ? '\u25B2 ' : pctStr < 0 ? '\u25BC ' : '';
+        changeEl.textContent = arrow + (pctStr >= 0 ? '+' : '') + pctStr + '%';
+        changeEl.className = 'sb-change ' + (pctStr >= 0 ? 'up' : 'dn');
+        _stockChangeCache[s.code] = parseFloat(pctStr);
       }
 
       // R3: 거래량 갱신
       const itemEl = priceEl.closest('.sb-item');
       if (itemEl) {
         const volSpan = itemEl.querySelector('.sb-volume');
-        if (volSpan) volSpan.textContent = _formatVolume(last.volume || 0);
+        if (volSpan) volSpan.textContent = _formatVolume(lastVol);
       }
 
-      // 가격 flash 효과
+      // 가격 flash 효과 (캐시된 캔들이 있을 때만 — 요약 데이터는 정적)
+      if (!cdls || !cdls.length) continue;
       const prev = _prevPrices[s.code];
       if (prev !== undefined && prev !== newPrice) {
         const flashCls = newPrice > prev ? 'price-flash-up' : 'price-flash-down';
@@ -1182,11 +1255,8 @@ const sidebarManager = (() => {
       _prevPrices[s.code] = newPrice;
     }
 
-    // R9: 스파크라인 일괄 갱신
-    const sbAll = document.getElementById('sb-all');
-    const sbRecent = document.getElementById('sb-recent');
-    if (sbAll) _drawVisibleSparklines(sbAll);
-    if (sbRecent) _drawVisibleSparklines(sbRecent);
+    // R9: 스파크라인 — IntersectionObserver로 새로 캐시된 데이터 반영
+    _initSparkObserver();
   }
 
 

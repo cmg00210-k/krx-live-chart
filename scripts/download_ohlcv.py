@@ -330,13 +330,39 @@ def main():
                 print(f"  ✗ [{i+1}/{len(targets)}] {s['name']}({s['code']}): {result['error']}")
         else:
             success += 1
-            stocks_meta.append({
+            entry = {
                 "code": result["code"],
                 "name": result["name"],
                 "market": result["market"],
                 "file": result["file"],
                 "lastClose": result["last_close"]
-            })
+            }
+
+            # [OPT] 사이드바 즉시 표시용 요약 데이터 (index.json에서 바로 사용)
+            # 마지막 2봉에서 전일 종가, 변동폭, 등락률, 거래량 추출
+            candle_path = os.path.join(DATA_DIR, result["file"])
+            try:
+                with open(candle_path, "r", encoding="utf-8") as cf:
+                    candle_data = json.load(cf)
+                candles = candle_data.get("candles", [])
+                if len(candles) >= 2:
+                    last = candles[-1]
+                    prev = candles[-2]
+                    entry["prevClose"] = prev["close"]
+                    entry["change"] = last["close"] - prev["close"]
+                    entry["changePercent"] = round(
+                        (last["close"] - prev["close"]) / prev["close"] * 100, 2
+                    ) if prev["close"] > 0 else 0.0
+                    entry["volume"] = last.get("volume", 0)
+                elif len(candles) == 1:
+                    entry["prevClose"] = candles[-1]["close"]
+                    entry["change"] = 0
+                    entry["changePercent"] = 0.0
+                    entry["volume"] = candles[-1].get("volume", 0)
+            except Exception:
+                pass  # 요약 추출 실패 시 기존 필드만 유지
+
+            stocks_meta.append(entry)
             # 진행률 표시 (50개마다 또는 처음 5개)
             if (i + 1) % 50 == 0 or i < 5:
                 elapsed = time.time() - start_time

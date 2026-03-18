@@ -39,7 +39,7 @@ const drawingTools = (() => {
 
   // 드로잉 색상
   const COLORS = {
-    trendline: '#C9A84C',     // 금색 (accent)
+    trendline: '#A08830',     // 금색 (accent, 어두운 톤)
     hline:     '#787B86',     // 회색
     vline:     '#787B86',     // 회색
     rect:      'rgba(41,98,255,0.25)',   // 파란색 반투명
@@ -47,7 +47,7 @@ const drawingTools = (() => {
     fib:       '#787B86',     // 회색 (레벨 선)
     fibFill:   'rgba(41,98,255,0.06)',   // 레벨 간 채우기
     eraser:    '#E05050',     // 빨강 (삭제 모드 표시용)
-    preview:   'rgba(201,168,76,0.5)',   // 프리뷰 (반투명 금색)
+    preview:   'rgba(160,136,48,0.5)',   // 프리뷰 (반투명 금색)
   };
 
 

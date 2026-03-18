@@ -853,11 +853,14 @@ async function _preloadSidebarData() {
   }
 
   // 시총 내림차순 정렬 (중요 종목 우선 로드)
-  stocks = stocks.slice(0, 30).sort(function(a, b) {
+  // [OPT] 30→10: 상위 10종목만 프리로드, 나머지는 클릭 시 온디맨드 로드
+  //   네트워크: 30×25KB=750KB → 10×25KB=250KB, 약 2초 내 완료
+  var displayCount = 10;
+  stocks = stocks.slice(0, displayCount).sort(function(a, b) {
     return (b.marketCap || b.base || 0) - (a.marketCap || a.base || 0);
   });
 
-  var batchSize = 3;  // 6 → 3으로 축소 (UI 반응성 개선)
+  var batchSize = 8;  // [OPT] 3→8: 10종목을 2배치로 빠르게 완료
 
   for (var batch = 0; batch < stocks.length; batch += batchSize) {
     var batchStocks = stocks.slice(batch, batch + batchSize);
