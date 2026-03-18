@@ -21,6 +21,75 @@ var _latestFinRoe = 0;
 //  재무지표 패널 (우측 탭)
 // ══════════════════════════════════════════════════════
 
+/**
+ * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
+ * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
+ */
+function _clearAllFinancials() {
+  // 모든 fin-* 텍스트 요소를 "—"로 설정하고 색상 클래스 제거
+  var ids = [
+    'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
+    'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
+    'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
+  ];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) {
+      el.textContent = '\u2014';  // em dash
+      el.className = '';
+    }
+  }
+
+  // 캔버스 차트 클리어 (이전 종목의 잔류 데이터 방지)
+  var canvasIds = ['opm-sparkline', 'fin-trend-canvas', 'fin-per-band'];
+  for (var c = 0; c < canvasIds.length; c++) {
+    var canvas = document.getElementById(canvasIds[c]);
+    if (canvas) {
+      var ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // 추이 차트 데이터 캐시 초기화 (탭 전환 시 이전 종목 데이터 렌더링 방지)
+  _finTrendData = [];
+
+  // 업종 비교 / 동종업종 비교 영역 초기화
+  var compareEl = document.getElementById('fin-compare');
+  if (compareEl) compareEl.innerHTML = '';
+  var peersEl = document.getElementById('fin-peers');
+  if (peersEl) peersEl.innerHTML = '';
+}
+
+/**
+ * 데이터 출처별 경고 배너 표시
+ * @param {string|null} source - 'dart' | 'hardcoded' | 'seed' | null
+ */
+function _showDartWarning(source) {
+  var el = document.getElementById('fin-seed-warning');
+  if (!el) return;
+
+  if (source === 'dart') {
+    // DART 실제 데이터 — 경고 숨김
+    el.style.display = 'none';
+  } else if (source === 'hardcoded') {
+    // 하드코딩 데이터 (삼성전자/SK하이닉스) — 일부 추정치 포함 가능
+    el.style.display = 'block';
+    el.textContent = '참고용 데이터 (DART 미연동 \u2014 일부 추정치 포함)';
+    el.style.background = 'rgba(255,180,50,0.10)';
+    el.style.borderColor = 'rgba(255,180,50,0.20)';
+    el.style.color = 'rgba(255,180,50,0.65)';
+  } else {
+    // seed 생성 또는 알 수 없는 출처 — DART 연동 안내
+    el.style.display = 'block';
+    el.textContent = 'DART 데이터 미연동 \u2014 download_financials.py를 실행하세요';
+    el.style.background = 'rgba(244,67,54,0.10)';
+    el.style.borderColor = 'rgba(244,67,54,0.25)';
+    el.style.color = 'rgba(244,67,54,0.75)';
+  }
+}
+
 async function updateFinancials() {
   // [FIX] 새 종목 전환 시 이전 데이터 잔류 방지: 모든 fin-* 요소 초기화
   var _finIds = [
@@ -50,37 +119,23 @@ async function updateFinancials() {
   const setHtml = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
   const setClass = (id, cls) => { const el = document.getElementById(id); if (el) el.className = cls; };
 
-  // 기간 표시
-  set('fin-period', latest.p || '—');
+  // ── 데이터 출처 확인: seed 데이터는 표시하지 않음 ──
+  const _cached = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
+  const _finSource = _cached ? _cached.source : null;
+
+  // [CLEAN-DATA] source가 'dart' 또는 'hardcoded'가 아닌 경우 (seed 생성 가짜 데이터)
+  // → 모든 재무 지표를 "—"로 표시하고 캔버스 차트 초기화 후 조기 종료
+  if (_finSource !== 'dart' && _finSource !== 'hardcoded') {
+    _clearAllFinancials();
+    _showDartWarning('seed');
+    return;
+  }
 
   // [FIX-TRUST] 데이터 출처별 경고 배너 표시
-  // DART 연동: source='dart' → 경고 숨김
-  // 하드코딩(삼성/하이닉스): source='hardcoded' → 추정치 경고
-  // 시드 생성(기타): source='seed' → 가짜 데이터 강한 경고
-  const _seedWarningEl = document.getElementById('fin-seed-warning');
-  if (_seedWarningEl) {
-    const cached = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
-    const finSource = cached ? cached.source : null;
+  _showDartWarning(_finSource);
 
-    if (finSource === 'dart') {
-      // DART 실제 데이터 — 경고 숨김
-      _seedWarningEl.style.display = 'none';
-    } else if (finSource === 'hardcoded') {
-      // 하드코딩 데이터 (삼성전자/SK하이닉스) — 일부 추정치 포함 가능
-      _seedWarningEl.style.display = 'block';
-      _seedWarningEl.textContent = '참고용 데이터 (DART 미연동 — 일부 추정치 포함)';
-      _seedWarningEl.style.background = 'rgba(255,180,50,0.10)';
-      _seedWarningEl.style.borderColor = 'rgba(255,180,50,0.20)';
-      _seedWarningEl.style.color = 'rgba(255,180,50,0.65)';
-    } else {
-      // 시드 생성 데이터 — 완전 가짜, 강한 경고
-      _seedWarningEl.style.display = 'block';
-      _seedWarningEl.textContent = '\u26A0 재무 데이터 없음 (시뮬레이션 수치 \u2014 투자 참고 불가)';
-      _seedWarningEl.style.background = 'rgba(244,67,54,0.10)';
-      _seedWarningEl.style.borderColor = 'rgba(244,67,54,0.25)';
-      _seedWarningEl.style.color = 'rgba(244,67,54,0.75)';
-    }
-  }
+  // 기간 표시
+  set('fin-period', latest.p || '—');
 
   // 주요손익지표 — 단위를 span.fin-unit으로 분리 (CSS 별도 스타일링)
   setHtml('fin-revenue', Number(latest.rev).toLocaleString() + '<span class="fin-unit">억</span>');
@@ -974,6 +1029,8 @@ function _getPeerFinancials(code) {
     // data.js의 _financialCache는 전역 const — 직접 접근 가능
     if (typeof _financialCache !== 'undefined' && _financialCache[code]) {
       var cached = _financialCache[code];
+      // [CLEAN-DATA] seed 생성 가짜 데이터는 peer 비교에서도 표시하지 않음
+      if (cached.source !== 'dart' && cached.source !== 'hardcoded') return result;
       var q = cached.quarterly || [];
       if (q.length > 0) {
         var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
@@ -1125,6 +1182,8 @@ function _getLatestEPS() {
 
   if (typeof _financialCache !== 'undefined' && _financialCache[currentStock.code]) {
     var data = _financialCache[currentStock.code];
+    // [CLEAN-DATA] seed 생성 가짜 데이터의 EPS는 사용하지 않음
+    if (data.source !== 'dart' && data.source !== 'hardcoded') return 0;
     var q = data.quarterly || [];
     if (q.length > 0) {
       var latest = q[0]; // 최신순 정렬 (getFinancialData에서 sort)
