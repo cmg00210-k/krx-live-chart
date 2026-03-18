@@ -300,13 +300,10 @@ class KRXDataService {
       // file 모드 + 일봉: JSON 파일 로드 (실패 시 빈 배열 반환, 데모 폴백 없음)
       candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // file 모드 + 분봉: 보간 분봉 JSON 로드 시도 → 없으면 일봉 폴백
-      // generate_intraday.py가 생성한 {code}_{timeframe}.json 파일 사용
-      candles = await this._fileGetIntradayCandles(stock, timeframe);
-      if (!candles || candles.length === 0) {
-        // 분봉 파일 없으면 일봉 데이터를 그대로 표시 (데이터 무결성 유지)
-        candles = await this._fileGetCandles(stock);
-      }
+      // [FIX] file 모드 + 분봉: 404 fetch 제거 → 일봉 데이터 즉시 표시
+      // generate_intraday.py 실행 전에는 분봉 JSON 파일이 없으므로
+      // 불필요한 404 fetch(30-100ms 지연)를 건너뛰고 바로 일봉 폴백
+      candles = await this._fileGetCandles(stock);
     } else if (KRX_API_CONFIG.mode === 'demo') {
       // 데모 모드: 명시적으로 demo 모드가 설정된 경우에만 시뮬레이션 데이터 생성
       candles = this._demoGenerateCandles(stock, timeframe);
