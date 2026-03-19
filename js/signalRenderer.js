@@ -401,19 +401,18 @@ const signalRenderer = (() => {
 
     if (volBreakoutSet.size === 0) return;
 
-    // [PERF] 전체 배열 재생성 대신 breakout 봉만 개별 update()
-    // volumeSeries.update()는 기존 데이터에서 해당 time의 바만 갱신
-    // → O(N) setData 대신 O(k) update (k = breakout 개수, 보통 2~5개)
-    volBreakoutSet.forEach(function(idx) {
-      if (idx >= 0 && idx < candles.length) {
-        var c = candles[idx];
-        cm.volumeSeries.update({
-          time: c.time,
-          value: c.volume,
-          color: KRX_COLORS.ACCENT_FILL(0.7),
-        });
-      }
+    // [FIX] update()는 과거 봉에 사용 불가 (Cannot update oldest data 에러)
+    // setData()로 전체 볼륨 배열을 재설정하되, breakout 봉만 색상 변경
+    var volData = candles.map(function(c, i) {
+      var isBreakout = volBreakoutSet.has(i);
+      return {
+        time: c.time,
+        value: c.volume || 0,
+        color: isBreakout ? KRX_COLORS.ACCENT_FILL(0.7)
+             : (c.close >= c.open ? KRX_COLORS.UP_FILL(0.35) : KRX_COLORS.DOWN_FILL(0.35)),
+      };
     });
+    cm.volumeSeries.setData(volData);
   }
 
 
