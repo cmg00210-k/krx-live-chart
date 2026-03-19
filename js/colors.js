@@ -17,6 +17,17 @@ const KRX_COLORS = Object.freeze({
   KALMAN: '#76FF03', RSI: '#ff9800',
   MACD_LINE: '#2962ff', MACD_SIGNAL: '#ff9800',
 
+  // ── 추가 서브차트 지표 색상 ──
+  STOCH_K: '#ff9800', STOCH_D: '#e91e63',
+  CCI: '#26C6DA',
+  ADX: '#AB47BC',
+  WILLR: '#FF7043',
+  ATR_LINE: '#FFA726',
+
+  // ── 패턴 무효화/태그 배경 ──
+  PTN_INVALID: '#FF6B35',
+  TAG_BG: (a) => `rgba(19,23,34,${a || 0.88})`,
+
   // ── 차트 레이아웃 색상 (KNOWSTOCK 기반 테마) ──
   CHART_BG: '#131722',
   CHART_TEXT: '#d1d4dc',

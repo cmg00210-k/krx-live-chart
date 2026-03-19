@@ -96,8 +96,8 @@ class PatternEngine {
     }
     const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
     // ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용
-    // atrVal이 없으면 가격 평균의 1%를 fallback (기존 동작 유지)
-    const divisor = atrVal && atrVal > 0 ? atrVal : (sy / n * 0.01);
+    // atrVal이 없으면 가격 평균의 2%를 fallback (ATR_FALLBACK_PCT = 0.02 일관)
+    const divisor = atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT);
     const norm = slope / divisor;
     const T = PatternEngine.TREND_THRESHOLD;
     return {

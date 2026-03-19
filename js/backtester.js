@@ -194,7 +194,7 @@ class PatternBacktester {
       var trendStrength = 0;
       var lookback = Math.min(10, idx);
       if (lookback >= 3 && atr) {
-        var atrVal = atr[idx] || (candles[idx].close * 0.01);
+        var atrVal = atr[idx] || (candles[idx].close * (typeof PatternEngine !== 'undefined' ? PatternEngine.ATR_FALLBACK_PCT : 0.02));
         var sx = 0, sy = 0, sxy = 0, sx2 = 0;
         for (var ti = 0; ti <= lookback; ti++) {
           var ci = idx - lookback + ti;
@@ -308,10 +308,10 @@ class PatternBacktester {
       const avgLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0) / lossReturns.length) : 0;
       const riskReward = avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? Infinity : 0);
 
-      // t-검정: H0: mean = 0 (소표본 보정: df < 30이면 임계값 상향)
+      // t-검정: H0: mean = 0 (소표본 보정: 정밀 t-분포 임계값 테이블, 95% 양측)
       const tStat = stdDev > 0 && n > 1 ? mean / (stdDev / Math.sqrt(n)) : 0;
       const df = n - 1;
-      const tCritical = df >= 30 ? 1.96 : df >= 15 ? 2.13 : df >= 10 ? 2.23 : df >= 5 ? 2.57 : 4.30;
+      const tCritical = df >= 120 ? 1.96 : df >= 60 ? 2.00 : df >= 30 ? 2.04 : df >= 15 ? 2.13 : df >= 10 ? 2.23 : df >= 5 ? 2.57 : 4.30;
       const significant = Math.abs(tStat) > tCritical;
 
       // 표본 수 경고

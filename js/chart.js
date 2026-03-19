@@ -779,8 +779,8 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.stochChart = LightweightCharts.createChart(container, opts);
-    this.stochKSeries = this.stochChart.addLineSeries({ color: '#ff9800', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
-    this.stochDSeries = this.stochChart.addLineSeries({ color: '#e91e63', lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
+    this.stochKSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_K, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.stochDSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_D, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
     this.stochKSeries.createPriceLine({ price: 80, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.stochKSeries.createPriceLine({ price: 20, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.stochChart);
@@ -809,7 +809,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.cciChart = LightweightCharts.createChart(container, opts);
-    this.cciSeries = this.cciChart.addLineSeries({ color: '#26C6DA', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.cciSeries = this.cciChart.addLineSeries({ color: KRX_COLORS.CCI, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     this.cciSeries.createPriceLine({ price: 100, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.cciSeries.createPriceLine({ price: -100, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.cciChart);
@@ -837,7 +837,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.adxChart = LightweightCharts.createChart(container, opts);
-    this.adxSeries = this.adxChart.addLineSeries({ color: '#AB47BC', lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+    this.adxSeries = this.adxChart.addLineSeries({ color: KRX_COLORS.ADX, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
     this.adxPlusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
     this.adxMinusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
     this.adxSeries.createPriceLine({ price: 25, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
@@ -868,7 +868,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.willrChart = LightweightCharts.createChart(container, opts);
-    this.willrSeries = this.willrChart.addLineSeries({ color: '#FF7043', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.willrSeries = this.willrChart.addLineSeries({ color: KRX_COLORS.WILLR, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     this.willrSeries.createPriceLine({ price: -20, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.willrSeries.createPriceLine({ price: -80, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.willrChart);
@@ -896,7 +896,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.atrChart = LightweightCharts.createChart(container, opts);
-    this.atrSeries = this.atrChart.addLineSeries({ color: '#FFA726', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.atrSeries = this.atrChart.addLineSeries({ color: KRX_COLORS.ATR_LINE, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     this._observeResize(container, this.atrChart);
     this._rebuildSync();
     return this.atrChart;

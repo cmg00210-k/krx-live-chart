@@ -308,7 +308,7 @@ const patternRenderer = (() => {
               const ly = hl.y;
 
               // 태그 배경
-              ctx.fillStyle = 'rgba(19,23,34,0.92)';
+              ctx.fillStyle = KRX_COLORS.TAG_BG(0.92);
               ctx.beginPath();
               _roundRect(ctx, lx - 4, ly - tagH / 2, tagW, tagH, 3);
               ctx.fill();
@@ -450,7 +450,7 @@ const patternRenderer = (() => {
             const radius = 3;
 
             // ── pill 배경: 살짝 투명한 다크 ──
-            ctx.fillStyle = lb.bgColor || 'rgba(19,23,34,0.88)';
+            ctx.fillStyle = lb.bgColor || KRX_COLORS.TAG_BG(0.88);
             ctx.beginPath();
             _roundRect(ctx, boxX, boxY, boxW, boxH, radius);
             ctx.fill();
@@ -542,7 +542,7 @@ const patternRenderer = (() => {
                   ctx.textBaseline = 'middle';
                   // 텍스트 배경 (가독성)
                   const rtm = ctx.measureText('목표 ' + fz.returnText);
-                  ctx.fillStyle = 'rgba(19,23,34,0.75)';
+                  ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
                   ctx.beginPath();
                   _roundRect(ctx, retX - rtm.width / 2 - 4, retY - 7, rtm.width + 8, 14, 3);
                   ctx.fill();
@@ -596,7 +596,7 @@ const patternRenderer = (() => {
                   const slm = ctx.measureText(slText);
                   const slX = zoneX + zoneW - 4;
                   const slY = fz.yStop;
-                  ctx.fillStyle = 'rgba(19,23,34,0.75)';
+                  ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
                   ctx.beginPath();
                   _roundRect(ctx, slX - slm.width - 4, slY - 6, slm.width + 8, 12, 2);
                   ctx.fill();
@@ -634,7 +634,7 @@ const patternRenderer = (() => {
                 const rrText = 'R:R ' + (fz.rrRatio >= 10 ? fz.rrRatio.toFixed(0) : fz.rrRatio.toFixed(1));
                 const rrY = (fz.yEntry + fz.yTarget) / 2;
                 const rrM = ctx.measureText(rrText);
-                ctx.fillStyle = 'rgba(19,23,34,0.80)';
+                ctx.fillStyle = KRX_COLORS.TAG_BG(0.80);
                 ctx.beginPath();
                 _roundRect(ctx, barX + 5, rrY - 7, rrM.width + 8, 14, 3);
                 ctx.fill();
@@ -1266,7 +1266,7 @@ const patternRenderer = (() => {
         placement: isBullish ? 'bottom' : 'top',
         text: name,
         color: color,
-        bgColor: 'rgba(19,23,34,0.88)',
+        bgColor: KRX_COLORS.TAG_BG(0.88),
         borderColor: color,
         confidence: p.confidence,
         outcome: outcome,
@@ -1330,7 +1330,7 @@ const patternRenderer = (() => {
           if (y != null) {
             hlines.push({
               y: y,
-              color: '#FF6B35',
+              color: KRX_COLORS.PTN_INVALID,
               width: 1.2,
               dash: [3, 3],
               marker: 'invalid',
@@ -1401,7 +1401,7 @@ const patternRenderer = (() => {
           zone.returnText = `${retSign}${retPct.toFixed(1)}%`;
 
           // [UX] 목표가 수익률 텍스트: 매수=빨강(UP), 매도=파랑(DOWN) — 작은 폰트로 방향 전달
-          zone.returnColor = isBuy ? '#E05050' : '#5086DC';
+          zone.returnColor = isBuy ? KRX_COLORS.UP : KRX_COLORS.DOWN;
           zone.targetFillNear = 'rgba(150,220,200,0.22)';
           zone.targetFillFar  = 'rgba(150,220,200,0.05)';
           zone.targetBorder   = 'rgba(150,220,200,0.45)';
@@ -1418,7 +1418,7 @@ const patternRenderer = (() => {
           zone.stopFill   = 'rgba(150,220,200,0.10)';
           zone.stopStripe = 'rgba(150,220,200,0.16)';
           zone.stopBorder = 'rgba(150,220,200,0.35)';
-          zone.stopColor  = isBuy ? '#5086DC' : '#E05050';
+          zone.stopColor  = isBuy ? KRX_COLORS.DOWN : KRX_COLORS.UP;
         }
       }
 

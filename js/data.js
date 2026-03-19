@@ -62,9 +62,21 @@ const PAST_DATA = {
 function getPastData(code, period) {
   if (PAST_DATA[code]) return PAST_DATA[code][period];
 
-  // 데이터 없는 종목은 코드 기반 고정값 (2025년까지 확장)
-  const quarters = ['2025 Q3', '2025 Q2', '2025 Q1', '2024 Q4', '2024 Q3', '2024 Q2', '2024 Q1', '2023 Q4'];
-  const years = ['2024', '2023', '2022', '2021'];
+  // 데이터 없는 종목은 코드 기반 고정값 (현재 날짜 기준 동적 생성)
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curQuarter = Math.ceil((now.getMonth() + 1) / 3);
+  // 최근 8분기 라벨 생성 (현재 분기부터 역순)
+  const quarters = [];
+  let qy = curYear, qq = curQuarter;
+  for (let i = 0; i < 8; i++) {
+    quarters.push(qy + ' Q' + qq);
+    qq--;
+    if (qq === 0) { qq = 4; qy--; }
+  }
+  // 최근 4개 연도 라벨 생성 (전년부터 역순 — 당해 실적은 미확정)
+  const years = [];
+  for (let i = 1; i <= 4; i++) years.push(String(curYear - i));
   const arr = period === 'quarter' ? quarters : years;
 
   let seed = 0;
