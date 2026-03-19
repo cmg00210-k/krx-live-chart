@@ -1037,21 +1037,8 @@ html, body {
   overflow-x: auto; overflow-y: hidden;  /* [FIX] hidden→auto: 리사이즈 시 버튼 텍스트 클리핑 방지 */
   scrollbar-width: none;  /* Firefox: 스크롤바 숨김 */
   background: var(--bg-element);
-  position: relative;  /* scroll hint ::after 포지셔닝 */
 }
 #chart-toolbar::-webkit-scrollbar { display: none; }  /* Chrome: 스크롤바 숨김 */
-
-/* 스크롤 힌트: 우측 페이드 그라디언트 — 더 많은 버튼이 있음을 표시 */
-#chart-toolbar::after {
-  content: '';
-  position: sticky;
-  right: 0;
-  min-width: 20px;
-  height: 100%;
-  background: linear-gradient(to right, transparent, var(--bg-element) 70%);
-  pointer-events: none;
-  flex-shrink: 0;
-}
 .sep { width: 1px; height: 18px; background: var(--border); margin: 0 var(--sp-1); flex-shrink: 0; }
 #chart-toolbar .sep { background: #333; }
 
