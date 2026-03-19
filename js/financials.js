@@ -1241,7 +1241,7 @@ function _drawPERBandChart() {
   }
   _perBandRetries = 0;  // 성공 시 카운터 리셋
   var parentW = Math.max(rawW - 8, 100);  // 최소 100px 보장
-  var h = Math.max(60, Math.min(100, Math.round(parentW * 0.35)));
+  var h = Math.max(80, Math.min(120, Math.round(parentW * 0.40)));
   canvas.width = parentW * dpr;
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';

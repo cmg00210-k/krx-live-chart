@@ -150,29 +150,23 @@ class ChartManager {
         minBarSpacing: 3,
         fixLeftEdge: true,
         lockVisibleTimeRangeOnResize: true,
-        // [FIX] X축 라벨을 KST(UTC+9)로 표시 — LWC 기본값은 브라우저 로컬 시간
+        // [FIX] X축 라벨을 KST(UTC+9)로 표시
         tickMarkFormatter: function(time, tickMarkType) {
-          // time: Unix timestamp (숫자) 또는 businessDay 객체 ({year, month, day})
-          if (typeof time === 'object' && time.year) {
-            // 일봉: businessDay 객체 → "MM/DD" 또는 "YYYY" 형식
-            if (tickMarkType <= 1) return time.year + '';
-            var mm = (time.month < 10 ? '0' : '') + time.month;
-            var dd = (time.day < 10 ? '0' : '') + time.day;
-            return mm + '/' + dd;
-          }
-          // 분봉: Unix timestamp → KST 시간
-          var d = new Date(time * 1000);
-          var kstH = d.getUTCHours() + 9;
-          var kstM = d.getUTCMinutes();
-          var kstDay = d.getUTCDate();
-          var kstMonth = d.getUTCMonth() + 1;
-          if (kstH >= 24) { kstH -= 24; kstDay++; }
-          // tickMarkType 3=Time, 4=TimeWithSeconds
-          if (tickMarkType >= 3) {
-            return (kstH < 10 ? '0' : '') + kstH + ':' + (kstM < 10 ? '0' : '') + kstM;
-          }
-          // tickMarkType 2=DayOfMonth — 날짜 경계
-          return kstMonth + '/' + kstDay;
+          try {
+            // 일봉: businessDay 객체
+            if (typeof time === 'object' && time && time.year) {
+              if (tickMarkType <= 1) return String(time.year);
+              return (time.month < 10 ? '0' : '') + time.month + '/' + (time.day < 10 ? '0' : '') + time.day;
+            }
+            // 분봉: Unix timestamp → KST
+            if (typeof time !== 'number' || !isFinite(time)) return '';
+            var kst = new Date((time + 9 * 3600) * 1000);
+            var h = kst.getUTCHours(), m = kst.getUTCMinutes();
+            if (tickMarkType >= 3) {
+              return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+            }
+            return (kst.getUTCMonth() + 1) + '/' + kst.getUTCDate();
+          } catch (e) { return ''; }
         },
       },
       // ── 줌/스크롤 자유 허용 (증권사 HTS / TradingView 스타일) ──
