@@ -1695,7 +1695,7 @@ html, body {
   font-size: var(--fs-micro); color: var(--text-muted);
   text-align: right; letter-spacing: 0.02em;
 }
-#opm-sparkline { width: 100%; height: 80px; margin-top: 2px; display: block; max-width: 100%; }
+#opm-sparkline { width: 100%; height: auto; margin-top: 2px; display: block; max-width: 100%; }  /* JS가 동적 높이 설정 */
 /* [FIX] 캔버스 요소 컨테이너 밖 넘침 방지 */
 #fin-content canvas { max-width: 100%; }
 
@@ -1925,7 +1925,7 @@ html, body {
   max-height: 0; padding-top: 0; padding-bottom: 0;
 }
 #fin-trend-canvas {
-  width: 100%; height: 56px; display: block;
+  width: 100%; height: auto; display: block;  /* JS가 동적 높이 설정 */
 }
 
 
@@ -2858,7 +2858,7 @@ html, body {
   #pp-toggle { display: flex; }
 }
 
-/* ── 1024px: 사이드바 접힘 ── */
+/* ── 1024px: 사이드바 → 슬라이드 드로어 전환 ── */
 @media (max-width: 1024px) {
   #main {
     grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
@@ -2868,7 +2868,48 @@ html, body {
   #main.sidebar-collapsed {
     grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
   }
-  #sidebar { width: 0; border-right: none; }
+
+  /* [FIX] 사이드바를 고정 오버레이 드로어로 전환 — 토글 버튼으로 열기/닫기 가능 */
+  #sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    width: min(280px, 80vw);
+    height: calc(100vh - var(--header-h));
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform .25s ease, box-shadow .25s ease;
+    box-shadow: none;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    will-change: transform;
+  }
+  #sidebar.sb-drawer-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+  }
+  /* [FIX] collapsed 상태에서도 드로어 폭/인터랙션 유지 */
+  #main.sidebar-collapsed #sidebar {
+    width: min(280px, 80vw);
+    border-right: 1px solid var(--border);
+    pointer-events: auto;
+  }
+
+  /* [FIX] 사이드바 백드롭 활성화 (768px과 동일) */
+  #sb-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    top: var(--header-h);
+    z-index: 199;
+    background: rgba(0,0,0,0.4);
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+  #sb-backdrop.sb-bd-visible {
+    display: block;
+    opacity: 1;
+  }
 
   .ticker-item:last-child { display: none; }
   .sh-details { display: none; }
@@ -2896,48 +2937,13 @@ html, body {
     grid-template-rows: 1fr;
     min-width: 320px;
   }
-
-  /* ── A열: 사이드바 → 좌측 드로어 오버레이 ── */
-  #sidebar {
-    position: fixed;
-    top: var(--header-h);
-    left: 0;
-    width: min(280px, 80vw);
-    height: calc(100vh - var(--header-h));
-    z-index: 200;
-    transform: translateX(-100%);
-    transition: transform .25s ease, box-shadow .25s ease;
-    box-shadow: none;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-    will-change: transform;  /* [FIX] GPU 가속으로 드로어 슬라이드 시 폰트 안정 */
-  }
-  #sidebar.sb-drawer-open {
-    transform: translateX(0);
-    box-shadow: 4px 0 20px rgba(0,0,0,0.5);
-  }
-  /* 사이드바 열릴 때 grid-template에 의한 width:0 무시 */
-  #main.sidebar-collapsed #sidebar {
-    width: min(280px, 80vw);
-    border-right: 1px solid var(--border);
-    pointer-events: auto;  /* [FIX] 모바일 드로어에서 데스크톱 collapsed pointer-events:none 해제 */
+  /* [FIX] 768px에서 sidebar-collapsed여도 단일 열 유지 (1024px 4열 규칙 오버라이드) */
+  #main.sidebar-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
   }
 
-  /* 사이드바 백드롭 */
-  #sb-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    top: var(--header-h);
-    z-index: 199;
-    background: rgba(0,0,0,0.4);
-    opacity: 0;
-    transition: opacity .25s ease;
-  }
-  #sb-backdrop.sb-bd-visible {
-    display: block;
-    opacity: 1;
-  }
+  /* A열: 사이드바 드로어 스타일은 1024px에서 이미 정의됨 — 768px에서 상속 */
 
   /* ── D열: 바텀시트 오버레이 ── */
   #right-panel {

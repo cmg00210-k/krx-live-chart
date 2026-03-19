@@ -2625,8 +2625,9 @@ if (patternBtn) {
 })();
 
 // ══════════════════════════════════════════════════════
-//  모바일 사이드바 드로어 (768px 이하)
-//  - 기존 #sidebar-toggle 햄버거를 오버레이 드로어로 재활용
+//  사이드바 드로어 (1024px 이하)
+//  - 1024px 이하에서 사이드바는 슬라이드 오버레이 드로어
+//  - 기존 #sidebar-toggle 햄버거로 열기/닫기
 //  - 백드롭 #sb-backdrop 클릭 시 닫기
 // ══════════════════════════════════════════════════════
 (function initMobileSidebar() {
@@ -2635,7 +2636,7 @@ if (patternBtn) {
   const sbToggle = document.getElementById('sidebar-toggle');
   if (!sidebar || !sbToggle) return;
 
-  const mq = window.matchMedia('(max-width: 768px)');
+  const mq = window.matchMedia('(max-width: 1024px)');
 
   function isMobile() { return mq.matches; }
 
@@ -2650,7 +2651,7 @@ if (patternBtn) {
 
   // 모바일에서 햄버거 버튼 동작 오버라이드
   sbToggle.addEventListener('click', (e) => {
-    if (!isMobile()) return; // 데스크톱은 기존 sidebarManager.toggle()이 처리
+    if (!isMobile()) return; // 1024px 초과: 기존 sidebarManager.toggle()이 처리
     e.stopImmediatePropagation(); // sidebarManager의 리스너보다 먼저 잡기
     if (sidebar.classList.contains('sb-drawer-open')) {
       closeDrawer();

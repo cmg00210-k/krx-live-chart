@@ -596,9 +596,9 @@ function drawOPMSparkline(data) {
   const paddingL = 16;     // 좌측 여백 (첫 라벨 잘림 방지)
   const paddingR = 16;     // 우측 여백
 
-  // [FIX] 부모 너비에 맞게 동적 계산 — 최소 100px 보장
+  // [FIX] 부모 크기에 맞게 동적 계산 — 최소 100px 보장
   const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200), 100);
-  const h = 80;
+  const h = Math.max(50, Math.min(80, Math.round(w * 0.28)));
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
@@ -747,9 +747,9 @@ function drawFinTrendChart(data, metric) {
   const dpr = window.devicePixelRatio || 1;
 
   const labelHeight = 14;
-  // [FIX] 최소 너비 보장 (scrollbar-gutter 등으로 인한 축소 대응)
+  // [FIX] 부모 크기에 맞게 동적 계산
   const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190), 100);
-  const h = 70;
+  const h = Math.max(44, Math.min(70, Math.round(w * 0.25)));
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
@@ -1241,7 +1241,7 @@ function _drawPERBandChart() {
   }
   _perBandRetries = 0;  // 성공 시 카운터 리셋
   var parentW = Math.max(rawW - 8, 100);  // 최소 100px 보장
-  var h = 100;
+  var h = Math.max(60, Math.min(100, Math.round(parentW * 0.35)));
   canvas.width = parentW * dpr;
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';
