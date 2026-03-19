@@ -22,6 +22,7 @@
   --up:           #E05050;
   --down:         #5086DC;
   --neutral:      #ffeb3b;
+  --fin-good:     #6BCB77;  /* 재무 지표 양호 수준 (초록) */
 
   /* ── 텍스트 3계층 ── */
   --text:         #E8E8E8;
@@ -1674,10 +1675,10 @@ html, body {
 .fin-score {
   font-size: var(--fs-body); font-weight: 700;
 }
-.fin-score.score-high { color: var(--up); }
+.fin-score.score-high { color: var(--fin-good); }
 .fin-score.score-mid  { color: var(--accent); }
 .fin-score.score-low  { color: var(--down); }
-.fin-grade-a  { color: var(--up); }
+.fin-grade-a  { color: var(--fin-good); }
 .fin-grade-b  { color: var(--accent); }
 .fin-grade-c  { color: var(--text-muted); }
 .fin-grade-d  { color: var(--down); }
@@ -1806,7 +1807,7 @@ html, body {
   color: var(--text);
   font-feature-settings: "tnum";
 }
-.fin-cmp-good { color: #6BCB77; }
+.fin-cmp-good { color: var(--fin-good); }
 .fin-cmp-bad { color: #C06060; }
 
 /* ── 동종업종 비교 (Peer Group) ── */
