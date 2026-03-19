@@ -99,20 +99,18 @@ class ChartManager {
         locale: 'ko-KR',
         dateFormat: 'yyyy-MM-dd',  // 한국식 연-월-일
         priceFormatter: (price) => Math.round(price).toLocaleString('ko-KR'),
-        timeFormatter: (businessDayOrTimestamp) => {
-          // businessDay 객체이면 날짜 포맷 (일봉)
-          if (typeof businessDayOrTimestamp === 'object' && businessDayOrTimestamp.year) {
-            return businessDayOrTimestamp.year + '-' +
-              String(businessDayOrTimestamp.month).padStart(2, '0') + '-' +
-              String(businessDayOrTimestamp.day).padStart(2, '0');
-          }
-          // Unix timestamp이면 KST(UTC+9)로 변환하여 표시
-          // 한국은 서머타임 미적용 — 항상 +9시간 고정
-          var d = new Date(businessDayOrTimestamp * 1000);
-          var h = d.getUTCHours() + 9;  // KST = UTC+9
-          var m = d.getUTCMinutes();
-          if (h >= 24) h -= 24;         // 자정 넘김 보정
-          return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+        timeFormatter: (t) => {
+          try {
+            if (typeof t === 'string') return t;  // "YYYY-MM-DD" 그대로
+            if (typeof t === 'object' && t && t.year) {
+              return t.year + '-' + String(t.month).padStart(2, '0') + '-' + String(t.day).padStart(2, '0');
+            }
+            if (typeof t !== 'number' || !isFinite(t)) return '';
+            var d = new Date(t * 1000);
+            var h = d.getUTCHours() + 9, m = d.getUTCMinutes();
+            if (h >= 24) h -= 24;
+            return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+          } catch (e) { return ''; }
         },
       },
       grid: {
@@ -153,19 +151,23 @@ class ChartManager {
         // [FIX] X축 라벨을 KST(UTC+9)로 표시
         tickMarkFormatter: function(time, tickMarkType) {
           try {
-            // 일봉: businessDay 객체
+            if (typeof time === 'string') {
+              var p = time.split('-');
+              if (p.length === 3) return p[1] + '/' + p[2];
+              return time;
+            }
             if (typeof time === 'object' && time && time.year) {
               if (tickMarkType <= 1) return String(time.year);
               return (time.month < 10 ? '0' : '') + time.month + '/' + (time.day < 10 ? '0' : '') + time.day;
             }
-            // 분봉: Unix timestamp → KST
             if (typeof time !== 'number' || !isFinite(time)) return '';
-            var kst = new Date((time + 9 * 3600) * 1000);
-            var h = kst.getUTCHours(), m = kst.getUTCMinutes();
+            var d = new Date(time * 1000);
+            var h = d.getUTCHours() + 9, m = d.getUTCMinutes();
+            if (h >= 24) h -= 24;
             if (tickMarkType >= 3) {
               return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
             }
-            return (kst.getUTCMonth() + 1) + '/' + kst.getUTCDate();
+            return (d.getUTCMonth() + 1) + '/' + (d.getUTCDate() + (d.getUTCHours() + 9 >= 24 ? 1 : 0));
           } catch (e) { return ''; }
         },
       },

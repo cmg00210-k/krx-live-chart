@@ -1421,7 +1421,7 @@ const patternRenderer = (() => {
               width: 1.2,
               dash: [3, 3],
               marker: 'invalid',
-              priceLabel: '무효 ' + invalidPrice.toLocaleString('ko-KR'),
+              priceLabel: '패턴이탈 ' + invalidPrice.toLocaleString('ko-KR'),
             });
           }
         }

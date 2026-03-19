@@ -1847,6 +1847,10 @@ function updateOHLCBar(data) {
   oH.textContent = d.high != null ? d.high.toLocaleString() : '—';
   oL.textContent = d.low != null ? d.low.toLocaleString() : '—';
   oC.textContent = d.close != null ? d.close.toLocaleString() : '—';
+  // OHLC 전체에 동일한 방향 색상 적용 (벤치마크: TradingView, 키움)
+  oO.className = 'ohlc-val ' + cls;
+  oH.className = 'ohlc-val ' + cls;
+  oL.className = 'ohlc-val ' + cls;
   oC.className = 'ohlc-val ' + cls;
   if (oV && d.volume != null) oV.textContent = formatVol(d.volume);
 
@@ -2139,15 +2143,21 @@ function updateStockInfo() {
   // → 가격선은 호출 경로별로 1회만 생성되도록 분리
 }
 
-/** [FIX] 캔들 데이터 기반 가격선 표시 (file/demo 모드용) */
+/** [FIX] 캔들 데이터 기반 가격선 표시 — 전체 캔들의 최고/최저 사용 */
 function _updatePriceLinesFromCandles() {
   if (!candles.length) return;
-  const lastC = candles[candles.length - 1];
-  const prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
+  var lastC = candles[candles.length - 1];
+  var prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
+  // 전체 캔들에서 최고가/최저가 계산
+  var allHigh = -Infinity, allLow = Infinity;
+  for (var i = 0; i < candles.length; i++) {
+    if (candles[i].high > allHigh) allHigh = candles[i].high;
+    if (candles[i].low < allLow) allLow = candles[i].low;
+  }
   chartManager.updatePriceLines(
     lastC.close,
-    lastC.high,
-    lastC.low,
+    isFinite(allHigh) ? allHigh : lastC.high,
+    isFinite(allLow) ? allLow : lastC.low,
     prevC ? prevC.close : lastC.open
   );
 }
