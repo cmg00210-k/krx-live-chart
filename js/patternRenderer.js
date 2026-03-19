@@ -38,30 +38,35 @@ const patternRenderer = (() => {
   const NEUTRAL_COLOR = KRX_COLORS.PTN_NEUTRAL;
   const MAX_PATTERNS = 5;
 
+  // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
+  const CANDLE_COLOR = KRX_COLORS.PTN_CANDLE;
+  const CANDLE_FILL  = KRX_COLORS.PTN_CANDLE_FILL;
+  const CANDLE_NEUTRAL = 'rgba(200,200,200,0.55)';
+
   // ── 패턴 유형별 분류 ──
   const ZONE_PATTERNS = {
-    threeWhiteSoldiers: { color: BUY_COLOR, fill: BUY_FILL, candles: 3 },
-    threeBlackCrows:    { color: SELL_COLOR, fill: SELL_FILL, candles: 3 },
-    bullishEngulfing:   { color: BUY_COLOR, fill: BUY_FILL, candles: 2 },
-    bearishEngulfing:   { color: SELL_COLOR, fill: SELL_FILL, candles: 2 },
-    morningStar:        { color: BUY_COLOR, fill: BUY_FILL, candles: 3 },
-    eveningStar:        { color: SELL_COLOR, fill: SELL_FILL, candles: 3 },
-    bullishHarami:      { color: BUY_COLOR, fill: BUY_FILL, candles: 2, useBody: true },
-    bearishHarami:      { color: SELL_COLOR, fill: SELL_FILL, candles: 2, useBody: true },
-    piercingLine:       { color: BUY_COLOR, fill: BUY_FILL, candles: 2 },
-    darkCloud:          { color: SELL_COLOR, fill: SELL_FILL, candles: 2 },
-    tweezerBottom:      { color: BUY_COLOR, fill: BUY_FILL, candles: 2 },
-    tweezerTop:         { color: SELL_COLOR, fill: SELL_FILL, candles: 2 },
+    threeWhiteSoldiers: { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    threeBlackCrows:    { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    bullishEngulfing:   { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    bearishEngulfing:   { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    morningStar:        { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    eveningStar:        { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    bullishHarami:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2, useBody: true },
+    bearishHarami:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2, useBody: true },
+    piercingLine:       { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    darkCloud:          { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    tweezerBottom:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    tweezerTop:         { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
   };
 
   const SINGLE_PATTERNS = {
-    hammer:         { key: 'low',   color: BUY_COLOR,     direction: 'buy' },
-    invertedHammer: { key: 'high',  color: BUY_COLOR,     direction: 'buy' },
-    hangingMan:     { key: 'low',   color: SELL_COLOR,    direction: 'sell' },
-    shootingStar:   { key: 'high',  color: SELL_COLOR,    direction: 'sell' },
-    doji:           { key: 'close', color: NEUTRAL_COLOR, direction: 'neutral' },
-    dragonflyDoji:  { key: 'low',   color: BUY_COLOR,     direction: 'buy' },
-    gravestoneDoji: { key: 'high',  color: SELL_COLOR,    direction: 'sell' },
+    hammer:         { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    invertedHammer: { key: 'high',  color: CANDLE_COLOR,   direction: 'buy' },
+    hangingMan:     { key: 'low',   color: CANDLE_COLOR,   direction: 'sell' },
+    shootingStar:   { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
+    doji:           { key: 'close', color: CANDLE_NEUTRAL, direction: 'neutral' },
+    dragonflyDoji:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    gravestoneDoji: { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
   };
 
   const CHART_PATTERNS = new Set([
@@ -147,7 +152,7 @@ const patternRenderer = (() => {
 
         ctx.save();
 
-        // ── 1. 캔들 글로우 (단일 캔들 패턴 하이라이트) ──
+        // ── 1. 캔들 글로우 (단일 캔들 패턴 — 수직 스트라이프) ──
         if (d.glows && d.glows.length) {
           d.glows.forEach(g => {
             if (g.x == null || g.y1 == null || g.y2 == null) return;
@@ -158,27 +163,18 @@ const patternRenderer = (() => {
             const ry = Math.min(g.y1, g.y2);
             const rh = Math.abs(g.y2 - g.y1);
 
-            // 그라데이션 글로우 (캔들 뒤에 은은한 발광)
-            const gradient = ctx.createRadialGradient(
-              g.x, (g.y1 + g.y2) / 2, 0,
-              g.x, (g.y1 + g.y2) / 2, Math.max(glowW, rh) * 0.8
-            );
-            gradient.addColorStop(0, g.fillCenter || g.fill);
-            gradient.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(rx - glowW * 0.3, ry - rh * 0.15, glowW * 1.6, rh * 1.3);
+            // 반투명 사각형 (캔들 뒤에 연보라 수직 스트라이프)
+            ctx.fillStyle = g.fill;
+            ctx.fillRect(rx, ry, glowW, rh);
 
-            // 얇은 테두리 라인 (좌우 수직선)
+            // 얇은 실선 테두리 (alpha 0.3)
             ctx.strokeStyle = g.border;
-            ctx.lineWidth = 0.8;
-            ctx.setLineDash([2, 2]);
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.3;
             ctx.beginPath();
-            ctx.moveTo(rx, ry - 2);
-            ctx.lineTo(rx, ry + rh + 2);
-            ctx.moveTo(rx + glowW, ry - 2);
-            ctx.lineTo(rx + glowW, ry + rh + 2);
+            ctx.rect(rx, ry, glowW, rh);
             ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
           });
         }
 
@@ -194,23 +190,20 @@ const patternRenderer = (() => {
             const rh = Math.abs(br.y2 - br.y1) + 4;
             const radius = 4;
 
-            // 반투명 영역 채우기 (그라데이션)
-            const grad = ctx.createLinearGradient(rx, ry, rx, ry + rh);
-            grad.addColorStop(0, br.fillTop || br.fill);
-            grad.addColorStop(1, br.fillBottom || 'rgba(0,0,0,0)');
-            ctx.fillStyle = grad;
+            // 균일 반투명 채우기 (연보라)
+            ctx.fillStyle = br.fill;
             ctx.beginPath();
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.fill();
 
-            // 점선 테두리
+            // 실선 테두리 (연보라)
             ctx.strokeStyle = br.border;
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 3]);
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.3;
             ctx.beginPath();
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
           });
         }
 
@@ -352,9 +345,21 @@ const patternRenderer = (() => {
           });
         }
 
-        // ── 6. 패턴 연결선 (H&S 어깨-머리 연결, 삼각형 꼭짓점 등) ──
+        // ── 6. 패턴 연결선 + 빈 원 마커 (H&S 등) ──
         if (d.connectors && d.connectors.length) {
           d.connectors.forEach(cn => {
+            // 빈 원 마커 (H&S 어깨/머리 위치)
+            if (cn.hollowCircle) {
+              if (cn.circleX == null || cn.circleY == null) return;
+              if (cn.circleX < -20 || cn.circleX > w + 20) return;
+              ctx.beginPath();
+              ctx.arc(cn.circleX, cn.circleY, cn.circleR || 4, 0, Math.PI * 2);
+              ctx.strokeStyle = cn.color;
+              ctx.lineWidth = cn.circleWidth || 1.5;
+              ctx.stroke();
+              return;
+            }
+
             const pts = cn.points.filter(p => p.x != null && p.y != null);
             if (pts.length < 2) return;
             // 모든 점이 화면 밖이면 스킵
@@ -826,24 +831,21 @@ const patternRenderer = (() => {
       const lo = toXY(c.time, c.low);
       if (hi.x == null || hi.y == null || lo.y == null) return;
 
-      // 패턴 방향에 따른 글로우 색상
-      const isBuy = cfg.direction === 'buy';
-      const isSell = cfg.direction === 'sell';
-      const glowColor = isBuy
-        ? 'rgba(150,220,200,0.18)'
-        : isSell ? 'rgba(150,220,200,0.18)' : 'rgba(200,200,200,0.12)';
-      const glowCenter = isBuy
-        ? 'rgba(150,220,200,0.25)'
-        : isSell ? 'rgba(150,220,200,0.25)' : 'rgba(200,200,200,0.18)';
-      const borderColor = cfg.color;
+      // 캔들 패턴: 연보라 수직 스트라이프
+      const isNeutral = cfg.direction === 'neutral';
+      const fillColor = isNeutral
+        ? 'rgba(200,200,200,0.10)'
+        : KRX_COLORS.PTN_CANDLE_FILL(0.10);
+      const borderColor = isNeutral
+        ? CANDLE_NEUTRAL
+        : CANDLE_COLOR;
 
       glows.push({
         x: hi.x,
         y1: hi.y,
         y2: lo.y,
         width: 18,
-        fill: glowColor,
-        fillCenter: glowCenter,
+        fill: fillColor,
         border: borderColor,
       });
     }
@@ -874,25 +876,17 @@ const patternRenderer = (() => {
       const br = toXY(candles[ei].time, lower);
       if (tl.x == null || tl.y == null || br.x == null || br.y == null) return;
 
-      const isBuy = _isBullish(p);
-
-      // 위에서 아래로 그라데이션 (매수: 아래서 진해짐, 매도: 위에서 진해짐)
-      const fillTop = isBuy
-        ? 'rgba(150,220,200,0.02)' : 'rgba(150,220,200,0.10)';
-      const fillBottom = isBuy
-        ? 'rgba(150,220,200,0.10)' : 'rgba(150,220,200,0.02)';
-
+      // 캔들 패턴: 균일 연보라 채우기 (그라데이션 제거)
       brackets.push({
         x1: tl.x, y1: tl.y,
         x2: br.x, y2: br.y,
-        fill: cfg.fill,
-        fillTop, fillBottom,
-        border: cfg.color,
+        fill: KRX_COLORS.PTN_CANDLE_FILL(0.10),
+        border: CANDLE_COLOR,
       });
     }
 
     // ══════════════════════════════════════════════════
-    //  이중 바닥 (W형): 부드러운 곡선 + 넥라인
+    //  이중 바닥: 사각형 영역 + 넥라인 + 저점 삼각 마커
     // ══════════════════════════════════════════════════
     _buildDoubleBottom(candles, p, toXY, data) {
       const si = p.startIndex, ei = p.endIndex;
@@ -905,19 +899,44 @@ const patternRenderer = (() => {
       }
       if (!isFinite(neckline)) return;
 
-      const p1 = toXY(candles[si].time, candles[si].low);
-      const pn = toXY(candles[neckIdx].time, neckline);
-      const p2 = toXY(candles[ei].time, candles[ei].low);
+      // 두 저점의 최저가
+      let minLow = Infinity;
+      for (let j = si; j <= ei && j < candles.length; j++) {
+        if (candles[j].low < minLow) minLow = candles[j].low;
+      }
+      if (!isFinite(minLow)) return;
 
-      // W형 부드러운 곡선
-      data.polylines.push({
-        points: [p1, pn, p2],
-        color: BUY_COLOR,
-        width: 1.8,
-        dash: [],
-        smooth: true,
-        dots: true,
-      });
+      // 사각형 영역: (startIndex, minLow) → (endIndex, neckline)
+      const topLeft = toXY(candles[si].time, neckline);
+      const bottomRight = toXY(candles[ei].time, minLow);
+      if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
+        const rx = Math.min(topLeft.x, bottomRight.x);
+        const ry = Math.min(topLeft.y, bottomRight.y);
+        const rw = Math.abs(bottomRight.x - topLeft.x);
+        const rh = Math.abs(bottomRight.y - topLeft.y);
+        data.trendAreas.push({
+          points: [
+            { x: rx, y: ry },
+            { x: rx + rw, y: ry },
+            { x: rx + rw, y: ry + rh },
+            { x: rx, y: ry + rh },
+          ],
+          fill: 'rgba(150,220,200,0.10)',
+        });
+        // 사각형 테두리 (민트, 1px, alpha 0.3)
+        data.polylines.push({
+          points: [
+            { x: rx, y: ry },
+            { x: rx + rw, y: ry },
+            { x: rx + rw, y: ry + rh },
+            { x: rx, y: ry + rh },
+            { x: rx, y: ry },
+          ],
+          color: 'rgba(150,220,200,0.30)',
+          width: 1,
+          dash: [],
+        });
+      }
 
       // 넥라인 수평 연장 (점선)
       const extIdx = Math.min(ei + 8, candles.length - 1);
@@ -932,49 +951,76 @@ const patternRenderer = (() => {
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
 
-      // W 영역 반투명 채우기
-      if (p1.x != null && pn.x != null && p2.x != null) {
-        data.trendAreas.push({
-          points: [
-            p1,
-            { x: (p1.x + pn.x) / 2, y: Math.min(p1.y, pn.y) - 5 },
-            pn,
-            { x: (pn.x + p2.x) / 2, y: Math.min(p2.y, pn.y) - 5 },
-            p2,
-            { x: p2.x, y: pn.y },
-            { x: p1.x, y: pn.y },
-          ],
-          fill: 'rgba(150,220,200,0.05)',
-        });
-      }
+      // 두 저점에 상향 삼각형 마커 (▲, 5px) — trendAreas를 사용해 삼각형 렌더링
+      const trough1 = toXY(candles[si].time, candles[si].low);
+      const trough2 = toXY(candles[ei].time, candles[ei].low);
+      [trough1, trough2].forEach(pt => {
+        if (pt.x != null && pt.y != null) {
+          const ty = pt.y + 8;  // 저가 아래
+          data.trendAreas.push({
+            points: [
+              { x: pt.x, y: ty - 5 },       // 꼭짓점 (위)
+              { x: pt.x + 5, y: ty + 4 },   // 우하
+              { x: pt.x - 5, y: ty + 4 },   // 좌하
+            ],
+            fill: BUY_COLOR,
+          });
+        }
+      });
     }
 
     // ══════════════════════════════════════════════════
-    //  이중 천장 (M형): 부드러운 곡선 + 넥라인
+    //  이중 천장: 사각형 영역 + 넥라인 + 고점 삼각 마커
     // ══════════════════════════════════════════════════
     _buildDoubleTop(candles, p, toXY, data) {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
+      // 넥라인 찾기 (두 고점 사이 최저점)
       let neckline = Infinity, neckIdx = si;
       for (let j = si; j <= ei && j < candles.length; j++) {
         if (candles[j].low < neckline) { neckline = candles[j].low; neckIdx = j; }
       }
       if (!isFinite(neckline)) return;
 
-      const p1 = toXY(candles[si].time, candles[si].high);
-      const pn = toXY(candles[neckIdx].time, neckline);
-      const p2 = toXY(candles[ei].time, candles[ei].high);
+      // 두 고점의 최고가
+      let maxHigh = -Infinity;
+      for (let j = si; j <= ei && j < candles.length; j++) {
+        if (candles[j].high > maxHigh) maxHigh = candles[j].high;
+      }
+      if (!isFinite(maxHigh)) return;
 
-      // M형 부드러운 곡선
-      data.polylines.push({
-        points: [p1, pn, p2],
-        color: SELL_COLOR,
-        width: 1.8,
-        dash: [],
-        smooth: true,
-        dots: true,
-      });
+      // 사각형 영역: (startIndex, neckline) → (endIndex, maxHigh)
+      const topLeft = toXY(candles[si].time, maxHigh);
+      const bottomRight = toXY(candles[ei].time, neckline);
+      if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
+        const rx = Math.min(topLeft.x, bottomRight.x);
+        const ry = Math.min(topLeft.y, bottomRight.y);
+        const rw = Math.abs(bottomRight.x - topLeft.x);
+        const rh = Math.abs(bottomRight.y - topLeft.y);
+        data.trendAreas.push({
+          points: [
+            { x: rx, y: ry },
+            { x: rx + rw, y: ry },
+            { x: rx + rw, y: ry + rh },
+            { x: rx, y: ry + rh },
+          ],
+          fill: 'rgba(150,220,200,0.10)',
+        });
+        // 사각형 테두리 (민트, 1px, alpha 0.3)
+        data.polylines.push({
+          points: [
+            { x: rx, y: ry },
+            { x: rx + rw, y: ry },
+            { x: rx + rw, y: ry + rh },
+            { x: rx, y: ry + rh },
+            { x: rx, y: ry },
+          ],
+          color: 'rgba(150,220,200,0.30)',
+          width: 1,
+          dash: [],
+        });
+      }
 
       // 넥라인 수평 연장
       const extIdx = Math.min(ei + 8, candles.length - 1);
@@ -989,25 +1035,26 @@ const patternRenderer = (() => {
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
 
-      // M 영역 반투명 채우기
-      if (p1.x != null && pn.x != null && p2.x != null) {
-        data.trendAreas.push({
-          points: [
-            p1,
-            { x: (p1.x + pn.x) / 2, y: Math.max(p1.y, pn.y) + 5 },
-            pn,
-            { x: (pn.x + p2.x) / 2, y: Math.max(p2.y, pn.y) + 5 },
-            p2,
-            { x: p2.x, y: pn.y },
-            { x: p1.x, y: pn.y },
-          ],
-          fill: 'rgba(150,220,200,0.05)',
-        });
-      }
+      // 두 고점에 하향 삼각형 마커 (▼, 5px) — trendAreas를 사용
+      const peak1 = toXY(candles[si].time, candles[si].high);
+      const peak2 = toXY(candles[ei].time, candles[ei].high);
+      [peak1, peak2].forEach(pt => {
+        if (pt.x != null && pt.y != null) {
+          const ty = pt.y - 8;  // 고가 위
+          data.trendAreas.push({
+            points: [
+              { x: pt.x, y: ty + 5 },       // 꼭짓점 (아래)
+              { x: pt.x + 5, y: ty - 4 },   // 우상
+              { x: pt.x - 5, y: ty - 4 },   // 좌상
+            ],
+            fill: SELL_COLOR,
+          });
+        }
+      });
     }
 
     // ══════════════════════════════════════════════════
-    //  머리어깨 (H&S) / 역머리어깨: 어깨-머리 연결 + 넥라인
+    //  머리어깨 (H&S) / 역머리어깨: 넥라인 + 빈 원 마커
     // ══════════════════════════════════════════════════
     _buildHeadAndShoulders(candles, p, toXY, data, inverse) {
       if (!p.trendlines || !p.trendlines.length) return;
@@ -1055,61 +1102,56 @@ const patternRenderer = (() => {
         dash: [4, 3],
       });
 
-      // 어깨-머리 연결선 (스윙 포인트 연결)
-      // 패턴의 시작-중간-끝에서 실제 고/저점을 찾아 연결
+      // 어깨/머리 극값 찾기 (빈 원 마커용)
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      // 왼쪽 어깨 / 머리 / 오른쪽 어깨의 극값을 찾기
       const mid = Math.floor((si + ei) / 2);
       const leftRange = candles.slice(si, Math.min(mid, candles.length));
       const rightRange = candles.slice(Math.min(mid + 1, candles.length), Math.min(ei + 1, candles.length));
 
+      let extremePoints = [];
       if (inverse) {
-        // 역H&S: 저점들 연결
         const leftLow = _findExtreme(leftRange, 'low', 'min');
         const headLow = _findExtreme(candles.slice(
           Math.max(si, Math.floor(si + (ei - si) * 0.25)),
           Math.min(ei + 1, Math.floor(si + (ei - si) * 0.75) + 1)
         ), 'low', 'min');
         const rightLow = _findExtreme(rightRange, 'low', 'min');
-
-        if (leftLow && headLow && rightLow) {
-          const lsP = toXY(leftLow.time, leftLow.low);
-          const hdP = toXY(headLow.time, headLow.low);
-          const rsP = toXY(rightLow.time, rightLow.low);
-          data.connectors.push({
-            points: [lsP, hdP, rsP],
-            color: BUY_COLOR,
-            width: 1.8,
-            dash: [3, 2],
-            alpha: 0.75,
-            showDots: true,
-          });
-        }
+        if (leftLow) extremePoints.push(toXY(leftLow.time, leftLow.low));
+        if (headLow) extremePoints.push(toXY(headLow.time, headLow.low));
+        if (rightLow) extremePoints.push(toXY(rightLow.time, rightLow.low));
       } else {
-        // H&S: 고점들 연결
         const leftHigh = _findExtreme(leftRange, 'high', 'max');
         const headHigh = _findExtreme(candles.slice(
           Math.max(si, Math.floor(si + (ei - si) * 0.25)),
           Math.min(ei + 1, Math.floor(si + (ei - si) * 0.75) + 1)
         ), 'high', 'max');
         const rightHigh = _findExtreme(rightRange, 'high', 'max');
+        if (leftHigh) extremePoints.push(toXY(leftHigh.time, leftHigh.high));
+        if (headHigh) extremePoints.push(toXY(headHigh.time, headHigh.high));
+        if (rightHigh) extremePoints.push(toXY(rightHigh.time, rightHigh.high));
+      }
 
-        if (leftHigh && headHigh && rightHigh) {
-          const lsP = toXY(leftHigh.time, leftHigh.high);
-          const hdP = toXY(headHigh.time, headHigh.high);
-          const rsP = toXY(rightHigh.time, rightHigh.high);
+      // 빈 원 마커 (4px 반지름, 1.5px 선) — connector로 렌더링
+      const markerColor = inverse ? BUY_COLOR : SELL_COLOR;
+      extremePoints.forEach(pt => {
+        if (pt.x != null && pt.y != null) {
           data.connectors.push({
-            points: [lsP, hdP, rsP],
-            color: SELL_COLOR,
-            width: 1.8,
-            dash: [3, 2],
-            alpha: 0.75,
-            showDots: true,
+            points: [pt, { x: pt.x, y: pt.y + 0.1 }],   // 최소 2점
+            color: markerColor,
+            width: 0,
+            dash: [],
+            alpha: 0,
+            showDots: false,
+            hollowCircle: true,  // 커스텀: 빈 원 마커
+            circleX: pt.x,
+            circleY: pt.y,
+            circleR: 4,
+            circleWidth: 1.5,
           });
         }
-      }
+      });
     }
 
     // ══════════════════════════════════════════════════
@@ -1125,33 +1167,33 @@ const patternRenderer = (() => {
 
       const isBuy = _isBullish(p);
 
-      // 상단 추세선
+      // 상단 추세선 (dots 제거, 선폭 축소)
       const u1 = toXY(upperTL.points[0].time, upperTL.points[0].value);
       const u2 = toXY(upperTL.points[1].time, upperTL.points[1].value);
       data.polylines.push({
         points: [u1, u2],
-        color: isBuy ? SELL_COLOR : SELL_COLOR,   // 저항선은 항상 sell색
-        width: 2.0,
+        color: isBuy ? SELL_COLOR : SELL_COLOR,
+        width: 1.5,
         dash: [],
-        dots: true,
+        dots: false,
       });
 
-      // 하단 추세선
+      // 하단 추세선 (dots 제거, 선폭 축소)
       const l1 = toXY(lowerTL.points[0].time, lowerTL.points[0].value);
       const l2 = toXY(lowerTL.points[1].time, lowerTL.points[1].value);
       data.polylines.push({
         points: [l1, l2],
-        color: isBuy ? BUY_COLOR : BUY_COLOR,    // 지지선은 항상 buy색
-        width: 2.0,
+        color: isBuy ? BUY_COLOR : BUY_COLOR,
+        width: 1.5,
         dash: [],
-        dots: true,
+        dots: false,
       });
 
-      // 수렴 영역 반투명 채우기
+      // 수렴 영역 반투명 채우기 (불투명도 증가: 0.04 → 0.10)
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: isBuy ? 'rgba(150,220,200,0.04)' : 'rgba(150,220,200,0.04)',
+          fill: 'rgba(150,220,200,0.10)',
         });
       }
     }
@@ -1169,33 +1211,33 @@ const patternRenderer = (() => {
 
       const isBuy = _isBullish(p);
 
-      // 상단 추세선 (실선)
+      // 상단 추세선 (dots 제거, 선폭 축소)
       const u1 = toXY(upperTL.points[0].time, upperTL.points[0].value);
       const u2 = toXY(upperTL.points[1].time, upperTL.points[1].value);
       data.polylines.push({
         points: [u1, u2],
         color: isBuy ? GOLD_COLOR : SELL_COLOR,
-        width: 2.0,
+        width: 1.5,
         dash: [],
-        dots: true,
+        dots: false,
       });
 
-      // 하단 추세선 (실선)
+      // 하단 추세선 (dots 제거, 선폭 축소)
       const l1 = toXY(lowerTL.points[0].time, lowerTL.points[0].value);
       const l2 = toXY(lowerTL.points[1].time, lowerTL.points[1].value);
       data.polylines.push({
         points: [l1, l2],
         color: isBuy ? BUY_COLOR : GOLD_COLOR,
-        width: 2.0,
+        width: 1.5,
         dash: [],
-        dots: true,
+        dots: false,
       });
 
-      // 수렴 영역 그라데이션 채우기
+      // 수렴 영역 채우기 (불투명도 증가: 0.05 → 0.10)
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: isBuy ? 'rgba(150,220,200,0.05)' : 'rgba(150,220,200,0.05)',
+          fill: 'rgba(150,220,200,0.10)',
         });
       }
     }
@@ -1238,8 +1280,11 @@ const patternRenderer = (() => {
       const isBullish = _isBullish(p);
       const isBearish = _isBearish(p);
 
-      // 색상: 패턴 전용 민트/라벤더/실버
-      const color = isBullish ? BUY_COLOR : (isBearish ? SELL_COLOR : NEUTRAL_COLOR);
+      // 색상: 캔들 패턴=연보라, 차트 패턴=민트, 중립=실버
+      const isCandle = CANDLE_PATTERN_TYPES.has(p.type);
+      const color = isCandle
+        ? (p.type === 'doji' ? CANDLE_NEUTRAL : CANDLE_COLOR)
+        : (isBullish ? BUY_COLOR : (isBearish ? SELL_COLOR : NEUTRAL_COLOR));
 
       // Y 좌표: 패턴 캔들 범위의 실제 고가/저가 기반
       var patternHigh = -Infinity, patternLow = Infinity;

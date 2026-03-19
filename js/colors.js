@@ -24,6 +24,10 @@ const KRX_COLORS = Object.freeze({
   WILLR: '#FF7043',
   ATR_LINE: '#FFA726',
 
+  // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
+  PTN_CANDLE: '#B388FF',
+  PTN_CANDLE_FILL: function(a) { return 'rgba(179,136,255,' + (a || 0.15) + ')'; },
+
   // ── 패턴 무효화/태그 배경 ──
   PTN_INVALID: '#FF6B35',
   TAG_BG: (a) => `rgba(19,23,34,${a || 0.88})`,
