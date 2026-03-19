@@ -380,8 +380,14 @@ function _applyPrefsToUI() {
   if (pBtn) pBtn.classList.toggle('active', patternEnabled);
   var summaryWrap = document.getElementById('pattern-summary-wrap');
   if (summaryWrap) summaryWrap.style.display = patternEnabled ? '' : 'none';
+  // 시각화 레이어 토글 복원
+  var vizWrapEl = document.getElementById('viz-toggle-wrap');
+  if (vizWrapEl) vizWrapEl.style.display = patternEnabled ? '' : 'none';
+  document.querySelectorAll('#viz-toggle-menu input[data-viz]').forEach(function(cb) {
+    cb.checked = vizToggles[cb.dataset.viz] !== false;
+  });
   var filterWrap = document.getElementById('signal-filter-wrap');
-  if (filterWrap) filterWrap.style.display = patternEnabled ? '' : 'none';
+  if (filterWrap) filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
   var retArea = document.getElementById('return-stats-area');
   if (retArea) retArea.style.display = patternEnabled ? '' : 'none';
 
@@ -568,6 +574,11 @@ async function _continueInit() {
   // 패턴 활성 상태 복원
   if (prefs && typeof prefs.patternEnabled === 'boolean') {
     patternEnabled = prefs.patternEnabled;
+  }
+
+  // 시각화 레이어 토글 복원
+  if (prefs && prefs.vizToggles) {
+    vizToggles = Object.assign({ candle: true, chart: true, signal: true, forecast: true }, prefs.vizToggles);
   }
 
   // 활성 지표 복원 (localStorage 저장분 우선, 없으면 기본값 vol+ma 유지)
@@ -1236,10 +1247,7 @@ function _initAnalysisWorker() {
 
           // 보존된 차트 패턴 구조선 병합 (드래그 시 소실 방지)
           detectedPatterns = _mergeChartPatternStructLines(dragPatterns);
-          chartManager._drawPatterns(candles, chartType, detectedPatterns);
-          if (typeof patternRenderer !== 'undefined') {
-            patternRenderer.render(chartManager, candles, chartType, detectedPatterns);
-          }
+          chartManager._drawPatterns(candles, chartType, _filterPatternsForViz(detectedPatterns));
 
           // 시그널 인덱스 오프셋 보정
           dragSignals.forEach(function (s) {
@@ -1248,7 +1256,8 @@ function _initAnalysisWorker() {
           detectedSignals = dragSignals;
           signalStats = msg.stats;
 
-          const dragFiltered = _filterSignalsByCategory(detectedSignals);
+          _renderOverlays();  // vizToggles 필터 적용된 통합 렌더
+          const dragFiltered = vizToggles.signal ? _filterSignalsByCategory(detectedSignals) : [];
           if (typeof signalRenderer !== 'undefined') {
             signalRenderer.render(chartManager, candles, dragFiltered, {
               volumeActive: activeIndicators.has('vol'),
@@ -1775,10 +1784,8 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
 
   // 보존된 차트 패턴 구조선 병합 (드래그 시 소실 방지)
   detectedPatterns = _mergeChartPatternStructLines(visiblePatterns);
-  chartManager._drawPatterns(candles, chartType, detectedPatterns);
-  if (typeof patternRenderer !== 'undefined') {
-    patternRenderer.render(chartManager, candles, chartType, detectedPatterns);
-  }
+  chartManager._drawPatterns(candles, chartType, _filterPatternsForViz(detectedPatterns));
+  _renderOverlays();
 
   // 시그널도 보이는 구간으로 재분석
   if (typeof signalEngine !== 'undefined') {
@@ -2203,6 +2210,7 @@ function initSignalFilter() {
     vizMenu.querySelectorAll('input[data-viz]').forEach(function(cb) {
       cb.addEventListener('change', function() {
         vizToggles[cb.dataset.viz] = cb.checked;
+        _savePrefs({ vizToggles: vizToggles });
         // 시그널 필터 가시성 연동
         if (filterWrap) {
           filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
