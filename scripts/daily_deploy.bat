@@ -26,7 +26,7 @@ echo [3/5] Index update...
 python scripts/download_ohlcv.py --update-index-only 2>nul
 
 echo [4/5] Cloudflare Pages deploy...
-call npx wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true
+call npx wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message="daily-update"
 
 echo.
 echo ============================================
