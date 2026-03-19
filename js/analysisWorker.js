@@ -25,6 +25,17 @@
 // ── Worker 초기화 상태 ────────────────────────────────
 let _workerReady = false;
 
+// ── [PERF] 분석 결과 캐시 — 동일 캔들 재분석 방지 ────
+// 캔들 길이 + 마지막 캔들의 time + close로 변경 감지
+// drag 이벤트에서 동일 visible 구간 반복 요청 시 캐시 적중
+let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
+
+function _makeCacheKey(candles) {
+  if (!candles || !candles.length) return '';
+  var last = candles[candles.length - 1];
+  return candles.length + '_' + last.time + '_' + last.close;
+}
+
 // ── Worker 내부에 필요한 스크립트 로드 ───────────────
 // importScripts 경로는 Worker 파일(js/) 기준 상대 경로
 try {
@@ -67,19 +78,37 @@ self.onmessage = function (e) {
         ? candles.slice(0, -1)
         : candles;
 
-      // 1) 캔들 패턴 분석
-      const patterns = patternEngine.analyze(analyzeCandles);
+      // [PERF] 캐시 키 비교 — 동일 캔들이면 재분석 건너뜀
+      // drag 이벤트에서 동일 visible 구간 반복 요청 시 효과적
+      const cacheKey = _makeCacheKey(analyzeCandles);
+      let patterns, signals, stats;
 
-      // 2) 지표 시그널 + 복합 시그널 분석
-      //    signalEngine.analyze()는 IndicatorCache를 내부 생성하며,
-      //    cache 객체는 함수를 포함하므로 structured clone 불가 → 전달하지 않음
-      const result = signalEngine.analyze(analyzeCandles, patterns);
+      if (_analyzeCache.key === cacheKey && _analyzeCache.patterns) {
+        // 캐시 적중: 이전 분석 결과 재사용
+        patterns = _analyzeCache.patterns;
+        signals = _analyzeCache.signals;
+        stats = _analyzeCache.stats;
+      } else {
+        // 캐시 미스: 새로 분석
+        // 1) 캔들 패턴 분석
+        patterns = patternEngine.analyze(analyzeCandles);
+
+        // 2) 지표 시그널 + 복합 시그널 분석
+        //    signalEngine.analyze()는 IndicatorCache를 내부 생성하며,
+        //    cache 객체는 함수를 포함하므로 structured clone 불가 → 전달하지 않음
+        const result = signalEngine.analyze(analyzeCandles, patterns);
+        signals = result.signals;
+        stats = result.stats;
+
+        // 캐시 갱신
+        _analyzeCache = { key: cacheKey, patterns: patterns, signals: signals, stats: stats };
+      }
 
       self.postMessage({
         type: 'result',
         patterns: patterns,
-        signals: result.signals,
-        stats: result.stats,
+        signals: signals,
+        stats: stats,
         version: version,
         source: msg.source || 'full',
       });
@@ -99,7 +128,16 @@ self.onmessage = function (e) {
     try {
       const { candles, version } = msg;
 
-      // backtester.backtestAll()은 내부적으로 patternEngine.analyze() 호출
+      // [PERF] 이전 analyze 결과가 동일 캔들이면
+      // backtester의 _analyzeCache를 미리 채워서 중복 patternEngine.analyze() 방지
+      const btCacheKey = _makeCacheKey(candles);
+      if (_analyzeCache.key === btCacheKey && _analyzeCache.patterns) {
+        backtester._analyzeCache = {
+          _candles: candles,
+          patterns: _analyzeCache.patterns,
+        };
+      }
+
       const results = backtester.backtestAll(candles);
 
       self.postMessage({

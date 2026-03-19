@@ -401,19 +401,19 @@ const signalRenderer = (() => {
 
     if (volBreakoutSet.size === 0) return;
 
-    // 현재 volumeSeries 데이터를 재설정 (강조 색상 적용)
-    const volData = candles.map((c, i) => {
-      let color;
-      if (volBreakoutSet.has(i)) {
-        // 금색 테두리 효과: 밝은 금색으로 표시
-        color = KRX_COLORS.ACCENT_FILL(0.7);
-      } else {
-        color = c.close >= c.open ? KRX_COLORS.UP_FILL(0.45) : KRX_COLORS.DOWN_FILL(0.45);
+    // [PERF] 전체 배열 재생성 대신 breakout 봉만 개별 update()
+    // volumeSeries.update()는 기존 데이터에서 해당 time의 바만 갱신
+    // → O(N) setData 대신 O(k) update (k = breakout 개수, 보통 2~5개)
+    volBreakoutSet.forEach(function(idx) {
+      if (idx >= 0 && idx < candles.length) {
+        var c = candles[idx];
+        cm.volumeSeries.update({
+          time: c.time,
+          value: c.volume,
+          color: KRX_COLORS.ACCENT_FILL(0.7),
+        });
       }
-      return { time: c.time, value: c.volume, color };
     });
-
-    cm.volumeSeries.setData(volData);
   }
 
 

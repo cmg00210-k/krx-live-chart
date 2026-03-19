@@ -63,6 +63,9 @@ class ChartManager {
 
     // [PERF] 지표 데이터 캐싱 — 동일 데이터 setData() 중복 호출 방지
     this._lastDataKey = {};
+    // [PERF] 지표 계산 결과 캐싱 — 캔들 변경 시에만 재계산
+    // key: candles.length + '_' + lastCandle.time, results: { ma5, ma20, ... }
+    this._indicatorCache = { key: null, results: {} };
     // [UX] RSI/MACD 최근 계산값 저장 (크로스헤어 툴팁용)
     this._lastRsiValues = null;
     this._lastMacdValues = null;
@@ -335,6 +338,14 @@ class ChartManager {
     const times = candles.map(c => c.time);
     const closes = candles.map(c => c.close);
 
+    // [PERF] 지표 계산 캐시: 캔들 길이 + 마지막 캔들 시간 + 마지막 종가로 변경 감지
+    // 동일 캔들이면 calcMA/calcEMA/calcBB 등 고비용 계산을 건너뜀
+    var _cacheKey = candles.length + '_' + candles[candles.length - 1].time + '_' + candles[candles.length - 1].close;
+    if (this._indicatorCache.key !== _cacheKey) {
+      this._indicatorCache = { key: _cacheKey, results: {} };
+    }
+    var _ic = this._indicatorCache.results;
+
     // ── 가격 데이터 ──
     if (chartType === 'line') {
       this.candleSeries.setData([]);
@@ -416,26 +427,29 @@ class ChartManager {
       this.volumeSeries.setData([]);
     }
 
-    // ── 이동평균 (MA) — 커스텀 기간 지원 ──
+    // ── 이동평균 (MA) — 커스텀 기간 지원 + 계산 캐싱 ──
     const maP = (_p.ma || { p1: 5, p2: 20, p3: 60 });
+    var _maK1 = 'ma_' + maP.p1, _maK2 = 'ma_' + maP.p2, _maK3 = 'ma_' + maP.p3;
     this._updateIndicatorLine('ma5', activeIndicators.has('ma'),
-      times, calcMA(closes, maP.p1), KRX_COLORS.MA_SHORT, 1);    // 단기
+      times, _ic[_maK1] || (_ic[_maK1] = calcMA(closes, maP.p1)), KRX_COLORS.MA_SHORT, 1);
     this._updateIndicatorLine('ma20', activeIndicators.has('ma'),
-      times, calcMA(closes, maP.p2), KRX_COLORS.MA_MID, 1);      // 중기
+      times, _ic[_maK2] || (_ic[_maK2] = calcMA(closes, maP.p2)), KRX_COLORS.MA_MID, 1);
     this._updateIndicatorLine('ma60', activeIndicators.has('ma'),
-      times, calcMA(closes, maP.p3), KRX_COLORS.MA_LONG, 1);     // 장기
+      times, _ic[_maK3] || (_ic[_maK3] = calcMA(closes, maP.p3)), KRX_COLORS.MA_LONG, 1);
 
-    // ── EMA — 커스텀 기간 지원 ──
+    // ── EMA — 커스텀 기간 지원 + 계산 캐싱 ──
     const emaP = (_p.ema || { p1: 12, p2: 26 });
+    var _emaK1 = 'ema_' + emaP.p1, _emaK2 = 'ema_' + emaP.p2;
     this._updateIndicatorLine('ema12', activeIndicators.has('ema'),
-      times, calcEMA(closes, emaP.p1), KRX_COLORS.EMA_12, 1);
+      times, _ic[_emaK1] || (_ic[_emaK1] = calcEMA(closes, emaP.p1)), KRX_COLORS.EMA_12, 1);
     this._updateIndicatorLine('ema26', activeIndicators.has('ema'),
-      times, calcEMA(closes, emaP.p2), KRX_COLORS.EMA_26, 1);
+      times, _ic[_emaK2] || (_ic[_emaK2] = calcEMA(closes, emaP.p2)), KRX_COLORS.EMA_26, 1);
 
-    // ── 일목균형표 — 커스텀 기간 지원 ──
+    // ── 일목균형표 — 커스텀 기간 지원 + 계산 캐싱 ──
     if (activeIndicators.has('ich')) {
       const ichP = (_p.ich || { tenkan: 9, kijun: 26, senkou: 52 });
-      const ich = calcIchimoku(candles, ichP.tenkan, ichP.kijun, ichP.senkou);
+      var _ichK = 'ich_' + ichP.tenkan + '_' + ichP.kijun + '_' + ichP.senkou;
+      var ich = _ic[_ichK] || (_ic[_ichK] = calcIchimoku(candles, ichP.tenkan, ichP.kijun, ichP.senkou));
       this._updateIndicatorLine('ichTenkan', true, times,
         ich.tenkan, KRX_COLORS.ICH_TENKAN, 1);
       this._updateIndicatorLine('ichKijun', true, times,
@@ -451,24 +465,26 @@ class ChartManager {
         this._removeIndicatorLine(k));
     }
 
-    // ── 칼만 필터 ──
+    // ── 칼만 필터 + 계산 캐싱 ──
     if (activeIndicators.has('kalman')) {
-      const kalman = calcKalman(closes);
+      var kalman = _ic['kalman'] || (_ic['kalman'] = calcKalman(closes));
       this._updateIndicatorLine('kalman', true, times, kalman, KRX_COLORS.KALMAN, 2);
     } else {
       this._removeIndicatorLine('kalman');
     }
 
-    // ── 볼린저 밴드 — 커스텀 파라미터 지원 ──
+    // ── 볼린저 밴드 — 커스텀 파라미터 지원 + 계산 캐싱 ──
     if (activeIndicators.has('bb')) {
       const bbP = (_p.bb || { period: 20, stdDev: 2 });
-      const bb = calcBB(closes, bbP.period, bbP.stdDev);
-      this._updateIndicatorLine('bbUpper', true,
-        times, bb.map(b => b.upper), KRX_COLORS.BB, 1);
-      this._updateIndicatorLine('bbMid', true,
-        times, bb.map(b => b.mid), KRX_COLORS.BB_MID, 1);
-      this._updateIndicatorLine('bbLower', true,
-        times, bb.map(b => b.lower), KRX_COLORS.BB, 1);
+      var _bbK = 'bb_' + bbP.period + '_' + bbP.stdDev;
+      var bb = _ic[_bbK] || (_ic[_bbK] = calcBB(closes, bbP.period, bbP.stdDev));
+      // BB 파생 배열도 캐싱 (map 재실행 방지)
+      var bbUp = _ic[_bbK + '_u'] || (_ic[_bbK + '_u'] = bb.map(b => b.upper));
+      var bbMid = _ic[_bbK + '_m'] || (_ic[_bbK + '_m'] = bb.map(b => b.mid));
+      var bbLow = _ic[_bbK + '_l'] || (_ic[_bbK + '_l'] = bb.map(b => b.lower));
+      this._updateIndicatorLine('bbUpper', true, times, bbUp, KRX_COLORS.BB, 1);
+      this._updateIndicatorLine('bbMid', true, times, bbMid, KRX_COLORS.BB_MID, 1);
+      this._updateIndicatorLine('bbLower', true, times, bbLow, KRX_COLORS.BB, 1);
     } else {
       this._removeIndicatorLine('bbUpper');
       this._removeIndicatorLine('bbMid');
