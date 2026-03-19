@@ -384,7 +384,7 @@ function _showConnectionGuide(onResolved) {
   if (text) text.style.display = 'none';
   if (sub) sub.style.display = 'none';
   if (guide) guide.style.display = '';
-  if (urlInput) urlInput.value = KRX_API_CONFIG.wsUrl || 'ws://localhost:8765';
+  if (urlInput) urlInput.value = KRX_API_CONFIG.wsUrl || _defaultWsUrl;
 
   // 연결 시도 버튼
   var retryBtn = document.getElementById('conn-guide-retry');
@@ -798,7 +798,16 @@ async function _continueInit() {
         if (typeof chartManager !== 'undefined' && chartManager.mainChart) {
           const container = document.getElementById('main-chart-container');
           if (container) {
-            chartManager.mainChart.applyOptions({ width: container.clientWidth });
+            const w = container.clientWidth;
+            // 메인 차트 + 모든 서브차트 동시 리사이즈 (사이드바 토글 시 너비 불일치 방지)
+            chartManager.mainChart.applyOptions({ width: w });
+            if (chartManager._resizeMap) {
+              chartManager._resizeMap.forEach(function(entry) {
+                if (entry.chart !== chartManager.mainChart) {
+                  try { entry.chart.applyOptions({ width: w }); } catch(e) {}
+                }
+              });
+            }
           }
         }
       }
@@ -1445,8 +1454,10 @@ function updateChartFull() {
   if (patternEnabled && now - _lastPatternAnalysis > 3000) {
 
     // Worker가 준비되어 있으면 비동기 분석 요청
+    var _workerWillRender = false;
     if (_analysisWorker && _workerReady) {
       _requestWorkerAnalysis();
+      _workerWillRender = true;  // Worker 콜백에서 full 렌더링 예정
     } else {
       // [OPT] 메인 스레드 동기 분석을 지연 실행 — 차트 렌더링 우선
       // 패턴 분석(50-200ms)이 차트 최초 렌더를 차단하지 않도록
@@ -1474,10 +1485,13 @@ function updateChartFull() {
     detectedSignals = [];
   }
 
-  chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
+  // [OPT] Worker 분석 요청 시: 패턴 없이 차트만 렌더 (Worker 콜백에서 재렌더 예정)
+  // → 이중 렌더링 제거 (stale 패턴으로 full 렌더 후 즉시 새 패턴으로 재렌더하는 낭비 방지)
+  chartManager.updateMain(candles, chartType, activeIndicators,
+    _workerWillRender ? [] : detectedPatterns, indParams);
 
   // 시그널 Canvas 시각화 (카테고리 필터 적용)
-  const filteredSignals = _filterSignalsByCategory(detectedSignals);
+  const filteredSignals = _workerWillRender ? [] : _filterSignalsByCategory(detectedSignals);
   if (typeof signalRenderer !== 'undefined') {
     signalRenderer.render(chartManager, candles, filteredSignals, {
       volumeActive: activeIndicators.has('vol'),

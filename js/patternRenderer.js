@@ -334,6 +334,13 @@ const patternRenderer = (() => {
                 ctx.moveTo(w - 50, hl.y - 5);
                 ctx.lineTo(w - 45, hl.y + 4);
                 ctx.lineTo(w - 55, hl.y + 4);
+              } else if (hl.marker === 'invalid') {
+                // 다이아몬드 (무효화)
+                ctx.moveTo(w - 50, hl.y - 5);
+                ctx.lineTo(w - 45, hl.y);
+                ctx.lineTo(w - 50, hl.y + 5);
+                ctx.lineTo(w - 55, hl.y);
+                ctx.closePath();
               } else {
                 // 위 삼각형 (목표)
                 ctx.moveTo(w - 50, hl.y + 5);
@@ -467,7 +474,25 @@ const patternRenderer = (() => {
             ctx.fillStyle = lb.color;
             ctx.fillText(lb.text, lb.x + 1.5, labelY);
 
-            // (신뢰도 도트 제거 — 라벨 텍스트에 이미 "이중바닥 82%" 포함)
+            // ── 적중 상태 도트 (Active=금색◌ / Hit=빨강● / Failed=파랑●) ──
+            if (lb.outcome) {
+              const dotX = boxX + boxW + 5;
+              const dotR = 3.5;
+              ctx.beginPath();
+              ctx.arc(dotX, labelY, dotR, 0, Math.PI * 2);
+              if (lb.outcome === 'hit') {
+                ctx.fillStyle = KRX_COLORS.UP;
+                ctx.fill();
+              } else if (lb.outcome === 'failed') {
+                ctx.fillStyle = KRX_COLORS.DOWN;
+                ctx.fill();
+              } else {
+                // active: 빈 원 (진행 중)
+                ctx.strokeStyle = KRX_COLORS.ACCENT;
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+              }
+            }
           });
         }
 
@@ -578,6 +603,43 @@ const patternRenderer = (() => {
                   ctx.fillStyle = fz.stopColor;
                   ctx.fillText(slText, slX, slY);
                 }
+              }
+            }
+            // ── R:R 비율 수직 바 (목표/손절 양쪽 존재 시) ──
+            if (fz.rrRatio != null && fz.yTarget != null && fz.yStop != null) {
+              const barX = fz.x2 + 6;
+              if (barX < w - 40) {
+                // 목표 구간 수직선 (민트)
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = fz.targetBorder || 'rgba(150,220,200,0.65)';
+                ctx.beginPath();
+                ctx.moveTo(barX, fz.yEntry);
+                ctx.lineTo(barX, fz.yTarget);
+                ctx.stroke();
+                // 손절 구간 수직선
+                ctx.strokeStyle = fz.stopColor || 'rgba(224,80,80,0.5)';
+                ctx.beginPath();
+                ctx.moveTo(barX, fz.yEntry);
+                ctx.lineTo(barX, fz.yStop);
+                ctx.stroke();
+                // 진입점 마커
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(barX, fz.yEntry, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                // R:R 텍스트 라벨
+                ctx.font = "700 9px 'Pretendard', sans-serif";
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const rrText = 'R:R ' + (fz.rrRatio >= 10 ? fz.rrRatio.toFixed(0) : fz.rrRatio.toFixed(1));
+                const rrY = (fz.yEntry + fz.yTarget) / 2;
+                const rrM = ctx.measureText(rrText);
+                ctx.fillStyle = 'rgba(19,23,34,0.80)';
+                ctx.beginPath();
+                _roundRect(ctx, barX + 5, rrY - 7, rrM.width + 8, 14, 3);
+                ctx.fill();
+                ctx.fillStyle = fz.rrRatio >= 1.5 ? 'rgba(150,220,200,0.9)' : 'rgba(224,80,80,0.8)';
+                ctx.fillText(rrText, barX + 9, rrY);
               }
             }
           });
@@ -1148,7 +1210,24 @@ const patternRenderer = (() => {
       const baseName = PATTERN_NAMES_KO[p.type] || p.type;
       // 신뢰도(%) 추가: "이중바닥 82%"
       const confVal = p.quality != null ? p.quality : p.confidence;
-      const name = confVal != null ? `${baseName} ${Math.round(confVal)}%` : baseName;
+      let name = confVal != null ? `${baseName} ${Math.round(confVal)}%` : baseName;
+
+      // ── 패턴 적중 추적: Active/Hit/Failed ──
+      let outcome = null;
+      if ((p.priceTarget != null || p.stopLoss != null) && ei < candles.length - 1) {
+        const isBuy = _isBullish(p);
+        outcome = 'active';
+        for (let ci = ei + 1; ci < candles.length; ci++) {
+          if (p.priceTarget != null) {
+            if (isBuy && candles[ci].high >= p.priceTarget) { outcome = 'hit'; break; }
+            if (!isBuy && candles[ci].low <= p.priceTarget) { outcome = 'hit'; break; }
+          }
+          if (p.stopLoss != null) {
+            if (isBuy && candles[ci].low <= p.stopLoss) { outcome = 'failed'; break; }
+            if (!isBuy && candles[ci].high >= p.stopLoss) { outcome = 'failed'; break; }
+          }
+        }
+      }
 
       // X 위치: 패턴 중앙
       const midIdx = Math.round((si + ei) / 2);
@@ -1190,6 +1269,7 @@ const patternRenderer = (() => {
         bgColor: 'rgba(19,23,34,0.88)',
         borderColor: color,
         confidence: p.confidence,
+        outcome: outcome,
       });
     }
 
@@ -1226,6 +1306,39 @@ const patternRenderer = (() => {
           });
         }
       }
+
+      // ── 무효화 가격선: 패턴 구조 붕괴 수준 ──
+      const ei = top.endIndex, si = top.startIndex;
+      if (ei != null && si != null && ei < candles.length) {
+        const isBuy = _isBullish(top);
+        let invalidPrice = null;
+        if (isBuy) {
+          invalidPrice = Infinity;
+          for (let ci = si; ci <= ei && ci < candles.length; ci++) {
+            if (candles[ci].low < invalidPrice) invalidPrice = candles[ci].low;
+          }
+        } else {
+          invalidPrice = -Infinity;
+          for (let ci = si; ci <= ei && ci < candles.length; ci++) {
+            if (candles[ci].high > invalidPrice) invalidPrice = candles[ci].high;
+          }
+        }
+        // 손절선과 유의미하게 다를 때만 표시
+        if (invalidPrice != null && isFinite(invalidPrice) &&
+            (top.stopLoss == null || Math.abs(invalidPrice - top.stopLoss) / (top.stopLoss || 1) > 0.005)) {
+          const y = series.priceToCoordinate(invalidPrice);
+          if (y != null) {
+            hlines.push({
+              y: y,
+              color: '#FF6B35',
+              width: 1.2,
+              dash: [3, 3],
+              marker: 'invalid',
+              priceLabel: '무효 ' + invalidPrice.toLocaleString('ko-KR'),
+            });
+          }
+        }
+      }
     }
 
     // ══════════════════════════════════════════════════
@@ -1241,7 +1354,7 @@ const patternRenderer = (() => {
       if (p.priceTarget == null && p.stopLoss == null) return;
 
       const ei = p.endIndex;
-      if (ei == null || ei >= candles.length) return;
+      if (ei == null || ei < 0 || ei >= candles.length) return;
 
       const entry = candles[ei].close;
       if (!entry || entry === 0) return;
@@ -1249,12 +1362,16 @@ const patternRenderer = (() => {
       const isBuy = _isBullish(p);
 
       // Forecast Zone 너비: 패턴 끝 → 오른쪽 8봉 연장
+      // 패턴이 마지막 봉이면 fzEnd === fzStart → 폭 0 → skip
       const fzStart = ei;
       const fzEnd = Math.min(ei + 8, candles.length - 1);
+      if (fzEnd <= fzStart) return;   // 마지막 봉 패턴: 예측 영역 미표시
 
       const startCoord = toXY(candles[fzStart].time, entry);
       const endCoord = toXY(candles[fzEnd].time, entry);
       if (startCoord.x == null || endCoord.x == null) return;
+      // 좌표 변환 후에도 폭 0 체크 (같은 봉이 같은 x로 변환된 경우)
+      if (Math.abs(endCoord.x - startCoord.x) < 2) return;
 
       const zone = {
         x1: startCoord.x,
@@ -1302,6 +1419,15 @@ const patternRenderer = (() => {
           zone.stopStripe = 'rgba(150,220,200,0.16)';
           zone.stopBorder = 'rgba(150,220,200,0.35)';
           zone.stopColor  = isBuy ? '#5086DC' : '#E05050';
+        }
+      }
+
+      // R:R 비율 바 데이터 (목표가 + 손절가 모두 존재 시)
+      if (p.priceTarget != null && p.stopLoss != null) {
+        const targetDist = Math.abs(p.priceTarget - entry);
+        const stopDist = Math.abs(p.stopLoss - entry);
+        if (stopDist > 0) {
+          zone.rrRatio = +(targetDist / stopDist).toFixed(2);
         }
       }
 

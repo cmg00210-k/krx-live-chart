@@ -102,7 +102,7 @@ class RealtimeProvider {
   // ══════════════════════════════════════════════════
 
   _connectWebSocket(stock, timeframe) {
-    const wsUrl = KRX_API_CONFIG.wsUrl || 'ws://localhost:8765';
+    const wsUrl = KRX_API_CONFIG.wsUrl || _defaultWsUrl || 'ws://localhost:8765';
 
     // 이전 연결 정리
     this._closeWebSocket();
@@ -166,10 +166,9 @@ class RealtimeProvider {
         this._emit({ error: true, message: 'Kiwoom 로그인 실패 — 서버 재시작 필요' });
       } else if (this._stock && this._wsReconnectCount < this._wsMaxReconnect) {
         this._wsReconnectCount++;
-        const delay = Math.min(
-          this._wsReconnectDelay * Math.pow(1.5, this._wsReconnectCount - 1),
-          15000  // 서버 기동 + 로그인 대기 동안 빠른 재연결 유지
-        );
+        const baseDelay = this._wsReconnectDelay * Math.pow(1.5, this._wsReconnectCount - 1);
+        const jitter = Math.random() * baseDelay * 0.3;  // 30% 지터 (다수 클라이언트 동시 재연결 방지)
+        const delay = Math.min(baseDelay + jitter, 15000);
         console.log(
           '[RealtimeProvider] 재연결 시도 %d/%d (%.1f초 후)',
           this._wsReconnectCount, this._wsMaxReconnect, delay / 1000

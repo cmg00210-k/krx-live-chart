@@ -71,9 +71,18 @@ const _idb = {
   }
 };
 
+// ── 배포 환경 자동 감지: cheesestock.co.kr → WSS 프록시, 그 외 → localhost ──
+var _defaultWsUrl = 'ws://localhost:8765';
+try {
+  var _h = window.location.hostname;
+  if (_h === 'www.cheesestock.co.kr' || _h === 'cheesestock.co.kr') {
+    _defaultWsUrl = 'wss://ws.cheesestock.co.kr/ws';
+  }
+} catch(e) {}
+
 const KRX_API_CONFIG = {
   mode: 'ws',     // 'ws' | 'file' | 'demo' | 'koscom'
-  wsUrl: 'ws://localhost:8765',  // WebSocket 서버 주소 (Kiwoom OCX)
+  wsUrl: _defaultWsUrl,
   dataDir: 'data', // file 모드에서 JSON 파일 경로
 };
 
@@ -184,24 +193,18 @@ class KRXDataService {
     // ── 모드 자동감지: WS 서버 프로브 → file → demo ──
     // 3초 이내 WS 서버 연결 가능 여부 확인. 실패 시 file 모드로 전환.
     if (KRX_API_CONFIG.mode === 'ws') {
-      try {
-        var probeWs = new WebSocket(KRX_API_CONFIG.wsUrl);
-        var probeOk = await new Promise(function(resolve) {
-          probeWs.onopen = function() { probeWs.close(); resolve(true); };
-          probeWs.onerror = function() { resolve(false); };
-          setTimeout(function() {
-            try { probeWs.close(); } catch(e) {}
-            resolve(false);
-          }, 3000);
-        });
-        if (!probeOk) {
-          console.log('[KRX] WS 서버 미감지 — file 모드로 전환');
-          KRX_API_CONFIG.mode = 'file';
+      // [OPT] WS 프로브 비동기화 — 초기 로딩 3초 블로킹 제거
+      // file 모드로 즉시 전환하여 차트를 먼저 표시,
+      // WS 프로브 성공 시 백그라운드에서 ws 모드 복원
+      KRX_API_CONFIG.mode = 'file';
+      this.probeWsServer(KRX_API_CONFIG.wsUrl, 3000).then(function(ok) {
+        if (ok) {
+          KRX_API_CONFIG.mode = 'ws';
+          console.log('[KRX] WS 서버 감지 — ws 모드 활성화 (백그라운드)');
+        } else {
+          console.log('[KRX] WS 서버 미감지 — file 모드 유지');
         }
-      } catch(e) {
-        console.log('[KRX] WS 프로브 실패:', e.message, '— file 모드로 전환');
-        KRX_API_CONFIG.mode = 'file';
-      }
+      });
     }
 
     if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;

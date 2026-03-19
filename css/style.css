@@ -76,6 +76,8 @@ html, body {
   font-size: var(--fs-body);
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;  /* [FIX] macOS 폰트 렌더링 일관성 */
+  text-rendering: optimizeLegibility;
 }
 
 
@@ -182,9 +184,11 @@ html, body {
   grid-template-rows: 1fr;
   height: calc(100vh - var(--header-h));
   max-height: calc(100vh - var(--header-h));
-  min-width: 800px;
+  min-width: 0;  /* [FIX] 800px→0: 반응형에서 가로 스크롤 방지, 각 열 minmax가 이미 제한 */
   gap: 0;
   transition: grid-template-columns .25s ease;
+  /* [FIX] 그리드 전환 중 서브픽셀 렌더링으로 폰트 흐림 방지 */
+  backface-visibility: hidden;
 }
 #main.sidebar-collapsed {
   grid-template-columns:
@@ -216,10 +220,12 @@ html, body {
   width: var(--sidebar-w);
   min-width: 0;
   min-height: 0; /* grid item이 콘텐츠 밀어내지 않도록 */
+  will-change: width;  /* [FIX] 사이드바 토글 시 GPU 가속으로 폰트 깜빡임 감소 */
 }
 #main.sidebar-collapsed #sidebar {
   width: var(--sidebar-collapsed);
   border-right: none;
+  pointer-events: none;  /* [FIX] width:0 상태에서 숨겨진 콘텐츠 클릭 방지 */
 }
 
 /* ── 1. Controls 영역 (검색 + 정렬 + 필터) ── */
@@ -920,9 +926,9 @@ html, body {
 
 #chart-area {
   background: #131722;
-  border-right: 1px solid var(--border);
+  border-right: none;  /* [FIX] C열 border-left가 경계선 담당 → 이중 보더 제거 */
   display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: inset 1px 0 0 rgba(42,46,57,0.3), inset -1px 0 0 rgba(42,46,57,0.3);
+  box-shadow: inset 1px 0 0 rgba(42,46,57,0.3);  /* [FIX] 우측 inset 제거 — C열 border와 겹침 */
   min-height: 0; /* flex/grid item이 콘텐츠 밀어내지 않도록 */
   padding-left: 1px;
 }
@@ -949,10 +955,13 @@ html, body {
   display: flex; align-items: center; gap: var(--sp-2);
   white-space: nowrap; line-height: 1.2;
   position: relative; /* 연결 설정 패널 기준점 */
+  min-width: 0;  /* [FIX] flex 자식 말줄임 허용 — 좁은 화면에서 텍스트 클리핑 방지 */
+  overflow: hidden;
 }
 .sh-name {
   font-size: var(--fs-heading); font-weight: 700; color: #fff;
   letter-spacing: -0.01em; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis;  /* [FIX] 긴 종목명 리사이즈 시 클리핑→말줄임 */
 }
 .sh-code {
   font-size: var(--fs-caption); color: var(--text-muted);
@@ -1005,7 +1014,8 @@ html, body {
   display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
   padding: var(--sp-1) var(--sp-2);
   background: var(--bg-element); border-radius: var(--radius);
-  min-width: 68px;
+  min-width: 0;  /* [FIX] 68px→0: 리사이즈 시 stock-header 오버플로우 방지 */
+  flex-shrink: 1;  /* 좁아질 때 압축 허용 */
 }
 .sh-detail-label {
   font-size: var(--fs-nano); color: var(--text-muted);
@@ -1023,9 +1033,12 @@ html, body {
 #chart-toolbar {
   height: var(--toolbar-h); display: flex; align-items: center;
   padding: 0 var(--sp-3); gap: var(--sp-1);
-  border-bottom: 1px solid var(--border); flex-shrink: 0; overflow: hidden;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  overflow-x: auto; overflow-y: hidden;  /* [FIX] hidden→auto: 리사이즈 시 버튼 텍스트 클리핑 방지 */
+  scrollbar-width: none;  /* Firefox: 스크롤바 숨김 */
   background: var(--bg-element);
 }
+#chart-toolbar::-webkit-scrollbar { display: none; }  /* Chrome: 스크롤바 숨김 */
 .sep { width: 1px; height: 18px; background: var(--border); margin: 0 var(--sp-1); flex-shrink: 0; }
 #chart-toolbar .sep { background: #333; }
 
@@ -1170,10 +1183,11 @@ html, body {
 #pattern-panel {
   background: var(--panel);
   border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border-right: none;  /* [FIX] D열 border-left와 중복 → 1px 겹침 방지 */
   display: flex; flex-direction: column;
   overflow-x: hidden; overflow-y: auto;
   min-height: 0; /* grid item이 콘텐츠 밀어내지 않도록 */
+  min-width: 0;  /* [FIX] grid 자식 오버플로우 방지 — C열 콘텐츠가 그리드 밀어내기 차단 */
 }
 
 /* ── 패턴 패널 토글 버튼 (1200px 이하에서만 표시) ── */
@@ -1510,6 +1524,7 @@ html, body {
   display: flex; flex-direction: column;
   overflow: hidden;
   min-height: 0; /* grid item이 콘텐츠 밀어내지 않도록 */
+  min-width: 0;  /* [FIX] grid 자식 오버플로우 방지 — D열 축소 시 콘텐츠 밀어내기 차단 */
 }
 
 .rp-header {
@@ -1521,6 +1536,8 @@ html, body {
   flex: 1; padding: var(--sp-2) var(--sp-3); overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 0;
   scrollbar-gutter: stable;  /* [FIX] Windows 17px 스크롤바 레이아웃 시프트 방지 */
+  min-height: 0;  /* [FIX] flex 자식 오버플로우 허용 — 콘텐츠가 패널 밀어내지 않도록 */
+  word-break: keep-all;  /* [FIX] 한글 텍스트 단어 단위 줄바꿈 보장 */
 }
 .fin-period-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -1548,12 +1565,16 @@ html, body {
 }
 .fin-row-label {
   font-size: var(--fs-body); color: var(--text-sub);
+  min-width: 0;  /* [FIX] flex 축소 허용 — D열 좁을 때 값 영역 보장 */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fin-row-value {
   font-size: var(--fs-body); font-weight: 700; font-family: var(--font-mono);
   color: var(--text);
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;  /* [FIX] 숫자 값 줄바꿈 방지 — 단위와 분리되지 않도록 */
+  flex-shrink: 0;
 }
 .fin-row-value.up { color: var(--up); }
 .fin-row-value.dn { color: var(--down); }
@@ -1600,6 +1621,7 @@ html, body {
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
   text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;  /* [FIX] D열 축소 시 숫자 넘침 방지 */
 }
 .fin-grid-value.up { color: var(--up); }
 .fin-grid-value.dn { color: var(--down); }
@@ -1657,6 +1679,9 @@ html, body {
   color: var(--text-muted);
   text-align: right;
   max-width: 60%;
+  min-width: 0;  /* [FIX] flex 자식 축소 허용 */
+  word-break: keep-all;  /* [FIX] 한글 단어 단위 줄바꿈 */
+  line-height: 1.4;
 }
 
 .fin-spark-wrap {
@@ -1670,7 +1695,9 @@ html, body {
   font-size: var(--fs-micro); color: var(--text-muted);
   text-align: right; letter-spacing: 0.02em;
 }
-#opm-sparkline { width: 100%; height: 80px; margin-top: 2px; display: block; }
+#opm-sparkline { width: 100%; height: 80px; margin-top: 2px; display: block; max-width: 100%; }
+/* [FIX] 캔버스 요소 컨테이너 밖 넘침 방지 */
+#fin-content canvas { max-width: 100%; }
 
 /* ── PER 밴드 차트 ── */
 .fin-per-band-wrap {
@@ -1814,7 +1841,7 @@ html, body {
   position: absolute;
   bottom: calc(100% + 6px); left: 50%;
   transform: translateX(-50%);
-  width: max-content; max-width: 180px;
+  width: max-content; max-width: min(180px, 80vw);  /* [FIX] 좁은 화면에서 뷰포트 밖 넘침 방지 */
   padding: var(--sp-2);
   background: rgba(20, 20, 20, 0.96);
   border: 1px solid var(--border);
@@ -1827,6 +1854,7 @@ html, body {
   opacity: 0; visibility: hidden;
   transition: opacity .15s, visibility .15s;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  word-break: keep-all;  /* [FIX] 한글 tooltip 단어 단위 줄바꿈 */
 }
 .fin-info::before {
   content: '';
@@ -2274,7 +2302,7 @@ html, body {
 }
 .rs-row {
   display: grid;
-  grid-template-columns: 80px 1fr 56px 50px 40px;
+  grid-template-columns: minmax(60px, 80px) 1fr minmax(40px, 52px) minmax(32px, 40px) minmax(28px, 36px) minmax(28px, 34px);  /* [FIX] 고정px→minmax: 좁은 화면에서 열 압축 허용 */
   align-items: center; gap: var(--sp-2);
   height: 24px;
 }
@@ -2307,6 +2335,12 @@ html, body {
   font-family: var(--font-mono); font-size: var(--fs-nano);
   color: var(--text-muted); text-align: right;
 }
+.rs-rr {
+  font-family: var(--font-mono); font-size: var(--fs-nano);
+  color: var(--text-sub); text-align: right; white-space: nowrap;
+}
+.rs-rr.up { color: var(--up); }
+.rs-rr.dn { color: var(--down); }
 
 .rs-footer {
   padding: var(--sp-1) var(--sp-3);
@@ -2429,6 +2463,10 @@ html, body {
   backdrop-filter: blur(8px);
   border: 1px solid rgba(42,46,57,0.3);
   line-height: 1.4;
+  max-width: calc(100% - var(--sp-4));  /* [FIX] 차트 영역 밖으로 넘침 방지 */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .ohlc-label {
   color: var(--text-muted); font-weight: 700; margin-left: var(--sp-2);
@@ -2558,7 +2596,7 @@ html, body {
 .sh-price, .sb-price, .sb-change,
 .php-ret, .php-wr, .php-count, .php-expected, .php-ci,
 .ohlc-val, .sh-detail-value,
-.rs-return, .rs-winrate, .rs-count,
+.rs-return, .rs-winrate, .rs-rr, .rs-count,
 .ticker-val,
 .ph-return, .ph-count, .ph-winrate {
   font-feature-settings: "tnum";
@@ -2807,6 +2845,9 @@ html, body {
     transition: transform .25s ease, box-shadow .25s ease;
     box-shadow: none;
     border-left: 1px solid var(--border);
+    border-right: none;  /* [FIX] 고정 위치에서는 우측 보더 불필요 */
+    will-change: transform;  /* [FIX] GPU 가속으로 슬라이드 시 폰트 렌더링 안정 */
+    overflow-y: auto;  /* [FIX] 고정 위치 패널에서 세로 스크롤 보장 */
   }
   #pattern-panel.pp-visible {
     transform: translateX(0);
@@ -2822,6 +2863,10 @@ html, body {
   #main {
     grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
     min-width: 0;
+  }
+  /* [FIX] sidebar-collapsed 상태도 동일 그리드 적용 — 1200px 규칙 상속 방지 */
+  #main.sidebar-collapsed {
+    grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
   }
   #sidebar { width: 0; border-right: none; }
 
@@ -2865,6 +2910,7 @@ html, body {
     box-shadow: none;
     border-right: 1px solid var(--border);
     overflow-y: auto;
+    will-change: transform;  /* [FIX] GPU 가속으로 드로어 슬라이드 시 폰트 안정 */
   }
   #sidebar.sb-drawer-open {
     transform: translateX(0);
@@ -2874,6 +2920,7 @@ html, body {
   #main.sidebar-collapsed #sidebar {
     width: min(280px, 80vw);
     border-right: 1px solid var(--border);
+    pointer-events: auto;  /* [FIX] 모바일 드로어에서 데스크톱 collapsed pointer-events:none 해제 */
   }
 
   /* 사이드바 백드롭 */
@@ -2894,7 +2941,7 @@ html, body {
 
   /* ── D열: 바텀시트 오버레이 ── */
   #right-panel {
-    display: flex !important;
+    display: flex;  /* [FIX] !important 제거 — JS display:none 토글과 충돌 방지 */
     position: fixed;
     bottom: 0; left: 0; right: 0;
     height: min(60vh, 480px);
@@ -2906,6 +2953,7 @@ html, body {
     border-left: none;
     border-radius: 12px 12px 0 0;
     overflow-y: auto;
+    will-change: transform;  /* [FIX] GPU 가속으로 바텀시트 슬라이드 시 폰트 안정 */
   }
   #right-panel.rp-sheet-open {
     transform: translateY(0);
@@ -3331,7 +3379,7 @@ html, body {
 .conn-panel {
   position: absolute; top: calc(100% + 4px); right: 0;
   background: var(--bg-elevated, #1E1E1E); border: 1px solid var(--border);
-  border-radius: 8px; padding: 12px; min-width: 280px; z-index: 500;
+  border-radius: 8px; padding: 12px; min-width: 280px; z-index: 510;  /* [FIX] 500→510: #header z-index:500 위에 표시 */
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
 }
 .conn-panel-title {

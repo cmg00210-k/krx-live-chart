@@ -463,12 +463,20 @@ function updatePatternHistoryBar(patterns) {
     const retCls = h5.mean > 0 ? 'up' : h5.mean < 0 ? 'dn' : 'flat';
     const retSign = h5.mean > 0 ? '+' : '';
 
+    // R:R 비율 표시
+    var rrText = '';
+    if (h5.riskReward != null && h5.riskReward > 0 && h5.riskReward !== Infinity) {
+      var rrColor = h5.riskReward >= 1.5 ? 'var(--up)' : h5.riskReward < 1 ? 'var(--down)' : 'var(--text-muted)';
+      rrText = `<span style="font-size:10px;color:${rrColor};white-space:nowrap;margin-left:4px;" title="평균이익/평균손실">R:R ${h5.riskReward}</span>`;
+    }
+
     items.push(
       `<div class="ph-item">` +
       `<span class="ph-name">${result.name}</span>` +
       `<span class="ph-count">${result.sampleSize}회</span>` +
       `<span class="ph-return ${retCls}">${retSign}${h5.mean.toFixed(1)}% (5D)</span>` +
       `<span class="ph-winrate">${h5.winRate.toFixed(0)}%</span>` +
+      rrText +
       `</div>`
     );
   }
@@ -887,11 +895,19 @@ function updateReturnStatsGrid(patterns) {
     const barW = Math.min(100, (Math.abs(r.hs.mean) / maxAbsReturn) * 100);
     const sign = r.hs.mean > 0 ? '+' : '';
 
+    // R:R 비율
+    var rrSpan = '';
+    if (r.hs.riskReward != null && r.hs.riskReward > 0 && r.hs.riskReward !== Infinity) {
+      var rrC = r.hs.riskReward >= 1.5 ? 'up' : r.hs.riskReward < 1 ? 'dn' : '';
+      rrSpan = `<span class="rs-rr ${rrC}" title="평균이익/평균손실">${r.hs.riskReward}</span>`;
+    }
+
     return `<div class="rs-row">` +
       `<span class="rs-pattern-name">${r.name}</span>` +
       `<div class="rs-bar-wrap"><div class="rs-bar ${retCls}" style="width:${barW}%"></div></div>` +
       `<span class="rs-return ${retCls}">${sign}${r.hs.mean.toFixed(1)}%</span>` +
       `<span class="rs-winrate">${r.hs.winRate.toFixed(0)}%</span>` +
+      rrSpan +
       `<span class="rs-count">${r.count}</span>` +
       `</div>`;
   }).join('');
@@ -987,6 +1003,28 @@ function renderPatternCards(patterns) {
           }
         }
 
+        // R:R 비율 + 순수익률 (KRX 거래비용 차감)
+        var rrHtml = '';
+        if (h5 && h5.n > 0) {
+          if (h5.riskReward != null && h5.riskReward > 0 && h5.riskReward !== Infinity) {
+            var rrCls = h5.riskReward >= 1.5 ? 'up' : h5.riskReward < 1 ? 'dn' : '';
+            rrHtml += `
+            <div class="pp-stat-row">
+              <span class="pp-stat-label">R:R 비율</span>
+              <span class="pp-stat-value ${rrCls}" title="평균이익 +${h5.avgWin}% / 평균손실 -${h5.avgLoss}%">${h5.riskReward}</span>
+            </div>`;
+          }
+          var krxCost = (typeof backtester !== 'undefined' && backtester.KRX_COST) ? backtester.KRX_COST : 0.36;
+          var netReturn = +(h5.mean - krxCost).toFixed(1);
+          var netCls = netReturn > 0 ? 'up' : netReturn < 0 ? 'dn' : '';
+          var netSign = netReturn >= 0 ? '+' : '';
+          rrHtml += `
+            <div class="pp-stat-row">
+              <span class="pp-stat-label">순수익률</span>
+              <span class="pp-stat-value ${netCls}" title="5일 수익률 − 거래비용 ${krxCost}%">${netSign}${netReturn}%</span>
+            </div>`;
+        }
+
         statsHtml = `
           <div class="pp-card-stats">
             <div class="pp-stat-row">
@@ -1002,6 +1040,7 @@ function renderPatternCards(patterns) {
               <span class="pp-stat-value">${h5 && h5.n > 0 ? h5.winRate.toFixed(0) + '%' : '--'}</span>
             </div>` +
             expRetHtml +
+            rrHtml +
             (meta ? `
             <div class="pp-stat-row">
               <span class="pp-stat-label">학술 승률</span>

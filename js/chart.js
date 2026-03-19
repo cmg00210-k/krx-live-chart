@@ -937,13 +937,20 @@ class ChartManager {
               // [FIX] barSpacing은 실제 컨테이너 크기 변경(>10px) 시에만 재계산
               // 줌 제스처 중 ResizeObserver가 발동해도 barSpacing을 건드리지 않음
               // → 줌 리셋 버그 방지 (Lightweight Charts가 줌 중 applyOptions 호출 시 뷰 리셋)
+              let savedRange = null;
               if (isMainChart && Math.abs(width - _lastResizeWidth) > 10) {
+                // [FIX] 전체화면 전환 시 visible range 보존 → 줌 레벨 점프 방지
+                try { savedRange = chart.timeScale().getVisibleLogicalRange(); } catch(e2) {}
                 applyOpts.timeScale = {
                   barSpacing: Math.max(6, Math.floor(width / 17)),
                 };
               }
               _lastResizeWidth = width;
               chart.applyOptions(applyOpts);
+              // barSpacing 변경 후 이전 visible range 복원
+              if (savedRange) {
+                try { chart.timeScale().setVisibleLogicalRange(savedRange); } catch(e2) {}
+              }
             } catch (e) {}
           }
         }

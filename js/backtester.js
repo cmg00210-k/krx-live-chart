@@ -15,6 +15,9 @@ class PatternBacktester {
     /** 기본 분석 기간(N일 후) */
     this.HORIZONS = [1, 3, 5, 10, 20];
 
+    /** KRX 왕복 거래비용 (%) — 수수료(0.015%×2) + 거래세(0.18%) + 농특세(0.15%) */
+    this.KRX_COST = 0.36;
+
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
     this._META = {
       threeWhiteSoldiers:     { name: '적삼병',     signal: 'buy'  },
