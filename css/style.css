@@ -1037,8 +1037,21 @@ html, body {
   overflow-x: auto; overflow-y: hidden;  /* [FIX] hidden→auto: 리사이즈 시 버튼 텍스트 클리핑 방지 */
   scrollbar-width: none;  /* Firefox: 스크롤바 숨김 */
   background: var(--bg-element);
+  position: relative;  /* scroll hint ::after 포지셔닝 */
 }
 #chart-toolbar::-webkit-scrollbar { display: none; }  /* Chrome: 스크롤바 숨김 */
+
+/* 스크롤 힌트: 우측 페이드 그라디언트 — 더 많은 버튼이 있음을 표시 */
+#chart-toolbar::after {
+  content: '';
+  position: sticky;
+  right: 0;
+  min-width: 20px;
+  height: 100%;
+  background: linear-gradient(to right, transparent, var(--bg-element) 70%);
+  pointer-events: none;
+  flex-shrink: 0;
+}
 .sep { width: 1px; height: 18px; background: var(--border); margin: 0 var(--sp-1); flex-shrink: 0; }
 #chart-toolbar .sep { background: #333; }
 
@@ -2863,6 +2876,14 @@ html, body {
 
   /* 패널 토글 버튼 표시 */
   #pp-toggle { display: flex; }
+
+  /* 툴바 반응형: 텍스트 축약 + 패딩 축소 */
+  #chart-toolbar .tf-btn { padding: 3px 5px; font-size: 10px; }
+  #chart-toolbar .ct-btn { padding: 3px 5px; font-size: 10px; }
+  #chart-toolbar .ind-btn { padding: 3px 5px; font-size: 10px; }
+  #chart-toolbar .ind-dropdown-btn { padding: 3px 5px; font-size: 10px; }
+  #chart-toolbar .sep { margin: 0 1px; }
+  #chart-toolbar { gap: 2px; padding: 0 6px; }
 }
 
 /* ── 1024px: 사이드바 → 슬라이드 드로어 전환 ── */
@@ -2925,6 +2946,14 @@ html, body {
   .fin-trend-section .fin-trend-tabs { font-size: var(--fs-nano); }
   .fin-grid { grid-template-columns: 1fr 1fr; }  /* 180px 패널에서 3열→2열 */
   #return-stats-area { display: none; }
+
+  /* 툴바 반응형: 아이콘급 축소 + 구분선 제거 */
+  #chart-toolbar .tf-btn { padding: 2px 4px; font-size: 9px; }
+  #chart-toolbar .ct-btn { padding: 2px 4px; font-size: 9px; }
+  #chart-toolbar .ind-btn { padding: 2px 4px; font-size: 9px; }
+  #chart-toolbar .ind-dropdown-btn { padding: 2px 4px; font-size: 9px; }
+  #chart-toolbar .sep { margin: 0; width: 0; border: none; }
+  #chart-toolbar { gap: 1px; padding: 0 4px; }
 }
 
 /* ── 768px: 모바일 — 사이드바 드로어, D열 바텀시트 ── */
