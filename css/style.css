@@ -2809,7 +2809,7 @@ html, body {
   .sb-index-val { display: none; }
   .sb-sort-select { font-size: var(--fs-nano); }
   .sh-details { gap: var(--sp-1); }
-  .sh-detail-item { min-width: 60px; padding: 3px var(--sp-1); }
+  .sh-detail-item { min-width: 0; padding: 3px var(--sp-1); }  /* [FIX] 60px→0: 좁은 화면 오버플로우 방지 */
   #fin-trend-canvas { height: 60px; }
   .fin-trend-body { max-height: 80px; }
   .fin-info::after { max-width: 150px; }
