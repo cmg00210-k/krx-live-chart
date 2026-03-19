@@ -851,11 +851,12 @@ function drawFinTrendChart(data, metric) {
       ctx.stroke();
     }
 
-    // 바 위에 값 표시 (억원 → 조/억 단위)
+    // 바 위에 값 표시 (억원 → 조/억 단위) — 겹침 방지 thinning
     ctx.fillStyle = '#A0A0A0';
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
+    var prevLabelX = null;
     values.forEach((v, i) => {
       var barX = gap + i * (barW + gap);
       var barH = (Math.abs(v) / absMax) * (hasNeg ? chartH / 2 : chartH - 2);
@@ -866,8 +867,15 @@ function drawFinTrendChart(data, metric) {
         text = Math.round(v) + '억';
       }
       if (text) {
+        var centerX = barX + barW / 2;
+        var labelWidth = ctx.measureText(text).width;
+        // 이전 라벨과 너무 가까우면 건너뜀 (겹침 방지)
+        if (prevLabelX != null && Math.abs(centerX - prevLabelX) < labelWidth + 4) {
+          return; // skip this label
+        }
         var labelY = v >= 0 ? zeroY - barH - 2 : zeroY + barH + 10;
-        ctx.fillText(text, barX + barW / 2, labelY);
+        ctx.fillText(text, centerX, labelY);
+        prevLabelX = centerX;
       }
     });
   }

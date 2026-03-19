@@ -671,6 +671,16 @@ html, body {
 .sb-rsi.over { color: var(--up); }
 .sb-rsi.under { color: var(--down); }
 
+/* ── 17b. 사이드바 메타 레이블 (MC, V, R) ── */
+.sb-label {
+  font-size: 7px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  opacity: 0.45;
+  margin-right: 2px;
+  letter-spacing: 0.3px;
+}
+
 /* ── 18. 변동액 (전일 대비 가격 차이, 예: ▲500) ── */
 .sb-change-amt {
   font-size: var(--fs-nano);

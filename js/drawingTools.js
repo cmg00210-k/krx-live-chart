@@ -910,17 +910,25 @@ const drawingTools = (() => {
       }
     }
 
-    // [FIX] 드로잉 도구 활성 시 차트 드래그 스크롤 비활성화
-    // pressedMouseMove=true이면 차트가 클릭을 스크롤로 소비하여 드로잉 이벤트 차단됨
+    // [FIX] 드로잉 도구 활성 시 차트 드래그 스크롤 + 축 드래그 줌 비활성화
+    // pressedMouseMove=true이면 차트가 클릭을 스크롤로 소비하여 subscribeClick 차단됨
+    // axisPressedMouseMove=true이면 축 드래그가 클릭 이벤트를 가로챔
     if (_chartRef && _chartRef.mainChart) {
+      const active = !!_activeTool;
       _chartRef.mainChart.applyOptions({
         handleScroll: {
           mouseWheel: true,
-          pressedMouseMove: !_activeTool,  // 도구 활성 → 드래그 스크롤 OFF
-          horzTouchDrag: !_activeTool,
-          vertTouchDrag: !_activeTool,
+          pressedMouseMove: !active,   // 도구 활성 → 드래그 스크롤 OFF
+          horzTouchDrag: !active,
+          vertTouchDrag: !active,
+        },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: !active,  // 도구 활성 → 축 드래그 줌 OFF
         },
       });
+      console.log('[Draw] setTool:', toolName, '→ _activeTool:', _activeTool, ', scroll/scale locked:', active);
     }
 
     // 색상 선택기: select 모드에서 선택된 드로잉이 있으면 열 수 있게 준비
@@ -1119,11 +1127,12 @@ const drawingTools = (() => {
     _previewPoint = null;
     _selectedDrawing = null;
     _dragState = null;
-    // 차트 스크롤 복원
+    // 차트 스크롤 + 축 줌 복원
     if (_chartRef && _chartRef.mainChart) {
       try {
         _chartRef.mainChart.applyOptions({
           handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+          handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
         });
       } catch (e) {}
     }

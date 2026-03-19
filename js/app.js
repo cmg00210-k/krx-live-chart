@@ -2948,6 +2948,7 @@ function _initDrawingTools() {
   // (destroyAll()로 차트 객체가 교체되므로 subscribeClick/subscribeCrosshairMove 재등록)
   if (chartManager.mainChart) {
     chartManager.mainChart.subscribeClick(function(param) {
+      console.log('[Draw] click event', { tool: drawingTools.getActiveTool(), time: param.time, point: param.point });
       if (!drawingTools.getActiveTool()) return;
       if (!param.time) return;
 
@@ -2965,6 +2966,7 @@ function _initDrawingTools() {
       }
       if (price == null) return;
 
+      console.log('[Draw] click resolved', { price, time: param.time });
       drawingTools.handleChartClick(price, param.time);
     });
 

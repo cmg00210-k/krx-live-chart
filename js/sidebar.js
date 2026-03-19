@@ -814,14 +814,14 @@ const sidebarManager = (() => {
     const rsiVal = _getRSI(s.code);
     let rsiHtml = '';
     if (rsiVal != null) {
-      rsiHtml = '<span class="sb-rsi" style="color:' + _rsiColor(rsiVal) + '">' + rsiVal + '</span>';
+      rsiHtml = '<span class="sb-rsi" style="color:' + _rsiColor(rsiVal) + '"><span class="sb-label">R</span>' + rsiVal + '</span>';
     }
 
     // S3: 시가총액 표시
     const mcapText = _formatMarketCap(s.code);
     let mcapHtml = '';
     if (mcapText) {
-      mcapHtml = '<span class="sb-mcap">' + mcapText + '</span>';
+      mcapHtml = '<span class="sb-mcap"><span class="sb-label">MC</span>' + mcapText + '</span>';
     }
 
     // S6: 패턴명 → data-patterns 속성 (호버 툴팁)
@@ -871,7 +871,7 @@ const sidebarManager = (() => {
           '<span class="sb-spark-label">' + sparkLabel + '</span>' +
         '</span>' +
         mcapHtml +
-        '<span class="sb-volume">' + _formatVolume(volume) + '</span>' +
+        '<span class="sb-volume"><span class="sb-label">V</span>' + _formatVolume(volume) + '</span>' +
         rsiHtml +
         '<span class="sb-change-group">' +
           '<span class="sb-change-amt ' + changeClass + '" id="sb-amt-' + s.code + '">' + changeAmtText + '</span>' +
@@ -1440,7 +1440,7 @@ const sidebarManager = (() => {
 
       // R3: 거래량 갱신
       var volSpan = itemEl.querySelector('.sb-volume');
-      if (volSpan) volSpan.textContent = _formatVolume(lastVol);
+      if (volSpan) volSpan.innerHTML = '<span class="sb-label">V</span>' + _formatVolume(lastVol);
 
       // 가격 flash 효과 (캐시된 캔들이 있을 때만)
       if (!cdls || !cdls.length) continue;

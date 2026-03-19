@@ -89,21 +89,23 @@ const patternRenderer = (() => {
   ]);
 
   // ── 패턴 한글 이름 (간결) ──
+  // ── 패턴 한국어 명칭 (PATTERN_ACADEMIC_META.nameKo 기준) ──
+  // 한국 트레이더가 실제 사용하는 용어 (일본어 유래 표준 용어 포함)
   const PATTERN_NAMES_KO = {
-    hammer: '망치형', invertedHammer: '역망치', hangingMan: '교수형',
+    hammer: '해머', invertedHammer: '역해머', hangingMan: '교수형',
     shootingStar: '유성형', doji: '도지', dragonflyDoji: '잠자리도지',
     gravestoneDoji: '비석도지',
-    bullishEngulfing: '상승장악', bearishEngulfing: '하락장악',
-    bullishHarami: '상승잉태', bearishHarami: '하락잉태',
-    piercingLine: '관통형', darkCloud: '먹구름',
+    bullishEngulfing: '상승장악형', bearishEngulfing: '하락장악형',
+    bullishHarami: '상승잉태형', bearishHarami: '하락잉태형',
+    piercingLine: '관통형', darkCloud: '먹구름형',
     tweezerBottom: '족집게바닥', tweezerTop: '족집게천장',
     morningStar: '샛별형', eveningStar: '석별형',
     threeWhiteSoldiers: '적삼병', threeBlackCrows: '흑삼병',
     doubleBottom: '이중바닥', doubleTop: '이중천장',
-    headAndShoulders: 'H&S', inverseHeadAndShoulders: '역H&S',
-    ascendingTriangle: '상승삼각', descendingTriangle: '하락삼각',
+    headAndShoulders: '머리어깨형', inverseHeadAndShoulders: '역머리어깨형',
+    ascendingTriangle: '상승삼각형', descendingTriangle: '하락삼각형',
     risingWedge: '상승쐐기', fallingWedge: '하락쐐기',
-    symmetricTriangle: '대칭삼각', bullishFlag: '상승깃발',
+    symmetricTriangle: '대칭삼각형', bullishFlag: '상승깃발',
     bearishFlag: '하락깃발', cupAndHandle: '컵핸들',
     channel: '채널', rectangle: '박스권',
   };
@@ -542,7 +544,7 @@ const patternRenderer = (() => {
                 if (fz.returnText) {
                   const retX = zoneX + zoneW / 2;
                   const retY = (fz.yEntry + fz.yTarget) / 2;
-                  ctx.font = "700 10px 'Pretendard', sans-serif";
+                  ctx.font = "700 11px 'Pretendard', sans-serif";
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
                   // 텍스트 배경 (가독성)
@@ -1487,8 +1489,8 @@ const patternRenderer = (() => {
           const retSign = retPct >= 0 ? '+' : '';
           zone.returnText = `${retSign}${retPct.toFixed(1)}%`;
 
-          // [UX] 목표가 수익률 텍스트: 매수=빨강(UP), 매도=파랑(DOWN) — 작은 폰트로 방향 전달
-          zone.returnColor = isBuy ? KRX_COLORS.UP : KRX_COLORS.DOWN;
+          // [UX] 목표가 수익률 텍스트: 민트 통일 (패턴 전용 색상 — 차트 UP/DOWN과 무관)
+          zone.returnColor = KRX_COLORS.PTN_BUY;
           zone.targetFillNear = 'rgba(150,220,200,0.22)';
           zone.targetFillFar  = 'rgba(150,220,200,0.05)';
           zone.targetBorder   = 'rgba(150,220,200,0.45)';
@@ -1501,11 +1503,11 @@ const patternRenderer = (() => {
         if (stopCoord.y != null) {
           zone.yStop = stopCoord.y;
 
-          // [UX] 손절존: 민트 통일, 손절 텍스트는 반대색 (매수 손절=파랑, 매도 손절=빨강)
+          // [UX] 손절존: 민트 통일, 손절 텍스트도 PTN_STOP 색상 사용
           zone.stopFill   = 'rgba(150,220,200,0.10)';
           zone.stopStripe = 'rgba(150,220,200,0.16)';
           zone.stopBorder = 'rgba(150,220,200,0.35)';
-          zone.stopColor  = isBuy ? KRX_COLORS.DOWN : KRX_COLORS.UP;
+          zone.stopColor  = KRX_COLORS.PTN_STOP;
         }
       }
 
