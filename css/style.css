@@ -2142,7 +2142,7 @@ html, body {
 }
 .ind-select-all-label strong { font-weight: 600; font-size: var(--fs-caption); }
 .sf-check { gap: 4px; }
-.sf-check .sf-dot {
+.sf-check .sf-dot, .vz-check .sf-dot {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
   display: inline-block;
   transition: opacity var(--transition);
