@@ -2126,6 +2126,21 @@ html, body {
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--sp-1);
 }
+/* 지표/표시 드롭다운 내 첫 번째가 아닌 섹션 타이틀: 상단 여백 + 구분선 */
+.ind-dropdown-section-title + .ind-check + .ind-dropdown-section-title,
+.ind-dropdown-menu .ind-dropdown-section-title:not(:first-child):not(:nth-child(2)) {
+  margin-top: var(--sp-1);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+/* 전체 선택/해제 라벨 */
+.ind-select-all-label {
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--sp-1);
+  padding-bottom: 6px;
+  color: var(--text);
+}
+.ind-select-all-label strong { font-weight: 600; font-size: var(--fs-caption); }
 .sf-check { gap: 4px; }
 .sf-check .sf-dot {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;

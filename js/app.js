@@ -392,11 +392,14 @@ function _applyPrefsToUI() {
   if (retArea) retArea.style.display = patternEnabled ? '' : 'none';
 
   // 지표 체크박스 동기화 (activeIndicators ↔ DOM)
-  document.querySelectorAll('#ind-dropdown-menu input[type="checkbox"]').forEach(function (cb) {
+  document.querySelectorAll('#ind-dropdown-menu input[data-ind]').forEach(function (cb) {
     cb.checked = activeIndicators.has(cb.dataset.ind);
   });
   var indToggle = document.getElementById('ind-dropdown-toggle');
   if (indToggle) indToggle.classList.toggle('has-active', activeIndicators.size > 0);
+  // 전체 선택/해제 체크박스 상태 동기화
+  _syncIndSelectAll();
+  _syncVizSelectAll();
 
   // 사이드바: 복원된 종목 활성 표시
   if (currentStock && typeof sidebarManager !== 'undefined' && sidebarManager.setActive) {
@@ -2209,6 +2212,8 @@ function initSignalFilter() {
       cb.addEventListener('change', function() {
         vizToggles[cb.dataset.viz] = cb.checked;
         _savePrefs({ vizToggles: vizToggles });
+        // 전체 선택/해제 체크박스 상태 동기화
+        _syncVizSelectAll();
         // 시그널 필터 가시성 연동
         if (filterWrap) {
           filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
@@ -2624,8 +2629,8 @@ if (indDropdownToggle && indDropdownMenu) {
     }
   });
 
-  // 체크박스 변경 시 지표 토글
-  indDropdownMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+  // 체크박스 변경 시 지표 토글 (data-ind 속성이 있는 체크박스만 — select-all 제외)
+  indDropdownMenu.querySelectorAll('input[data-ind]').forEach(cb => {
     cb.addEventListener('change', () => {
       const ind = cb.dataset.ind;
       if (cb.checked) {
@@ -2635,10 +2640,75 @@ if (indDropdownToggle && indDropdownMenu) {
       }
       // 활성 지표가 있으면 드롭다운 버튼에 accent 표시
       indDropdownToggle.classList.toggle('has-active', activeIndicators.size > 0);
+      // 전체 선택/해제 체크박스 상태 동기화
+      _syncIndSelectAll();
       // 지표 상태를 localStorage에 저장
       _savePrefs({ indicators: Array.from(activeIndicators) });
       updateChartFull();
     });
+  });
+}
+
+// ── 지표 전체 선택/해제 ──
+function _syncIndSelectAll() {
+  var selectAll = document.getElementById('ind-select-all');
+  if (!selectAll) return;
+  var allCbs = document.querySelectorAll('#ind-dropdown-menu input[data-ind]');
+  var allChecked = true;
+  allCbs.forEach(function(cb) { if (!cb.checked) allChecked = false; });
+  selectAll.checked = allChecked && allCbs.length > 0;
+}
+
+var indSelectAll = document.getElementById('ind-select-all');
+if (indSelectAll) {
+  indSelectAll.addEventListener('change', function() {
+    var checked = indSelectAll.checked;
+    document.querySelectorAll('#ind-dropdown-menu input[data-ind]').forEach(function(cb) {
+      if (cb.checked !== checked) {
+        cb.checked = checked;
+        var ind = cb.dataset.ind;
+        if (checked) {
+          activeIndicators.add(ind);
+        } else {
+          activeIndicators.delete(ind);
+        }
+      }
+    });
+    var indTogBtn = document.getElementById('ind-dropdown-toggle');
+    if (indTogBtn) indTogBtn.classList.toggle('has-active', activeIndicators.size > 0);
+    _savePrefs({ indicators: Array.from(activeIndicators) });
+    updateChartFull();
+  });
+}
+
+// ── 표시(viz) 전체 선택/해제 ──
+function _syncVizSelectAll() {
+  var selectAll = document.getElementById('viz-select-all');
+  if (!selectAll) return;
+  var allCbs = document.querySelectorAll('#viz-toggle-menu input[data-viz]');
+  var allChecked = true;
+  allCbs.forEach(function(cb) { if (!cb.checked) allChecked = false; });
+  selectAll.checked = allChecked && allCbs.length > 0;
+}
+
+var vizSelectAll = document.getElementById('viz-select-all');
+if (vizSelectAll) {
+  vizSelectAll.addEventListener('change', function() {
+    var checked = vizSelectAll.checked;
+    document.querySelectorAll('#viz-toggle-menu input[data-viz]').forEach(function(cb) {
+      if (cb.checked !== checked) {
+        cb.checked = checked;
+        vizToggles[cb.dataset.viz] = checked;
+      }
+    });
+    _savePrefs({ vizToggles: vizToggles });
+    // 시그널 필터 가시성 연동
+    var filterWrap = document.getElementById('signal-filter-wrap');
+    if (filterWrap) filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
+    _renderOverlays();
+    if (typeof renderPatternPanel === 'function') {
+      renderPatternPanel(_filterPatternsForViz(detectedPatterns));
+    }
   });
 }
 
