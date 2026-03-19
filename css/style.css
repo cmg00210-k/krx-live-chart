@@ -488,12 +488,13 @@ html, body {
   user-select: none;
   font-size: var(--fs-caption);
   font-weight: 700;
-  color: var(--text);
-  background: var(--bg-element);
+  color: var(--text-sub);
+  background: var(--bg-elevated);
   transition: background var(--transition);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
+  border-left: 2px solid var(--accent);
 }
-.sb-header:hover { background: var(--bg-elevated); }
+.sb-header:hover { background: #323232; }
 .sb-header:active { background: rgba(160,136,48,0.08); }
 
 /* 섹션 접기/펼치기 화살표 */
@@ -570,15 +571,16 @@ html, body {
   position: relative;
 }
 .sb-item:hover {
-  background: var(--bg-element);
+  background: rgba(255,255,255,0.05);
   border-left-color: rgba(160,136,48,0.6);
 }
 .sb-item:hover .sb-name {
   color: #fff;
 }
 .sb-item.active {
-  background: rgba(160,136,48,0.10);
+  background: rgba(160,136,48,0.16);
   border-left-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(160,136,48,0.12);
 }
 .sb-item.active .sb-name { font-weight: 700; color: #fff; }
 .sb-item.active .sb-price { color: var(--text); }
@@ -895,17 +897,35 @@ html, body {
 
 /* ── 23. 최근 본 종목 섹션 ── */
 .sb-recent-section {
-  background: rgba(160,136,48,0.03);
+  background: rgba(160,136,48,0.05);
+  border-top: 1px solid rgba(160,136,48,0.15);
+  border-bottom: 1px solid rgba(160,136,48,0.15);
 }
 .sb-recent-section .sb-header {
-  background: rgba(160,136,48,0.06);
+  background: rgba(160,136,48,0.10);
+  border-left: 2px solid var(--accent);
 }
 .sb-recent-section .sb-header:hover {
-  background: rgba(160,136,48,0.12);
+  background: rgba(160,136,48,0.16);
 }
 .sb-recent-section .sb-item:hover .sb-remove {
   opacity: 1;
 }
+
+/* ── 23-b. 관심종목 섹션 ── */
+#sb-watchlist-section {
+  background: rgba(160,136,48,0.05);
+  border-top: 1px solid rgba(160,136,48,0.15);
+  border-bottom: 1px solid rgba(160,136,48,0.15);
+}
+#sb-watchlist-section .sb-header {
+  background: rgba(160,136,48,0.10);
+  border-left: 2px solid var(--accent);
+}
+#sb-watchlist-section .sb-header:hover {
+  background: rgba(160,136,48,0.16);
+}
+
 .sb-remove {
   position: absolute;
   right: 4px;
