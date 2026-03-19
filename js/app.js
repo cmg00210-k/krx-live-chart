@@ -10,9 +10,9 @@
 // ── 상태 ──
 let currentStock = ALL_STOCKS[0];
 let currentTimeframe = '1d';  // 기본 일봉 (장외에서도 데이터 있음)
-let activeIndicators = new Set(['vol', 'ma']);
+let activeIndicators = new Set(['vol']);  // 기본: 거래량만 (pure price chart)
 let chartType = 'candle';
-let patternEnabled = true;
+let patternEnabled = false;  // 기본 OFF: pure price chart → 사용자가 [분석] 클릭 시 활성화
 let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
