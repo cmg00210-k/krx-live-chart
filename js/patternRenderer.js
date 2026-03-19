@@ -167,10 +167,10 @@ const patternRenderer = (() => {
             ctx.fillStyle = g.fill;
             ctx.fillRect(rx, ry, glowW, rh);
 
-            // 얇은 실선 테두리 (alpha 0.3)
+            // 실선 테두리 (alpha 0.5 — 가시성 향상)
             ctx.strokeStyle = g.border;
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.3;
+            ctx.globalAlpha = 0.5;
             ctx.beginPath();
             ctx.rect(rx, ry, glowW, rh);
             ctx.stroke();
@@ -196,10 +196,10 @@ const patternRenderer = (() => {
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.fill();
 
-            // 실선 테두리 (연보라)
+            // 실선 테두리 (연보라, alpha 0.5 — 가시성 향상)
             ctx.strokeStyle = br.border;
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.3;
+            ctx.globalAlpha = 0.5;
             ctx.beginPath();
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.stroke();
@@ -831,11 +831,11 @@ const patternRenderer = (() => {
       const lo = toXY(c.time, c.low);
       if (hi.x == null || hi.y == null || lo.y == null) return;
 
-      // 캔들 패턴: 연보라 수직 스트라이프
+      // 캔들 패턴: 연보라 수직 스트라이프 (채우기 0.12 — 가시성 향상)
       const isNeutral = cfg.direction === 'neutral';
       const fillColor = isNeutral
-        ? 'rgba(200,200,200,0.10)'
-        : KRX_COLORS.PTN_CANDLE_FILL(0.10);
+        ? 'rgba(200,200,200,0.12)'
+        : KRX_COLORS.PTN_CANDLE_FILL(0.12);
       const borderColor = isNeutral
         ? CANDLE_NEUTRAL
         : CANDLE_COLOR;
@@ -876,11 +876,11 @@ const patternRenderer = (() => {
       const br = toXY(candles[ei].time, lower);
       if (tl.x == null || tl.y == null || br.x == null || br.y == null) return;
 
-      // 캔들 패턴: 균일 연보라 채우기 (그라데이션 제거)
+      // 캔들 패턴: 균일 연보라 채우기 (0.12 — 가시성 향상)
       brackets.push({
         x1: tl.x, y1: tl.y,
         x2: br.x, y2: br.y,
-        fill: KRX_COLORS.PTN_CANDLE_FILL(0.10),
+        fill: KRX_COLORS.PTN_CANDLE_FILL(0.12),
         border: CANDLE_COLOR,
       });
     }
@@ -907,6 +907,8 @@ const patternRenderer = (() => {
       if (!isFinite(minLow)) return;
 
       // 사각형 영역: (startIndex, minLow) → (endIndex, neckline)
+      // 넓은 패턴(>15봉)은 채우기 없이 좌/우 경계선 + 넥라인만 표시
+      const patternWidth = ei - si;
       const topLeft = toXY(candles[si].time, neckline);
       const bottomRight = toXY(candles[ei].time, minLow);
       if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
@@ -914,28 +916,47 @@ const patternRenderer = (() => {
         const ry = Math.min(topLeft.y, bottomRight.y);
         const rw = Math.abs(bottomRight.x - topLeft.x);
         const rh = Math.abs(bottomRight.y - topLeft.y);
-        data.trendAreas.push({
-          points: [
-            { x: rx, y: ry },
-            { x: rx + rw, y: ry },
-            { x: rx + rw, y: ry + rh },
-            { x: rx, y: ry + rh },
-          ],
-          fill: 'rgba(150,220,200,0.10)',
-        });
-        // 사각형 테두리 (민트, 1px, alpha 0.3)
-        data.polylines.push({
-          points: [
-            { x: rx, y: ry },
-            { x: rx + rw, y: ry },
-            { x: rx + rw, y: ry + rh },
-            { x: rx, y: ry + rh },
-            { x: rx, y: ry },
-          ],
-          color: 'rgba(150,220,200,0.30)',
-          width: 1,
-          dash: [],
-        });
+        // 10% 내부 패딩 (사각형 크기 축소)
+        const padY = rh * 0.10;
+
+        if (patternWidth <= 15) {
+          // 좁은 패턴: 채우기 + 테두리 (패딩 적용)
+          data.trendAreas.push({
+            points: [
+              { x: rx, y: ry + padY },
+              { x: rx + rw, y: ry + padY },
+              { x: rx + rw, y: ry + rh - padY },
+              { x: rx, y: ry + rh - padY },
+            ],
+            fill: 'rgba(150,220,200,0.10)',
+          });
+          data.polylines.push({
+            points: [
+              { x: rx, y: ry + padY },
+              { x: rx + rw, y: ry + padY },
+              { x: rx + rw, y: ry + rh - padY },
+              { x: rx, y: ry + rh - padY },
+              { x: rx, y: ry + padY },
+            ],
+            color: 'rgba(150,220,200,0.50)',
+            width: 1,
+            dash: [],
+          });
+        } else {
+          // 넓은 패턴(>15봉): 채우기 없이 좌/우 수직 경계선만 (lines-only 모드)
+          data.polylines.push({
+            points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
+            color: 'rgba(150,220,200,0.40)',
+            width: 1,
+            dash: [4, 3],
+          });
+          data.polylines.push({
+            points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
+            color: 'rgba(150,220,200,0.40)',
+            width: 1,
+            dash: [4, 3],
+          });
+        }
       }
 
       // 넥라인 수평 연장 (점선)
@@ -991,6 +1012,8 @@ const patternRenderer = (() => {
       if (!isFinite(maxHigh)) return;
 
       // 사각형 영역: (startIndex, neckline) → (endIndex, maxHigh)
+      // 넓은 패턴(>15봉)은 채우기 없이 좌/우 경계선 + 넥라인만 표시
+      const patternWidth = ei - si;
       const topLeft = toXY(candles[si].time, maxHigh);
       const bottomRight = toXY(candles[ei].time, neckline);
       if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
@@ -998,28 +1021,47 @@ const patternRenderer = (() => {
         const ry = Math.min(topLeft.y, bottomRight.y);
         const rw = Math.abs(bottomRight.x - topLeft.x);
         const rh = Math.abs(bottomRight.y - topLeft.y);
-        data.trendAreas.push({
-          points: [
-            { x: rx, y: ry },
-            { x: rx + rw, y: ry },
-            { x: rx + rw, y: ry + rh },
-            { x: rx, y: ry + rh },
-          ],
-          fill: 'rgba(150,220,200,0.10)',
-        });
-        // 사각형 테두리 (민트, 1px, alpha 0.3)
-        data.polylines.push({
-          points: [
-            { x: rx, y: ry },
-            { x: rx + rw, y: ry },
-            { x: rx + rw, y: ry + rh },
-            { x: rx, y: ry + rh },
-            { x: rx, y: ry },
-          ],
-          color: 'rgba(150,220,200,0.30)',
-          width: 1,
-          dash: [],
-        });
+        // 10% 내부 패딩 (사각형 크기 축소)
+        const padY = rh * 0.10;
+
+        if (patternWidth <= 15) {
+          // 좁은 패턴: 채우기 + 테두리 (패딩 적용)
+          data.trendAreas.push({
+            points: [
+              { x: rx, y: ry + padY },
+              { x: rx + rw, y: ry + padY },
+              { x: rx + rw, y: ry + rh - padY },
+              { x: rx, y: ry + rh - padY },
+            ],
+            fill: 'rgba(150,220,200,0.10)',
+          });
+          data.polylines.push({
+            points: [
+              { x: rx, y: ry + padY },
+              { x: rx + rw, y: ry + padY },
+              { x: rx + rw, y: ry + rh - padY },
+              { x: rx, y: ry + rh - padY },
+              { x: rx, y: ry + padY },
+            ],
+            color: 'rgba(150,220,200,0.50)',
+            width: 1,
+            dash: [],
+          });
+        } else {
+          // 넓은 패턴(>15봉): 채우기 없이 좌/우 수직 경계선만 (lines-only 모드)
+          data.polylines.push({
+            points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
+            color: 'rgba(150,220,200,0.40)',
+            width: 1,
+            dash: [4, 3],
+          });
+          data.polylines.push({
+            points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
+            color: 'rgba(150,220,200,0.40)',
+            width: 1,
+            dash: [4, 3],
+          });
+        }
       }
 
       // 넥라인 수평 연장

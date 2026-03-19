@@ -145,13 +145,13 @@ class ChartManager {
         borderColor: KRX_COLORS.CHART_BORDER,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 5,                     // 우측 여백 확대 (현재가 라벨 가독성)
+        rightOffset: 3,                     // 우측 여백 (5→3: 적절한 현재가 라벨 공간)
         // KNOWSTOCK: c_width = max(2, min(15, int(x_step * 0.70)))
         // x_step(캔들 간격)의 70%가 캔들 몸통 → barSpacing 10px이면 몸통 7px
         // 증권사 HTS 기본값(8-10px 간격)에 맞춤
         barSpacing: 10,                     // 캔들 간격 (12→10: 더 많은 봉 표시)
         minBarSpacing: 3,                   // 최소 캔들 간격 (4→3: 축소 시 더 많은 봉)
-        fixLeftEdge: false,
+        fixLeftEdge: true,                  // 첫 번째 캔들 왼쪽 빈 공간 스크롤 방지
         lockVisibleTimeRangeOnResize: true,
       },
       // ── 줌/스크롤 자유 허용 (증권사 HTS / TradingView 스타일) ──
@@ -202,6 +202,8 @@ class ChartManager {
     this.volumeSeries = this.mainChart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: 'vol',
+      lastValueVisible: false,              // 우측 가격축에 거래량 태그 숨김
+      priceLineVisible: false,              // 거래량 수평 가격선 숨김
     });
     this.mainChart.priceScale('vol').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
@@ -1110,25 +1112,27 @@ class ChartManager {
       title: '',
     });
 
-    // 고가 라인 (점선)
+    // 고가 라인 (파선 — 태그에서 캔들까지 수평선 표시)
     if (dayHigh && dayHigh !== currentPrice) {
       this._highPriceLine = this.candleSeries.createPriceLine({
         price: dayHigh,
-        color: KRX_COLORS.UP_FILL(0.4),
+        color: KRX_COLORS.UP_FILL(0.35),
         lineWidth: 1,
-        lineStyle: 3,
+        lineStyle: 2,                       // Dashed (3=Dotted → 2=Dashed: 더 잘 보임)
+        lineVisible: true,                  // 태그에서 캔들까지 수평 파선 표시
         axisLabelVisible: true,
         title: '고',
       });
     }
 
-    // 저가 라인 (점선)
+    // 저가 라인 (파선 — 태그에서 캔들까지 수평선 표시)
     if (dayLow && dayLow !== currentPrice) {
       this._lowPriceLine = this.candleSeries.createPriceLine({
         price: dayLow,
-        color: KRX_COLORS.DOWN_FILL(0.4),
+        color: KRX_COLORS.DOWN_FILL(0.35),
         lineWidth: 1,
-        lineStyle: 3,
+        lineStyle: 2,                       // Dashed (점선→파선)
+        lineVisible: true,                  // 태그에서 캔들까지 수평 파선 표시
         axisLabelVisible: true,
         title: '저',
       });
