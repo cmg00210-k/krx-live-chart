@@ -1069,15 +1069,18 @@ class ChartManager {
   updatePriceLines(currentPrice, dayHigh, dayLow, prevClose) {
     if (!this.candleSeries) return;
 
-    // 기존 가격선 제거
+    // [FIX] 기존 가격선 제거 + null 초기화 (중복 라벨 방지)
     if (this._currentPriceLine) {
       try { this.candleSeries.removePriceLine(this._currentPriceLine); } catch (e) {}
+      this._currentPriceLine = null;
     }
     if (this._highPriceLine) {
       try { this.candleSeries.removePriceLine(this._highPriceLine); } catch (e) {}
+      this._highPriceLine = null;
     }
     if (this._lowPriceLine) {
       try { this.candleSeries.removePriceLine(this._lowPriceLine); } catch (e) {}
+      this._lowPriceLine = null;
     }
 
     const isUp = currentPrice >= (prevClose || currentPrice);

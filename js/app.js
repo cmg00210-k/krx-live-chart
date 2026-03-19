@@ -732,6 +732,7 @@ async function _continueInit() {
     _markDataFresh();  // 데이터 수신 시각 기록
     updateChartFull();
     updateStockInfo();
+    _updatePriceLinesFromCandles();  // [FIX] 초기 로드 시 가격선 1회 생성
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
@@ -1475,6 +1476,7 @@ function startRealtimeTick() {
               if (typeof _idb !== 'undefined') { _idb.set(cacheKey, cacheEntry); }
               updateChartFull();
               updateStockInfo();
+              _updatePriceLinesFromCandles();  // [FIX] WS 폴백 시 가격선 1회 생성
               updateOHLCBar(null);
               chartManager.setWatermark(_buildWatermark(currentStock.name));
               console.log('[KRX] WS 미연결 — file 폴백 일봉 로드: %s (%d건)',
@@ -2041,6 +2043,7 @@ async function selectStock(code) {
     _markDataFresh();  // 종목 변경 데이터 수신 시각 기록
     updateChartFull();
     updateStockInfo();
+    _updatePriceLinesFromCandles();  // [FIX] 종목 변경 시 가격선 1회 생성
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
@@ -2127,17 +2130,23 @@ function updateStockInfo() {
   }
   _prevPrice = last.close;
 
-  // file/demo 모드에서도 가격선 표시
-  if (candles.length > 0) {
-    const lastC = candles[candles.length - 1];
-    const prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
-    chartManager.updatePriceLines(
-      lastC.close,
-      lastC.high,
-      lastC.low,
-      prevC ? prevC.close : lastC.open
-    );
-  }
+  // [FIX] 가격선 업데이트는 각 호출 경로에서 명시적으로 수행
+  // updateStockInfo() 내부에서 updatePriceLines()를 호출하면
+  // _flushTickRender() 등에서 이중 호출되어 중복 라벨 발생
+  // → 가격선은 호출 경로별로 1회만 생성되도록 분리
+}
+
+/** [FIX] 캔들 데이터 기반 가격선 표시 (file/demo 모드용) */
+function _updatePriceLinesFromCandles() {
+  if (!candles.length) return;
+  const lastC = candles[candles.length - 1];
+  const prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
+  chartManager.updatePriceLines(
+    lastC.close,
+    lastC.high,
+    lastC.low,
+    prevC ? prevC.close : lastC.open
+  );
 }
 
 // ── 재무지표: financials.js로 분리됨 ──
@@ -2572,6 +2581,7 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
       _markDataFresh();  // 타임프레임 변경 데이터 수신 시각 기록
       updateChartFull();
       updateStockInfo();
+      _updatePriceLinesFromCandles();  // [FIX] 타임프레임 변경 시 가격선 1회 생성
       updateOHLCBar(null);
       // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
       if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
