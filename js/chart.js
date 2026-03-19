@@ -332,6 +332,21 @@ class ChartManager {
   // ══════════════════════════════════════════════════
   updateMain(candles, chartType, activeIndicators, patterns, params) {
     if (!this.mainChart || !candles || !candles.length) return;
+
+    // [FIX] 기존 가격선 사전 정리 (updateMain 이중 호출 시 중복 방지)
+    if (this._highPriceLine && this.candleSeries) {
+      try { this.candleSeries.removePriceLine(this._highPriceLine); } catch(e) {}
+      this._highPriceLine = null;
+    }
+    if (this._lowPriceLine && this.candleSeries) {
+      try { this.candleSeries.removePriceLine(this._lowPriceLine); } catch(e) {}
+      this._lowPriceLine = null;
+    }
+    if (this._currentPriceLine && this.candleSeries) {
+      try { this.candleSeries.removePriceLine(this._currentPriceLine); } catch(e) {}
+      this._currentPriceLine = null;
+    }
+
     // params: 지표 파라미터 (커스텀 기간 등), 없으면 기본값 사용
     const _p = params || {};
 

@@ -2196,6 +2196,8 @@ function initSignalFilter() {
   if (vizBtn && vizMenu) {
     vizBtn.addEventListener('click', function(e) {
       e.stopPropagation();
+      // 다른 드롭다운 닫기
+      if (typeof indDropdownMenu !== 'undefined' && indDropdownMenu) indDropdownMenu.classList.remove('show');
       vizMenu.classList.toggle('show');
     });
     document.addEventListener('click', function(e) {
@@ -2609,6 +2611,9 @@ if (indDropdownToggle && indDropdownMenu) {
   // 드롭다운 열기/닫기
   indDropdownToggle.addEventListener('click', (e) => {
     e.stopPropagation();
+    // 다른 드롭다운 닫기
+    var vizM = document.getElementById('viz-toggle-menu');
+    if (vizM) vizM.classList.remove('show');
     indDropdownMenu.classList.toggle('show');
   });
 
