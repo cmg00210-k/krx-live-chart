@@ -927,7 +927,10 @@ html, body {
 #chart-area {
   background: #131722;
   border-right: none;  /* [FIX] C열 border-left가 경계선 담당 → 이중 보더 제거 */
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column;
+  /* [FIX] overflow-x: clip → 가로 넘침 방지, overflow-y: visible → 드롭다운 메뉴 탈출 허용
+     clip은 hidden과 달리 per-axis 설정 가능 (CSS Overflow L3). #chart-wrap이 자체 overflow:hidden을 가짐 */
+  overflow-x: clip; overflow-y: visible;
   box-shadow: inset 1px 0 0 rgba(42,46,57,0.3);  /* [FIX] 우측 inset 제거 — C열 border와 겹침 */
   min-height: 0; /* flex/grid item이 콘텐츠 밀어내지 않도록 */
   padding-left: 1px;
@@ -1031,10 +1034,13 @@ html, body {
 
 /* ── 차트 툴바 ── */
 #chart-toolbar {
-  height: var(--toolbar-h); display: flex; align-items: center;
+  min-height: var(--toolbar-h); display: flex; align-items: center;
   padding: 0 var(--sp-3); gap: var(--sp-1);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
   overflow: visible;  /* [FIX] 드롭다운 메뉴가 툴바 아래로 펼쳐져야 하므로 overflow 제거 */
+  flex-wrap: wrap;    /* [FIX] 좁은 화면에서 버튼이 수평 오버플로우 대신 다음 줄로 감김 */
+  align-content: center;  /* 단일 행일 때 세로 중앙, 복수 행일 때 밀착 배치 */
+  position: relative; z-index: 10;  /* 드롭다운이 chart-wrap 위에 표시되도록 스태킹 컨텍스트 형성 */
   scrollbar-width: none;  /* Firefox: 스크롤바 숨김 */
   background: var(--bg-element);
 }
@@ -1046,7 +1052,8 @@ html, body {
   background: transparent; border: 1px solid transparent; border-radius: var(--radius);
   padding: var(--sp-1) var(--sp-2); color: var(--text-muted); cursor: pointer;
   font-size: var(--fs-caption); font-weight: 500;
-  transition: all var(--transition); white-space: nowrap; flex-shrink: 0;
+  transition: all var(--transition); white-space: nowrap;
+  flex-shrink: 0;   /* 개별 버튼은 축소하지 않고 flex-wrap이 줄바꿈 처리 */
   min-height: var(--min-touch); line-height: 1.2;
 }
 .tf-btn:hover, .ct-btn:hover, .ind-btn:hover { color: var(--text); background: var(--bg-element); }
@@ -1069,7 +1076,7 @@ html, body {
   display: none; position: absolute; top: 100%; left: 0;
   margin-top: var(--sp-1);
   background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); z-index: 120;
+  border-radius: var(--radius-lg); z-index: 500;  /* [FIX] 120→500: 차트 콘텐츠 위에 확실히 표시 */
   min-width: 160px; padding: var(--sp-1) 0;
   max-height: min(70vh, 460px); overflow-y: auto;  /* 13+ 지표 항목 스크롤 지원 */
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
@@ -2869,6 +2876,7 @@ html, body {
   #chart-toolbar .ct-btn { padding: 3px 5px; font-size: 10px; }
   #chart-toolbar .ind-btn { padding: 3px 5px; font-size: 10px; }
   #chart-toolbar .ind-dropdown-btn { padding: 3px 5px; font-size: 10px; }
+  #chart-toolbar .sh-action-btn { padding: 2px 5px; font-size: 12px; }
   #chart-toolbar .sep { margin: 0 1px; }
   #chart-toolbar { gap: 2px; padding: 0 6px; }
 }
@@ -2939,7 +2947,8 @@ html, body {
   #chart-toolbar .ct-btn { padding: 2px 4px; font-size: 9px; }
   #chart-toolbar .ind-btn { padding: 2px 4px; font-size: 9px; }
   #chart-toolbar .ind-dropdown-btn { padding: 2px 4px; font-size: 9px; }
-  #chart-toolbar .sep { margin: 0; width: 0; border: none; }
+  #chart-toolbar .sh-action-btn { padding: 2px 4px; font-size: 11px; }
+  #chart-toolbar .sep { margin: 0; width: 0; height: 0; border: none; }
   #chart-toolbar { gap: 1px; padding: 0 4px; }
 }
 
@@ -3027,11 +3036,12 @@ html, body {
   #stock-header { min-height: 40px; padding: var(--sp-2) var(--sp-3); }
   .sh-details { display: none; }
 
-  /* 툴바: 가로 스크롤 (wrap 대신) */
+  /* 툴바: 모바일에서는 wrap 대신 가로 스크롤 — 세로 공간 절약 */
   #chart-toolbar {
-    overflow-x: auto; overflow-y: hidden;
-    flex-wrap: nowrap;
-    height: var(--toolbar-h);
+    overflow: auto hidden;  /* x=auto (가로 스크롤), y=hidden (세로 고정) */
+    flex-wrap: nowrap;      /* 데스크톱 wrap 오버라이드: 모바일은 한 줄 스크롤 */
+    min-height: var(--toolbar-h);
+    height: var(--toolbar-h);  /* 고정 높이로 한 줄 유지 */
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;            /* Firefox */
   }
