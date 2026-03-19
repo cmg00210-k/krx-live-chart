@@ -16,6 +16,62 @@ let patternEnabled = true;
 let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
+
+// ── 시각화 레이어 토글 (4카테고리) ──
+var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
+// 캔들 패턴 타입 Set (필터링용)
+var _VIZ_CANDLE_TYPES = new Set([
+  'threeWhiteSoldiers','threeBlackCrows','hammer','invertedHammer',
+  'hangingMan','shootingStar','doji','bullishEngulfing','bearishEngulfing',
+  'bullishHarami','bearishHarami','morningStar','eveningStar',
+  'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
+  'tweezerBottom','tweezerTop'
+]);
+// 차트 패턴 타입 Set
+var _VIZ_CHART_TYPES = new Set([
+  'ascendingTriangle','descendingTriangle','risingWedge','fallingWedge',
+  'doubleBottom','doubleTop','headAndShoulders','inverseHeadAndShoulders'
+]);
+
+/** 시각화 토글에 따라 패턴 배열 필터링 */
+function _filterPatternsForViz(patterns) {
+  if (!patterns || !patterns.length) return patterns;
+  return patterns.filter(function(p) {
+    var t = p.type;
+    if (t === 'support' || t === 'resistance') return vizToggles.chart;
+    if (_VIZ_CANDLE_TYPES.has(t)) return vizToggles.candle;
+    if (_VIZ_CHART_TYPES.has(t)) return vizToggles.chart;
+    return true;
+  });
+}
+
+/** 렌더러 호출 통합 — 7+개 호출 사이트를 1곳으로 집약 */
+function _renderOverlays() {
+  var vizPatterns = _filterPatternsForViz(detectedPatterns);
+  // 예측 영역 OFF 시 stop/target/priceTarget 제거
+  if (!vizToggles.forecast) {
+    vizPatterns = vizPatterns.map(function(p) {
+      if (p.priceTarget != null || p.stopLoss != null) {
+        var copy = Object.assign({}, p);
+        copy.priceTarget = null;
+        copy.stopLoss = null;
+        return copy;
+      }
+      return p;
+    });
+  }
+  if (typeof patternRenderer !== 'undefined') {
+    patternRenderer.render(chartManager, candles, chartType, vizPatterns);
+  }
+  var filtSigs = vizToggles.signal ? _filterSignalsByCategory(detectedSignals) : [];
+  if (typeof signalRenderer !== 'undefined') {
+    signalRenderer.render(chartManager, candles, filtSigs, {
+      volumeActive: activeIndicators.has('vol'),
+      chartType: chartType,
+    });
+  }
+  chartManager.setHoverData(candles, vizPatterns, filtSigs);
+}
 let candles = [];
 let tickTimer = null;
 let _lastPatternAnalysis = 0;
@@ -2129,6 +2185,37 @@ function initSignalFilter() {
     });
   }
 
+  // ── 시각화 레이어 토글 (4카테고리) ──
+  var vizWrap = document.getElementById('viz-toggle-wrap');
+  var vizBtn = document.getElementById('viz-toggle-btn');
+  var vizMenu = document.getElementById('viz-toggle-menu');
+
+  if (vizBtn && vizMenu) {
+    vizBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      vizMenu.classList.toggle('show');
+    });
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('#viz-toggle-wrap')) {
+        vizMenu.classList.remove('show');
+      }
+    });
+    vizMenu.querySelectorAll('input[data-viz]').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        vizToggles[cb.dataset.viz] = cb.checked;
+        // 시그널 필터 가시성 연동
+        if (filterWrap) {
+          filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
+        }
+        _renderOverlays();
+        // 패턴 패널도 갱신
+        if (typeof renderPatternPanel === 'function') {
+          renderPatternPanel(_filterPatternsForViz(detectedPatterns));
+        }
+      });
+    });
+  }
+
   // 패턴 상세 팝업 열기/닫기
   const detailBtn = document.getElementById('psb-detail-btn');
   const popup = document.getElementById('pattern-detail-popup');
@@ -2557,9 +2644,13 @@ if (patternBtn) {
     const summaryWrap = document.getElementById('pattern-summary-wrap');
     if (summaryWrap) summaryWrap.style.display = patternEnabled ? '' : 'none';
 
+    // 시각화 레이어 토글 표시/숨김
+    const vizWrapEl = document.getElementById('viz-toggle-wrap');
+    if (vizWrapEl) vizWrapEl.style.display = patternEnabled ? '' : 'none';
+
     // 시그널 필터 드롭다운 표시/숨김
     const filterWrap = document.getElementById('signal-filter-wrap');
-    if (filterWrap) filterWrap.style.display = patternEnabled ? '' : 'none';
+    if (filterWrap) filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
 
     // 과거 수익률 영역 표시/숨김
     const retArea = document.getElementById('return-stats-area');

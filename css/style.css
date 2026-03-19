@@ -2112,6 +2112,13 @@ html, body {
 .sf-check input[type="checkbox"]:not(:checked) + .sf-dot { opacity: 0.25; }
 .sf-check input[type="checkbox"]:not(:checked) ~ span:last-child { opacity: 0.4; }
 
+/* ═══ 시각화 레이어 토글 ═══════════════════════════ */
+.vz-check { gap: 4px; }
+.vz-check input[type="checkbox"]:not(:checked) ~ * { opacity: 0.4; }
+.vz-count {
+  font-family: var(--font-mono); font-size: var(--fs-nano);
+  color: var(--text-muted); margin-left: 2px;
+}
 
 /* ═══ 패턴 요약 바 (차트 하단) ═══════════════════ */
 

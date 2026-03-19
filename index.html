@@ -222,10 +222,19 @@
           </div>
         </div>
         <div class="sep"></div>
-        <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">패턴</button>
-        <div class="sep"></div>
-        <button id="screenshot-btn" class="sh-action-btn" title="차트 스크린샷 저장">📷</button>
-        <!-- 시그널 필터 드롭다운 -->
+        <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">분석</button>
+        <!-- 시각화 레이어 토글 (분석 활성화 시 표시) -->
+        <div class="ind-dropdown-wrap" id="viz-toggle-wrap" style="display:none">
+          <button class="ind-dropdown-btn has-active" id="viz-toggle-btn">레이어 ▼</button>
+          <div class="ind-dropdown-menu" id="viz-toggle-menu">
+            <div class="ind-dropdown-section-title">시각화 레이어</div>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="candle" checked> 캔들 패턴 <span class="vz-count"></span></label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="chart" checked> 차트 패턴 <span class="vz-count"></span></label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="signal" checked> 시그널 <span class="vz-count"></span></label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="forecast" checked> 예측 영역</label>
+          </div>
+        </div>
+        <!-- 시그널 카테고리 필터 (시그널 레이어 ON 시 표시) -->
         <div class="ind-dropdown-wrap" id="signal-filter-wrap" style="display:none">
           <button class="ind-dropdown-btn has-active" id="signal-filter-toggle">시그널 ▼</button>
           <div class="ind-dropdown-menu" id="signal-filter-menu">
@@ -238,6 +247,8 @@
             <label class="ind-check sf-check"><input type="checkbox" data-cat="composite" checked><span class="sf-dot" style="background:#A08830"></span> 복합</label>
           </div>
         </div>
+        <div class="sep"></div>
+        <button id="screenshot-btn" class="sh-action-btn" title="차트 스크린샷 저장">📷</button>
       </div>
 
       <!-- 차트 래퍼 -->
