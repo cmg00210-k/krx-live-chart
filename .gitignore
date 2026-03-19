@@ -36,3 +36,4 @@ logs/
 
 # Runtime state (login guard — prevents Kiwoom account lockout across restarts)
 server/.login_guard.json
+.wrangler/

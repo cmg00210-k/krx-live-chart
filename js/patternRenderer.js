@@ -624,7 +624,7 @@ const patternRenderer = (() => {
                 ctx.lineTo(barX, fz.yTarget);
                 ctx.stroke();
                 // 손절 구간 수직선
-                ctx.strokeStyle = fz.stopColor || 'rgba(224,80,80,0.5)';
+                ctx.strokeStyle = fz.stopColor || 'rgba(200,120,120,0.5)';
                 ctx.beginPath();
                 ctx.moveTo(barX, fz.yEntry);
                 ctx.lineTo(barX, fz.yStop);
