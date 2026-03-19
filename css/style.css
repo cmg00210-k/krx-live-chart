@@ -1034,7 +1034,7 @@ html, body {
   height: var(--toolbar-h); display: flex; align-items: center;
   padding: 0 var(--sp-3); gap: var(--sp-1);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
-  overflow-x: auto; overflow-y: hidden;  /* [FIX] hidden→auto: 리사이즈 시 버튼 텍스트 클리핑 방지 */
+  overflow: visible;  /* [FIX] 드롭다운 메뉴가 툴바 아래로 펼쳐져야 하므로 overflow 제거 */
   scrollbar-width: none;  /* Firefox: 스크롤바 숨김 */
   background: var(--bg-element);
 }
