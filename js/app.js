@@ -2161,25 +2161,12 @@ function updateStockInfo() {
 // ══════════════════════════════════════════════════════
 
 function initSignalFilter() {
-  // 시그널 필터 드롭다운 (툴바 통합)
+  // 시그널 필터 (레이어 드롭다운 내 통합)
   const filterWrap = document.getElementById('signal-filter-wrap');
-  const filterToggle = document.getElementById('signal-filter-toggle');
-  const filterMenu = document.getElementById('signal-filter-menu');
 
-  if (filterToggle && filterMenu) {
-    // 드롭다운 열기/닫기
-    filterToggle.addEventListener('click', (e) => {
-      e.stopPropagation();
-      filterMenu.classList.toggle('show');
-    });
-    // 외부 클릭 시 닫기
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#signal-filter-wrap')) {
-        filterMenu.classList.remove('show');
-      }
-    });
-    // 체크박스 변경
-    filterMenu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+  if (filterWrap) {
+    // 시그널 상세 필터 체크박스 변경
+    filterWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
       cb.addEventListener('change', () => {
         const cat = cb.dataset.cat;
         if (cb.checked) {
@@ -2658,7 +2645,10 @@ if (patternBtn) {
 
     // 시그널 필터 드롭다운 표시/숨김
     const filterWrap = document.getElementById('signal-filter-wrap');
-    if (filterWrap) filterWrap.style.display = (patternEnabled && vizToggles.signal) ? '' : 'none';
+    var sfTitle = document.getElementById('signal-filter-title');
+    var sfWrap = document.getElementById('signal-filter-wrap');
+    if (sfTitle) sfTitle.style.display = vizToggles.signal ? '' : 'none';
+    if (sfWrap) sfWrap.style.display = vizToggles.signal ? '' : 'none';
 
     // 과거 수익률 영역 표시/숨김
     const retArea = document.getElementById('return-stats-area');

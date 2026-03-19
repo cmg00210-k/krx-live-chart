@@ -223,28 +223,24 @@
         </div>
         <div class="sep"></div>
         <button class="ind-btn pattern-btn" id="pattern-toggle" data-ind="pattern">분석</button>
-        <!-- 시각화 레이어 토글 (분석 활성화 시 표시) -->
+        <!-- 시각화 레이어 + 시그널 필터 통합 드롭다운 -->
         <div class="ind-dropdown-wrap" id="viz-toggle-wrap" style="display:none">
           <button class="ind-dropdown-btn has-active" id="viz-toggle-btn">레이어 ▼</button>
           <div class="ind-dropdown-menu" id="viz-toggle-menu">
             <div class="ind-dropdown-section-title">시각화 레이어</div>
-            <label class="ind-check vz-check"><input type="checkbox" data-viz="candle" checked> 캔들 패턴 <span class="vz-count"></span></label>
-            <label class="ind-check vz-check"><input type="checkbox" data-viz="chart" checked> 차트 패턴 <span class="vz-count"></span></label>
-            <label class="ind-check vz-check"><input type="checkbox" data-viz="signal" checked> 시그널 <span class="vz-count"></span></label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="candle" checked> 캔들 패턴</label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="chart" checked> 차트 패턴</label>
+            <label class="ind-check vz-check"><input type="checkbox" data-viz="signal" checked> 시그널</label>
             <label class="ind-check vz-check"><input type="checkbox" data-viz="forecast" checked> 예측 영역</label>
-          </div>
-        </div>
-        <!-- 시그널 카테고리 필터 (시그널 레이어 ON 시 표시) -->
-        <div class="ind-dropdown-wrap" id="signal-filter-wrap" style="display:none">
-          <button class="ind-dropdown-btn has-active" id="signal-filter-toggle">시그널 ▼</button>
-          <div class="ind-dropdown-menu" id="signal-filter-menu">
-            <div class="ind-dropdown-section-title">시그널 카테고리 필터</div>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="ma" checked><span class="sf-dot" style="background:#FFD93D"></span> MA 크로스</label>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="macd" checked><span class="sf-dot" style="background:#2962ff"></span> MACD</label>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="rsi" checked><span class="sf-dot" style="background:#ff9800"></span> RSI</label>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="bb" checked><span class="sf-dot" style="background:#FF8C42"></span> 볼린저</label>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="volume" checked><span class="sf-dot" style="background:#78909C"></span> 거래량</label>
-            <label class="ind-check sf-check"><input type="checkbox" data-cat="composite" checked><span class="sf-dot" style="background:#A08830"></span> 복합</label>
+            <div class="ind-dropdown-section-title" id="signal-filter-title" style="margin-top:4px;border-top:1px solid var(--border-subtle);padding-top:6px">시그널 상세</div>
+            <div id="signal-filter-wrap">
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="ma" checked><span class="sf-dot" style="background:#FFD93D"></span> MA</label>
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="macd" checked><span class="sf-dot" style="background:#2962ff"></span> MACD</label>
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="rsi" checked><span class="sf-dot" style="background:#ff9800"></span> RSI</label>
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="bb" checked><span class="sf-dot" style="background:#FF8C42"></span> BB</label>
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="volume" checked><span class="sf-dot" style="background:#78909C"></span> 거래량</label>
+              <label class="ind-check sf-check"><input type="checkbox" data-cat="composite" checked><span class="sf-dot" style="background:#A08830"></span> 복합</label>
+            </div>
           </div>
         </div>
         <div class="sep"></div>
