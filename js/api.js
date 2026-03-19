@@ -318,15 +318,19 @@ class KRXDataService {
         candles = this._demoGenerateCandles(stock, timeframe);
       }
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // [OPT] file 모드 + 분봉: 일봉 캐시 재사용 (동일 JSON 이중 fetch 방지)
-      var dailyKey = stock.code + '-1d';
-      var dailyCached = this.cache[dailyKey];
-      if (dailyCached && dailyCached.candles && dailyCached.candles.length > 0) {
-        candles = dailyCached.candles.slice();
-      } else {
-        candles = await this._fileGetCandles(stock);
-        if (candles.length === 0) {
-          candles = this._demoGenerateCandles(stock, timeframe);
+      // file 모드 + 분봉: 보간 분봉 JSON 우선 시도 → 없으면 일봉 폴백
+      candles = await this._fileGetIntradayCandles(stock, timeframe);
+      if (candles.length === 0) {
+        // 분봉 파일 없음 → 일봉 캐시 재사용 (워터마크로 안내)
+        var dailyKey = stock.code + '-1d';
+        var dailyCached = this.cache[dailyKey];
+        if (dailyCached && dailyCached.candles && dailyCached.candles.length > 0) {
+          candles = dailyCached.candles.slice();
+        } else {
+          candles = await this._fileGetCandles(stock);
+          if (candles.length === 0) {
+            candles = this._demoGenerateCandles(stock, timeframe);
+          }
         }
       }
     } else if (KRX_API_CONFIG.mode === 'demo') {
