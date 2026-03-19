@@ -602,9 +602,12 @@ html, body {
   border-bottom: 2px solid var(--accent);
 }
 
-/* Row 1 — min-width:0 필수: grid 자식의 flex가 overflow를 허용하도록 */
+/* Row 1 — 종목명(좌) + 현재가(우).  min-width:0 필수: grid 자식의 flex가 overflow를 허용하도록 */
 .sb-row1 { display: flex; align-items: center; gap: var(--sp-1); grid-column: 1 / -1; min-width: 0; }
-.sb-row2 { display: flex; align-items: center; gap: var(--sp-1); grid-column: 1 / -1; min-width: 0; }
+/* Row 2 — 종목코드(좌) + 등락(우).  space-between으로 양끝 정렬 */
+.sb-row2 { display: flex; align-items: center; justify-content: space-between; grid-column: 1 / -1; min-width: 0; }
+/* Row 2 우측 등락 묶음 (변동액 + 등락률) */
+.sb-change-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
 /* ── 13. 종목명 — flex:1 + min-width:0으로 긴 이름 말줄임, 가격/등락률 고정 보장 ── */
 .sb-name {
@@ -636,15 +639,14 @@ html, body {
   font-feature-settings: "tnum";
 }
 
-/* ── 15. 종목코드 ── */
+/* ── 15. 종목코드 — row2 좌측, 종목 식별 보조 ── */
 .sb-code {
-  grid-column: 1;
-  grid-row: 2;
   font-size: var(--fs-nano);
   color: var(--text-muted);
   font-family: var(--font-mono);
   letter-spacing: 0.03em;
   line-height: 1.3;
+  flex-shrink: 0;
 }
 
 /* ── 16. 거래량 ── */
@@ -666,16 +668,29 @@ html, body {
 .sb-rsi.over { color: var(--up); }
 .sb-rsi.under { color: var(--down); }
 
-/* ── 18. 등락률 pill ── */
-.sb-change {
-  grid-column: 2;
-  grid-row: 2;
-  font-size: var(--fs-micro);
-  font-weight: 700;
+/* ── 18. 변동액 (전일 대비 가격 차이, 예: ▲500) ── */
+.sb-change-amt {
+  font-size: var(--fs-nano);
+  font-weight: 500;
   font-family: var(--font-mono);
   text-align: right;
   color: var(--text-muted);
-  padding: 1px 5px;
+  line-height: 1.3;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-feature-settings: "tnum";
+}
+.sb-change-amt.up { color: var(--up); }
+.sb-change-amt.dn { color: var(--down); }
+
+/* ── 18b. 등락률 pill ── */
+.sb-change {
+  font-size: var(--fs-nano);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-align: right;
+  color: var(--text-muted);
+  padding: 1px 4px;
   border-radius: 3px;
   line-height: 1.3;
   background: transparent;
@@ -786,61 +801,62 @@ html, body {
 #sidebar.sb-minimal .sb-code { display: none; }
 
 /* ── 21b. 기본 모드 (클래스 없음) ──
-   row1: 종목명 + 가격
-   row2: 등락률 + 거래량만 (RSI, 스파크라인, 코드 숨김)
+   row1: 종목명(좌) + 현재가(우)
+   row2: 종목코드(좌) + 변동액 등락률(우)
+   시총/거래량/RSI/스파크라인은 분석 모드에서만 표시
    ────────────────────────── */
 #sidebar:not(.sb-minimal):not(.sb-analysis) .sb-sparkline { display: none; }
 #sidebar:not(.sb-minimal):not(.sb-analysis) .sb-spark-wrap { display: none; }
 #sidebar:not(.sb-minimal):not(.sb-analysis) .sb-rsi { display: none; }
-#sidebar:not(.sb-minimal):not(.sb-analysis) .sb-code { display: none; }
+#sidebar:not(.sb-minimal):not(.sb-analysis) .sb-mcap { display: none; }
+#sidebar:not(.sb-minimal):not(.sb-analysis) .sb-volume { display: none; }
 #sidebar:not(.sb-minimal):not(.sb-analysis) .sb-row3 { display: none; }
 
 /* ── 21c. 분석 모드 (sb-analysis) ── 모든 항목 표시
-   row2를 2행 grid로 재배치:
-   1행: 스파크라인(좌) + 등락률(우)
-   2행: 시총 + 거래량 + RSI (작은 메타 정보)
+   row2: 코드(좌) + 스파크라인 + 시총/거래량/RSI + 등락(우)
    ────────────────────────────────────────── */
 #sidebar.sb-analysis .sb-item {
   padding: 5px 8px 5px 10px;
   gap: 2px var(--sp-2);
 }
 #sidebar.sb-analysis .sb-row2 {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  grid-template-rows: auto auto;
-  gap: 2px 6px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 3px 6px;
 }
-/* 스파크라인 래퍼: 1행 좌측 */
+/* 코드: 좌측 고정 */
+#sidebar.sb-analysis .sb-code {
+  flex-shrink: 0;
+}
+/* 스파크라인 래퍼 */
 #sidebar.sb-analysis .sb-spark-wrap {
-  grid-column: 1;
-  grid-row: 1;
   width: 48px;
   height: 16px;
+  flex-shrink: 0;
 }
 #sidebar.sb-analysis .sb-sparkline {
   width: 44px;
   height: 14px;
 }
-/* 등락률: 1행 우측 끝 */
-#sidebar.sb-analysis .sb-change {
-  grid-column: 3;
-  grid-row: 1;
-  flex-shrink: 0;
-  white-space: nowrap;
-  justify-self: end;
-}
-/* 시총/거래량/RSI: 2행, 중앙~우측에 자연 배치 */
+/* 시총/거래량/RSI: 중앙 메타 정보 */
 #sidebar.sb-analysis .sb-mcap,
 #sidebar.sb-analysis .sb-volume,
 #sidebar.sb-analysis .sb-rsi {
-  grid-row: 2;
   font-size: 9px;
   line-height: 1.2;
 }
-#sidebar.sb-analysis .sb-mcap   { grid-column: 1; color: var(--text-sub); }
-#sidebar.sb-analysis .sb-volume { grid-column: 2; }
-#sidebar.sb-analysis .sb-rsi    { grid-column: 3; justify-self: end; }
+#sidebar.sb-analysis .sb-mcap   { color: var(--text-sub); }
+#sidebar.sb-analysis .sb-volume { color: #888; }
+#sidebar.sb-analysis .sb-rsi    { }
+/* 등락 그룹: 우측 끝 */
+#sidebar.sb-analysis .sb-change-group {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+#sidebar.sb-analysis .sb-change {
+  white-space: nowrap;
+}
 
 /* ── 22. "N개 더보기" 버튼 ── */
 .sb-load-more {

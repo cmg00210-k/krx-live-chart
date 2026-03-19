@@ -768,7 +768,8 @@ const sidebarManager = (() => {
     const cdls = _getCachedCandles(s.code);
     // [FIX] s 자체가 ALL_STOCKS 요소 — find() 없이 직접 읽기
     let price = 0;
-    let changeText = '';
+    let changeAmtText = '';   // 변동액 (예: "▲500", "▼1,200")
+    let changePctText = '';   // 등락률 (예: "+0.75%", "-1.50%")
     let changeClass = '';
     let volume = 0;
 
@@ -779,10 +780,11 @@ const sidebarManager = (() => {
       const prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
       const prevClose = prevCandle ? prevCandle.close : last.open;
       if (prevClose > 0) {
-        const pctNum = parseFloat(((last.close - prevClose) / prevClose * 100).toFixed(2));
-        const pct = pctNum.toFixed(2);
-        const arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
-        changeText = arrow + (pctNum >= 0 ? '+' : '') + pct + '%';
+        const diff = last.close - prevClose;
+        const pctNum = parseFloat(((diff / prevClose) * 100).toFixed(2));
+        const arrow = pctNum > 0 ? '\u25B2' : pctNum < 0 ? '\u25BC' : '';
+        changeAmtText = arrow + Math.abs(diff).toLocaleString();
+        changePctText = '(' + (pctNum >= 0 ? '+' : '') + pctNum.toFixed(2) + '%)';
         changeClass = pctNum >= 0 ? 'up' : 'dn';
       }
     } else {
@@ -791,16 +793,22 @@ const sidebarManager = (() => {
       volume = s.volume || 0;
       var chgPct = s.changePercent || 0;
       if (s.prevClose > 0 || chgPct !== 0) {
-        var arrow = chgPct > 0 ? '\u25B2 ' : chgPct < 0 ? '\u25BC ' : '';
-        changeText = arrow + (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%';
+        // 변동액: prevClose가 있으면 계산, 없으면 %만 표시
+        var basePrice = s.prevClose || s.base || 0;
+        if (basePrice > 0 && chgPct !== 0) {
+          var diff = Math.round(basePrice * chgPct / 100);
+          var arrow = chgPct > 0 ? '\u25B2' : chgPct < 0 ? '\u25BC' : '';
+          changeAmtText = arrow + Math.abs(diff).toLocaleString();
+        }
+        changePctText = '(' + (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%)';
         changeClass = chgPct >= 0 ? 'up' : 'dn';
       }
     }
 
-    // ── 미니멀 모드 (R5) ──
-    // CSS가 row2/row3을 숨기므로 row1에 가격+등락률을 모두 포함
-    // ── 기본/상세 모드 ──
-    // CSS가 모드별로 sparkline/rsi/code/row3 표시 제어
+    // ── 모드별 표시 제어 ──
+    // 미니멀: CSS가 row2 숨김 → row1에 가격만
+    // 기본:   row1=종목명+가격, row2=코드+변동액+등락률 (시총/거래량/RSI 숨김)
+    // 분석:   row2에 코드+스파크라인+시총/거래량/RSI+등락 모두 표시
 
     // R10: RSI 값
     const rsiVal = _getRSI(s.code);
@@ -857,6 +865,7 @@ const sidebarManager = (() => {
         '<span class="sb-price" id="sb-' + s.code + '">' + (price > 0 ? price.toLocaleString() : '\u2014') + _demoBadge + '</span>' +
       '</div>' +
       '<div class="sb-row2">' +
+        '<span class="sb-code">' + s.code + '</span>' +
         '<span class="' + sparkWrapClass + '">' +
           '<canvas class="sb-sparkline" data-code="' + s.code + '" width="48" height="16"></canvas>' +
           '<span class="sb-spark-label">' + sparkLabel + '</span>' +
@@ -864,7 +873,10 @@ const sidebarManager = (() => {
         mcapHtml +
         '<span class="sb-volume">' + _formatVolume(volume) + '</span>' +
         rsiHtml +
-        '<span class="sb-change ' + changeClass + '" id="sb-chg-' + s.code + '">' + changeText + '</span>' +
+        '<span class="sb-change-group">' +
+          '<span class="sb-change-amt ' + changeClass + '" id="sb-amt-' + s.code + '">' + changeAmtText + '</span>' +
+          '<span class="sb-change ' + changeClass + '" id="sb-chg-' + s.code + '">' + changePctText + '</span>' +
+        '</span>' +
       '</div>' +
     '</div>';
   }
@@ -1383,7 +1395,7 @@ const sidebarManager = (() => {
       if (!priceEl) continue;
 
       var cdls = _getCachedCandles(s.code);
-      var newPrice, changePct, lastVol;
+      var newPrice, changePct, changeDiff, lastVol, prevClose;
 
       if (cdls && cdls.length) {
         // 캐시된 캔들 우선 (실시간/최근 로드 데이터)
@@ -1391,13 +1403,16 @@ const sidebarManager = (() => {
         newPrice = last.close;
         lastVol = last.volume || 0;
         var prevCandle = cdls.length >= 2 ? cdls[cdls.length - 2] : null;
-        var prevClose = prevCandle ? prevCandle.close : last.open;
-        changePct = prevClose > 0 ? ((last.close - prevClose) / prevClose * 100) : 0;
+        prevClose = prevCandle ? prevCandle.close : last.open;
+        changeDiff = prevClose > 0 ? (last.close - prevClose) : 0;
+        changePct = prevClose > 0 ? ((changeDiff / prevClose) * 100) : 0;
       } else if (s.base && s.base > 0) {
         // index.json 요약 폴백 — OHLCV fetch 없이 즉시 표시
         newPrice = s.base;
         changePct = s.changePercent || 0;
         lastVol = s.volume || 0;
+        var basePrice = s.prevClose || s.base || 0;
+        changeDiff = basePrice > 0 ? Math.round(basePrice * changePct / 100) : 0;
       } else {
         continue;
       }
@@ -1405,14 +1420,21 @@ const sidebarManager = (() => {
       priceEl.textContent = newPrice.toLocaleString();
       priceEl.className = 'sb-price';
 
-      // 등락률
+      // 변동액 + 등락률
+      var pctNum = parseFloat(changePct.toFixed(2));
+      var clsCh = pctNum >= 0 ? 'up' : 'dn';
+
+      var amtEl = itemEl.querySelector('.sb-change-amt');
+      if (amtEl) {
+        var arrow = pctNum > 0 ? '\u25B2' : pctNum < 0 ? '\u25BC' : '';
+        amtEl.textContent = arrow + Math.abs(changeDiff).toLocaleString();
+        amtEl.className = 'sb-change-amt ' + clsCh;
+      }
+
       var changeEl = itemEl.querySelector('.sb-change');
       if (changeEl) {
-        var pctNum = parseFloat(changePct.toFixed(2));
-        var pctStr = pctNum.toFixed(2);
-        var arrow = pctNum > 0 ? '\u25B2 ' : pctNum < 0 ? '\u25BC ' : '';
-        changeEl.textContent = arrow + (pctNum >= 0 ? '+' : '') + pctStr + '%';
-        changeEl.className = 'sb-change ' + (pctNum >= 0 ? 'up' : 'dn');
+        changeEl.textContent = '(' + (pctNum >= 0 ? '+' : '') + pctNum.toFixed(2) + '%)';
+        changeEl.className = 'sb-change ' + clsCh;
         _stockChangeCache[s.code] = pctNum;
       }
 
