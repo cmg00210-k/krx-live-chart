@@ -668,7 +668,9 @@ async function _continueInit() {
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-      chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
+      // 분봉 JSON 실제 로드 여부: Unix 타임스탬프(숫자)면 분봉, 문자열(YYYY-MM-DD)이면 일봉 폴백
+      var _hasIntraday = candles.length > 0 && typeof candles[0].time === 'number';
+      chartManager.setWatermark(_buildWatermark(currentStock.name, _hasIntraday ? '' : '일봉 — 분봉 데이터 미제공'));
     } else {
       chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
@@ -1979,7 +1981,9 @@ async function selectStock(code) {
     updateOHLCBar(null);
     // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
     if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-      chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
+      // 분봉 JSON 실제 로드 여부: Unix 타임스탬프(숫자)면 분봉, 문자열(YYYY-MM-DD)이면 일봉 폴백
+      var _hasIntraday = candles.length > 0 && typeof candles[0].time === 'number';
+      chartManager.setWatermark(_buildWatermark(currentStock.name, _hasIntraday ? '' : '일봉 — 분봉 데이터 미제공'));
     } else {
       chartManager.setWatermark(_buildWatermark(currentStock.name));
     }
