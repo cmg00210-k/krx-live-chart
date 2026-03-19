@@ -964,9 +964,9 @@ html, body {
   background: #131722;
   border-right: none;  /* [FIX] C열 border-left가 경계선 담당 → 이중 보더 제거 */
   display: flex; flex-direction: column;
-  /* [FIX] overflow-x: clip → 가로 넘침 방지, overflow-y: visible → 드롭다운 메뉴 탈출 허용
-     clip은 hidden과 달리 per-axis 설정 가능 (CSS Overflow L3). #chart-wrap이 자체 overflow:hidden을 가짐 */
-  overflow-x: clip; overflow-y: visible;
+  /* [FIX] overflow: visible — 드롭다운 메뉴가 차트 영역 밖으로 펼쳐져야 함
+     #chart-wrap이 자체 overflow:hidden으로 차트 캔버스 클리핑 담당 */
+  overflow: visible;
   box-shadow: inset 1px 0 0 rgba(42,46,57,0.3);  /* [FIX] 우측 inset 제거 — C열 border와 겹침 */
   min-height: 0; /* flex/grid item이 콘텐츠 밀어내지 않도록 */
   padding-left: 1px;
@@ -1109,7 +1109,7 @@ html, body {
 .ind-dropdown-btn:hover { color: var(--text); background: var(--bg-element); }
 .ind-dropdown-btn.has-active { color: var(--accent); border-color: rgba(160,136,48,0.3); }
 .ind-dropdown-menu {
-  display: none; position: absolute; top: 100%; left: 0;
+  display: none; position: absolute; top: 100%; left: 0; right: auto;
   margin-top: var(--sp-1);
   background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: var(--radius-lg); z-index: 500;  /* [FIX] 120→500: 차트 콘텐츠 위에 확실히 표시 */
@@ -2153,6 +2153,9 @@ html, body {
   border-top: 1px solid var(--border-subtle);
   padding-top: 6px;
 }
+/* [FIX] 표시 드롭다운: 우측 정렬 (차트 영역 오른쪽 경계에서 잘림 방지) */
+#viz-toggle-wrap .ind-dropdown-menu { left: auto; right: 0; }
+
 /* 전체 선택/해제 라벨 */
 .ind-select-all-label {
   border-bottom: 1px solid var(--border-subtle);
