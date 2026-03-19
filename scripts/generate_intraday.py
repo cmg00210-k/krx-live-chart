@@ -30,6 +30,7 @@ import argparse
 import math
 import random
 import time
+import calendar
 from datetime import datetime, timedelta
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -148,9 +149,11 @@ def generate_intraday(daily_candles, timeframe_min, days=30, seed=42):
             minute = slot_min % 60
 
             # KST 시각 → UTC 타임스탬프 변환
+            # Python의 naive datetime.timestamp()는 로컬(KST) 기준이므로
+            # 수동 -9h 없이 calendar.timegm()으로 UTC 직접 계산
             kst_dt = base_dt.replace(hour=hour, minute=minute, second=0)
             utc_dt = kst_dt - KST_OFFSET_DELTA
-            ts = int(utc_dt.timestamp())
+            ts = int(calendar.timegm(utc_dt.timetuple()))
 
             slot_o = prices[s]
             slot_c = prices[s + 1]
