@@ -91,7 +91,12 @@ const KRX_API_CONFIG = {
 try {
   var _savedPrefs = JSON.parse(localStorage.getItem('krx-prefs'));
   if (_savedPrefs && _savedPrefs.wsUrl) {
-    KRX_API_CONFIG.wsUrl = _savedPrefs.wsUrl;
+    // 프로덕션 도메인에서 localStorage의 localhost URL 무시
+    var _isLocalSaved = _savedPrefs.wsUrl.includes('localhost') || _savedPrefs.wsUrl.includes('127.0.0.1');
+    var _isProdDomain = _defaultWsUrl.startsWith('wss://');
+    if (!(_isLocalSaved && _isProdDomain)) {
+      KRX_API_CONFIG.wsUrl = _savedPrefs.wsUrl;
+    }
   }
 } catch (e) { /* localStorage 접근 불가 — 무시 */ }
 
@@ -210,7 +215,7 @@ class KRXDataService {
     if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;
 
     try {
-      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`, { credentials: 'omit' });
+      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
       if (!res.ok) throw new Error(`index.json: ${res.status}`);
 
       const index = await res.json();
