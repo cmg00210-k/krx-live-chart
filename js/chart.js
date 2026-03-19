@@ -145,14 +145,35 @@ class ChartManager {
         borderColor: KRX_COLORS.CHART_BORDER,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 3,                     // 우측 여백 (5→3: 적절한 현재가 라벨 공간)
-        // KNOWSTOCK: c_width = max(2, min(15, int(x_step * 0.70)))
-        // x_step(캔들 간격)의 70%가 캔들 몸통 → barSpacing 10px이면 몸통 7px
-        // 증권사 HTS 기본값(8-10px 간격)에 맞춤
-        barSpacing: 10,                     // 캔들 간격 (12→10: 더 많은 봉 표시)
-        minBarSpacing: 3,                   // 최소 캔들 간격 (4→3: 축소 시 더 많은 봉)
-        fixLeftEdge: true,                  // 첫 번째 캔들 왼쪽 빈 공간 스크롤 방지
+        rightOffset: 3,
+        barSpacing: 10,
+        minBarSpacing: 3,
+        fixLeftEdge: true,
         lockVisibleTimeRangeOnResize: true,
+        // [FIX] X축 라벨을 KST(UTC+9)로 표시 — LWC 기본값은 브라우저 로컬 시간
+        tickMarkFormatter: function(time, tickMarkType) {
+          // time: Unix timestamp (숫자) 또는 businessDay 객체 ({year, month, day})
+          if (typeof time === 'object' && time.year) {
+            // 일봉: businessDay 객체 → "MM/DD" 또는 "YYYY" 형식
+            if (tickMarkType <= 1) return time.year + '';
+            var mm = (time.month < 10 ? '0' : '') + time.month;
+            var dd = (time.day < 10 ? '0' : '') + time.day;
+            return mm + '/' + dd;
+          }
+          // 분봉: Unix timestamp → KST 시간
+          var d = new Date(time * 1000);
+          var kstH = d.getUTCHours() + 9;
+          var kstM = d.getUTCMinutes();
+          var kstDay = d.getUTCDate();
+          var kstMonth = d.getUTCMonth() + 1;
+          if (kstH >= 24) { kstH -= 24; kstDay++; }
+          // tickMarkType 3=Time, 4=TimeWithSeconds
+          if (tickMarkType >= 3) {
+            return (kstH < 10 ? '0' : '') + kstH + ':' + (kstM < 10 ? '0' : '') + kstM;
+          }
+          // tickMarkType 2=DayOfMonth — 날짜 경계
+          return kstMonth + '/' + kstDay;
+        },
       },
       // ── 줌/스크롤 자유 허용 (증권사 HTS / TradingView 스타일) ──
       handleScale: {
