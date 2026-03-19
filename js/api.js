@@ -75,7 +75,7 @@ const _idb = {
 var _defaultWsUrl = 'ws://localhost:8765';
 try {
   var _h = window.location.hostname;
-  if (_h === 'www.cheesestock.co.kr' || _h === 'cheesestock.co.kr') {
+  if (_h === 'www.cheesestock.co.kr' || _h === 'cheesestock.co.kr' || _h.endsWith('.pages.dev')) {
     _defaultWsUrl = 'wss://ws.cheesestock.co.kr/ws';
   }
 } catch(e) {}
@@ -210,7 +210,7 @@ class KRXDataService {
     if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;
 
     try {
-      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
+      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`, { credentials: 'omit' });
       if (!res.ok) throw new Error(`index.json: ${res.status}`);
 
       const index = await res.json();
