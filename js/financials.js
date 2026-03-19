@@ -667,7 +667,7 @@ function drawOPMSparkline(data) {
 
     // "0%" 라벨
     ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText('0%', paddingL - 3, zeroY);
@@ -692,7 +692,7 @@ function drawOPMSparkline(data) {
   }
 
   // ── 5) 퍼센트 값 텍스트 (마커 위) ──
-  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.font = "10px 'JetBrains Mono', monospace";
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   // 라벨 표시 간격: 6개 이하면 모두, 아니면 짝수 인덱스 + 마지막
@@ -706,7 +706,7 @@ function drawOPMSparkline(data) {
   }
 
   // ── 6) X축 분기 라벨 (하단) ──
-  ctx.font = '9px Pretendard, sans-serif';
+  ctx.font = "10px 'Pretendard', sans-serif";
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -853,7 +853,7 @@ function drawFinTrendChart(data, metric) {
 
     // 바 위에 값 표시 (억원 → 조/억 단위)
     ctx.fillStyle = '#A0A0A0';
-    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     values.forEach((v, i) => {
@@ -873,7 +873,7 @@ function drawFinTrendChart(data, metric) {
   }
 
   // ── 분기 라벨 (x축 하단) ──
-  ctx.font = '10px Pretendard, sans-serif';
+  ctx.font = "10px 'Pretendard', sans-serif";
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -1263,7 +1263,7 @@ function _drawPERBandChart() {
   var eps = _getLatestEPS();
   if (!eps || eps <= 0) {
     ctx.fillStyle = '#808080';
-    ctx.font = '11px Pretendard, sans-serif';
+    ctx.font = "11px 'Pretendard', sans-serif";
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('EPS 데이터 없음', parentW / 2, h / 2);
@@ -1317,7 +1317,7 @@ function _drawPERBandChart() {
 
     // 라벨 (우측)
     ctx.fillStyle = b.color.replace('0.5', '0.9');
-    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(b.label, padL + chartW + 3, y);
@@ -1364,7 +1364,7 @@ function _drawPERBandChart() {
   // ── 5) 현재 PER 표시 ──
   var currentPER = closes[closes.length - 1] / eps;
   ctx.fillStyle = KRX_COLORS.ACCENT;
-  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.font = "10px 'Pretendard', sans-serif";
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   ctx.fillText('현재 ' + currentPER.toFixed(1) + 'x', padL + chartW - 2, padT + 2);

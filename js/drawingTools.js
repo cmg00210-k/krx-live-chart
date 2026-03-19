@@ -246,7 +246,7 @@ const drawingTools = (() => {
 
     // 가격 라벨
     const priceText = Math.round(d.points[0].price).toLocaleString('ko-KR');
-    ctx.font = "11px 'JetBrains Mono', monospace";
+    ctx.font = "600 11px 'JetBrains Mono', monospace";
     ctx.fillStyle = color;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';

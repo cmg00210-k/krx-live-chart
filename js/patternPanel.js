@@ -756,7 +756,7 @@ function drawReturnCurve(curvesData) {
   }
 
   // x축 라벨 (일수)
-  ctx.font = '9px Pretendard, sans-serif';
+  ctx.font = "9px 'Pretendard', sans-serif";
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -778,7 +778,7 @@ function drawReturnCurve(curvesData) {
   // 범례 (우상단)
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.font = '9px Pretendard, sans-serif';
+  ctx.font = "9px 'Pretendard', sans-serif";
   let legendX = pad.left + 4;
   const legendY = pad.top;
   for (const cd of curvesData) {

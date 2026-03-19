@@ -3115,7 +3115,7 @@ document.getElementById('screenshot-btn')?.addEventListener('click', function() 
 
   // 워터마크
   ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '12px Pretendard, sans-serif';
+  ctx.font = "12px 'Pretendard', sans-serif";
   ctx.fillText('CheeseStock — ' + (currentStock ? currentStock.name : '') + ' ' + currentTimeframe, 10, rect.height - 10);
 
   // 다운로드
