@@ -624,7 +624,7 @@ const patternRenderer = (() => {
                 ctx.lineTo(barX, fz.yTarget);
                 ctx.stroke();
                 // 손절 구간 수직선
-                ctx.strokeStyle = fz.stopColor || 'rgba(200,120,120,0.5)';
+                ctx.strokeStyle = fz.stopColor || 'rgba(150,220,200,0.55)';
                 ctx.beginPath();
                 ctx.moveTo(barX, fz.yEntry);
                 ctx.lineTo(barX, fz.yStop);
@@ -645,7 +645,7 @@ const patternRenderer = (() => {
                 ctx.beginPath();
                 _roundRect(ctx, barX + 5, rrY - 7, rrM.width + 8, 14, 3);
                 ctx.fill();
-                ctx.fillStyle = fz.rrRatio >= 1.5 ? 'rgba(150,220,200,0.9)' : 'rgba(224,80,80,0.8)';
+                ctx.fillStyle = fz.rrRatio >= 1.5 ? 'rgba(150,220,200,0.9)' : 'rgba(150,220,200,0.5)';
                 ctx.fillText(rrText, barX + 9, rrY);
               }
             }
@@ -1216,7 +1216,7 @@ const patternRenderer = (() => {
       const u2 = toXY(upperTL.points[1].time, upperTL.points[1].value);
       data.polylines.push({
         points: [u1, u2],
-        color: isBuy ? SELL_COLOR : SELL_COLOR,
+        color: SELL_COLOR,
         width: 1.5,
         dash: [],
         dots: false,
@@ -1227,7 +1227,7 @@ const patternRenderer = (() => {
       const l2 = toXY(lowerTL.points[1].time, lowerTL.points[1].value);
       data.polylines.push({
         points: [l1, l2],
-        color: isBuy ? BUY_COLOR : BUY_COLOR,
+        color: BUY_COLOR,
         width: 1.5,
         dash: [],
         dots: false,

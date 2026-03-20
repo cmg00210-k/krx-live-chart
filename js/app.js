@@ -3025,7 +3025,7 @@ document.addEventListener('keydown', (e) => {
     // 지표 드롭다운 닫기
     if (indDropdownMenu) indDropdownMenu.classList.remove('show');
     // 시그널 필터 드롭다운 닫기
-    const sfMenu = document.getElementById('signal-filter-menu');
+    const sfMenu = document.getElementById('viz-toggle-menu');
     if (sfMenu) sfMenu.classList.remove('show');
     // 모바일 사이드바 드로어 닫기
     const sidebarEl = document.getElementById('sidebar');

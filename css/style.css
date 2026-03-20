@@ -326,7 +326,7 @@ html, body {
   outline: none;
 }
 .sb-sort-select option {
-  background: var(--bg-card);
+  background: var(--bg-element);
   color: var(--text);
 }
 
@@ -3039,6 +3039,10 @@ html, body {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
   }
+  /* [FIX] 단일 열에서 grid-column:2 무효화 */
+  #chart-area    { grid-column: 1; grid-row: 1; }
+  #pattern-panel { grid-column: 1; }
+  #right-panel   { grid-column: 1; }
 
   /* A열: 사이드바 드로어 스타일은 1024px에서 이미 정의됨 — 768px에서 상속 */
 
