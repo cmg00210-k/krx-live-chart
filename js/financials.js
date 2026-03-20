@@ -110,6 +110,7 @@ async function updateFinancials() {
   } catch (e) {
     console.error('[KRX] 재무 데이터 로드 실패:', e);
     showToast(currentStock.name + ' 재무 데이터 로드 실패', 'error');
+    _clearAllFinancials();
     return;
   }
   if (!data.length) return;
@@ -135,7 +136,7 @@ async function updateFinancials() {
   _showDartWarning(_finSource);
 
   // 기간 표시
-  set('fin-period', latest.p || '—');
+  set('fin-period', latest.p || '\u2014');
 
   // 주요손익지표 — 단위를 span.fin-unit으로 분리 (CSS 별도 스타일링)
   setHtml('fin-revenue', Number(latest.rev).toLocaleString() + '<span class="fin-unit">억</span>');
@@ -154,11 +155,11 @@ async function updateFinancials() {
   set('fin-eps', Number(latest.eps).toLocaleString() + '원');
   setClass('fin-eps', 'fin-grid-value' + (Number(latest.eps) < 0 ? ' dn' : ''));
   const roeNum = parseFloat(latest.roe);
-  set('fin-roe', isNaN(roeNum) ? '—' : roeNum.toFixed(1) + '%');
+  set('fin-roe', isNaN(roeNum) ? '\u2014' : roeNum.toFixed(1) + '%');
   setClass('fin-roe', 'fin-grid-value' + (!isNaN(roeNum) && roeNum < 0 ? ' dn' : ''));
   _latestFinRoe = isNaN(roeNum) ? 0 : roeNum;
   // BPS: 자본총계/발행주식수 (DART 데이터에 있으면 표시)
-  const bps = latest.bps || '—';
+  const bps = latest.bps || '\u2014';
   set('fin-bps', typeof bps === 'number' ? bps.toLocaleString() + '원' : bps);
   setClass('fin-bps', 'fin-grid-value' + (typeof bps === 'number' && bps < 0 ? ' dn' : ''));
 
@@ -178,7 +179,7 @@ async function updateFinancials() {
     set('fin-npm', npmVal.toFixed(1) + '%');
     setClass('fin-npm', 'fin-grid-value' + (npmVal < 0 ? ' dn' : ''));
   } else {
-    set('fin-npm', '—');
+    set('fin-npm', '\u2014');
   }
 
   // ROA: data.js toDisplay()에서 이미 계산, 또는 여기서 폴백
@@ -199,7 +200,7 @@ async function updateFinancials() {
     set('fin-roa', roaVal.toFixed(1) + '%');
     setClass('fin-roa', 'fin-grid-value' + (roaVal < 0 ? ' dn' : ''));
   } else {
-    set('fin-roa', '—');
+    set('fin-roa', '\u2014');
   }
 
   // 부채비율: debt_ratio (DART) 또는 total_liabilities/total_equity로 계산
@@ -219,7 +220,7 @@ async function updateFinancials() {
     set('fin-debt-ratio', debtRatio.toFixed(1) + '%');
     setClass('fin-debt-ratio', 'fin-grid-value' + (debtRatio > 200 ? ' dn' : ''));
   } else {
-    set('fin-debt-ratio', '—');
+    set('fin-debt-ratio', '\u2014');
   }
 
   // ── PER / PBR / PSR 계산 ──
@@ -235,10 +236,10 @@ async function updateFinancials() {
     let shares = Number(latest.shares_outstanding);
     // 단위 보정: 100 미만이면 백만주 단위로 추정 → 원래 주수로 변환
     if (shares < 100) {
-      console.warn('[KRX-FIN] shares_outstanding < 100, 백만주 단위 추정:', shares, '→', shares * 1000000);
+      console.warn('[KRX-FIN] shares_outstanding < 100, 백만주 단위 추정:', shares, '\u2192', shares * 1000000);
       shares = shares * 1000000;
     } else if (shares > 0 && shares < 1000) {
-      console.warn('[KRX-FIN] shares_outstanding 비정상 범위:', shares, '— EPS 계산 생략');
+      console.warn('[KRX-FIN] shares_outstanding 비정상 범위:', shares, '\u2014 EPS 계산 생략');
       shares = 0;
     }
     if (shares > 0) {
@@ -282,7 +283,7 @@ async function updateFinancials() {
     set('fin-per', '적자');
     setClass('fin-per', 'fin-grid-value');
   } else {
-    set('fin-per', '—');
+    set('fin-per', '\u2014');
   }
 
   // PBR 계산 우선순위:
@@ -299,7 +300,7 @@ async function updateFinancials() {
     set('fin-pbr', pbrVal.toFixed(2) + '배');
     setClass('fin-pbr', 'fin-grid-value');
   } else {
-    set('fin-pbr', '—');
+    set('fin-pbr', '\u2014');
   }
 
   // PSR = 시가총액(억원) / 매출액(억원)
@@ -309,7 +310,7 @@ async function updateFinancials() {
     set('fin-psr', psrVal.toFixed(2) + '배');
     setClass('fin-psr', 'fin-grid-value');
   } else {
-    set('fin-psr', '—');
+    set('fin-psr', '\u2014');
   }
 
   // ── 성장성: 3년 CAGR 계산 ──
@@ -370,8 +371,8 @@ function _getMarketCapEok(code, currentPrice, sharesOutstanding) {
  */
 function _calcCAGR(annualData, set, setClass) {
   if (!annualData || annualData.length < 2) {
-    set('fin-rev-cagr', '—');
-    set('fin-ni-cagr', '—');
+    set('fin-rev-cagr', '\u2014');
+    set('fin-ni-cagr', '\u2014');
     return;
   }
 
@@ -380,8 +381,8 @@ function _calcCAGR(annualData, set, setClass) {
   const years = annualData.length >= 4 ? 3 : (annualData.length - 1);
 
   if (years <= 0) {
-    set('fin-rev-cagr', '—');
-    set('fin-ni-cagr', '—');
+    set('fin-rev-cagr', '\u2014');
+    set('fin-ni-cagr', '\u2014');
     return;
   }
 
@@ -393,7 +394,7 @@ function _calcCAGR(annualData, set, setClass) {
     set('fin-rev-cagr', (revCagr >= 0 ? '+' : '') + revCagr.toFixed(1) + '%');
     setClass('fin-rev-cagr', 'fin-grid-value ' + (revCagr >= 0 ? 'up' : 'dn'));
   } else {
-    set('fin-rev-cagr', '—');
+    set('fin-rev-cagr', '\u2014');
   }
 
   // 순이익 CAGR
@@ -410,7 +411,7 @@ function _calcCAGR(annualData, set, setClass) {
     set('fin-ni-cagr', '적자전환');
     setClass('fin-ni-cagr', 'fin-grid-value dn');
   } else {
-    set('fin-ni-cagr', '—');
+    set('fin-ni-cagr', '\u2014');
   }
 }
 
@@ -489,8 +490,8 @@ function _calcInvestmentScore(params, set, setClass) {
 
   // 최소 2개 항목 활성 필요 (최소 maxPossible >= 30)
   if (maxPossible < 30) {
-    set('fin-score', '—');
-    set('fin-grade', '—');
+    set('fin-score', '\u2014');
+    set('fin-grade', '\u2014');
     return;
   }
 
@@ -552,7 +553,7 @@ function _calcFinChanges(data) {
   };
 
   const fmtPct = (label, pct) => {
-    if (pct == null) return label + ' —';
+    if (pct == null) return label + ' \u2014';
     if (pct === TURNAROUND_POS) return label + ' 흑자전환';
     if (pct === TURNAROUND_NEG) return label + ' 적자전환';
     const sign = pct >= 0 ? '+' : '';

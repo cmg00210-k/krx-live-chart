@@ -37,10 +37,11 @@ const signalRenderer = (() => {
         const ctx = scope.context;
         const w = scope.mediaSize.width;
         const h = scope.mediaSize.height;
-        const { vbands, diamonds, stars, divLines } = this._data;
+        const { vbands, diamonds, stars, divLines, volLabels } = this._data;
 
         // 빈 데이터면 즉시 반환
-        if (!vbands.length && !diamonds.length && !stars.length && !divLines.length) return;
+        const hasVolLabels = volLabels && volLabels.length;
+        if (!vbands.length && !diamonds.length && !stars.length && !divLines.length && !hasVolLabels) return;
 
         ctx.save();
 
@@ -99,9 +100,70 @@ const signalRenderer = (() => {
           _drawStar(ctx, s.x, s.y, s.size || 8, s.color);
         });
 
+        // ── 5. 거래량 급증 라벨 ("거래↑") ──
+        if (hasVolLabels) {
+          const labelText = '거래\u2191';
+          ctx.font = '600 10px "JetBrains Mono", monospace';
+          const textMetrics = ctx.measureText(labelText);
+          const textW = textMetrics.width;
+          const padH = 3;   // 좌우 패딩
+          const padV = 2;   // 상하 패딩
+          const boxW = textW + padH * 2;
+          const boxH = 12 + padV * 2;  // 10px 폰트 + 패딩
+          const labelY = h * 0.80;     // 차트 높이의 80% 위치 (볼륨 히스토그램 상단)
+          const MIN_LABEL_GAP = 30;    // 라벨 간 최소 간격 (px)
+
+          let prevLabelX = -Infinity;
+
+          volLabels.forEach(vl => {
+            if (vl.x == null) return;
+            // 겹침 방지: 직전 라벨과 30px 이상 떨어져야 표시
+            if (vl.x - prevLabelX < MIN_LABEL_GAP) return;
+
+            const bx = vl.x - boxW / 2;
+            const by = labelY - boxH / 2;
+
+            // 배경 (반투명 다크)
+            ctx.fillStyle = KRX_COLORS.TAG_BG(0.85);
+            ctx.beginPath();
+            _roundRect(ctx, bx, by, boxW, boxH, 3);
+            ctx.fill();
+
+            // 텍스트 (금색)
+            ctx.fillStyle = KRX_COLORS.ACCENT;
+            ctx.globalAlpha = 0.95;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, vl.x, labelY);
+            ctx.globalAlpha = 1;
+
+            prevLabelX = vl.x;
+          });
+        }
+
         ctx.restore();
       });
     }
+  }
+
+
+  // ══════════════════════════════════════════════════
+  //  roundRect 유틸리티 (브라우저 호환 — patternRenderer.js와 동일 패턴)
+  // ══════════════════════════════════════════════════
+
+  function _roundRect(ctx, x, y, w, h, r) {
+    if (typeof r === 'number') r = [r, r, r, r];
+    const [tl, tr, br, bl] = r;
+    ctx.moveTo(x + tl, y);
+    ctx.lineTo(x + w - tr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + tr);
+    ctx.lineTo(x + w, y + h - br);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+    ctx.lineTo(x + bl, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - bl);
+    ctx.lineTo(x, y + tl);
+    ctx.quadraticCurveTo(x, y, x + tl, y);
+    ctx.closePath();
   }
 
 
@@ -143,7 +205,7 @@ const signalRenderer = (() => {
   class SignalBgPaneView {
     constructor(source) {
       this._source = source;
-      this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [] };
+      this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [], volLabels: [] };
     }
 
     zOrder() { return 'bottom'; }
@@ -151,7 +213,7 @@ const signalRenderer = (() => {
     update() {
       const src = this._source;
       if (!src._chart || !src._series || !src._signals) {
-        this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [] };
+        this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [], volLabels: [] };
         return;
       }
 
@@ -184,7 +246,7 @@ const signalRenderer = (() => {
         });
       });
 
-      this._drawData = { vbands, diamonds: [], stars: [], divLines: [] };
+      this._drawData = { vbands, diamonds: [], stars: [], divLines: [], volLabels: [] };
     }
 
     renderer() { return new SignalCanvasRenderer(this._drawData); }
@@ -198,7 +260,7 @@ const signalRenderer = (() => {
   class SignalFgPaneView {
     constructor(source) {
       this._source = source;
-      this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [] };
+      this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [], volLabels: [] };
     }
 
     zOrder() { return 'top'; }
@@ -206,7 +268,7 @@ const signalRenderer = (() => {
     update() {
       const src = this._source;
       if (!src._chart || !src._series || !src._signals) {
-        this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [] };
+        this._drawData = { vbands: [], diamonds: [], stars: [], divLines: [], volLabels: [] };
         return;
       }
 
@@ -274,7 +336,20 @@ const signalRenderer = (() => {
         }
       });
 
-      this._drawData = { vbands: [], diamonds, stars, divLines };
+      // ── 거래량 급증 라벨 좌표 계산 ──
+      const volLabels = [];
+      const breakoutLabels = src._volBreakoutLabels;
+      if (breakoutLabels && breakoutLabels.length) {
+        breakoutLabels.forEach(bl => {
+          const x = ts.timeToCoordinate(bl.time);
+          if (x == null) return;
+          volLabels.push({ x });
+        });
+        // x좌표 오름차순 정렬 (겹침 방지 로직에 필요)
+        volLabels.sort((a, b) => a.x - b.x);
+      }
+
+      this._drawData = { vbands: [], diamonds, stars, divLines, volLabels };
     }
 
     renderer() { return new SignalCanvasRenderer(this._drawData); }
@@ -346,6 +421,7 @@ const signalRenderer = (() => {
       this._bgView = new SignalBgPaneView(this);
       this._fgView = new SignalFgPaneView(this);
       this._signals = null;
+      this._volBreakoutLabels = [];  // _highlightVolume()에서 수집한 breakout 봉 위치
     }
 
     attached(param) {
@@ -374,6 +450,7 @@ const signalRenderer = (() => {
 
     clearSignals() {
       this._signals = null;
+      this._volBreakoutLabels = [];
       if (this._requestUpdate) this._requestUpdate();
     }
   }
@@ -381,7 +458,9 @@ const signalRenderer = (() => {
 
   // ══════════════════════════════════════════════════
   //  거래량 강조 (volumeSeries 색상 변경)
-  //  별도 primitive 없이 chart.js의 volumeSeries 데이터 색상을 변경
+  //  [FIX] breakout 봉만 개별 update()로 색상 오버라이드
+  //  chart.js updateMain()의 동적 투명도 볼륨 색상을 기본으로 유지하고
+  //  breakout 봉만 accent 색상으로 덮어씀 (setData() 전체 덮어쓰기 제거)
   // ══════════════════════════════════════════════════
 
   function _highlightVolume(cm, candles, signals) {
@@ -399,20 +478,31 @@ const signalRenderer = (() => {
       }
     });
 
+    // primitive에 breakout 라벨 데이터 저장 (봉이 0개여도 빈 배열로 초기화)
+    const breakoutLabels = [];
+    volBreakoutSet.forEach(function(idx) {
+      if (idx < 0 || idx >= candles.length) return;
+      breakoutLabels.push({ time: candles[idx].time, index: idx });
+    });
+    if (_primitive) {
+      _primitive._volBreakoutLabels = breakoutLabels;
+      if (_primitive._requestUpdate) _primitive._requestUpdate();
+    }
+
     if (volBreakoutSet.size === 0) return;
 
-    // [FIX] update()는 과거 봉에 사용 불가 (Cannot update oldest data 에러)
-    // setData()로 전체 볼륨 배열을 재설정하되, breakout 봉만 색상 변경
-    var volData = candles.map(function(c, i) {
-      var isBreakout = volBreakoutSet.has(i);
-      return {
+    // [FIX] breakout 봉만 개별 update()로 accent 색상 오버라이드
+    // chart.js updateMain()의 동적 투명도 색상(0.15/0.25/0.45)을 보존하면서
+    // breakout 봉만 ACCENT_FILL(0.7)로 강조
+    volBreakoutSet.forEach(function(idx) {
+      if (idx < 0 || idx >= candles.length) return;
+      var c = candles[idx];
+      cm.volumeSeries.update({
         time: c.time,
         value: c.volume || 0,
-        color: isBreakout ? KRX_COLORS.ACCENT_FILL(0.7)
-             : (c.close >= c.open ? KRX_COLORS.UP_FILL(0.35) : KRX_COLORS.DOWN_FILL(0.35)),
-      };
+        color: KRX_COLORS.ACCENT_FILL(0.7),
+      });
     });
-    cm.volumeSeries.setData(volData);
   }
 
 

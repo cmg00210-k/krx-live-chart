@@ -389,22 +389,23 @@ class PatternEngine {
       const trend = this._detectTrend(candles, i, 10, a);
       if (trend.direction !== 'up') continue;
 
-      // Nison 필수 조건: 다음 봉이 확인 캔들 (종가가 교수형 종가 아래)
-      const hasConfirm = (i + 1 < candles.length) && (candles[i + 1].close < c.close);
+      // [FIX] look-ahead bias 제거: candles[i+1] 미래 참조 삭제
+      // Nison: 교수형은 확인 캔들(다음 봉 하락)로 신뢰도가 높아지나,
+      // 실시간 감지 시 미래 데이터를 사용하면 백테스트 결과가 왜곡됨.
+      // 확인 없이는 보수적으로 평가 (extra=0.15, strength='weak')
       const bodyScore = Math.min(body / a, 1);
       const shadowScore = Math.min(lowerShadow / range, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confirmBonus = hasConfirm ? 0.3 : 0;
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: confirmBonus });
-      const strength = hasConfirm ? 'strong' : 'weak';  // 확인 캔들 없으면 약한 신호
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.15 });
+      const strength = 'weak';  // 확인 캔들 없이는 약한 신호 (look-ahead bias 방지)
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._target(candles, i, i, 'sell');
 
       results.push({
         type: 'hangingMan', name: '교수형 (Hanging Man)', nameShort: '교수형',
         signal: 'sell', strength, confidence, stopLoss, priceTarget,
-        description: `상승 후 긴 아래꼬리${hasConfirm ? ' + 확인 캔들' : ''} — 하락 반전 경고. 신뢰도 ${confidence}%`,
+        description: `상승 후 긴 아래꼬리 — 하락 반전 경고 (확인 필요). 신뢰도 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -579,16 +580,16 @@ class PatternEngine {
         if (curr.open > prev.close && curr.close < prev.open) {
           const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
           const bodyScore = Math.min(1 - currBody / prevBody, 1);
-          // [ACC] 하라미 3캔들 확인: 다음 캔들이 현재 종가 위로 마감하면 확인됨
-          const hasConfirm = (i + 1 < candles.length) && candles[i + 1].close > curr.close;
+          // [FIX] look-ahead bias 제거: candles[i+1] 미래 참조 삭제
+          // 잉태형은 본질적으로 미확인 패턴 — 항상 보수적으로 평가 (20% 감산 적용)
           let quality = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
-          if (!hasConfirm) quality = Math.round(quality * 0.8);  // 미확인 시 20% 감산
+          quality = Math.round(quality * 0.8);  // 미확인 상태가 기본 (look-ahead bias 방지)
           results.push({
             type: 'bullishHarami', name: '상승잉태형 (Bullish Harami)', nameShort: '상승잉태',
-            signal: 'buy', strength: 'medium', confidence: quality, confirmed: hasConfirm,
+            signal: 'buy', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
             priceTarget: this._target(candles, i - 1, i, 'buy'),
-            description: `작은 양봉이 음봉 내에 — 반전 가능. ${hasConfirm ? '확인됨' : '미확인'}. 신뢰도 ${quality}%`,
+            description: `작은 양봉이 음봉 내에 — 반전 가능 (확인 필요). 신뢰도 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
           });
@@ -600,16 +601,16 @@ class PatternEngine {
         if (curr.open < prev.close && curr.close > prev.open) {
           const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
           const bodyScore = Math.min(1 - currBody / prevBody, 1);
-          // [ACC] 하라미 3캔들 확인: 다음 캔들이 현재 종가 아래로 마감하면 확인됨
-          const hasConfirm = (i + 1 < candles.length) && candles[i + 1].close < curr.close;
+          // [FIX] look-ahead bias 제거: candles[i+1] 미래 참조 삭제
+          // 잉태형은 본질적으로 미확인 패턴 — 항상 보수적으로 평가 (20% 감산 적용)
           let quality = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
-          if (!hasConfirm) quality = Math.round(quality * 0.8);  // 미확인 시 20% 감산
+          quality = Math.round(quality * 0.8);  // 미확인 상태가 기본 (look-ahead bias 방지)
           results.push({
             type: 'bearishHarami', name: '하락잉태형 (Bearish Harami)', nameShort: '하락잉태',
-            signal: 'sell', strength: 'medium', confidence: quality, confirmed: hasConfirm,
+            signal: 'sell', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
             priceTarget: this._target(candles, i - 1, i, 'sell'),
-            description: `작은 음봉이 양봉 내에 — 반전 가능. ${hasConfirm ? '확인됨' : '미확인'}. 신뢰도 ${quality}%`,
+            description: `작은 음봉이 양봉 내에 — 반전 가능 (확인 필요). 신뢰도 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
           });

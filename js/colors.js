@@ -56,4 +56,8 @@ const KRX_COLORS = Object.freeze({
   PTN_TARGET:    'rgba(150,220,200,0.55)',    // 목표: 민트
   PTN_MARKER_BUY:  'rgba(130,210,185,0.8)',   // 민트 마커
   PTN_MARKER_SELL: 'rgba(130,210,185,0.8)',   // [통일] 매도 마커도 민트
+
+  // ── Visible 고/저점 색상 ──
+  VIS_HIGH_FILL: (a) => `rgba(224,80,80,${a})`,      // 고점 (빨강 계열)
+  VIS_LOW_FILL:  (a) => `rgba(100,200,255,${a})`,    // 저점 (하늘색 — 볼륨 파랑과 구분)
 });

@@ -263,7 +263,7 @@ class PatternBacktester {
         if (!entryPrice || entryPrice === 0) continue;
 
         const exitPrice = candles[exitIdx].close;
-        const ret = (exitPrice - entryPrice) / entryPrice * 100; // %
+        const ret = (exitPrice - entryPrice) / entryPrice * 100 - this.KRX_COST; // % (왕복 거래비용 차감)
         returns.push(ret);
         validOccs.push(occ);
       }
@@ -454,7 +454,7 @@ class PatternBacktester {
         const entryPrice = candles[entryIdx2].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
-        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100;
+        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100 - this.KRX_COST; // 왕복 거래비용 차감
         returns.push(ret);
       }
 

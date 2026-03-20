@@ -4,6 +4,169 @@
 //  이 파일은 ChartManager 클래스만 포함
 // ══════════════════════════════════════════════════════
 
+// ── HighLowPrimitive: visible 고/저점 캔들 → 우측 축까지 점선 ──
+// ISeriesPrimitive 패턴 (patternRenderer.js 참조)
+// createPriceLine(lineVisible:false)로 축 태그만 표시하고,
+// 이 primitive가 해당 캔들 x좌표 → 차트 우측 끝까지 점선을 그림
+class _HighLowPaneView {
+  constructor(source) {
+    this._source = source;
+    this._drawItems = [];
+  }
+
+  zOrder() { return 'bottom'; }
+
+  update() {
+    this._drawItems = [];
+    const src = this._source;
+    if (!src._chart || !src._series) return;
+    if (src._highPrice == null && src._lowPrice == null) return;
+
+    const ts = src._chart.timeScale();
+    const series = src._series;
+
+    // 점선 끝점: 마지막 캔들 x좌표 (여백에 점선 안 그림)
+    var endX = null;
+    if (src._lastCandleTime != null) {
+      endX = ts.timeToCoordinate(src._lastCandleTime);
+    }
+
+    // 고점 점선 데이터
+    if (src._highPrice != null && src._highTime != null) {
+      const x = ts.timeToCoordinate(src._highTime);
+      const y = series.priceToCoordinate(src._highPrice);
+      if (x != null && y != null) {
+        this._drawItems.push({
+          x: x, y: y, isHigh: true,
+          color: KRX_COLORS.UP_FILL(0.6),
+          endX: endX,
+        });
+      }
+    }
+
+    // 저점 점선 데이터
+    if (src._lowPrice != null && src._lowTime != null) {
+      const x = ts.timeToCoordinate(src._lowTime);
+      const y = series.priceToCoordinate(src._lowPrice);
+      if (x != null && y != null) {
+        this._drawItems.push({
+          x: x, y: y, isHigh: false,
+          color: KRX_COLORS.VIS_LOW_FILL(0.6),
+          endX: endX,
+        });
+      }
+    }
+  }
+
+  renderer() { return new _HighLowRenderer(this._drawItems); }
+}
+
+class _HighLowRenderer {
+  constructor(items) { this._items = items; }
+
+  draw(target) {
+    if (!this._items || !this._items.length) return;
+
+    target.useMediaCoordinateSpace(scope => {
+      const ctx = scope.context;
+      const w = scope.mediaSize.width;
+
+      ctx.save();
+
+      this._items.forEach(item => {
+        if (item.x == null || item.y == null) return;
+        // 캔들이 화면 오른쪽 밖이면 스킵
+        if (item.x > w + 10) return;
+
+        // ── 점선: 캔들 x → 마지막 캔들 x (여백에는 절대 안 그림) ──
+        // endX가 null이면 (마지막 캔들이 visible 밖) 점선 생략
+        if (item.endX != null && item.endX > item.x) {
+          ctx.beginPath();
+          ctx.strokeStyle = item.color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 3]);
+          const startX = Math.max(0, item.x);
+          const lineEndX = Math.min(item.endX + 12, w);
+          ctx.moveTo(startX, item.y);
+          ctx.lineTo(lineEndX, item.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // ── 마커: 고점 ▲, 저점 ▼ (작은 삼각형 4px) ──
+        if (item.x >= -10 && item.x <= w + 10) {
+          ctx.fillStyle = item.color;
+          ctx.beginPath();
+          if (item.isHigh) {
+            // ▲ 고점 위쪽 삼각형 (캔들 바로 위)
+            ctx.moveTo(item.x, item.y - 6);
+            ctx.lineTo(item.x - 4, item.y - 1);
+            ctx.lineTo(item.x + 4, item.y - 1);
+          } else {
+            // ▼ 저점 아래쪽 삼각형 (캔들 바로 아래)
+            ctx.moveTo(item.x, item.y + 6);
+            ctx.lineTo(item.x - 4, item.y + 1);
+            ctx.lineTo(item.x + 4, item.y + 1);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+
+      ctx.restore();
+    });
+  }
+}
+
+class _HighLowPrimitive {
+  constructor() {
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+    this._view = new _HighLowPaneView(this);
+    // 데이터
+    this._highPrice = null;
+    this._highTime = null;
+    this._lowPrice = null;
+    this._lowTime = null;
+    this._lastCandleTime = null;  // 점선 끝점 제한용
+  }
+
+  attached(param) {
+    this._chart = param.chart;
+    this._series = param.series;
+    this._requestUpdate = param.requestUpdate;
+  }
+
+  detached() {
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  updateAllViews() { this._view.update(); }
+  paneViews() { return [this._view]; }
+
+  setHighLow(highPrice, highTime, lowPrice, lowTime, lastCandleTime) {
+    this._highPrice = highPrice;
+    this._highTime = highTime;
+    this._lowPrice = lowPrice;
+    this._lowTime = lowTime;
+    this._lastCandleTime = lastCandleTime || null;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  clear() {
+    this._highPrice = null;
+    this._highTime = null;
+    this._lowPrice = null;
+    this._lowTime = null;
+    this._lastCandleTime = null;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+}
+
+
 class ChartManager {
   constructor() {
     this.mainChart = null;
@@ -43,10 +206,22 @@ class ChartManager {
     this._syncing = false;
     this._syncScheduled = false;  // [OPT] 마이크로태스크 디바운스 플래그
 
-    // 가격선 참조 (현재가/고가/저가)
+    // 가격선 참조 (현재가만 — 고/저점은 visible 기준으로 별도 관리)
     this._currentPriceLine = null;
-    this._highPriceLine = null;
-    this._lowPriceLine = null;
+
+    // visible range 기준 고/저점 (축 라벨 전용 priceLine + ISeriesPrimitive 점선)
+    this._visHighLine = null;      // createPriceLine (lineVisible:false, 축 태그만)
+    this._visLowLine = null;
+    this._visHighLowPrimitive = null;  // ISeriesPrimitive (캔들→우측 점선)
+    this._visHighIdx = -1;         // 고점 캔들 인덱스 (primitive용)
+    this._visLowIdx = -1;          // 저점 캔들 인덱스
+
+    // visible range 기준 고/저점 캐시 (불필요한 업데이트 스킵용)
+    this._lastVisibleHigh = null;
+    this._lastVisibleLow = null;
+
+    // 볼륨 20일 이동평균 시리즈
+    this._volMaSeries = null;
 
     // OHLC 크로스헤어 콜백
     this._ohlcCallback = null;
@@ -143,10 +318,11 @@ class ChartManager {
         borderColor: KRX_COLORS.CHART_BORDER,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 3,
+        rightOffset: 0,
         barSpacing: 10,
         minBarSpacing: 3,
         fixLeftEdge: true,
+        fixRightEdge: true,   // 마지막 캔들이 우측 축에 고정 — 우측 빈 여백 없음
         lockVisibleTimeRangeOnResize: true,
         // [FIX] X축 라벨을 KST(UTC+9)로 표시
         tickMarkFormatter: function(time, tickMarkType) {
@@ -450,8 +626,33 @@ class ChartManager {
       }));
       // [FIX] 거래량 활성 시 프라이스 스케일 복원 (비활성→활성 전환 대응)
       this.mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+      // ── 20일 평균 거래량선 (점선) ──
+      if (!this._volMaSeries) {
+        this._volMaSeries = this.mainChart.addLineSeries({
+          priceScaleId: 'vol',
+          color: KRX_COLORS.MA_MID,
+          lineWidth: 1,
+          lineStyle: 2,                          // Dashed (점선)
+          priceLineVisible: false,
+          lastValueVisible: true,
+          title: 'Vol MA20',
+          crosshairMarkerVisible: false,
+        });
+      }
+      var volMaValues = calcMA(candles.map(function(c) { return c.volume || 0; }), 20);
+      this._volMaSeries.setData(
+        volMaValues.map(function(v, i) {
+          return v !== null ? { time: candles[i].time, value: v } : null;
+        }).filter(Boolean)
+      );
     } else {
       this.volumeSeries.setData([]);
+      // 볼륨 비활성 시 MA 시리즈도 제거
+      if (this._volMaSeries) {
+        try { this.mainChart.removeSeries(this._volMaSeries); } catch (e) {}
+        this._volMaSeries = null;
+      }
       // [FIX] 거래량 비활성 시 volume 프라이스 스케일을 0 높이로 축소
       // — scaleMargins top:0.8 이 데이터 없어도 20% 공간을 점유하는 버그 수정
       this.mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 1, bottom: 0 } });
@@ -523,13 +724,14 @@ class ChartManager {
 
     // ── 패턴 마커 & 추세선 ──
     this._drawPatterns(candles, chartType, patterns);
-    if (typeof patternRenderer !== 'undefined') patternRenderer.render(this, candles, chartType, patterns);
+    // [FIX] patternRenderer.render()는 app.js _renderOverlays()에서 단일 호출
+    // 여기서 중복 호출하면 한 프레임에 2회 Canvas 렌더 → 제거
 
     // ── 초기 표시 범위: 동적 barSpacing (컨테이너폭/17) 기반 ──
     // 약 12개 캔들 + rightOffset 5칸 표시
     // 최근 데이터를 우측에 배치하고 좌측으로 드래그하여 과거 탐색
     if (candles.length > 0 && this._shouldSetInitialRange) {
-      this.mainChart.timeScale().scrollToPosition(3, false);
+      this.mainChart.timeScale().scrollToPosition(0, false);
       this._shouldSetInitialRange = false;
     }
   }
@@ -827,8 +1029,9 @@ class ChartManager {
     this.stochChart = LightweightCharts.createChart(container, opts);
     this.stochKSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_K, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     this.stochDSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_D, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
-    this.stochKSeries.createPriceLine({ price: 80, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-    this.stochKSeries.createPriceLine({ price: 20, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
+    this.stochKSeries.createPriceLine({ price: 80, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.stochKSeries.createPriceLine({ price: 20, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.stochChart);
     this._rebuildSync();
     return this.stochChart;
@@ -856,8 +1059,9 @@ class ChartManager {
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.cciChart = LightweightCharts.createChart(container, opts);
     this.cciSeries = this.cciChart.addLineSeries({ color: KRX_COLORS.CCI, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
-    this.cciSeries.createPriceLine({ price: 100, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-    this.cciSeries.createPriceLine({ price: -100, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
+    this.cciSeries.createPriceLine({ price: 100, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.cciSeries.createPriceLine({ price: -100, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.cciChart);
     this._rebuildSync();
     return this.cciChart;
@@ -886,6 +1090,7 @@ class ChartManager {
     this.adxSeries = this.adxChart.addLineSeries({ color: KRX_COLORS.ADX, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
     this.adxPlusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
     this.adxMinusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
+    // ADX 25선: rgba(255,255,255,0.2) — KRX_COLORS에 정확한 대응 없음, 유지
     this.adxSeries.createPriceLine({ price: 25, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.adxChart);
     this._rebuildSync();
@@ -915,8 +1120,9 @@ class ChartManager {
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.willrChart = LightweightCharts.createChart(container, opts);
     this.willrSeries = this.willrChart.addLineSeries({ color: KRX_COLORS.WILLR, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
-    this.willrSeries.createPriceLine({ price: -20, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
-    this.willrSeries.createPriceLine({ price: -80, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
+    this.willrSeries.createPriceLine({ price: -20, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    this.willrSeries.createPriceLine({ price: -80, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.willrChart);
     this._rebuildSync();
     return this.willrChart;
@@ -1055,6 +1261,16 @@ class ChartManager {
     this._resizeMap.forEach(entry => entry.observer.disconnect());
     this._resizeMap.clear();
 
+    // visible 고/저점 primitive 정리 (chart.remove() 전에 detach)
+    if (this._visHighLowPrimitive && this.candleSeries) {
+      try { this.candleSeries.detachPrimitive(this._visHighLowPrimitive); } catch (e) {}
+    }
+    this._visHighLine = null;
+    this._visLowLine = null;
+    this._visHighLowPrimitive = null;
+    this._visHighIdx = -1;
+    this._visLowIdx = -1;
+
     // 차트 제거
     if (this.mainChart) { this.mainChart.remove(); this.mainChart = null; }
     if (this.rsiChart) { this.rsiChart.remove(); this.rsiChart = null; }
@@ -1081,36 +1297,33 @@ class ChartManager {
     this.macdSignalSeries = null;
     this.macdHistSeries = null;
     this._currentPriceLine = null;
-    this._highPriceLine = null;
-    this._lowPriceLine = null;
+    this._lastVisibleHigh = null;
+    this._lastVisibleLow = null;
+    this._volMaSeries = null;
     this._ohlcCallback = null;
     this._tooltipCallback = null;
     this._hoverPatterns = [];
     this._hoverSignals = [];
     this._hoverCandles = [];
     this._shouldSetInitialRange = false;
+    this._indicatorCache = { key: null, results: {} };
+    this._lastDataKey = {};
+    this._lastRsiValues = null;
+    this._lastMacdValues = null;
     // 주의: _visibleRangeCallback은 유지 — init()에서 한 번만 등록하며
     // destroyAll() → createMainChart() 후에도 _subscribeVisibleRange()에서
     // 기존 콜백을 자동으로 새 차트에 재연결함
     // this._visibleRangeCallback = null;  // 의도적으로 보존
   }
 
-  /** 현재가/고가/저가 가격선 업데이트 */
+  /** 현재가 가격선 업데이트 (고/저점은 updateVisibleHighLow에서 관리) */
   updatePriceLines(currentPrice, dayHigh, dayLow, prevClose) {
     if (!this.candleSeries) return;
 
-    // [FIX] 기존 가격선 제거 + null 초기화 (중복 라벨 방지)
+    // [FIX] 기존 현재가 가격선 제거 + null 초기화 (중복 라벨 방지)
     if (this._currentPriceLine) {
       try { this.candleSeries.removePriceLine(this._currentPriceLine); } catch (e) {}
       this._currentPriceLine = null;
-    }
-    if (this._highPriceLine) {
-      try { this.candleSeries.removePriceLine(this._highPriceLine); } catch (e) {}
-      this._highPriceLine = null;
-    }
-    if (this._lowPriceLine) {
-      try { this.candleSeries.removePriceLine(this._lowPriceLine); } catch (e) {}
-      this._lowPriceLine = null;
     }
 
     const isUp = currentPrice >= (prevClose || currentPrice);
@@ -1124,32 +1337,107 @@ class ChartManager {
       axisLabelVisible: true,
       title: '',
     });
+    // dayHigh/dayLow 인자는 시그니처 호환을 위해 유지하나 내부 미사용
+    // → visible range 기반 고/저점은 updateVisibleHighLow()가 전담
+  }
 
-    // 고가 라인 (파선 — 태그에서 캔들까지 수평선 표시)
-    if (dayHigh && dayHigh !== currentPrice) {
-      this._highPriceLine = this.candleSeries.createPriceLine({
-        price: dayHigh,
-        color: KRX_COLORS.UP_FILL(0.35),
-        lineWidth: 1,
-        lineStyle: 2,                       // Dashed (3=Dotted → 2=Dashed: 더 잘 보임)
-        lineVisible: true,                  // 태그에서 캔들까지 수평 파선 표시
-        axisLabelVisible: true,
-        title: '고',
-      });
+  /**
+   * visible range 기준 고/저점 — 축 태그 + 캔들→우측 점선
+   * 방법 D: createPriceLine(lineVisible:false) → 축 태그만 표시
+   *         ISeriesPrimitive(_HighLowPrimitive) → 캔들 x → 우측 끝 점선
+   * — _subscribeVisibleRange() 콜백 내에서 호출되도록 설계
+   * — 실제 연결은 app.js가 담당
+   * @param {Array} candles — 전체 candles 배열
+   */
+  updateVisibleHighLow(candles) {
+    if (!this.mainChart || !this.candleSeries || !candles || !candles.length) return;
+
+    var range = this.mainChart.timeScale().getVisibleLogicalRange();
+    if (!range) return;
+
+    var from = Math.max(0, Math.floor(range.from));
+    var to = Math.min(candles.length - 1, Math.ceil(range.to));
+    if (from > to) return;
+
+    // visible 구간에서 최고가/최저가 + 해당 인덱스 계산
+    var visHigh = -Infinity, visLow = Infinity;
+    var highIdx = from, lowIdx = from;
+    for (var i = from; i <= to; i++) {
+      if (candles[i].high > visHigh) { visHigh = candles[i].high; highIdx = i; }
+      if (candles[i].low < visLow) { visLow = candles[i].low; lowIdx = i; }
     }
 
-    // 저가 라인 (파선 — 태그에서 캔들까지 수평선 표시)
-    if (dayLow && dayLow !== currentPrice) {
-      this._lowPriceLine = this.candleSeries.createPriceLine({
-        price: dayLow,
-        color: KRX_COLORS.DOWN_FILL(0.35),
-        lineWidth: 1,
-        lineStyle: 2,                       // Dashed (점선→파선)
-        lineVisible: true,                  // 태그에서 캔들까지 수평 파선 표시
-        axisLabelVisible: true,
-        title: '저',
-      });
+    if (!isFinite(visHigh) || !isFinite(visLow)) return;
+
+    // 이전 고/저점과 동일하면 불필요한 업데이트 스킵 (가격+캔들 인덱스 모두 비교)
+    if (visHigh === this._lastVisibleHigh && visLow === this._lastVisibleLow
+        && highIdx === this._visHighIdx && lowIdx === this._visLowIdx) return;
+    this._lastVisibleHigh = visHigh;
+    this._lastVisibleLow = visLow;
+    this._visHighIdx = highIdx;
+    this._visLowIdx = lowIdx;
+
+    // ── 기존 축 태그 가격선 제거 ──
+    if (this._visHighLine) {
+      try { this.candleSeries.removePriceLine(this._visHighLine); } catch (e) {}
+      this._visHighLine = null;
     }
+    if (this._visLowLine) {
+      try { this.candleSeries.removePriceLine(this._visLowLine); } catch (e) {}
+      this._visLowLine = null;
+    }
+
+    // 현재가와 동일하면 라인 생략 (현재가 라인과 겹침 방지)
+    var lastClose = candles[candles.length - 1].close;
+
+    // ── 고점: 축 태그만 (lineVisible:false) ──
+    var highTime = null;
+    if (visHigh !== lastClose) {
+      this._visHighLine = this.candleSeries.createPriceLine({
+        price: visHigh,
+        color: 'rgba(0,0,0,0)',             // 투명 — 실선 안 보이게
+        lineWidth: 1,
+        lineStyle: 2,
+        lineVisible: false,
+        axisLabelVisible: true,
+        axisLabelColor: KRX_COLORS.UP_FILL(0.8),
+        axisLabelTextColor: '#ffffff',
+        title: '',
+      });
+      highTime = candles[highIdx].time;
+    }
+
+    // ── 저점: 축 태그만 (lineVisible:false) — 밝은 하늘색 (볼륨과 구분) ──
+    var lowTime = null;
+    if (visLow !== lastClose) {
+      this._visLowLine = this.candleSeries.createPriceLine({
+        price: visLow,
+        color: 'rgba(0,0,0,0)',             // 투명 — 실선 안 보이게
+        lineWidth: 1,
+        lineStyle: 2,
+        lineVisible: false,
+        axisLabelVisible: true,
+        axisLabelColor: KRX_COLORS.VIS_LOW_FILL(0.8),
+        axisLabelTextColor: '#ffffff',
+        title: '',
+      });
+      lowTime = candles[lowIdx].time;
+    }
+
+    // ── ISeriesPrimitive: 캔들→우측 점선 ──
+    // primitive가 없으면 생성 + attach
+    if (!this._visHighLowPrimitive) {
+      this._visHighLowPrimitive = new _HighLowPrimitive();
+      this.candleSeries.attachPrimitive(this._visHighLowPrimitive);
+    }
+
+    // 데이터 갱신 → requestUpdate (마지막 캔들 time 전달 → 점선 끝점 제한)
+    var lastCandleTime = candles[candles.length - 1].time;
+    this._visHighLowPrimitive.setHighLow(
+      visHigh !== lastClose ? visHigh : null, highTime,
+      visLow !== lastClose ? visLow : null, lowTime,
+      lastCandleTime
+    );
   }
 
   /** 워터마크 설정 (종목명 배경 표시) */

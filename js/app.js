@@ -104,6 +104,11 @@ function _buildWatermark(stockName, suffix) {
     var demoSuffix = suffix ? suffix + ' | 데모' : '데모 — 실제 데이터 아님';
     return stockName + ' (' + demoSuffix + ')';
   }
+  if (KRX_API_CONFIG.mode === 'file') {
+    // 파일 모드: CheeseStock 브랜딩 + 모드 표시
+    var fileSuffix = suffix ? suffix + ' · 파일' : 'CheeseStock · 파일';
+    return stockName + ' (' + fileSuffix + ')';
+  }
   if (suffix) {
     return stockName + ' (' + suffix + ')';
   }
@@ -118,16 +123,86 @@ var _freshnessTimer = null;
 function _updateFreshness() {
   var el = document.getElementById('data-freshness');
   if (!el) return;
-  if (!_lastDataTime) { el.textContent = ''; return; }
+  if (!_lastDataTime) { el.textContent = ''; el.title = ''; return; }
 
-  var diff = Math.floor((Date.now() - _lastDataTime) / 1000);
-  if (diff < 5) el.textContent = '방금';
-  else if (diff < 60) el.textContent = diff + '초 전';
-  else if (diff < 3600) el.textContent = Math.floor(diff / 60) + '분 전';
-  else el.textContent = Math.floor(diff / 3600) + '시간 전';
+  var mode = KRX_API_CONFIG.mode;
 
-  // 5분 이상 지연 시 경고 색상
-  el.style.color = diff > 300 ? 'var(--neutral)' : diff > 60 ? 'var(--text-sub)' : 'var(--text-muted)';
+  // ── WS/실시간 모드: "방금", "X초 전" (수신 시각 기준) ──
+  if (mode === 'ws') {
+    var diff = Math.floor((Date.now() - _lastDataTime) / 1000);
+    if (diff < 5) el.textContent = '방금';
+    else if (diff < 60) el.textContent = diff + '초 전';
+    else if (diff < 3600) el.textContent = Math.floor(diff / 60) + '분 전';
+    else el.textContent = Math.floor(diff / 3600) + '시간 전';
+    el.style.color = diff > 300 ? 'var(--neutral)' : diff > 60 ? 'var(--text-sub)' : 'var(--text-muted)';
+    el.title = '마지막 실시간 데이터 수신 시각';
+    return;
+  }
+
+  // ── 파일/데모 모드: 마지막 캔들 날짜 기준 표시 ──
+  if (mode === 'demo') {
+    el.textContent = '시뮬레이션';
+    el.style.color = 'var(--neutral)';
+    el.title = '데모 모드 — 실제 데이터가 아닙니다';
+    return;
+  }
+
+  // file 모드: 마지막 캔들 날짜 + 데이터 로드 시각으로 기준 표시
+  var lastDate = '';
+  var candleTimeStr = ''; // 분봉이면 캔들 자체 시:분, 일봉이면 없음
+  var isIntraday = false;
+  if (typeof candles !== 'undefined' && candles.length > 0) {
+    var lastTime = candles[candles.length - 1].time;
+    if (typeof lastTime === 'string') {
+      lastDate = lastTime; // "YYYY-MM-DD" (일봉)
+    } else if (lastTime && lastTime.year) {
+      lastDate = lastTime.year + '-' + String(lastTime.month).padStart(2, '0') + '-' + String(lastTime.day).padStart(2, '0');
+    } else if (typeof lastTime === 'number') {
+      isIntraday = true;
+      var d = new Date((lastTime + 9 * 3600) * 1000); // KST 보정
+      lastDate = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+      candleTimeStr = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+    }
+  }
+
+  if (!lastDate) {
+    el.textContent = '';
+    el.title = '';
+    return;
+  }
+
+  // JSON 파일의 실제 갱신 시각 (Last-Modified 헤더 → KST)
+  var fileModTime = (typeof dataService !== 'undefined' && dataService._lastFileModified)
+    ? dataService._lastFileModified : _lastDataTime;
+  var modKst = new Date(fileModTime + 9 * 3600 * 1000);
+  var fileTimeStr = String(modKst.getUTCHours()).padStart(2, '0') + ':' + String(modKst.getUTCMinutes()).padStart(2, '0');
+
+  // 분봉: 캔들 자체 시각 사용, 일봉: JSON 파일 갱신 시각 사용
+  var timeStr = isIntraday ? candleTimeStr : fileTimeStr;
+
+  // 날짜를 "오늘", "어제", "M/D"로 변환
+  var now = new Date();
+  var kstNow = new Date(now.getTime() + 9 * 3600 * 1000);
+  var todayStr = kstNow.getUTCFullYear() + '-' + String(kstNow.getUTCMonth() + 1).padStart(2, '0') + '-' + String(kstNow.getUTCDate()).padStart(2, '0');
+  var yesterday = new Date(kstNow.getTime() - 86400000);
+  var yesterdayStr = yesterday.getUTCFullYear() + '-' + String(yesterday.getUTCMonth() + 1).padStart(2, '0') + '-' + String(yesterday.getUTCDate()).padStart(2, '0');
+
+  var parts = lastDate.split('-');
+  var displayDate = parseInt(parts[1]) + '/' + parseInt(parts[2]);
+
+  if (lastDate === todayStr) {
+    el.textContent = '오늘 ' + timeStr + ' 기준';
+    el.style.color = 'var(--text-muted)';
+  } else if (lastDate === yesterdayStr) {
+    el.textContent = '어제 ' + timeStr + ' 마감';
+    el.style.color = 'var(--text-muted)';
+  } else {
+    el.textContent = displayDate + ' ' + timeStr + ' 마감';
+    // 3일 이상 지나면 경고 색상
+    var daysDiff = Math.floor((kstNow.getTime() - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
+    el.style.color = daysDiff > 3 ? 'var(--neutral)' : 'var(--text-sub)';
+  }
+  el.title = '데이터 기준일: ' + lastDate + ' (파일 모드)';
 }
 
 /** 캔들 데이터 수신 시 호출 — 최종 수신 시각 기록 */
@@ -138,6 +213,7 @@ function _markDataFresh() {
 
 // 10초마다 freshness 텍스트 갱신
 _freshnessTimer = setInterval(_updateFreshness, 10000);
+window.addEventListener('beforeunload', function() { clearInterval(_freshnessTimer); });
 
 // ── DOM 캐시 (빈번 조회 요소) ──
 const _dom = {};
@@ -541,8 +617,10 @@ async function init() {
 
   // ── WS 모드 의도였으나 프로브 실패 → 연결 가이드 표시 ──
   // 로컬 개발 환경에서만 가이드 표시 (공개 서버에서는 file 모드로 자동 진입)
+  // 단, 종목 데이터(ALL_STOCKS)가 이미 로드되었으면 file 모드로 바로 진행 (WS 프로브는 백그라운드 진행 중)
   var _isLocalDev = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:');
-  if (_originalMode === 'ws' && KRX_API_CONFIG.mode !== 'ws' && _isLocalDev) {
+  var _hasStockData = (typeof ALL_STOCKS !== 'undefined' && ALL_STOCKS.length > 0);
+  if (_originalMode === 'ws' && KRX_API_CONFIG.mode !== 'ws' && _isLocalDev && !_hasStockData) {
     _showConnectionGuide(function() { _continueInit(); });
     return;
   }
@@ -781,6 +859,12 @@ async function _continueInit() {
   // KNOWSTOCK chart_widget.py 참고: 드래그 → _offset 변경 → _visible_slice() → repaint
   // 여기서는 subscribeVisibleLogicalRangeChange → 해당 구간 패턴 분석 → 즉시 렌더링
   chartManager.onVisibleRangeChange((from, to) => {
+    // ── visible range 기반 고/저점 수평선 업데이트 ──
+    // chart.js의 updateVisibleHighLow가 준비되면 자동 연결
+    if (candles.length && typeof chartManager.updateVisibleHighLow === 'function') {
+      chartManager.updateVisibleHighLow(candles);
+    }
+
     if (!patternEnabled || !candles.length) return;
 
     // 보이는 구간의 캔들만 추출 (인덱스 보정 포함)
@@ -1262,12 +1346,6 @@ function _initAnalysisWorker() {
 
           _renderOverlays();  // vizToggles 필터 적용된 통합 렌더
           const dragFiltered = vizToggles.signal ? _filterSignalsByCategory(detectedSignals) : [];
-          if (typeof signalRenderer !== 'undefined') {
-            signalRenderer.render(chartManager, candles, dragFiltered, {
-              volumeActive: activeIndicators.has('vol'),
-              chartType: chartType,
-            });
-          }
 
           chartManager.setHoverData(candles, detectedPatterns, dragFiltered);
 
@@ -1999,6 +2077,9 @@ async function selectStock(code) {
   _dragVersion++;
   if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
   _chartPatternStructLines = [];
+  detectedPatterns = [];
+  detectedSignals = [];
+  signalStats = null;
   _prevPrice = null;
   _prevPatternCount = -1;
   if (typeof backtester !== 'undefined') backtester.invalidateCache();
@@ -2131,23 +2212,23 @@ function updateStockInfo() {
   // → 가격선은 호출 경로별로 1회만 생성되도록 분리
 }
 
-/** [FIX] 캔들 데이터 기반 가격선 표시 — 전체 캔들의 최고/최저 사용 */
+/** [FIX] 캔들 데이터 기반 가격선 표시 — 현재가 + 전일종가 (고/저점은 updateVisibleHighLow에서 처리) */
 function _updatePriceLinesFromCandles() {
   if (!candles.length) return;
   var lastC = candles[candles.length - 1];
   var prevC = candles.length >= 2 ? candles[candles.length - 2] : null;
-  // 전체 캔들에서 최고가/최저가 계산
-  var allHigh = -Infinity, allLow = Infinity;
-  for (var i = 0; i < candles.length; i++) {
-    if (candles[i].high > allHigh) allHigh = candles[i].high;
-    if (candles[i].low < allLow) allLow = candles[i].low;
-  }
+  // 고/저가는 chart.js의 updateVisibleHighLow()가 visible range 기반으로 처리
+  // updatePriceLines 시그니처 유지 (currentPrice, dayHigh, dayLow, prevClose) — high/low는 0 전달
   chartManager.updatePriceLines(
     lastC.close,
-    isFinite(allHigh) ? allHigh : lastC.high,
-    isFinite(allLow) ? allLow : lastC.low,
+    0,
+    0,
     prevC ? prevC.close : lastC.open
   );
+  // visible range 기반 고/저점 설정
+  if (typeof chartManager.updateVisibleHighLow === 'function') {
+    chartManager.updateVisibleHighLow(candles);
+  }
 }
 
 // ── 재무지표: financials.js로 분리됨 ──
@@ -2590,7 +2671,8 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
       updateOHLCBar(null);
       // file 모드 + 분봉: 일봉 데이터 표시 중임을 안내
       if (currentTimeframe !== '1d' && KRX_API_CONFIG.mode === 'file') {
-        chartManager.setWatermark(_buildWatermark(currentStock.name, '일봉 — 분봉 데이터 미제공'));
+        var _hasIntraday = candles.length > 0 && typeof candles[0].time === 'number';
+        chartManager.setWatermark(_buildWatermark(currentStock.name, _hasIntraday ? '' : '일봉 — 분봉 데이터 미제공'));
       } else {
         chartManager.setWatermark(_buildWatermark(currentStock.name));
       }

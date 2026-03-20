@@ -139,7 +139,7 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     nameKo: '샛별형',
     category: '캔들스틱 (반전)',
     candles: 3,
-    academicDesc: '하락 추세 후 긴 음봉 → 갭 하락 후 짧은 몸통(별) → 갭 상승 후 긴 양봉의 3봉 구성. 가장 신뢰도 높은 상승 반전 패턴 중 하나.',
+    academicDesc: '하락 추세 후 긴 음봉 \u2192 갭 하락 후 짧은 몸통(별) \u2192 갭 상승 후 긴 양봉의 3봉 구성. 가장 신뢰도 높은 상승 반전 패턴 중 하나.',
     psychology: '1일차의 강한 하락 후, 2일차에 매도세가 소진되어 작은 봉을 형성. 3일차에 매수세가 압도하며 추세를 반전시킴.',
     bulkowskiWinRate: 78,
     invalidation: '별(2봉)의 거래량이 극히 적으면 우연적 형성 가능. 3봉의 종가가 1봉 몸통의 50% 이상을 회복하지 못하면 약한 신호.'
@@ -149,7 +149,7 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     nameKo: '석별형',
     category: '캔들스틱 (반전)',
     candles: 3,
-    academicDesc: '상승 추세 후 긴 양봉 → 갭 상승 후 짧은 몸통(별) → 갭 하락 후 긴 음봉의 3봉 구성. 가장 신뢰도 높은 하락 반전 패턴 중 하나.',
+    academicDesc: '상승 추세 후 긴 양봉 \u2192 갭 상승 후 짧은 몸통(별) \u2192 갭 하락 후 긴 음봉의 3봉 구성. 가장 신뢰도 높은 하락 반전 패턴 중 하나.',
     psychology: '1일차의 강한 상승 후, 2일차에 매수세가 소진되어 우유부단한 봉 형성. 3일차에 매도세가 지배하며 추세를 반전.',
     bulkowskiWinRate: 72,
     invalidation: '3봉의 종가가 1봉 몸통의 50% 이상을 하락시키지 못하면 약한 신호. 거래량 감소 시 무효.'
@@ -279,7 +279,7 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     nameKo: '머리어깨형',
     category: '차트패턴 (반전)',
     candles: 30,
-    academicDesc: '좌측어깨 → 머리(최고점) → 우측어깨의 3봉우리 구조 + 넥라인 하방 이탈. 가장 신뢰도 높은 하락 반전 패턴.',
+    academicDesc: '좌측어깨 \u2192 머리(최고점) \u2192 우측어깨의 3봉우리 구조 + 넥라인 하방 이탈. 가장 신뢰도 높은 하락 반전 패턴.',
     psychology: '매수세가 3차례 고점 도전하나 점차 약화(머리 이후 우측어깨가 더 낮음). 넥라인 이탈은 매수세 완전 항복을 의미.',
     bulkowskiWinRate: 83,
     invalidation: '우측어깨가 머리보다 높으면 패턴 무효. 넥라인 기울기가 급격하면 신뢰도 하락.'
@@ -289,7 +289,7 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     nameKo: '역머리어깨형',
     category: '차트패턴 (반전)',
     candles: 30,
-    academicDesc: '좌측어깨(저점) → 머리(최저점) → 우측어깨(저점)의 역3봉우리 + 넥라인 상방 돌파. 가장 신뢰도 높은 상승 반전 패턴.',
+    academicDesc: '좌측어깨(저점) \u2192 머리(최저점) \u2192 우측어깨(저점)의 역3봉우리 + 넥라인 상방 돌파. 가장 신뢰도 높은 상승 반전 패턴.',
     psychology: '매도세가 3차례 저점 도전하나 점차 약화(머리 이후 우측어깨가 더 높음). 넥라인 돌파는 매도세 완전 소진을 의미.',
     bulkowskiWinRate: 89,
     invalidation: '우측어깨가 머리보다 낮으면 패턴 무효. 넥라인 돌파 시 거래량 급증이 동반되어야 유효.'
@@ -676,8 +676,10 @@ function drawReturnCurve(curvesData) {
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
+  // [FIX] setTransform으로 변환 행렬 초기화 후 재스케일 (DPR 누적 방지)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
 
   const chartW = w - pad.left - pad.right;
   const chartH = h - pad.top - pad.bottom;

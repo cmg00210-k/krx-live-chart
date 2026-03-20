@@ -6,7 +6,7 @@
 //
 //  핵심 원칙:
 //  - 패턴 영역을 은은한 그라데이션으로 표시
-//  - 라벨은 HTS 스타일 pill badge (Pretendard 11px)
+//  - 라벨은 HTS 스타일 pill badge (Pretendard 12px Bold)
 //  - 추세선은 점선+실선 조합으로 전문적 표시
 //  - 매수 = 민트/시안, 매도 = 라벤더/퍼플, 구조선 = 금색/회색
 //  - MAX 5개 패턴, 신뢰도 순 정렬
@@ -294,7 +294,7 @@ const patternRenderer = (() => {
             // 우측 가격 라벨 (HTS 스타일 태그 — 확대)
             if (hl.priceLabel) {
               const labelText = hl.priceLabel;
-              ctx.font = "600 11px 'JetBrains Mono', monospace";
+              ctx.font = "700 12px 'JetBrains Mono', monospace";
               const tm = ctx.measureText(labelText);
               const tagW = tm.width + 16;
               const tagH = 20;
@@ -396,8 +396,8 @@ const patternRenderer = (() => {
         // ── 7. 패턴 라벨 (HTS 스타일 pill badge) ──
         if (d.labels && d.labels.length) {
           ctx.setLineDash([]);
-          const fontSize = 11;
-          ctx.font = `600 ${fontSize}px 'Pretendard', sans-serif`;
+          const fontSize = 12;
+          ctx.font = `700 ${fontSize}px 'Pretendard', sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
@@ -653,7 +653,7 @@ const patternRenderer = (() => {
         }
 
         // ── 9. 연장 구조선 (visible 밖 차트 패턴의 넥라인/추세선 → 현재 범위까지 연장) ──
-        //  accent 금색 점선, lineWidth 1.2, dash [6, 4], alpha 0.5
+        //  accent 금색 점선, lineWidth 1.5, dash [6, 4], alpha 0.45
         if (d._extendedLines && d._extendedLines.length) {
           d._extendedLines.forEach(line => {
             const pts = line.points;
@@ -663,9 +663,9 @@ const patternRenderer = (() => {
             const p2 = pts[pts.length - 1];
 
             ctx.save();
-            ctx.globalAlpha = 0.5;
+            ctx.globalAlpha = 0.45;
             ctx.strokeStyle = KRX_COLORS.ACCENT;
-            ctx.lineWidth = 1.2;
+            ctx.lineWidth = 1.5;
             ctx.setLineDash([6, 4]);
 
             if (line.isNeckline) {
@@ -908,9 +908,7 @@ const patternRenderer = (() => {
       }
       if (!isFinite(minLow)) return;
 
-      // 사각형 영역: (startIndex, minLow) → (endIndex, neckline)
-      // 넓은 패턴(>15봉)은 채우기 없이 좌/우 경계선 + 넥라인만 표시
-      const patternWidth = ei - si;
+      // 좌/우 수직 경계선 (lines-only — TradingView 스타일, 채우기 없음)
       const topLeft = toXY(candles[si].time, neckline);
       const bottomRight = toXY(candles[ei].time, minLow);
       if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
@@ -918,58 +916,30 @@ const patternRenderer = (() => {
         const ry = Math.min(topLeft.y, bottomRight.y);
         const rw = Math.abs(bottomRight.x - topLeft.x);
         const rh = Math.abs(bottomRight.y - topLeft.y);
-        // 10% 내부 패딩 (사각형 크기 축소)
-        const padY = rh * 0.10;
 
-        if (patternWidth <= 15) {
-          // 좁은 패턴: 채우기 + 테두리 (패딩 적용)
-          data.trendAreas.push({
-            points: [
-              { x: rx, y: ry + padY },
-              { x: rx + rw, y: ry + padY },
-              { x: rx + rw, y: ry + rh - padY },
-              { x: rx, y: ry + rh - padY },
-            ],
-            fill: 'rgba(150,220,200,0.10)',
-          });
-          data.polylines.push({
-            points: [
-              { x: rx, y: ry + padY },
-              { x: rx + rw, y: ry + padY },
-              { x: rx + rw, y: ry + rh - padY },
-              { x: rx, y: ry + rh - padY },
-              { x: rx, y: ry + padY },
-            ],
-            color: 'rgba(150,220,200,0.50)',
-            width: 1,
-            dash: [],
-          });
-        } else {
-          // 넓은 패턴(>15봉): 채우기 없이 좌/우 수직 경계선만 (lines-only 모드)
-          data.polylines.push({
-            points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
-            color: 'rgba(150,220,200,0.40)',
-            width: 1,
-            dash: [4, 3],
-          });
-          data.polylines.push({
-            points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
-            color: 'rgba(150,220,200,0.40)',
-            width: 1,
-            dash: [4, 3],
-          });
-        }
+        data.polylines.push({
+          points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
+          color: 'rgba(150,220,200,0.60)',
+          width: 1.5,
+          dash: [4, 3],
+        });
+        data.polylines.push({
+          points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
+          color: 'rgba(150,220,200,0.60)',
+          width: 1.5,
+          dash: [4, 3],
+        });
       }
 
-      // 넥라인 수평 연장 (점선)
-      const extIdx = Math.min(ei + 8, candles.length - 1);
-      const nStart = toXY(candles[Math.max(si - 2, 0)].time, neckline);
+      // 넥라인 수평 연장 (점선) — 패턴 범위 + 우측 3봉만 (공간 분리)
+      const extIdx = Math.min(ei + 3, candles.length - 1);
+      const nStart = toXY(candles[Math.max(si - 1, 0)].time, neckline);
       const nEnd = toXY(candles[extIdx].time, neckline);
       data.hlines.push({
         y: nStart.y,
         x1: nStart.x, x2: nEnd.x,
         color: GOLD_COLOR,
-        width: 1,
+        width: 1.5,
         dash: [5, 3],
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
@@ -1013,9 +983,7 @@ const patternRenderer = (() => {
       }
       if (!isFinite(maxHigh)) return;
 
-      // 사각형 영역: (startIndex, neckline) → (endIndex, maxHigh)
-      // 넓은 패턴(>15봉)은 채우기 없이 좌/우 경계선 + 넥라인만 표시
-      const patternWidth = ei - si;
+      // 좌/우 수직 경계선 (lines-only — TradingView 스타일, 채우기 없음)
       const topLeft = toXY(candles[si].time, maxHigh);
       const bottomRight = toXY(candles[ei].time, neckline);
       if (topLeft.x != null && topLeft.y != null && bottomRight.x != null && bottomRight.y != null) {
@@ -1023,58 +991,30 @@ const patternRenderer = (() => {
         const ry = Math.min(topLeft.y, bottomRight.y);
         const rw = Math.abs(bottomRight.x - topLeft.x);
         const rh = Math.abs(bottomRight.y - topLeft.y);
-        // 10% 내부 패딩 (사각형 크기 축소)
-        const padY = rh * 0.10;
 
-        if (patternWidth <= 15) {
-          // 좁은 패턴: 채우기 + 테두리 (패딩 적용)
-          data.trendAreas.push({
-            points: [
-              { x: rx, y: ry + padY },
-              { x: rx + rw, y: ry + padY },
-              { x: rx + rw, y: ry + rh - padY },
-              { x: rx, y: ry + rh - padY },
-            ],
-            fill: 'rgba(150,220,200,0.10)',
-          });
-          data.polylines.push({
-            points: [
-              { x: rx, y: ry + padY },
-              { x: rx + rw, y: ry + padY },
-              { x: rx + rw, y: ry + rh - padY },
-              { x: rx, y: ry + rh - padY },
-              { x: rx, y: ry + padY },
-            ],
-            color: 'rgba(150,220,200,0.50)',
-            width: 1,
-            dash: [],
-          });
-        } else {
-          // 넓은 패턴(>15봉): 채우기 없이 좌/우 수직 경계선만 (lines-only 모드)
-          data.polylines.push({
-            points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
-            color: 'rgba(150,220,200,0.40)',
-            width: 1,
-            dash: [4, 3],
-          });
-          data.polylines.push({
-            points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
-            color: 'rgba(150,220,200,0.40)',
-            width: 1,
-            dash: [4, 3],
-          });
-        }
+        data.polylines.push({
+          points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
+          color: 'rgba(150,220,200,0.60)',
+          width: 1.5,
+          dash: [4, 3],
+        });
+        data.polylines.push({
+          points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
+          color: 'rgba(150,220,200,0.60)',
+          width: 1.5,
+          dash: [4, 3],
+        });
       }
 
-      // 넥라인 수평 연장
-      const extIdx = Math.min(ei + 8, candles.length - 1);
-      const nStart = toXY(candles[Math.max(si - 2, 0)].time, neckline);
+      // 넥라인 수평 연장 — 패턴 범위 + 우측 3봉만 (공간 분리)
+      const extIdx = Math.min(ei + 3, candles.length - 1);
+      const nStart = toXY(candles[Math.max(si - 1, 0)].time, neckline);
       const nEnd = toXY(candles[extIdx].time, neckline);
       data.hlines.push({
         y: nStart.y,
         x1: nStart.x, x2: nEnd.x,
         color: GOLD_COLOR,
-        width: 1,
+        width: 1.5,
         dash: [5, 3],
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
@@ -1369,35 +1309,46 @@ const patternRenderer = (() => {
       const top = patterns.find(p => p.stopLoss != null || p.priceTarget != null);
       if (!top) return;
 
+      // 손절/목표선은 패턴 endIndex 이후부터만 표시 (과거 캔들 위 수평선 제거 — 공간 분리)
+      const ei = top.endIndex, si = top.startIndex;
+      let x1 = null;
+      if (ei != null && ei < candles.length) {
+        const eiCoord = toXY(candles[ei].time, candles[ei].close);
+        if (eiCoord.x != null) x1 = eiCoord.x;
+      }
+
       if (top.stopLoss != null) {
         const y = series.priceToCoordinate(top.stopLoss);
         if (y != null) {
-          hlines.push({
+          var hl = {
             y: y,
             color: KRX_COLORS.PTN_STOP,
             width: 1.5,
             dash: [6, 3],
             marker: 'stop',
             priceLabel: '손절 ' + top.stopLoss.toLocaleString('ko-KR'),
-          });
+          };
+          if (x1 != null) hl.x1 = x1;
+          hlines.push(hl);
         }
       }
       if (top.priceTarget != null) {
         const y = series.priceToCoordinate(top.priceTarget);
         if (y != null) {
-          hlines.push({
+          var hl = {
             y: y,
             color: KRX_COLORS.PTN_TARGET,
             width: 1.5,
             dash: [6, 3],
             marker: 'target',
             priceLabel: '목표 ' + top.priceTarget.toLocaleString('ko-KR'),
-          });
+          };
+          if (x1 != null) hl.x1 = x1;
+          hlines.push(hl);
         }
       }
 
-      // ── 무효화 가격선: 패턴 구조 붕괴 수준 ──
-      const ei = top.endIndex, si = top.startIndex;
+      // ── 무효화 가격선: 패턴 범위 내에서만 표시 (si ~ ei) ──
       if (ei != null && si != null && ei < candles.length) {
         const isBuy = _isBullish(top);
         let invalidPrice = null;
@@ -1417,14 +1368,21 @@ const patternRenderer = (() => {
             (top.stopLoss == null || Math.abs(invalidPrice - top.stopLoss) / (top.stopLoss || 1) > 0.005)) {
           const y = series.priceToCoordinate(invalidPrice);
           if (y != null) {
-            hlines.push({
+            var invHl = {
               y: y,
               color: KRX_COLORS.PTN_INVALID,
               width: 1.2,
               dash: [3, 3],
               marker: 'invalid',
               priceLabel: '패턴이탈 ' + invalidPrice.toLocaleString('ko-KR'),
-            });
+            };
+            // 패턴 범위 내에서만 표시
+            if (si < candles.length) {
+              var siCoord = toXY(candles[si].time, candles[si].close);
+              if (siCoord.x != null) invHl.x1 = siCoord.x;
+            }
+            if (x1 != null) invHl.x2 = x1;
+            hlines.push(invHl);
           }
         }
       }

@@ -514,7 +514,7 @@ const sidebarManager = (() => {
 
     // 선 색상: 마지막 > 처음 → 빨강, 아니면 파랑
     const isUp = closes[closes.length - 1] > closes[0];
-    ctx.strokeStyle = isUp ? '#E05050' : '#5086DC';
+    ctx.strokeStyle = isUp ? KRX_COLORS.UP : KRX_COLORS.DOWN;
     ctx.lineWidth = 1;
     ctx.beginPath();
 

@@ -553,6 +553,11 @@ class KRXDataService {
       const res = await fetch(filePath);
       if (!res.ok) throw new Error(`${filePath}: ${res.status}`);
 
+      // JSON 파일의 실제 갱신 시각 캡처 (Last-Modified 또는 Date 헤더)
+      var lastMod = res.headers.get('Last-Modified');
+      if (lastMod) this._lastFileModified = new Date(lastMod).getTime();
+      else this._lastFileModified = Date.now();
+
       const data = await res.json();
       if (!data.candles || !data.candles.length) throw new Error('빈 캔들 데이터');
 
@@ -586,6 +591,10 @@ class KRXDataService {
 
       const res = await fetch(filePath);
       if (!res.ok) return [];
+
+      var lastMod = res.headers.get('Last-Modified');
+      if (lastMod) this._lastFileModified = new Date(lastMod).getTime();
+      else this._lastFileModified = Date.now();
 
       const data = await res.json();
       if (!data.candles || !data.candles.length) return [];

@@ -90,7 +90,7 @@ function getPastData(code, period) {
     ni:  Math.round(-5000 + r() * 65000),
     opm: (-5 + r() * 25).toFixed(1) + '%',
     eps: Math.round(-1000 + r() * 9000),
-    roe: (-3 + r() * 23).toFixed(1)
+    roe: +(-3 + r() * 23).toFixed(1)
   }));
 }
 
@@ -151,7 +151,7 @@ async function getFinancialData(code, period) {
           rev: revEok,
           op:  toEok(d.op),
           ni:  niEok,
-          opm: d.opm || ((d.revenue && d.op) ? (d.op / d.revenue * 100).toFixed(1) + '%' : '—'),
+          opm: d.opm || ((d.revenue && d.op) ? (d.op / d.revenue * 100).toFixed(1) + '%' : '\u2014'),
           eps: d.eps || 0,
           roe: d.roe ? parseFloat(d.roe) : (d.ni && d.total_equity ? +(d.ni / d.total_equity * 100).toFixed(1) : 0),
           bps: d.bps || null,
@@ -194,7 +194,7 @@ async function getFinancialData(code, period) {
  * UI 표시 형식 ("2024 Q3")으로 변환
  */
 function _formatPeriodLabel(period) {
-  if (!period) return '—';
+  if (!period) return '\u2014';
   // "2024Q3" → "2024 Q3", "2024" → "2024"
   const match = period.match(/^(\d{4})Q(\d)$/);
   if (match) return `${match[1]} Q${match[2]}`;
