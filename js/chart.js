@@ -167,7 +167,9 @@ class ChartManager {
             if (tickMarkType >= 3) {
               return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
             }
-            return (d.getUTCMonth() + 1) + '/' + (d.getUTCDate() + (d.getUTCHours() + 9 >= 24 ? 1 : 0));
+            // [FIX] KST 변환은 Date 객체로 — 월 경계 롤오버 자동 처리 (1/32 버그 수정)
+            var kstDate = new Date((time + 9 * 3600) * 1000);
+            return (kstDate.getUTCMonth() + 1) + '/' + kstDate.getUTCDate();
           } catch (e) { return ''; }
         },
       },
@@ -352,19 +354,8 @@ class ChartManager {
   updateMain(candles, chartType, activeIndicators, patterns, params) {
     if (!this.mainChart || !candles || !candles.length) return;
 
-    // [FIX] 기존 가격선 사전 정리 (updateMain 이중 호출 시 중복 방지)
-    if (this._highPriceLine && this.candleSeries) {
-      try { this.candleSeries.removePriceLine(this._highPriceLine); } catch(e) {}
-      this._highPriceLine = null;
-    }
-    if (this._lowPriceLine && this.candleSeries) {
-      try { this.candleSeries.removePriceLine(this._lowPriceLine); } catch(e) {}
-      this._lowPriceLine = null;
-    }
-    if (this._currentPriceLine && this.candleSeries) {
-      try { this.candleSeries.removePriceLine(this._currentPriceLine); } catch(e) {}
-      this._currentPriceLine = null;
-    }
+    // [FIX] 가격선 정리는 updatePriceLines()에서만 관리 — 여기서 제거하면
+    // updateMain() 단독 호출 시 가격선이 사라지는 버그 발생
 
     // params: 지표 파라미터 (커스텀 기간 등), 없으면 기본값 사용
     const _p = params || {};
@@ -457,8 +448,13 @@ class ChartManager {
           color: c.close >= c.open ? KRX_COLORS.UP_FILL(alpha) : KRX_COLORS.DOWN_FILL(alpha),
         };
       }));
+      // [FIX] 거래량 활성 시 프라이스 스케일 복원 (비활성→활성 전환 대응)
+      this.mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     } else {
       this.volumeSeries.setData([]);
+      // [FIX] 거래량 비활성 시 volume 프라이스 스케일을 0 높이로 축소
+      // — scaleMargins top:0.8 이 데이터 없어도 20% 공간을 점유하는 버그 수정
+      this.mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 1, bottom: 0 } });
     }
 
     // ── 이동평균 (MA) — 커스텀 기간 지원 + 계산 캐싱 ──
@@ -1203,7 +1199,9 @@ class ChartManager {
     const candles = this._hoverCandles;
 
     // crosshairTime에 해당하는 candle index 찾기
-    const crossIdx = candles.findIndex(c => c.time === crosshairTime);
+    // [FIX] String 변환으로 비교 — 캔들 time이 문자열("2026-03-12")이고
+    // crosshairTime이 다른 타입일 때 strict === 실패하는 버그 수정
+    const crossIdx = candles.findIndex(c => String(c.time) === String(crosshairTime));
     if (crossIdx < 0) {
       this._tooltipCallback(null);
       return;

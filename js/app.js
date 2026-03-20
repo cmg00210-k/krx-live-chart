@@ -1308,20 +1308,9 @@ function _initAnalysisWorker() {
           showToast(detectedPatterns.length + '개 패턴 감지됨', 'info');
         }
 
-        // 차트에 패턴 렌더링 반영
-        chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns);
-
-        // 시그널 Canvas 시각화 (카테고리 필터 적용)
-        const workerFiltered = _filterSignalsByCategory(detectedSignals);
-        if (typeof signalRenderer !== 'undefined') {
-          signalRenderer.render(chartManager, candles, workerFiltered, {
-            volumeActive: activeIndicators.has('vol'),
-            chartType: chartType,
-          });
-        }
-
-        // 호버 감지 데이터 갱신
-        chartManager.setHoverData(candles, detectedPatterns, workerFiltered);
+        // 차트에 패턴 렌더링 반영 + 오버레이 통합 렌더 (vizToggles 필터 적용)
+        chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
+        _renderOverlays();
         return;
       }
 
@@ -1538,16 +1527,9 @@ function updateChartFull() {
       setTimeout(function() {
         if (_deferredVersion !== _workerVersion) return;  // stale 방지
         _analyzeOnMainThread();
-        // 분석 완료 후 차트 + 렌더러만 갱신 (재귀 방지: 직접 호출)
+        // 분석 완료 후 차트 + 오버레이 통합 렌더 (vizToggles 필터 적용)
         chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
-        var filtSigs = _filterSignalsByCategory(detectedSignals);
-        if (typeof signalRenderer !== 'undefined') {
-          signalRenderer.render(chartManager, candles, filtSigs, {
-            volumeActive: activeIndicators.has('vol'),
-            chartType: chartType,
-          });
-        }
-        chartManager.setHoverData(candles, detectedPatterns, filtSigs);
+        _renderOverlays();
       }, 0);
     }
 
@@ -1562,17 +1544,23 @@ function updateChartFull() {
   chartManager.updateMain(candles, chartType, activeIndicators,
     _workerWillRender ? [] : detectedPatterns, indParams);
 
-  // 시그널 Canvas 시각화 (카테고리 필터 적용)
-  const filteredSignals = _workerWillRender ? [] : _filterSignalsByCategory(detectedSignals);
-  if (typeof signalRenderer !== 'undefined') {
-    signalRenderer.render(chartManager, candles, filteredSignals, {
-      volumeActive: activeIndicators.has('vol'),
-      chartType: chartType,
-    });
+  // 오버레이 통합 렌더 (vizToggles 필터 적용)
+  // Worker가 렌더 예정이면 빈 상태로 렌더 (Worker 콜백에서 _renderOverlays 재호출)
+  if (_workerWillRender) {
+    // Worker 대기 중: 빈 오버레이로 클리어
+    if (typeof patternRenderer !== 'undefined') {
+      patternRenderer.render(chartManager, candles, chartType, []);
+    }
+    if (typeof signalRenderer !== 'undefined') {
+      signalRenderer.render(chartManager, candles, [], {
+        volumeActive: activeIndicators.has('vol'),
+        chartType: chartType,
+      });
+    }
+    chartManager.setHoverData(candles, [], []);
+  } else {
+    _renderOverlays();
   }
-
-  // 호버 감지용 데이터 설정 (패턴 + 필터된 시그널)
-  chartManager.setHoverData(candles, detectedPatterns, filteredSignals);
 
   if (activeIndicators.has('rsi')) {
     _dom.rsiContainer.style.display = 'block';

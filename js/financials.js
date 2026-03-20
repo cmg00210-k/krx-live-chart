@@ -603,7 +603,8 @@ function drawOPMSparkline(data) {
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
-  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  // [FIX] setTransform으로 변환 행렬 초기화 후 재스케일 (DPR 누적 방지)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
 
@@ -754,7 +755,8 @@ function drawFinTrendChart(data, metric) {
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
-  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  // [FIX] setTransform으로 변환 행렬 초기화 후 재스케일 (DPR 누적 방지)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
 
@@ -1254,7 +1256,8 @@ function _drawPERBandChart() {
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';
   canvas.style.height = h + 'px';
-  // [FIX] clearRect를 scale 전에 물리 픽셀 단위로 호출 (DPR 누적 방지)
+  // [FIX] setTransform으로 변환 행렬 초기화 후 재스케일 (DPR 누적 방지)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
 
