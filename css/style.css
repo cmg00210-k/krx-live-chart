@@ -181,6 +181,7 @@ html, body {
 /* ═══ MAIN LAYOUT (4열, 1행) ═══════════════════════ */
 
 #main {
+  background: var(--chart-bg, #131722);
   display: grid;
   grid-template-columns:
     minmax(0, var(--sidebar-w))       /* A열: 좌측 메뉴 */
