@@ -17,6 +17,49 @@ var _finTrendMetric = 'revenue';
 var _latestFinOpm = 0;
 var _latestFinRoe = 0;
 
+// ── KSIC 세부업종 → 광의 업종 매핑 (peer group 폴백용) ──
+var KSIC_BROAD_MAP = {
+  '반도체 제조업': 'C26_전자부품컴퓨터통신장비',
+  '전자부품 제조업': 'C26_전자부품컴퓨터통신장비',
+  '통신 및 방송 장비 제조업': 'C26_전자부품컴퓨터통신장비',
+  '컴퓨터 및 주변장치 제조업': 'C26_전자부품컴퓨터통신장비',
+  '영상 및 음향기기 제조업': 'C26_전자부품컴퓨터통신장비',
+  '자동차용 엔진 및 자동차 제조업': 'C30_자동차',
+  '자동차 신품 부품 제조업': 'C30_자동차',
+  '자동차 차체 및 트레일러 제조업': 'C30_자동차',
+  '기초 화학물질 제조업': 'C20_화학',
+  '기타 화학제품 제조업': 'C20_화학',
+  '합성고무 및 플라스틱 물질 제조업': 'C20_화학',
+  '기초 의약물질 제조업': 'C21_의약품',
+  '의약품 제조업': 'C21_의약품',
+  '의료용품 및 기타 의약 관련제품 제조업': 'C21_의약품',
+  '의료용 기기 제조업': 'C27_의료정밀',
+  '측정, 시험, 항해, 제어 및 기타 정밀기기 제조업': 'C27_의료정밀',
+  '전동기, 발전기 및 전기 변환 · 공급 · 제어 장치 제조업': 'C28_전기장비',
+  '일차전지 및 이차전지 제조업': 'C28_전기장비',
+  '일반 목적용 기계 제조업': 'C29_기계장비',
+  '특수 목적용 기계 제조업': 'C29_기계장비',
+  '기타 금융업': 'K64_금융보험',
+  '보험업': 'K64_금융보험',
+  '금융 지원 서비스업': 'K64_금융보험',
+  '은행 및 저축기관': 'K64_금융보험',
+  '소프트웨어 개발 및 공급업': 'J58_정보통신',
+  '컴퓨터 프로그래밍, 시스템 통합 및 관리업': 'J58_정보통신',
+  '자료처리, 호스팅, 포털 및 기타 인터넷 정보매개 서비스업': 'J58_정보통신',
+  '전기 통신업': 'J58_정보통신',
+  '선박 및 보트 건조업': 'C31_기타운송장비',
+  '항공기,우주선 및 부품 제조업': 'C31_기타운송장비',
+  '1차 철강 제조업': 'C24_1차금속',
+  '1차 비철금속 제조업': 'C24_1차금속',
+  '석유 정제품 제조업': 'C19_석유정제',
+  '건물 건설업': 'F41_건설',
+  '토목 건설업': 'F41_건설',
+};
+
+function _getBroadIndustry(name) {
+  return KSIC_BROAD_MAP[name] || name;
+}
+
 // ══════════════════════════════════════════════════════
 //  재무지표 패널 (우측 탭)
 // ══════════════════════════════════════════════════════
@@ -631,7 +674,7 @@ function drawOPMSparkline(data) {
 
   // [FIX] 부모 크기에 맞게 동적 계산 — 최소 100px 보장
   const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 200), 100);
-  const h = Math.max(50, Math.min(80, Math.round(w * 0.28)));
+  const h = Math.max(80, Math.min(120, Math.round(w * 0.40)));
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
@@ -689,7 +732,7 @@ function drawOPMSparkline(data) {
   // ── 2) 0% 기준선 (양수/음수 혼재 시) ──
   if (hasZeroLine) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 0.8;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -700,7 +743,7 @@ function drawOPMSparkline(data) {
     ctx.restore();
 
     // "0%" 라벨
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -714,13 +757,13 @@ function drawOPMSparkline(data) {
     ctx.lineTo(points[i].x, points[i].y);
   }
   ctx.strokeStyle = KRX_COLORS.ACCENT;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
   ctx.stroke();
 
   // ── 4) 원형 마커 (각 데이터 포인트) ──
   for (i = 0; i < points.length; i++) {
     ctx.beginPath();
-    ctx.arc(points[i].x, points[i].y, 3, 0, Math.PI * 2);
+    ctx.arc(points[i].x, points[i].y, 3.5, 0, Math.PI * 2);
     ctx.fillStyle = values[i] >= 0 ? KRX_COLORS.ACCENT : KRX_COLORS.DOWN;
     ctx.fill();
   }
@@ -741,7 +784,7 @@ function drawOPMSparkline(data) {
 
   // ── 6) X축 분기 라벨 (하단) ──
   ctx.font = "10px 'Pretendard', sans-serif";
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   var maxLabels = 6;
@@ -783,7 +826,7 @@ function drawFinTrendChart(data, metric) {
   const labelHeight = 14;
   // [FIX] 부모 크기에 맞게 동적 계산
   const w = Math.max((canvas.parentElement ? canvas.parentElement.clientWidth - 8 : 190), 100);
-  const h = Math.max(44, Math.min(70, Math.round(w * 0.25)));
+  const h = Math.max(70, Math.min(110, Math.round(w * 0.35)));
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   canvas.style.width = w + 'px';
@@ -892,7 +935,7 @@ function drawFinTrendChart(data, metric) {
     }
 
     // 바 위에 값 표시 (억원 → 조/억 단위) — 겹침 방지 thinning
-    ctx.fillStyle = '#A0A0A0';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'center';
     var prevLabelX = null;
@@ -927,7 +970,7 @@ function drawFinTrendChart(data, metric) {
 
   // ── 분기 라벨 (x축 하단) ──
   ctx.font = "10px 'Pretendard', sans-serif";
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
 
@@ -983,9 +1026,17 @@ function _renderSectorComparison() {
     return;
   }
 
-  // 현재 종목의 섹터 찾기
+  // 현재 종목의 섹터 찾기 (industry 우선, sector 폴백)
   var stockInfo = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
-  var sectorName = stockInfo ? (stockInfo.sector || '') : '';
+  var sectorName = stockInfo ? (stockInfo.industry || stockInfo.sector || '') : '';
+
+  // sector_fundamentals 키 매칭: industry로 먼저 시도, 없으면 sector로 재시도
+  if (!sectorName || !_sectorData.sectors || !_sectorData.sectors[sectorName]) {
+    var fallbackSector = stockInfo ? (stockInfo.sector || '') : '';
+    if (fallbackSector && _sectorData.sectors && _sectorData.sectors[fallbackSector]) {
+      sectorName = fallbackSector;
+    }
+  }
 
   if (!sectorName || !_sectorData.sectors || !_sectorData.sectors[sectorName]) {
     container.innerHTML = '<div class="fin-compare-placeholder">업종 데이터 없음</div>';
@@ -1124,7 +1175,8 @@ async function _preloadPeerFinancials(peers) {
 
 /**
  * 동종업종 비교 테이블 렌더링
- * 현재 종목과 같은 업종(sector)의 시총 상위 5개 종목 비교.
+ * 같은 시장 + 같은 세부업종(industry) + 시총 유사도 기준으로 peer 4개 선정.
+ * 세부업종 peer가 3개 미만이면 KSIC 광의 업종(KSIC_BROAD_MAP)으로 확장.
  * 종목명 클릭 시 해당 종목으로 전환.
  */
 function _renderPeerGroup() {
@@ -1137,20 +1189,58 @@ function _renderPeerGroup() {
     return;
   }
 
-  // 현재 종목의 업종 찾기
+  // 현재 종목의 업종 찾기 (industry 우선, sector 폴백)
   var myStock = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
-  var mySector = myStock ? (myStock.sector || '') : '';
+  var myIndustry = myStock ? (myStock.industry || myStock.sector || '') : '';
+  var myMarket = myStock ? myStock.market : '';
+  var myCap = myStock ? (myStock.marketCap || 0) : 0;
 
-  if (!mySector) {
+  if (!myIndustry) {
     container.innerHTML = '<div class="fin-compare-placeholder">업종 정보 없음</div>';
     return;
   }
 
-  // 같은 업종 종목 필터 → 시총 내림차순 → 상위 4개
-  var peers = ALL_STOCKS
-    .filter(function(s) { return s.sector === mySector && s.code !== currentStock.code; })
-    .sort(function(a, b) { return (b.marketCap || 0) - (a.marketCap || 0); })
-    .slice(0, 4);  // 현재 종목 + 4개 = 총 5개
+  // 시총 하한 필터 (KOSPI 1000억, KOSDAQ 500억 — 초소형주 제외)
+  var capFloor = (myMarket === 'KOSPI') ? 1000 : 500;
+
+  // Step 1: 같은 시장 + 같은 세부업종 + 시총 필터
+  var peers = ALL_STOCKS.filter(function(s) {
+    if (s.code === currentStock.code) return false;
+    if (s.market !== myMarket) return false;
+    var sInd = s.industry || s.sector || '';
+    if (sInd !== myIndustry) return false;
+    if ((s.marketCap || 0) < capFloor) return false;
+    return true;
+  });
+
+  // 시총 유사도 기준 정렬 (단순 내림차순 대신 현재 종목과 비슷한 규모 우선)
+  if (myCap > 0) {
+    peers.sort(function(a, b) {
+      var aR = Math.min((a.marketCap || 1) / myCap, myCap / (a.marketCap || 1));
+      var bR = Math.min((b.marketCap || 1) / myCap, myCap / (b.marketCap || 1));
+      if (Math.abs(aR - bR) > 0.1) return bR - aR;  // 유사도 차이 큰 경우 유사도 우선
+      return (b.marketCap || 0) - (a.marketCap || 0); // 유사도 비슷하면 시총 내림차순
+    });
+  } else {
+    peers.sort(function(a, b) { return (b.marketCap || 0) - (a.marketCap || 0); });
+  }
+  peers = peers.slice(0, 4);  // 현재 종목 + 4개 = 총 5개
+
+  // Fallback: 동일 세부업종 peer가 3개 미만이면 광의 업종으로 확장
+  if (peers.length < 3) {
+    var myBroad = _getBroadIndustry(myIndustry);
+    var broadPeers = ALL_STOCKS.filter(function(s) {
+      if (s.code === currentStock.code) return false;
+      if (s.market !== myMarket) return false;
+      if (peers.some(function(p) { return p.code === s.code; })) return false;
+      var sInd = s.industry || s.sector || '';
+      if (_getBroadIndustry(sInd) !== myBroad) return false;
+      if ((s.marketCap || 0) < capFloor) return false;
+      return true;
+    });
+    broadPeers.sort(function(a, b) { return (b.marketCap || 0) - (a.marketCap || 0); });
+    peers = peers.concat(broadPeers.slice(0, 4 - peers.length));
+  }
 
   // 현재 종목을 맨 앞에 추가
   peers.unshift(myStock);
@@ -1294,7 +1384,7 @@ function _drawPERBandChart() {
   }
   _perBandRetries = 0;  // 성공 시 카운터 리셋
   var parentW = Math.max(rawW - 8, 100);  // 최소 100px 보장
-  var h = Math.max(80, Math.min(120, Math.round(parentW * 0.40)));
+  var h = Math.max(120, Math.min(180, Math.round(parentW * 0.55)));
   canvas.width = parentW * dpr;
   canvas.height = h * dpr;
   canvas.style.width = parentW + 'px';
@@ -1326,10 +1416,10 @@ function _drawPERBandChart() {
 
   // PER 배수 라인 정의 (저평가→고평가)
   var bands = [
-    { per: 8,  color: 'rgba(80,134,220,0.5)',  label: '8x' },   // 파랑 (저평가)
-    { per: 12, color: 'rgba(107,203,119,0.5)',  label: '12x' },  // 초록
-    { per: 16, color: 'rgba(160,136,48,0.5)',   label: '16x' },  // 금색
-    { per: 20, color: 'rgba(224,80,80,0.5)',    label: '20x' },  // 빨강 (고평가)
+    { per: 8,  color: 'rgba(80,134,220,0.75)',  label: '8x' },   // 파랑 (저평가)
+    { per: 12, color: 'rgba(107,203,119,0.75)', label: '12x' },  // 초록
+    { per: 16, color: 'rgba(160,136,48,0.75)',  label: '16x' },  // 금색
+    { per: 20, color: 'rgba(224,80,80,0.75)',   label: '20x' },  // 빨강 (고평가)
   ];
 
   // 가격 범위 계산 (주가 + 모든 밴드 포함)
@@ -1340,7 +1430,7 @@ function _drawPERBandChart() {
   var rangeP = maxP - minP;
   if (rangeP <= 0) return;
 
-  var padL = 8, padR = 30, padT = 8, padB = 16;
+  var padL = 8, padR = 30, padT = 8, padB = 24;
   var chartW = parentW - padL - padR;
   var chartH = h - padT - padB;
 
@@ -1351,7 +1441,7 @@ function _drawPERBandChart() {
   for (var bi = 0; bi < bands.length - 1; bi++) {
     var yTop = toY(eps * bands[bi + 1].per);
     var yBot = toY(eps * bands[bi].per);
-    ctx.fillStyle = bands[bi].color.replace('0.5', '0.06');
+    ctx.fillStyle = bands[bi].color.replace('0.75', '0.12');
     ctx.fillRect(padL, yTop, chartW, yBot - yTop);
   }
 
@@ -1370,7 +1460,7 @@ function _drawPERBandChart() {
     ctx.setLineDash([]);
 
     // 라벨 (우측)
-    ctx.fillStyle = b.color.replace('0.5', '0.9');
+    ctx.fillStyle = b.color.replace('0.75', '0.9');
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -1415,11 +1505,48 @@ function _drawPERBandChart() {
   ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
   ctx.fill();
 
-  // ── 5) 현재 PER 표시 ──
+  // ── 5) X축 시간 라벨 ──
+  var labelCount = Math.min(5, candles_data.length);
+  var labelStep = Math.max(1, Math.floor((candles_data.length - 1) / (labelCount - 1)));
+  ctx.font = "10px 'JetBrains Mono', monospace";
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (var li = 0; li < candles_data.length; li += labelStep) {
+    var timeVal = candles_data[li].time;
+    var dateStr = typeof timeVal === 'string' ? timeVal : '';
+    if (!dateStr && typeof timeVal === 'number') {
+      var d = new Date(timeVal * 1000);
+      dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    var parts = dateStr.split('-');
+    var lbl = parts.length >= 2 ? "'" + parts[0].slice(2) + '.' + parts[1] : dateStr;
+    ctx.fillText(lbl, toX(li), padT + chartH + 4);
+  }
+  // 마지막 라벨 (마지막 캔들)
+  if ((candles_data.length - 1) % labelStep !== 0) {
+    var lastTime = candles_data[candles_data.length - 1].time;
+    var lastDateStr = typeof lastTime === 'string' ? lastTime : '';
+    if (!lastDateStr && typeof lastTime === 'number') {
+      var ld = new Date(lastTime * 1000);
+      lastDateStr = ld.getFullYear() + '-' + String(ld.getMonth() + 1).padStart(2, '0');
+    }
+    var lp = lastDateStr.split('-');
+    var lastLbl = lp.length >= 2 ? "'" + lp[0].slice(2) + '.' + lp[1] : lastDateStr;
+    ctx.fillText(lastLbl, toX(candles_data.length - 1), padT + chartH + 4);
+  }
+
+  // ── 6) 현재 PER 표시 (듀얼 폰트) ──
   var currentPER = closes[closes.length - 1] / eps;
-  ctx.fillStyle = KRX_COLORS.ACCENT;
-  ctx.font = "10px 'Pretendard', sans-serif";
+  var perNumStr = currentPER.toFixed(1) + 'x';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
-  ctx.fillText('현재 ' + currentPER.toFixed(1) + 'x', padL + chartW - 2, padT + 2);
+  // "12.5x" 숫자 부분 (JetBrains Mono)
+  ctx.fillStyle = KRX_COLORS.ACCENT;
+  ctx.font = "bold 10px 'JetBrains Mono', monospace";
+  var numW = ctx.measureText(perNumStr).width;
+  ctx.fillText(perNumStr, padL + chartW - 2, padT + 2);
+  // "현재 " 라벨 부분 (Pretendard)
+  ctx.font = "10px 'Pretendard', sans-serif";
+  ctx.fillText('현재 ', padL + chartW - 2 - numW, padT + 2);
 }

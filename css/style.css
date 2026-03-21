@@ -2038,7 +2038,7 @@ html, body {
 .fin-trend-body {
   padding: 2px var(--sp-2) var(--sp-1);
   transition: max-height .25s ease, padding .25s ease;
-  max-height: 72px; overflow: hidden;
+  max-height: 120px; overflow: hidden;
 }
 .fin-trend-body.collapsed {
   max-height: 0; padding-top: 0; padding-bottom: 0;
@@ -2957,8 +2957,8 @@ html, body {
   .sb-sector-select { font-size: var(--fs-nano); max-width: 100px; }
   .sh-details { gap: var(--sp-1); }
   .sh-detail-item { min-width: 0; padding: 3px var(--sp-1); }  /* [FIX] 60px→0: 좁은 화면 오버플로우 방지 */
-  #fin-trend-canvas { height: 60px; }
-  .fin-trend-body { max-height: 80px; }
+  #fin-trend-canvas { height: 80px; }
+  .fin-trend-body { max-height: 120px; }
   .fin-info::after { max-width: 150px; }
   .pp-card-desc { -webkit-line-clamp: 2; }
   .pp-card-psych { display: none; }

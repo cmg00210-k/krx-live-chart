@@ -232,6 +232,7 @@ class KRXDataService {
         base: s.lastClose || 50000,  // 데모 모드 폴백용
         marketCap: s.marketCap || 0, // 시가총액 (억원, download_ohlcv.py에서 생성)
         sector: s.sector || '',      // 업종 (KSIC 기준, download_ohlcv.py에서 생성)
+        industry: s.industry || s.sector || '',  // 세부 업종 (KSIC, peer group용)
         // [OPT] 사이드바 즉시 표시용 요약 데이터 (OHLCV 로드 없이 가격/등락률 표시)
         prevClose: s.prevClose || 0,
         change: s.change || 0,
