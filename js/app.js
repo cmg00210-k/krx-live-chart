@@ -17,6 +17,37 @@ let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
 
+// ── 오실레이터 상호 배제 그룹 (investing.com 스타일: 최대 2 서브차트) ──
+// MACD는 독립 슬롯. 아래 6개는 동시에 1개만 표시.
+const OSCILLATOR_GROUP = ['rsi', 'stoch', 'cci', 'adx', 'willr', 'atr'];
+
+// data-ind 키 → chartManager destroy 메서드 + _dom 컨테이너/라벨 매핑
+const _OSC_MAP = {
+  rsi:   { destroy: 'destroyRSI',         container: 'rsiContainer',   label: 'rsiLabel' },
+  stoch: { destroy: 'destroyStochastic',  container: 'stochContainer', label: 'stochLabel' },
+  cci:   { destroy: 'destroyCCI',         container: 'cciContainer',   label: 'cciLabel' },
+  adx:   { destroy: 'destroyADX',         container: 'adxContainer',   label: 'adxLabel' },
+  willr: { destroy: 'destroyWilliamsR',   container: 'willrContainer', label: 'willrLabel' },
+  atr:   { destroy: 'destroyATR',         container: 'atrContainer',   label: 'atrLabel' },
+};
+
+/** 오실레이터 하나를 비활성화: 체크박스 해제 + DOM 숨김 + 차트 파괴 */
+function _deactivateOscillator(ind) {
+  activeIndicators.delete(ind);
+  // 체크박스 해제
+  var cb = document.querySelector('#ind-dropdown-menu input[data-ind="' + ind + '"]');
+  if (cb) cb.checked = false;
+  // DOM 숨김 + chartManager 파괴
+  var m = _OSC_MAP[ind];
+  if (m) {
+    if (_dom[m.container]) _dom[m.container].style.display = 'none';
+    if (_dom[m.label]) _dom[m.label].style.display = 'none';
+    if (typeof chartManager !== 'undefined' && chartManager[m.destroy]) {
+      chartManager[m.destroy]();
+    }
+  }
+}
+
 // ── 시각화 레이어 토글 (4카테고리) ──
 var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
 // 캔들 패턴 타입 Set (필터링용)
@@ -688,6 +719,13 @@ async function _continueInit() {
   // 활성 지표 복원 (localStorage 저장분 우선, 없으면 기본값 vol+ma 유지)
   if (prefs && Array.isArray(prefs.indicators)) {
     activeIndicators = new Set(prefs.indicators);
+    // [2-slot 모델] 복원 시 오실레이터 상호 배제 강제 — 첫 번째만 유지
+    var activeOscs = OSCILLATOR_GROUP.filter(function(o) { return activeIndicators.has(o); });
+    if (activeOscs.length > 1) {
+      for (var i = 1; i < activeOscs.length; i++) {
+        activeIndicators.delete(activeOscs[i]);
+      }
+    }
   }
 
   // 종목 데이터 로드 알림
@@ -2752,10 +2790,19 @@ if (indDropdownToggle && indDropdownMenu) {
   });
 
   // 체크박스 변경 시 지표 토글 (data-ind 속성이 있는 체크박스만 — select-all 제외)
+  // [2-slot 모델] 오실레이터 그룹은 상호 배제 (investing.com 스타일)
   indDropdownMenu.querySelectorAll('input[data-ind]').forEach(cb => {
     cb.addEventListener('change', () => {
       const ind = cb.dataset.ind;
       if (cb.checked) {
+        // 오실레이터 상호 배제: 새 오실레이터 ON → 기존 오실레이터 OFF
+        if (OSCILLATOR_GROUP.includes(ind)) {
+          OSCILLATOR_GROUP.forEach(other => {
+            if (other !== ind && activeIndicators.has(other)) {
+              _deactivateOscillator(other);
+            }
+          });
+        }
         activeIndicators.add(ind);
       } else {
         activeIndicators.delete(ind);
@@ -2772,27 +2819,38 @@ if (indDropdownToggle && indDropdownMenu) {
 }
 
 // ── 지표 전체 선택/해제 ──
+// [2-slot 모델] Murphy 세트 전부 활성이면 체크, 아니면 해제
 function _syncIndSelectAll() {
   var selectAll = document.getElementById('ind-select-all');
   if (!selectAll) return;
-  var allCbs = document.querySelectorAll('#ind-dropdown-menu input[data-ind]');
-  var allChecked = true;
-  allCbs.forEach(function(cb) { if (!cb.checked) allChecked = false; });
-  selectAll.checked = allChecked && allCbs.length > 0;
+  var murphySet = ['vol', 'ma', 'ema', 'bb', 'ich', 'kalman', 'macd', 'rsi'];
+  var allMurphy = murphySet.every(function(ind) { return activeIndicators.has(ind); });
+  selectAll.checked = allMurphy;
 }
 
+// [2-slot 모델] 전체 선택 → Murphy 추천 콤보 (vol + ma + bb + macd + rsi) 또는 전체 해제
+// 오실레이터 7개 동시 활성화 방지
 var indSelectAll = document.getElementById('ind-select-all');
 if (indSelectAll) {
   indSelectAll.addEventListener('change', function() {
     var checked = indSelectAll.checked;
+    // Murphy 추천 세트: 오버레이(vol, ma, ema, bb, ich, kalman) + MACD + RSI
+    // 오실레이터 그룹에서는 RSI만 (stoch/cci/adx/willr/atr 제외)
+    var murphySet = new Set(['vol', 'ma', 'ema', 'bb', 'ich', 'kalman', 'macd', 'rsi']);
     document.querySelectorAll('#ind-dropdown-menu input[data-ind]').forEach(function(cb) {
-      if (cb.checked !== checked) {
-        cb.checked = checked;
-        var ind = cb.dataset.ind;
-        if (checked) {
+      var ind = cb.dataset.ind;
+      var shouldBeOn = checked && murphySet.has(ind);
+      if (cb.checked !== shouldBeOn) {
+        cb.checked = shouldBeOn;
+        if (shouldBeOn) {
           activeIndicators.add(ind);
         } else {
-          activeIndicators.delete(ind);
+          // 기존 오실레이터 파괴 (DOM + 차트)
+          if (OSCILLATOR_GROUP.includes(ind) && activeIndicators.has(ind)) {
+            _deactivateOscillator(ind);
+          } else {
+            activeIndicators.delete(ind);
+          }
         }
       }
     });

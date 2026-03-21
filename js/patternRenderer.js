@@ -36,8 +36,8 @@ const patternRenderer = (() => {
   const SELL_FILL    = KRX_COLORS.PTN_SELL_FILL;
   const GOLD_COLOR   = KRX_COLORS.PTN_STRUCT;
   const NEUTRAL_COLOR = KRX_COLORS.PTN_NEUTRAL;
-  const MAX_PATTERNS = 5;
-  const MAX_EXTENDED_LINES = 10;
+  const MAX_PATTERNS = 3;
+  const MAX_EXTENDED_LINES = 5;
 
   // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
   const CANDLE_COLOR = KRX_COLORS.PTN_CANDLE;
@@ -654,7 +654,7 @@ const patternRenderer = (() => {
         }
 
         // ── 9. 연장 구조선 (visible 밖 차트 패턴의 넥라인/추세선 → 현재 범위까지 연장) ──
-        //  accent 금색 점선, lineWidth 1.5, dash [6, 4], alpha 0.45
+        //  accent 금색 점선, lineWidth 1.5, dash [6, 4], alpha 0.25
         if (d._extendedLines && d._extendedLines.length) {
           d._extendedLines.forEach(line => {
             const pts = line.points;
@@ -664,7 +664,7 @@ const patternRenderer = (() => {
             const p2 = pts[pts.length - 1];
 
             ctx.save();
-            ctx.globalAlpha = 0.45;
+            ctx.globalAlpha = 0.25;
             ctx.strokeStyle = KRX_COLORS.ACCENT;
             ctx.lineWidth = 1.5;
             ctx.setLineDash([6, 4]);

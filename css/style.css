@@ -1266,9 +1266,9 @@ html, body {
 #chart-wrap #ohlc-bar { left: calc(40px + var(--sp-2)); }
 #chart-wrap #pattern-summary-wrap { margin-left: 40px; }
 #chart-wrap #pattern-history-bar { margin-left: 40px; }
-.sub-chart-wrap { flex-shrink: 0; position: relative; }
+.sub-chart-wrap { flex-shrink: 1; position: relative; }  /* [2-slot] flex-shrink:1 — 공간 부족 시 압축 허용 */
 .sub-chart {
-  height: clamp(50px, 8vh, 80px); position: relative;
+  height: clamp(80px, 12vh, 120px); position: relative;  /* [2-slot] 최대 2개이므로 높이 확대 */
   border-top: 1px solid var(--border);
   background: var(--chart-bg);
   box-shadow: inset 0 1px 0 rgba(42,46,57,0.4);
@@ -2221,6 +2221,9 @@ html, body {
   text-transform: uppercase;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--sp-1);
+}
+.ind-hint {
+  font-weight: 400; text-transform: none; opacity: 0.6; font-size: 9px;
 }
 /* 지표/표시 드롭다운 내 첫 번째가 아닌 섹션 타이틀: 상단 여백 + 구분선 */
 .ind-dropdown-section-title + .ind-check + .ind-dropdown-section-title,
@@ -3190,7 +3193,7 @@ html, body {
 
   #ticker-strip { gap: var(--sp-2); }
   .ticker-val { font-size: var(--fs-caption); }
-  .sub-chart { height: 70px; }
+  .sub-chart { height: clamp(60px, 10vh, 90px); }  /* [2-slot] 480px에서도 넉넉하게 */
   #main-chart-container { min-height: 180px; }
 
   /* 헤더 로고 축소 */
@@ -3244,7 +3247,7 @@ html, body {
 /* ── 세로가 약간 짧은 화면 (소형 노트북) ── */
 @media (max-height: 800px) {
   #stock-header { min-height: 36px; padding: 2px var(--sp-3); }
-  .sub-chart { height: clamp(45px, 7vh, 70px); }
+  .sub-chart { height: clamp(60px, 10vh, 100px); }  /* [2-slot] 최대 2개이므로 높이 확대 */
   #return-stats-area { max-height: 120px; }
 }
 
@@ -3253,7 +3256,7 @@ html, body {
   #stock-header { min-height: 36px; padding: 2px var(--sp-3); }
   .sh-price { font-size: var(--fs-heading); }
   .sh-details { display: none; }
-  .sub-chart { height: 60px; }
+  .sub-chart { height: clamp(50px, 8vh, 80px); }  /* [2-slot] 짧은 화면에서도 최소 50px 확보 */
   #main-chart-container { min-height: 160px; }
   .rp-header { padding: var(--sp-1) var(--sp-2); }
   .pp-header { padding: var(--sp-1) var(--sp-2); }

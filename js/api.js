@@ -214,8 +214,11 @@ class KRXDataService {
 
     if (KRX_API_CONFIG.mode !== 'file' && KRX_API_CONFIG.mode !== 'ws' && KRX_API_CONFIG.mode !== 'koscom') return;
 
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
     try {
-      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`);
+      const res = await fetch(`${KRX_API_CONFIG.dataDir}/index.json`, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`index.json: ${res.status}`);
 
       const index = await res.json();
@@ -238,6 +241,7 @@ class KRXDataService {
 
       console.log(`[KRX] index.json 로드 완료: ${ALL_STOCKS.length}종목 (${index.kospi} KOSPI + ${index.kosdaq} KOSDAQ)`);
     } catch (e) {
+      clearTimeout(timeoutId);
       console.warn('[KRX] index.json 로드 실패, 기본 종목 사용:', e.message);
       ALL_STOCKS = DEFAULT_STOCKS;
     }
@@ -489,6 +493,9 @@ class KRXDataService {
   _sanitizeCandles(candles, timeframe) {
     if (!candles || candles.length === 0) return candles;
 
+    // 원본 배열 변경 방지 — 복사본에서 작업
+    var sorted = candles;
+
     // [OPT] 정렬 전 이미 정렬되어 있는지 빠른 검증 (대부분의 JSON은 이미 정렬됨)
     var needsSort = false;
     for (var si = 1; si < candles.length; si++) {
@@ -498,7 +505,8 @@ class KRXDataService {
       if (curT < prevT) { needsSort = true; break; }
     }
     if (needsSort) {
-      candles.sort(function(a, b) {
+      sorted = [].concat(candles);
+      sorted.sort(function(a, b) {
         var ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time;
         var tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time;
         return ta - tb;
@@ -507,8 +515,8 @@ class KRXDataService {
 
     // OHLCV 유효성 필터링
     var self = this;
-    var validated = candles.filter(function(c, i) {
-      return self._validateCandle(c, i > 0 ? candles[i - 1] : null);
+    var validated = sorted.filter(function(c, i) {
+      return self._validateCandle(c, i > 0 ? sorted[i - 1] : null);
     });
 
     // 메모리 상한 적용 (최신 데이터 유지)
@@ -544,13 +552,16 @@ class KRXDataService {
   // ══════════════════════════════════════════════════
 
   async _fileGetCandles(stock) {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
     try {
       // stock.file이 있으면 사용, 없으면 market에서 경로 추론
       const filePath = stock.file
         ? `${KRX_API_CONFIG.dataDir}/${stock.file}`
         : `${KRX_API_CONFIG.dataDir}/${stock.market.toLowerCase()}/${stock.code}.json`;
 
-      const res = await fetch(filePath);
+      const res = await fetch(filePath, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`${filePath}: ${res.status}`);
 
       // JSON 파일의 실제 갱신 시각 캡처 (Last-Modified 또는 Date 헤더)
@@ -571,6 +582,7 @@ class KRXDataService {
         volume: c.volume,
       }));
     } catch (e) {
+      clearTimeout(timeoutId);
       console.warn(`[KRX] 파일 로드 실패 (${stock.code}):`, e.message);
       // 파일이 없으면 빈 배열 반환 (가짜 데이터 생성 안 함 — 데이터 무결성 원칙)
       return [];
@@ -585,11 +597,14 @@ class KRXDataService {
    * @returns {Array} 캔들 배열 (없으면 빈 배열)
    */
   async _fileGetIntradayCandles(stock, timeframe) {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
     try {
       const market = (stock.market || 'kospi').toLowerCase();
       const filePath = `${KRX_API_CONFIG.dataDir}/${market}/${stock.code}_${timeframe}.json`;
 
-      const res = await fetch(filePath);
+      const res = await fetch(filePath, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!res.ok) return [];
 
       var lastMod = res.headers.get('Last-Modified');
@@ -609,6 +624,7 @@ class KRXDataService {
         volume: c.volume,
       }));
     } catch (e) {
+      clearTimeout(timeoutId);
       // 분봉 파일 없음 — 조용히 빈 배열 반환 (일봉 폴백으로 진행)
       return [];
     }

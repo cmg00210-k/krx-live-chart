@@ -116,8 +116,11 @@ async function getFinancialData(code, period) {
   }
 
   // 2. data/financials/{code}.json 시도
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
   try {
-    const resp = await fetch(`data/financials/${code}.json`);
+    const resp = await fetch(`data/financials/${code}.json`, { signal: controller.signal });
+    clearTimeout(timeoutId);
     if (resp.ok) {
       const data = await resp.json();
       // download_financials.py 출력 형식을 getPastData() 형식으로 변환
@@ -172,6 +175,7 @@ async function getFinancialData(code, period) {
       return period === 'quarter' ? quarterly : annual;
     }
   } catch (e) {
+    clearTimeout(timeoutId);
     // fetch 실패 (파일 없음 등) — 하드코딩/시드 폴백
     console.debug('[Financial] %s 파일 없음, 폴백 사용:', code, e.message);
   }

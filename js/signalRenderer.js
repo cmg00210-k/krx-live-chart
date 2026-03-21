@@ -24,6 +24,11 @@ const signalRenderer = (() => {
   // 최근 N봉 이내 시그널만 표시 (차트 혼잡 방지)
   const RECENT_BAR_LIMIT = 50;
 
+  // ── 밀도 제한 (시각 혼잡 방지) ──
+  const MAX_DIAMONDS = 6;     // MA/EMA 크로스 다이아몬드 최대 표시 수
+  const MAX_STARS = 2;        // Tier 1 복합 시그널 별 최대 표시 수
+  const MAX_DIV_LINES = 4;   // 다이버전스 라인 최대 표시 수 (MACD 2 + RSI 2)
+
 
   // ══════════════════════════════════════════════════
   //  Renderer — Canvas2D 직접 드로잉
@@ -301,6 +306,7 @@ const signalRenderer = (() => {
             x, y,
             color: isBuy ? BUY_COLOR : SELL_COLOR,
             size: s.strength === 'strong' ? 10 : 8,
+            confidence: s.confidence || 0,
           });
         }
 
@@ -322,6 +328,7 @@ const signalRenderer = (() => {
             x, y,
             color: isBuy ? BUY_COLOR : SELL_COLOR,
             size: 12,
+            confidence: s.confidence || 0,
           });
         }
 
@@ -343,6 +350,19 @@ const signalRenderer = (() => {
           _buildDivergenceLine(s, candles, ts, series, cutoff, 'high', SELL_COLOR, divLines);
         }
       });
+
+      // ── 밀도 제한: confidence 내림차순 정렬 후 상위 N개만 유지 ──
+      if (diamonds.length > MAX_DIAMONDS) {
+        diamonds.sort((a, b) => b.confidence - a.confidence);
+        diamonds.length = MAX_DIAMONDS;
+      }
+      if (stars.length > MAX_STARS) {
+        stars.sort((a, b) => b.confidence - a.confidence);
+        stars.length = MAX_STARS;
+      }
+      if (divLines.length > MAX_DIV_LINES) {
+        divLines.length = MAX_DIV_LINES;
+      }
 
       // ── 거래량 급증 라벨 좌표 계산 ──
       const volLabels = [];
