@@ -43,6 +43,11 @@ const drawingTools = (() => {
   // ── 색상 선택기 상태 ──
   let _currentColor = null;     // 사용자 선택 색상 (null이면 도구별 기본값 사용)
 
+  // ── Undo/Redo 스택 ──
+  const MAX_UNDO = 50;
+  let _undoStack = [];  // { type: 'add'|'remove'|'move', drawing: {...}, prevState?: {points} }
+  let _redoStack = [];
+
   // localStorage 키
   const STORAGE_KEY = 'krx_drawings_v1';
 
@@ -571,6 +576,9 @@ const drawingTools = (() => {
       if (_selectedDrawing && _selectedDrawing.id === target.id) {
         _selectedDrawing = null;
       }
+      // Undo 기록: 삭제된 드로잉의 깊은 복사 저장
+      const copy = { ...target, points: target.points.map(p => ({ ...p })) };
+      _pushUndo({ type: 'remove', drawing: copy });
       _drawings.splice(globalIdx, 1);
       _saveDrawings();
       _refresh();
@@ -818,6 +826,13 @@ const drawingTools = (() => {
    */
   function _handleSelectMouseUp() {
     if (_dragState && _dragState.isDragging) {
+      // Undo 기록: 이동 전/후 좌표 저장
+      _pushUndo({
+        type: 'move',
+        drawing: _dragState.drawing,
+        prevState: { points: _dragState.origPoints.map(p => ({ ...p })) },
+        newState: { points: _dragState.drawing.points.map(p => ({ ...p })) },
+      });
       _saveDrawings();
     }
     if (_dragState) {
@@ -869,6 +884,115 @@ const drawingTools = (() => {
       return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
     }
     return null;
+  }
+
+
+  // ══════════════════════════════════════════════════
+  //  Undo / Redo
+  // ══════════════════════════════════════════════════
+
+  /**
+   * undoStack에 액션 기록 + redoStack 초기화
+   * @param {{ type: string, drawing: Object, prevState?: Object }} action
+   */
+  function _pushUndo(action) {
+    _undoStack.push(action);
+    if (_undoStack.length > MAX_UNDO) _undoStack.shift();
+    _redoStack = [];
+  }
+
+  /**
+   * 마지막 작업을 되돌림 (Ctrl+Z)
+   */
+  function undo() {
+    if (!_undoStack.length) return;
+    const action = _undoStack.pop();
+
+    if (action.type === 'add') {
+      // 추가된 드로잉 제거
+      const idx = _drawings.findIndex(d => d.id === action.drawing.id);
+      if (idx >= 0) _drawings.splice(idx, 1);
+    } else if (action.type === 'remove') {
+      // 삭제된 드로잉 복원
+      _drawings.push(action.drawing);
+    } else if (action.type === 'move') {
+      // 이동 전 좌표로 복원
+      const d = _drawings.find(dd => dd.id === action.drawing.id);
+      if (d && action.prevState) {
+        d.points = action.prevState.points.map(p => ({ ...p }));
+      }
+    }
+
+    _redoStack.push(action);
+    if (_redoStack.length > MAX_UNDO) _redoStack.shift();
+
+    _selectedDrawing = null;
+    _dragState = null;
+    _saveDrawings();
+    _refresh();
+  }
+
+  /**
+   * 되돌린 작업을 다시 실행 (Ctrl+Y / Ctrl+Shift+Z)
+   */
+  function redo() {
+    if (!_redoStack.length) return;
+    const action = _redoStack.pop();
+
+    if (action.type === 'add') {
+      // 드로잉 다시 추가
+      _drawings.push(action.drawing);
+    } else if (action.type === 'remove') {
+      // 드로잉 다시 삭제
+      const idx = _drawings.findIndex(d => d.id === action.drawing.id);
+      if (idx >= 0) _drawings.splice(idx, 1);
+    } else if (action.type === 'move') {
+      // 이동 후 좌표로 다시 적용
+      const d = _drawings.find(dd => dd.id === action.drawing.id);
+      if (d && action.newState) {
+        d.points = action.newState.points.map(p => ({ ...p }));
+      }
+    }
+
+    _undoStack.push(action);
+    if (_undoStack.length > MAX_UNDO) _undoStack.shift();
+
+    _selectedDrawing = null;
+    _dragState = null;
+    _saveDrawings();
+    _refresh();
+  }
+
+  // ── Undo/Redo 키보드 단축키 (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) ──
+  let _keyboardRegistered = false;
+  function _setupUndoRedoKeys() {
+    if (_keyboardRegistered) return;
+    _keyboardRegistered = true;
+    document.addEventListener('keydown', (e) => {
+      // 드로잉 툴바가 보이지 않으면 무시
+      const toolbar = document.getElementById('draw-toolbar');
+      if (!toolbar || toolbar.style.display === 'none') return;
+      // input/textarea에 포커스 중이면 무시
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          if (e.shiftKey) {
+            e.preventDefault();
+            redo();
+          } else {
+            e.preventDefault();
+            undo();
+          }
+        } else if (e.key === 'y' || e.key === 'Y') {
+          if (!e.shiftKey) {
+            e.preventDefault();
+            redo();
+          }
+        }
+      }
+    });
   }
 
 
@@ -972,26 +1096,30 @@ const drawingTools = (() => {
 
     // ── 1클릭 완성 도구: 수평선, 수직선 ──
     if (_activeTool === 'hline') {
-      _drawings.push({
+      const drawing = {
         id: _genId(),
         type: 'hline',
         points: [{ price, time }],
         stockCode: _currentStockCode,
         color: _currentColor,
-      });
+      };
+      _drawings.push(drawing);
+      _pushUndo({ type: 'add', drawing });
       _saveDrawings();
       _refresh();
       return;
     }
 
     if (_activeTool === 'vline') {
-      _drawings.push({
+      const drawing = {
         id: _genId(),
         type: 'vline',
         points: [{ price, time }],
         stockCode: _currentStockCode,
         color: _currentColor,
-      });
+      };
+      _drawings.push(drawing);
+      _pushUndo({ type: 'add', drawing });
       _saveDrawings();
       _refresh();
       return;
@@ -1001,13 +1129,15 @@ const drawingTools = (() => {
     _clickPoints.push({ price, time });
 
     if (_clickPoints.length >= 2) {
-      _drawings.push({
+      const drawing = {
         id: _genId(),
         type: _activeTool,
         points: _clickPoints.slice(),
         stockCode: _currentStockCode,
         color: _currentColor,
-      });
+      };
+      _drawings.push(drawing);
+      _pushUndo({ type: 'add', drawing });
       _clickPoints = [];
       _previewPoint = null;
       _saveDrawings();
@@ -1080,6 +1210,9 @@ const drawingTools = (() => {
     // 색상 선택기 DOM 초기화 (최초 1회)
     _initColorPicker();
     _setupColorPickerDismiss();
+
+    // Undo/Redo 키보드 단축키 등록 (최초 1회)
+    _setupUndoRedoKeys();
   }
 
   /**
@@ -1104,6 +1237,8 @@ const drawingTools = (() => {
     _previewPoint = null;
     _selectedDrawing = null;
     _dragState = null;
+    _undoStack = [];
+    _redoStack = [];
     _refresh();
   }
 
@@ -1127,6 +1262,8 @@ const drawingTools = (() => {
     _previewPoint = null;
     _selectedDrawing = null;
     _dragState = null;
+    _undoStack = [];
+    _redoStack = [];
     // 차트 스크롤 + 축 줌 복원
     if (_chartRef && _chartRef.mainChart) {
       try {
@@ -1163,6 +1300,8 @@ const drawingTools = (() => {
     setStockCode,
     clearAll,
     cleanup,
+    undo,
+    redo,
     // 상수 (외부 참조용)
     DRAW_COLORS,
   };

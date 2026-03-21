@@ -8,13 +8,23 @@ KRX Live Chart (CheeseStock) — a Korean stock market (KOSPI/KOSDAQ) charting w
 
 ## Architecture
 
-**No module system.** All JS files use global variables and classes. Script load order in `index.html` is critical:
+**No module system, no bundler, no package.json, no test framework.** All JS files use global variables and classes. Script load order in `index.html` is critical — breaking it causes reference errors.
+
+### CDN Dependencies (loaded in `index.html`)
+
+| Library | Version | CDN |
+|---------|---------|-----|
+| TradingView Lightweight Charts | v4.2.3 | unpkg.com |
+| Pretendard (Korean font) | v1.3.9 | jsDelivr (orioncactus/pretendard) |
+| JetBrains Mono (code font) | — | Google Fonts |
+
+### Script Load Order
 
 ```
 colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → drawingTools.js → app.js
 ```
 
-Breaking this order causes reference errors (e.g., `ALL_STOCKS` from api.js is used in app.js, `patternRenderer` from patternRenderer.js is used in chart.js/app.js).
+All scripts use `defer` — execution order is preserved but download is parallel.
 
 ### File Responsibilities (16 JS files)
 
@@ -79,24 +89,35 @@ analysisWorker.js ← (Web Worker, separate context)
 
 ### Key Patterns
 
+**Chart Lifecycle & Memory**
 - **ChartManager** uses `_resizeMap` (Map) to track ResizeObservers per container, preventing memory leaks.
 - **Sub-charts** (RSI, MACD) have explicit `destroyRSI()` / `destroyMACD()` methods that clean up observers and rebuild time scale sync.
 - **Time scale sync** across main/RSI/MACD charts uses `_syncUnsubs` array; `_rebuildSync()` unsubscribes all before re-subscribing.
-- **Pattern analysis** is throttled to 3-second intervals (`_lastPatternAnalysis` in app.js) to avoid performance issues.
-- **Pattern button** uses class `.pattern-btn` and is excluded from indicator handlers via `.ind-btn:not(.pattern-btn)`.
-- **PatternRenderer** uses ISeriesPrimitive plugin API for Canvas2D drawing. 9 draw layers (glows → brackets → trendAreas → polylines → hlines → connectors → labels → forecastZones → extendedLines). Max 5 patterns (`MAX_PATTERNS`), 3-tier visibility filtering (candle patterns: visible-only, chart patterns: extend structure lines when off-screen, S/R: always visible). Pattern colors use `KRX_COLORS.PTN_BUY` (mint) / `PTN_SELL` (lavender) — distinct from main UP/DOWN colors.
-- **SignalRenderer** uses same ISeriesPrimitive pattern with dual PaneViews (bg `zOrder='bottom'` for vbands, fg `zOrder='top'` for diamonds/stars/divlines). Also highlights volumeSeries colors for breakout bars.
-- **SignalEngine** builds an `IndicatorCache` internally for lazy indicator computation, then runs 5 signal categories + composite matching + sentiment scoring.
-- **IndicatorCache** (indicators.js) uses lazy evaluation — each indicator computed only on first access, cached until `setCandles()` or `invalidate()` is called.
-- **Web Worker** (`analysisWorker.js`) offloads heavy analysis (pattern + signal + backtest) off the main thread. Messages use `version` field for stale-result rejection.
-- **KRX_COLORS** (colors.js) centralizes all color constants; JS files should reference `KRX_COLORS.UP` instead of hardcoding `'#E05050'`. Pattern-specific colors (`PTN_BUY`, `PTN_SELL`, `PTN_STRUCT`, `PTN_STOP`, `PTN_TARGET`) are separate from chart UP/DOWN colors.
-- **Virtual Scroll** (sidebar.js) renders only ~40 DOM elements for 2700+ stocks. `.sb-body` is the scroll container; `#sb-all` contains a spacer div (total height) + absolute-positioned content div. `_renderVisibleItems()` recalculates on scroll via rAF throttling.
-- **Service Worker** (`sw.js`) provides offline caching. Cache-First for static assets, Network-First for data files, stale-while-revalidate for CDN resources. WebSocket connections are not intercepted.
-- **index.html** uses 4-column grid layout: A=sidebar, B=chart area + return stats, C=pattern panel, D=financial panel. Responsive breakpoints at 1200px, 1024px, 768px, 480px.
-- **Visualization Toggle System** (`vizToggles` in app.js): 4-category filter (candle/chart/signal/forecast) with `[표시 ▼]` dropdown. Analysis engine runs regardless of toggles; filtering happens at render time via `_filterPatternsForViz()`. Centralized render via `_renderOverlays()`.
-- **Dual Color System for Patterns**: Candle patterns use `PTN_CANDLE` (purple `#B388FF`), chart patterns use `PTN_BUY` (mint). Forecast zones are mint-only.
-- **Indicator Cache** (chart.js `_indicatorCache`): Caches MA/EMA/BB/Ichimoku etc. keyed by `candles.length + lastTime + lastClose`. Prevents redundant O(n) recomputation when `updateMain()` is called multiple times with same data.
+- **Drawing tools**: When active, `handleScroll.pressedMouseMove` AND `handleScale.axisPressedMouseMove` must be disabled, or LWC consumes click events for scrolling instead of forwarding to `subscribeClick`.
+
+**Rendering (ISeriesPrimitive Canvas2D)**
+- **PatternRenderer**: 9 draw layers (glows → brackets → trendAreas → polylines → hlines → connectors → labels → forecastZones → extendedLines). Max 5 patterns (`MAX_PATTERNS`), 3-tier visibility filtering. Must re-attach primitive when `candleSeries` is recreated (tracked via `_attachedSeries`).
+- **SignalRenderer**: Dual PaneViews (bg `zOrder='bottom'` for vbands, fg `zOrder='top'` for diamonds/stars/divlines). Also highlights volumeSeries colors for breakout bars.
+- **Dual Color System**: Candle patterns = `PTN_CANDLE` (purple `#B388FF`), chart patterns = `PTN_BUY` (mint). Forecast zones are mint-only. Pattern colors are distinct from main UP/DOWN colors.
+- **Visualization Toggles** (`vizToggles` in app.js): 4-category filter (candle/chart/signal/forecast). Analysis engine runs regardless; filtering at render time via `_filterPatternsForViz()`. Centralized render via `_renderOverlays()`.
+
+**Caching (3 layers)**
+- **IndicatorCache** (indicators.js): Lazy evaluation — each indicator computed only on first access, cached until `setCandles()` or `invalidate()`.
+- **Indicator Cache** (chart.js `_indicatorCache`): Keyed by `candles.length + lastTime + lastClose`. Prevents redundant O(n) recomputation on repeated `updateMain()` calls.
 - **Worker Analysis Cache** (analysisWorker.js `_analyzeCache`): Caches pattern/signal results by candle fingerprint. Drag-repeat and rapid stock re-selection skip re-analysis.
+
+**Worker & Analysis**
+- **Web Worker** (`analysisWorker.js`) offloads pattern + signal + backtest off main thread. Messages use `version` field for stale-result rejection. Uses `importScripts()` — only loads non-DOM files.
+- **IndicatorCache objects contain functions** — cannot be sent via `postMessage` (structured clone fails).
+- **Pattern analysis** throttled to 3-second intervals (`_lastPatternAnalysis` in app.js).
+- **Pattern button** uses class `.pattern-btn`, excluded from indicator handlers via `.ind-btn:not(.pattern-btn)`.
+
+**UI & Layout**
+- **index.html**: 4-column grid (A=sidebar, B=chart+return stats, C=pattern panel, D=financial panel). Responsive breakpoints: 1200px, 1024px, 768px, 480px.
+- **Virtual Scroll** (sidebar.js): ~40 DOM elements for 2700+ stocks. `.sb-body` scroll container; `_renderVisibleItems()` via rAF throttling.
+- **KRX_COLORS** (colors.js) centralizes all color constants. Never hardcode hex — use `KRX_COLORS.*` or CSS `var(--*)`.
+
+**Service Worker** (`sw.js`): Cache name `cheesestock-v2`. Cache-First for static assets, Network-First for data files, stale-while-revalidate for CDN. WebSocket not intercepted. **Bump `CACHE_NAME` version when deploying breaking changes to force cache refresh.**
 
 ### Data Flow
 
@@ -296,17 +317,12 @@ All timestamps must be KST-aware:
 
 ## Common Pitfalls
 
-- Adding `<script>` tags out of order breaks everything — see dependency graph above
-- All scripts use `defer` attribute — execution order is preserved but download is parallel
-- **`file://` protocol causes CORS errors** — `data/index.json` fetch fails. Always use HTTP server (`localhost:5500` via Live Server or `npx serve`)
+- Adding `<script>` tags out of order breaks everything — see load order above
+- **`file://` protocol causes CORS errors** — `data/index.json` fetch fails. Always use HTTP server
 - Sub-chart labels must be **outside** chart containers (Lightweight Charts takes over container DOM)
 - Markers in line chart mode must be set on `indicatorSeries._priceLine`, not `candleSeries`
 - `calcEMA([])` and `calcMACD()` with empty valid data need early returns to avoid NaN propagation
-- File mode candles use `"YYYY-MM-DD"` string dates (not Unix timestamps) — Lightweight Charts v4.2+ supports both. **Both `tickMarkFormatter` and `timeFormatter` must handle string dates.**
-- `patternRenderer` must re-attach primitive when `candleSeries` is recreated (tracked via `_attachedSeries`)
-- `analysisWorker.js` uses `importScripts()` — only loads indicators/patterns/signalEngine/backtester (no DOM-dependent files)
-- `IndicatorCache` objects contain functions — they cannot be sent via `postMessage` (structured clone fails)
-- **Canvas DPR**: All canvas drawing functions (financials.js) must call `ctx.setTransform(1,0,0,1,0,0)` before `ctx.scale(dpr,dpr)` to prevent DPR accumulation on repeated calls
-- **Wrangler deploy**: `--commit-message` must be ASCII — Korean characters cause Cloudflare API `Invalid commit message` error
-- **bat files**: Must use ASCII-only text — Korean in bat files breaks on Windows cmd.exe (CP949 vs UTF-8)
-- **Drawing tools**: When active, `handleScroll.pressedMouseMove` AND `handleScale.axisPressedMouseMove` must be disabled, or LWC consumes click events for scrolling instead of forwarding to `subscribeClick`
+- File mode candles use `"YYYY-MM-DD"` string dates (not Unix timestamps). **Both `tickMarkFormatter` and `timeFormatter` must handle string dates.**
+- **Canvas DPR**: All canvas drawing (financials.js) must call `ctx.setTransform(1,0,0,1,0,0)` before `ctx.scale(dpr,dpr)` to prevent DPR accumulation
+- **Wrangler deploy**: `--commit-message` must be ASCII — Korean causes Cloudflare API error
+- **bat files**: Must use ASCII-only text — Korean breaks on Windows cmd.exe (CP949 vs UTF-8)

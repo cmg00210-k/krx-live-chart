@@ -60,6 +60,10 @@ function _clearAllFinancials() {
   if (compareEl) compareEl.innerHTML = '';
   var peersEl = document.getElementById('fin-peers');
   if (peersEl) peersEl.innerHTML = '';
+
+  // 데이터 출처 배지 숨김
+  var badge = document.getElementById('fin-source-badge');
+  if (badge) badge.style.display = 'none';
 }
 
 /**
@@ -69,6 +73,26 @@ function _clearAllFinancials() {
 function _showDartWarning(source) {
   var el = document.getElementById('fin-seed-warning');
   if (!el) return;
+
+  // ── 헤더 배지 업데이트 ──
+  var badge = document.getElementById('fin-source-badge');
+  if (badge) {
+    badge.style.display = 'inline';
+    badge.className = 'fin-source-badge';
+    if (source === 'dart') {
+      badge.textContent = 'DART';
+      badge.classList.add('dart');
+      badge.title = 'DART 공시 데이터';
+    } else if (source === 'hardcoded') {
+      badge.textContent = '기본';
+      badge.classList.add('default');
+      badge.title = '내장 참고 데이터 (삼성전자/SK하이닉스)';
+    } else {
+      badge.textContent = '추정';
+      badge.classList.add('seed');
+      badge.title = '실제 재무데이터가 아닙니다';
+    }
+  }
 
   if (source === 'dart') {
     // DART 실제 데이터 — 경고 숨김
@@ -419,18 +443,18 @@ function _calcCAGR(annualData, set, setClass) {
  * 투자판단 점수 (0~100) 산출
  *
  * 항목별 배점:
- *   수익성 (30점): ROE(15) + OPM(15)
+ *   수익성 (40점): ROE(15) + OPM(15) + ROA(5) + NPM(5)
  *   밸류에이션 (30점): PER(15) + PBR(15)
  *   성장성 (20점): 매출 CAGR 기반
  *   안정성 (20점): 부채비율 기반
  */
 function _calcInvestmentScore(params, set, setClass) {
-  const { perVal, pbrVal, debtRatio, roe, opm, annualData } = params;
+  const { perVal, pbrVal, debtRatio, roe, opm, roaVal, npmVal, annualData } = params;
   let score = 0;
   // [FIX-1] 활성화된 항목의 최대 배점을 동적 합산 (하드코딩 제거)
   let maxPossible = 0;
 
-  // ── 수익성 (30점): ROE 15점 + OPM 15점 ──
+  // ── 수익성 (40점): ROE 15점 + OPM 15점 + ROA 5점 + NPM 5점 ──
   if (roe != null && !isNaN(roe)) {
     maxPossible += 15;
     if (roe >= 15) score += 15;
@@ -444,6 +468,14 @@ function _calcInvestmentScore(params, set, setClass) {
     else if (opm >= 10) score += 12;
     else if (opm >= 5) score += 8;
     else if (opm >= 0) score += 4;
+  }
+  if (roaVal != null && !isNaN(roaVal) && roaVal > 0) {
+    maxPossible += 5;
+    score += Math.min(roaVal / 10, 1) * 5;  // max 5점 (ROA >= 10%)
+  }
+  if (npmVal != null && !isNaN(npmVal) && npmVal > 0) {
+    maxPossible += 5;
+    score += Math.min(npmVal / 15, 1) * 5;  // max 5점 (NPM >= 15%)
   }
 
   // ── 밸류에이션 (30점): PER 15점 + PBR 15점 ──
@@ -644,9 +676,9 @@ function drawOPMSparkline(data) {
   for (i = 1; i < points.length; i++) {
     ctx.lineTo(points[i].x, points[i].y);
   }
-  // 아래로 닫기: 0% 기준선 또는 차트 하단까지
-  ctx.lineTo(points[points.length - 1].x, baseY);
-  ctx.lineTo(points[0].x, baseY);
+  // 아래로 닫기: 0% 기준선 (양수/음수 혼재) 또는 차트 하단까지
+  ctx.lineTo(points[points.length - 1].x, hasZeroLine ? zeroY : baseY);
+  ctx.lineTo(points[0].x, hasZeroLine ? zeroY : baseY);
   ctx.closePath();
   var gradient = ctx.createLinearGradient(0, chartTop, 0, chartTop + chartH);
   gradient.addColorStop(0, 'rgba(160,136,48,0.20)');
@@ -778,11 +810,14 @@ function drawFinTrendChart(data, metric) {
   const min = Math.min(...values);
   const absMax = Math.max(Math.abs(max), Math.abs(min)) || 1;
 
-  // 0선 위치 (양수/음수 공존 시)
+  // 0선 위치 (양수/음수 공존 시) — 실제 데이터 범위 기반
   const hasNeg = min < 0;
-  const zeroY = hasNeg
-    ? chartH * (absMax / (absMax * 2))  // 중간에 0선
-    : chartH;  // 양수만: 바닥이 0
+  const absMin = Math.abs(min);
+  const zeroY = max <= 0
+    ? 0                                           // 전부 음수: 0선이 꼭대기
+    : min >= 0
+      ? chartH                                    // 전부 양수: 0선이 바닥
+      : chartH * (Math.abs(max) / (Math.abs(max) + absMin));  // 혼재: 비례 배치
 
   if (metric === 'eps') {
     // ── EPS: 라인차트 + 점 ──
@@ -831,7 +866,9 @@ function drawFinTrendChart(data, metric) {
 
     values.forEach((v, i) => {
       const x = gap + i * (barW + gap);
-      const barH = (Math.abs(v) / absMax) * (hasNeg ? chartH / 2 : chartH - 2);
+      // 양수: zeroY 위 공간, 음수: zeroY 아래 공간에 비례
+      const maxH = v >= 0 ? (zeroY || 1) : ((chartH - zeroY) || 1);
+      const barH = (Math.abs(v) / absMax) * (hasNeg ? maxH : chartH - 2);
 
       ctx.fillStyle = v >= 0
         ? 'rgba(224, 80, 80, 0.65)'   // 양수: 빨강
@@ -861,7 +898,8 @@ function drawFinTrendChart(data, metric) {
     var prevLabelX = null;
     values.forEach((v, i) => {
       var barX = gap + i * (barW + gap);
-      var barH = (Math.abs(v) / absMax) * (hasNeg ? chartH / 2 : chartH - 2);
+      var maxH2 = v >= 0 ? (zeroY || 1) : ((chartH - zeroY) || 1);
+      var barH = (Math.abs(v) / absMax) * (hasNeg ? maxH2 : chartH - 2);
       var text = '';
       if (Math.abs(v) >= 10000) {         // 1조 이상 (값은 억원 단위)
         text = (v / 10000).toFixed(1) + '조';

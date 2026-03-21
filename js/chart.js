@@ -180,6 +180,7 @@ class ChartManager {
     this.atrChart = null;
 
     // Series 참조
+    this._mainSeriesType = 'candlestick'; // 'candlestick' | 'bar'
     this.candleSeries = null;
     this.volumeSeries = null;
     this.indicatorSeries = {};   // { 'ma5': series, 'ema12': series, ... }
@@ -241,6 +242,9 @@ class ChartManager {
     // [PERF] 지표 계산 결과 캐싱 — 캔들 변경 시에만 재계산
     // key: candles.length + '_' + lastCandle.time, results: { ma5, ma20, ... }
     this._indicatorCache = { key: null, results: {} };
+    // [PERF] 서브차트 지표 캐싱 — Stochastic/CCI/ADX/WilliamsR/ATR
+    // 동일 캔들 데이터면 재계산 스킵 (updateMain과 동일 패턴)
+    this._subChartCache = { key: null, results: {} };
     // [UX] RSI/MACD 최근 계산값 저장 (크로스헤어 툴팁용)
     this._lastRsiValues = null;
     this._lastMacdValues = null;
@@ -388,7 +392,7 @@ class ChartManager {
       borderVisible: false,
       wickUpColor: KRX_COLORS.UP,
       wickDownColor: KRX_COLORS.DOWN,
-      lastValueVisible: true,
+      lastValueVisible: false,
       priceLineVisible: false,
       priceFormat: { type: 'price', precision: 0, minMove: 1 },
     });
@@ -525,6 +529,70 @@ class ChartManager {
   }
 
   // ══════════════════════════════════════════════════
+  //  메인 시리즈 타입 전환 (candlestick ↔ bar)
+  //  LWC addBarSeries()를 사용하여 진정한 바 차트 렌더링
+  // ══════════════════════════════════════════════════
+  _swapMainSeries(toType) {
+    if (this._mainSeriesType === toType) return;
+    if (!this.mainChart || !this.candleSeries) return;
+
+    // 1. Detach high/low primitive (시리즈 제거 전 분리 필수)
+    if (this._visHighLowPrimitive) {
+      try { this.candleSeries.detachPrimitive(this._visHighLowPrimitive); } catch (e) {}
+    }
+
+    // 2. Remove price lines (시리즈에 종속된 가격선 제거)
+    if (this._currentPriceLine) {
+      try { this.candleSeries.removePriceLine(this._currentPriceLine); } catch (e) {}
+      this._currentPriceLine = null;
+    }
+    if (this._visHighLine) {
+      try { this.candleSeries.removePriceLine(this._visHighLine); } catch (e) {}
+      this._visHighLine = null;
+    }
+    if (this._visLowLine) {
+      try { this.candleSeries.removePriceLine(this._visLowLine); } catch (e) {}
+      this._visLowLine = null;
+    }
+
+    // 3. Remove old series from chart
+    try { this.mainChart.removeSeries(this.candleSeries); } catch (e) {}
+
+    // 4. Create new series of the target type
+    if (toType === 'bar') {
+      this.candleSeries = this.mainChart.addBarSeries({
+        upColor: KRX_COLORS.UP,
+        downColor: KRX_COLORS.DOWN,
+        openVisible: true,
+        thinBars: true,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 0, minMove: 1 },
+      });
+    } else {
+      this.candleSeries = this.mainChart.addCandlestickSeries({
+        upColor: KRX_COLORS.UP,
+        downColor: KRX_COLORS.DOWN,
+        borderVisible: false,
+        wickUpColor: KRX_COLORS.UP,
+        wickDownColor: KRX_COLORS.DOWN,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 0, minMove: 1 },
+      });
+    }
+
+    // 5. Re-attach high/low primitive to new series
+    if (this._visHighLowPrimitive) {
+      try { this.candleSeries.attachPrimitive(this._visHighLowPrimitive); } catch (e) {}
+    }
+
+    this._mainSeriesType = toType;
+    this._lastVisibleHigh = null;
+    this._lastVisibleLow = null;
+  }
+
+  // ══════════════════════════════════════════════════
   //  차트 데이터 업데이트
   // ══════════════════════════════════════════════════
   updateMain(candles, chartType, activeIndicators, patterns, params) {
@@ -549,6 +617,8 @@ class ChartManager {
 
     // ── 가격 데이터 ──
     if (chartType === 'line') {
+      // line 모드: candleSeries는 candlestick 유지 (빈 데이터), 별도 lineSeries 사용
+      this._swapMainSeries('candlestick');
       this.candleSeries.setData([]);
       if (!this.indicatorSeries._priceLine) {
         this.indicatorSeries._priceLine = this.mainChart.addLineSeries({
@@ -568,6 +638,9 @@ class ChartManager {
         delete this.indicatorSeries._priceLine;
       }
 
+      // bar 모드: LWC addBarSeries() 사용, 그 외: candlestick
+      this._swapMainSeries(chartType === 'bar' ? 'bar' : 'candlestick');
+
       // Heikin Ashi 변환
       let displayCandles = candles;
       if (chartType === 'heikin') {
@@ -581,22 +654,6 @@ class ChartManager {
         low: c.low,
         close: c.close,
       })));
-
-      if (chartType === 'bar') {
-        this.candleSeries.applyOptions({
-          upColor: 'transparent',
-          downColor: 'transparent',
-          borderVisible: true,
-          borderUpColor: KRX_COLORS.UP,
-          borderDownColor: KRX_COLORS.DOWN,
-        });
-      } else {
-        this.candleSeries.applyOptions({
-          upColor: KRX_COLORS.UP,
-          downColor: KRX_COLORS.DOWN,
-          borderVisible: false,
-        });
-      }
     }
 
     // ── 거래량 (동적 투명도: 20일 평균 대비 비율) ──
@@ -676,7 +733,7 @@ class ChartManager {
     this._updateIndicatorLine('ema26', activeIndicators.has('ema'),
       times, _ic[_emaK2] || (_ic[_emaK2] = calcEMA(closes, emaP.p2)), KRX_COLORS.EMA_26, 1);
 
-    // ── 일목균형표 — 커스텀 기간 지원 + 계산 캐싱 ──
+    // ── 일목균형표 — 커스텀 기간 지원 + 계산 캐싱 + 구름대 채움 ──
     if (activeIndicators.has('ich')) {
       const ichP = (_p.ich || { tenkan: 9, kijun: 26, senkou: 52 });
       var _ichK = 'ich_' + ichP.tenkan + '_' + ichP.kijun + '_' + ichP.senkou;
@@ -691,9 +748,97 @@ class ChartManager {
         ich.spanB, KRX_COLORS.ICH_SPANB, 1);
       this._updateIndicatorLine('ichChikou', true, times,
         ich.chikou, KRX_COLORS.ICH_CHIKOU, 1);
+
+      // ── 구름대(Kumo) 채움: 4개 AreaSeries 방식 ──
+      // 원리: "ceiling" area가 위에서 아래로 색을 칠하고,
+      //        "floor" area가 차트 배경색으로 아래 부분을 덮어씀
+      //        → 두 선 사이만 색이 보임
+      // 강세(spanA>spanB): 초록 / 약세(spanB>spanA): 빨강
+      // 세그먼트 분리: 각 구간에서 ceiling과 floor 데이터를 교차시켜
+      //               해당 구간만 색이 보이도록 함
+      var bullCeil = [], bullFloor = [], bearCeil = [], bearFloor = [];
+      for (var ci = 0; ci < times.length; ci++) {
+        var sA = ich.spanA[ci], sB = ich.spanB[ci];
+        if (sA == null || sB == null) continue;
+        var t = times[ci];
+        if (sA >= sB) {
+          // 강세 구간: spanA가 천장, spanB가 바닥
+          bullCeil.push({ time: t, value: sA });
+          bullFloor.push({ time: t, value: sB });
+          // 약세 구간: 천장=바닥으로 접어서 두께 0 (안 보임)
+          bearCeil.push({ time: t, value: sB });
+          bearFloor.push({ time: t, value: sB });
+        } else {
+          // 약세 구간: spanB가 천장, spanA가 바닥
+          bearCeil.push({ time: t, value: sB });
+          bearFloor.push({ time: t, value: sA });
+          // 강세 구간: 천장=바닥으로 접어서 두께 0
+          bullCeil.push({ time: t, value: sA });
+          bullFloor.push({ time: t, value: sA });
+        }
+      }
+
+      // 강세 구름 (초록 틴트)
+      if (!this.indicatorSeries._ichBullCeil) {
+        this.indicatorSeries._ichBullCeil = this.mainChart.addAreaSeries({
+          topColor: 'rgba(129,199,132,0.10)',
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      if (!this.indicatorSeries._ichBullFloor) {
+        this.indicatorSeries._ichBullFloor = this.mainChart.addAreaSeries({
+          topColor: KRX_COLORS.CHART_BG,
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      this.indicatorSeries._ichBullCeil.setData(bullCeil);
+      this.indicatorSeries._ichBullFloor.setData(bullFloor);
+
+      // 약세 구름 (빨강 틴트)
+      if (!this.indicatorSeries._ichBearCeil) {
+        this.indicatorSeries._ichBearCeil = this.mainChart.addAreaSeries({
+          topColor: 'rgba(239,154,154,0.10)',
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      if (!this.indicatorSeries._ichBearFloor) {
+        this.indicatorSeries._ichBearFloor = this.mainChart.addAreaSeries({
+          topColor: KRX_COLORS.CHART_BG,
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      this.indicatorSeries._ichBearCeil.setData(bearCeil);
+      this.indicatorSeries._ichBearFloor.setData(bearFloor);
     } else {
       ['ichTenkan', 'ichKijun', 'ichSpanA', 'ichSpanB', 'ichChikou'].forEach(k =>
         this._removeIndicatorLine(k));
+      // 구름대 AreaSeries 정리
+      ['_ichBullCeil', '_ichBullFloor', '_ichBearCeil', '_ichBearFloor'].forEach(k => {
+        if (this.indicatorSeries[k]) {
+          try { this.mainChart.removeSeries(this.indicatorSeries[k]); } catch (e) {}
+          delete this.indicatorSeries[k];
+        }
+      });
     }
 
     // ── 칼만 필터 + 계산 캐싱 ──
@@ -704,7 +849,7 @@ class ChartManager {
       this._removeIndicatorLine('kalman');
     }
 
-    // ── 볼린저 밴드 — 커스텀 파라미터 지원 + 계산 캐싱 ──
+    // ── 볼린저 밴드 — 커스텀 파라미터 지원 + 계산 캐싱 + 밴드 채움 ──
     if (activeIndicators.has('bb')) {
       const bbP = (_p.bb || { period: 20, stdDev: 2 });
       var _bbK = 'bb_' + bbP.period + '_' + bbP.stdDev;
@@ -716,10 +861,52 @@ class ChartManager {
       this._updateIndicatorLine('bbUpper', true, times, bbUp, KRX_COLORS.BB, 1);
       this._updateIndicatorLine('bbMid', true, times, bbMid, KRX_COLORS.BB_MID, 1);
       this._updateIndicatorLine('bbLower', true, times, bbLow, KRX_COLORS.BB, 1);
+
+      // ── BB 밴드 채움: ceiling(상단) + floor(하단) AreaSeries ──
+      // 상단 area가 BB 색상으로 아래로 칠하고, 하단 area가 배경색으로 덮어씀
+      // → 상단~하단 사이만 은은한 BB 색상이 보임
+      var bbCeilData = [], bbFloorData = [];
+      for (var bi = 0; bi < times.length; bi++) {
+        if (bbUp[bi] != null && bbLow[bi] != null) {
+          bbCeilData.push({ time: times[bi], value: bbUp[bi] });
+          bbFloorData.push({ time: times[bi], value: bbLow[bi] });
+        }
+      }
+      if (!this.indicatorSeries._bbCeil) {
+        this.indicatorSeries._bbCeil = this.mainChart.addAreaSeries({
+          topColor: 'rgba(255,140,66,0.06)',
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      if (!this.indicatorSeries._bbFloor) {
+        this.indicatorSeries._bbFloor = this.mainChart.addAreaSeries({
+          topColor: KRX_COLORS.CHART_BG,
+          bottomColor: 'transparent',
+          lineColor: 'transparent',
+          lineWidth: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+      }
+      this.indicatorSeries._bbCeil.setData(bbCeilData);
+      this.indicatorSeries._bbFloor.setData(bbFloorData);
     } else {
       this._removeIndicatorLine('bbUpper');
       this._removeIndicatorLine('bbMid');
       this._removeIndicatorLine('bbLower');
+      // BB 밴드 채움 AreaSeries 정리
+      ['_bbCeil', '_bbFloor'].forEach(k => {
+        if (this.indicatorSeries[k]) {
+          try { this.mainChart.removeSeries(this.indicatorSeries[k]); } catch (e) {}
+          delete this.indicatorSeries[k];
+        }
+      });
     }
 
     // ── 패턴 마커 & 추세선 ──
@@ -905,6 +1092,22 @@ class ChartManager {
   // ══════════════════════════════════════════════════
   //  지표 라인 유틸리티
   // ══════════════════════════════════════════════════
+
+  /**
+   * [PERF] 서브차트 캐시 접근 — 캔들 변경 시에만 캐시 초기화
+   * updateMain의 _indicatorCache와 동일한 키 패턴 사용
+   * @returns {Object} results 객체 — 각 서브차트가 키로 결과 저장
+   */
+  _getSubChartCache(candles) {
+    if (!candles || !candles.length) return {};
+    var last = candles[candles.length - 1];
+    var key = candles.length + '_' + last.time + '_' + last.close;
+    if (this._subChartCache.key !== key) {
+      this._subChartCache = { key: key, results: {} };
+    }
+    return this._subChartCache.results;
+  }
+
   _updateIndicatorLine(key, show, times, values, color, lineWidth) {
     if (!show) {
       this._removeIndicatorLine(key);
@@ -1038,9 +1241,10 @@ class ChartManager {
   }
   updateStochastic(candles) {
     if (!this.stochChart || !this.stochKSeries) return;
-    const { k, d } = calcStochastic(candles);
-    this.stochKSeries.setData(k.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
-    this.stochDSeries.setData(d.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    var sc = this._getSubChartCache(candles);
+    var stoch = sc['stoch'] || (sc['stoch'] = calcStochastic(candles));
+    this.stochKSeries.setData(stoch.k.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.stochDSeries.setData(stoch.d.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyStochastic() {
     if (this.stochChart) {
@@ -1068,7 +1272,8 @@ class ChartManager {
   }
   updateCCI(candles) {
     if (!this.cciChart || !this.cciSeries) return;
-    const cci = calcCCI(candles);
+    var sc = this._getSubChartCache(candles);
+    var cci = sc['cci'] || (sc['cci'] = calcCCI(candles));
     this.cciSeries.setData(cci.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyCCI() {
@@ -1098,10 +1303,11 @@ class ChartManager {
   }
   updateADX(candles) {
     if (!this.adxChart || !this.adxSeries) return;
-    const { adx, plusDI, minusDI } = calcADX(candles);
-    this.adxSeries.setData(adx.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
-    this.adxPlusDISeries.setData(plusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
-    this.adxMinusDISeries.setData(minusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    var sc = this._getSubChartCache(candles);
+    var adxData = sc['adx'] || (sc['adx'] = calcADX(candles));
+    this.adxSeries.setData(adxData.adx.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.adxPlusDISeries.setData(adxData.plusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
+    this.adxMinusDISeries.setData(adxData.minusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyADX() {
     if (this.adxChart) {
@@ -1129,7 +1335,8 @@ class ChartManager {
   }
   updateWilliamsR(candles) {
     if (!this.willrChart || !this.willrSeries) return;
-    const willr = calcWilliamsR(candles);
+    var sc = this._getSubChartCache(candles);
+    var willr = sc['willr'] || (sc['willr'] = calcWilliamsR(candles));
     this.willrSeries.setData(willr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyWilliamsR() {
@@ -1155,7 +1362,8 @@ class ChartManager {
   }
   updateATR(candles) {
     if (!this.atrChart || !this.atrSeries) return;
-    const atrVals = calcATR(candles);
+    var sc = this._getSubChartCache(candles);
+    var atrVals = sc['atr'] || (sc['atr'] = calcATR(candles));
     this.atrSeries.setData(atrVals.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyATR() {
@@ -1282,6 +1490,7 @@ class ChartManager {
     if (this.atrChart) { this.atrChart.remove(); this.atrChart = null; }
 
     // 참조 초기화
+    this._mainSeriesType = 'candlestick';
     this.candleSeries = null;
     this.volumeSeries = null;
     this.indicatorSeries = {};
@@ -1307,6 +1516,7 @@ class ChartManager {
     this._hoverCandles = [];
     this._shouldSetInitialRange = false;
     this._indicatorCache = { key: null, results: {} };
+    this._subChartCache = { key: null, results: {} };
     this._lastDataKey = {};
     this._lastRsiValues = null;
     this._lastMacdValues = null;
@@ -1328,12 +1538,13 @@ class ChartManager {
 
     const isUp = currentPrice >= (prevClose || currentPrice);
 
-    // 현재가 라인 (실선)
+    // 현재가 라인 (축 태그만, 실선 없음)
     this._currentPriceLine = this.candleSeries.createPriceLine({
       price: currentPrice,
       color: isUp ? KRX_COLORS.UP : KRX_COLORS.DOWN,
       lineWidth: 1,
       lineStyle: 0,
+      lineVisible: false,
       axisLabelVisible: true,
       title: '',
     });

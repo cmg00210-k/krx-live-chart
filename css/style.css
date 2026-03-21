@@ -329,6 +329,45 @@ html, body {
   color: var(--text);
 }
 
+/* ── 업종 필터 드롭다운 ── */
+.sb-sector-select {
+  flex: 1;
+  min-width: 0;
+  height: var(--ctrl-h-md);
+  background: var(--bg-element);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--ctrl-radius);
+  padding: 0 20px 0 6px;
+  font-family: var(--font-sans);
+  font-size: var(--ctrl-font);
+  font-weight: 600;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23808080'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  transition: border-color var(--transition);
+  line-height: var(--ctrl-h-md);
+  max-width: 120px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sb-sector-select:hover {
+  border-color: var(--text-muted);
+}
+.sb-sector-select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.sb-sector-select option {
+  background: var(--bg-element);
+  color: var(--text);
+}
+
 /* ── 4. 필터 칩 ── */
 .sb-filter-chips {
   padding: 0 var(--sp-2);
@@ -392,6 +431,7 @@ html, body {
 }
 /* 사이드바 컨트롤 focus-visible 2px 통일 */
 .sb-sort-select:focus-visible,
+.sb-sector-select:focus-visible,
 .sb-vol-toggle:focus-visible,
 .sb-chip:focus-visible,
 .sb-view-opt:focus-visible,
@@ -1761,6 +1801,19 @@ html, body {
   font-size: var(--fs-micro); color: var(--text-muted);
   text-align: right; letter-spacing: 0.02em;
 }
+/* ── 재무 데이터 출처 배지 (헤더 우측) ── */
+.fin-source-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.fin-source-badge.dart    { background: rgba(107,203,119,0.2);  color: var(--fin-good); }
+.fin-source-badge.default { background: rgba(255,193,7,0.2);    color: #FFC107; }
+.fin-source-badge.seed    { background: rgba(224,80,80,0.2);    color: var(--up); }
 #opm-sparkline { width: 100%; height: auto; margin-top: 2px; display: block; max-width: 100%; }  /* JS가 동적 높이 설정 */
 /* [FIX] 캔버스 요소 컨테이너 밖 넘침 방지 */
 #fin-content canvas { max-width: 100%; }
@@ -2898,6 +2951,7 @@ html, body {
   }
   .sb-index-val { display: none; }
   .sb-sort-select { font-size: var(--fs-nano); }
+  .sb-sector-select { font-size: var(--fs-nano); max-width: 100px; }
   .sh-details { gap: var(--sp-1); }
   .sh-detail-item { min-width: 0; padding: 3px var(--sp-1); }  /* [FIX] 60px→0: 좁은 화면 오버플로우 방지 */
   #fin-trend-canvas { height: 60px; }

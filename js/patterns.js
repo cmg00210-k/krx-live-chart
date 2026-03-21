@@ -6,6 +6,7 @@
 //  Phase 3: 손절가, 목표가, 리스크리워드
 //  Phase 4: 교수형, 유성형, 잉태형, 머리어깨, 지지/저항, 컨플루언스
 //  Phase 8: 관통형, 먹구름형, 잠자리도지, 비석도지, 족집게바닥/천장
+//  Phase 9: 마루보주(강세/약세), 팽이형
 //
 // ══════════════════════════════════════════════════════
 
@@ -58,6 +59,17 @@ class PatternEngine {
   /** 족집게 봉 body 하한 / 가격 일치 허용오차 (ATR 배수) */
   static TWEEZER_BODY_MIN = 0.15;
   static TWEEZER_TOLERANCE = 0.1;
+
+  /** 마루보주 body/range 하한 — Nison: 실체가 range의 85% 이상 */
+  static MARUBOZU_BODY_RATIO = 0.85;
+  /** 마루보주 꼬리/body 상한 — Morris: 양끝 꼬리 거의 없음 (2% 이하) */
+  static MARUBOZU_SHADOW_MAX = 0.02;
+
+  /** 팽이형 body/range 범위 — 도지(5%)와 보통 봉(30%) 사이 */
+  static SPINNING_BODY_MIN = 0.05;
+  static SPINNING_BODY_MAX = 0.30;
+  /** 팽이형 꼬리/body 하한 — 양쪽 꼬리가 body의 50% 이상 */
+  static SPINNING_SHADOW_RATIO = 0.5;
 
   /** 유의미한 범위 (range/ATR) 하한 */
   static MIN_RANGE_ATR = 0.3;
@@ -167,6 +179,8 @@ class PatternEngine {
     patterns.push(...this.detectInvertedHammer(candles, ctx));
     patterns.push(...this.detectDragonflyDoji(candles, ctx));
     patterns.push(...this.detectGravestoneDoji(candles, ctx));
+    patterns.push(...this.detectMarubozu(candles, ctx));
+    patterns.push(...this.detectSpinningTop(candles, ctx));
     // 2봉 패턴
     patterns.push(...this.detectEngulfing(candles, ctx));
     patterns.push(...this.detectHarami(candles, ctx));
@@ -189,6 +203,7 @@ class PatternEngine {
     patterns.push(...this.detectDescendingTriangle(candles, swH, swL, ctx));
     patterns.push(...this.detectRisingWedge(candles, swH, swL, ctx));
     patterns.push(...this.detectFallingWedge(candles, swH, swL, ctx));
+    patterns.push(...this.detectSymmetricTriangle(candles, swH, swL, ctx));
     patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
     patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
 
@@ -1060,6 +1075,146 @@ class PatternEngine {
   }
 
   // ══════════════════════════════════════════════════
+  //  마루보주 (Marubozu) — 강한 추세 지속
+  // ══════════════════════════════════════════════════
+  //
+  //  시장 심리: 시가부터 종가까지 한 방향으로만 움직여 꼬리가
+  //  거의 없는 봉. 매수(양봉) 또는 매도(음봉) 압력이 장 전체를
+  //  지배했음을 의미. Nison(1991): "Marubozu represents one of
+  //  the strongest single-candle continuation signals."
+  //
+  //  Bulkowski 통계:
+  //    양봉 마루보주: 상승 지속 확률 ~72%
+  //    음봉 마루보주: 하락 지속 확률 ~71%
+  //
+
+  detectMarubozu(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const body = Math.abs(c.close - c.open);
+      const range = c.high - c.low;
+      if (range === 0) continue;
+
+      // 마루보주 핵심 조건: body가 range의 85% 이상, 양끝 꼬리 각각 body의 2% 이하
+      if (body < range * PatternEngine.MARUBOZU_BODY_RATIO) continue;
+
+      const upperShadow = c.high - Math.max(c.open, c.close);
+      const lowerShadow = Math.min(c.open, c.close) - c.low;
+      if (upperShadow > body * PatternEngine.MARUBOZU_SHADOW_MAX) continue;
+      if (lowerShadow > body * PatternEngine.MARUBOZU_SHADOW_MAX) continue;
+
+      const a = this._atr(atr, i, candles);
+      // ATR 대비 유의미한 크기인지 확인 (MIN_RANGE_ATR 재활용)
+      if (range < a * PatternEngine.MIN_RANGE_ATR) continue;
+
+      const isBullish = c.close > c.open;
+      const signal = isBullish ? 'buy' : 'sell';
+      const type = isBullish ? 'bullishMarubozu' : 'bearishMarubozu';
+
+      // 추세 맥락 (ATR 기반 정규화) — 추세 방향과 일치하면 지속 신호
+      const trend = this._detectTrend(candles, i, 10, a);
+
+      // 품질 점수 산출
+      const bodyScore = Math.min(body / a, 1);
+      const shadowScore = 1 - Math.min((upperShadow + lowerShadow) / range, 1); // 꼬리 없을수록 높음
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      // 추세 일치 시 높은 점수, 반대 시 보수적
+      const trendScore = (isBullish && trend.direction === 'up') || (!isBullish && trend.direction === 'down')
+        ? Math.min(trend.strength, 1) : 0.3;
+
+      // 기본 신뢰도 75, 거래량 확인 시 +10
+      let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [ACC] 거래량 확인: 전일 대비 1.2배 이상이면 +10% (Nison 거래량 원칙)
+      if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 100);
+
+      // 손절가/목표가: body 높이 기반 (마루보주는 body ≈ range)
+      const stopLoss = isBullish
+        ? +(c.low - a * 1.5).toFixed(0)
+        : +(c.high + a * 1.5).toFixed(0);
+      const priceTarget = isBullish
+        ? +(c.close + body).toFixed(0)
+        : +(c.close - body).toFixed(0);
+
+      results.push({
+        type, name: isBullish ? '양봉 마루보주 (Bullish Marubozu)' : '음봉 마루보주 (Bearish Marubozu)',
+        nameShort: isBullish ? '양봉마루보주' : '음봉마루보주',
+        signal, strength: 'strong', confidence, stopLoss, priceTarget,
+        description: isBullish
+          ? `시가=저가, 종가=고가 — 매수 압력 극대화. 신뢰도 ${confidence}%`
+          : `시가=고가, 종가=저가 — 매도 압력 극대화. 신뢰도 ${confidence}%`,
+        startIndex: i, endIndex: i,
+        marker: {
+          time: c.time,
+          position: isBullish ? 'belowBar' : 'aboveBar',
+          color: isBullish ? KRX_COLORS.PTN_MARKER_BUY : KRX_COLORS.PTN_MARKER_SELL,
+          shape: isBullish ? 'arrowUp' : 'arrowDown',
+          text: '',
+        },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  팽이형 (Spinning Top) — 시장 우유부단
+  // ══════════════════════════════════════════════════
+  //
+  //  시장 심리: 도지보다는 실체가 있으나 작고, 양쪽 꼬리가 실체
+  //  이상으로 길어 매수/매도 어느 쪽도 우위를 점하지 못한 상태.
+  //  Nison(1991): "Spinning tops represent indecision; they are
+  //  especially important after a sustained advance or decline."
+  //
+  //  Bulkowski: 단독 패턴으로서 방향성 예측력은 낮으나 (51%),
+  //  추세 말기에 출현하면 반전 확률 상승. 주로 다른 패턴과
+  //  복합 신호로 사용 (예: 팽이형 + 볼린저밴드 수축).
+  //
+
+  detectSpinningTop(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const body = Math.abs(c.close - c.open);
+      const range = c.high - c.low;
+      if (range === 0) continue;
+
+      const bodyRatio = body / range;
+      // 팽이형: body가 range의 5~30% (도지보다 크고 보통 봉보다 작음)
+      if (bodyRatio <= PatternEngine.SPINNING_BODY_MIN ||
+          bodyRatio >= PatternEngine.SPINNING_BODY_MAX) continue;
+
+      const upperShadow = c.high - Math.max(c.open, c.close);
+      const lowerShadow = Math.min(c.open, c.close) - c.low;
+
+      // 양쪽 꼬리 모두 body의 50% 이상 (양방향 압력 존재)
+      if (upperShadow < body * PatternEngine.SPINNING_SHADOW_RATIO) continue;
+      if (lowerShadow < body * PatternEngine.SPINNING_SHADOW_RATIO) continue;
+
+      const a = this._atr(atr, i, candles);
+      // 유의미한 범위 확인
+      if (range < a * PatternEngine.MIN_RANGE_ATR) continue;
+
+      // 품질 점수 (중립 패턴 — 추세 불문)
+      const shadowBalance = 1 - Math.abs(upperShadow - lowerShadow) / range; // 꼬리 균형도
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const bodySmallScore = 1 - bodyRatio; // body가 작을수록 우유부단
+      const confidence = this._quality({ body: bodySmallScore, shadow: shadowBalance, volume: volumeScore, trend: 0.3, extra: 0.3 });
+
+      results.push({
+        type: 'spinningTop', name: '팽이형 (Spinning Top)', nameShort: '팽이형',
+        signal: 'neutral', strength: 'weak', confidence,
+        stopLoss: null, priceTarget: null,
+        description: `작은 실체 + 긴 양쪽 꼬리 — 시장 우유부단. 신뢰도 ${confidence}%`,
+        startIndex: i, endIndex: i,
+        marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
   //  상승 삼각형 (Ascending Triangle)
   // ══════════════════════════════════════════════════
   detectAscendingTriangle(candles, swingHighs, swingLows, ctx = {}) {
@@ -1292,6 +1447,87 @@ class PatternEngine {
           ],
         });
         break;
+      }
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  대칭 삼각형 (Symmetric Triangle) — 중립 수렴
+  //  시장 심리: 매수세와 매도세가 균형을 이루며 가격 범위가 점진적으로
+  //  축소. 고점은 낮아지고(하향 저항) 저점은 높아지는(상향 지지) 대칭
+  //  수렴 형태. 에너지 압축이 극에 달하면 어느 방향이든 폭발적 돌파 발생.
+  //  Bulkowski 통계: 54%가 상방 돌파, 목표가 = 삼각형 높이의 측정 이동.
+  // ══════════════════════════════════════════════════
+  detectSymmetricTriangle(candles, swingHighs, swingLows, ctx = {}) {
+    const results = [];
+    if (swingHighs.length < 2 || swingLows.length < 2) return results;
+    const { atr = [], vma = [] } = ctx;
+
+    // 최근 50봉 내 스윙 포인트만 사용
+    const recentHighs = swingHighs.filter(h => h.index >= candles.length - 50);
+    const recentLows = swingLows.filter(l => l.index >= candles.length - 50);
+    if (recentHighs.length < 2 || recentLows.length < 2) return results;
+
+    const sortedHighs = [...recentHighs].sort((a, b) => a.index - b.index);
+    const sortedLows = [...recentLows].sort((a, b) => a.index - b.index);
+
+    for (let hi = 0; hi < sortedHighs.length - 1; hi++) {
+      for (let li = 0; li < sortedLows.length - 1; li++) {
+        const h1 = sortedHighs[hi], h2 = sortedHighs[hi + 1];
+        const l1 = sortedLows[li], l2 = sortedLows[li + 1];
+
+        // 핵심 조건: 고점 하락(저항선 하향) + 저점 상승(지지선 상향)
+        if (h2.price >= h1.price) continue;  // 고점이 낮아져야 함
+        if (l2.price <= l1.price) continue;  // 저점이 높아져야 함
+
+        const a = this._atr(atr, h2.index, candles);
+
+        // ATR 정규화 기울기 계산
+        const highSlope = (h2.price - h1.price) / (h2.index - h1.index) / a;   // 음수 (하향)
+        const lowSlope = (l2.price - l1.price) / (l2.index - l1.index) / a;    // 양수 (상향)
+
+        // 기울기 의미 유효성: 너무 완만하면 횡보, 삼각형이 아님
+        if (Math.abs(highSlope) < 0.01 || Math.abs(lowSlope) < 0.01) continue;
+
+        // 대칭성 검증: 두 기울기 절대값의 비율이 0.3~3.0 사이
+        // 비율이 이 범위를 벗어나면 상승/하락 삼각형이나 쐐기에 더 가까움
+        const slopeRatio = Math.abs(highSlope) / Math.abs(lowSlope);
+        if (slopeRatio < 0.3 || slopeRatio > 3.0) continue;
+
+        // 최소 패턴 폭: 10봉 이상 (충분한 수렴 기간)
+        const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
+        if (span < 10) continue;
+
+        const endIdx = Math.max(h2.index, l2.index);
+        if (endIdx >= candles.length) continue;
+
+        // 거래량 분석: 삼각형 내부에서 거래량 감소가 전형적 (수렴 에너지 압축)
+        const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
+
+        // 대칭성이 좋을수록 신뢰도 보너스 (1.0에 가까울수록 완벽한 대칭)
+        const symmetryScore = 1 - Math.abs(1 - slopeRatio) / 2;
+        const confidence = this._quality({ body: 0.6, volume: volumeScore, trend: 0.5, extra: symmetryScore });
+
+        results.push({
+          type: 'symmetricTriangle', name: '대칭 삼각형 (Symmetric Triangle)', nameShort: '대칭삼각',
+          signal: 'neutral', strength: 'medium', confidence,
+          stopLoss: null, priceTarget: null,
+          description: `대칭 수렴 — 매수·매도 균형, 방향 돌파 대기. 신뢰도 ${confidence}%`,
+          startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
+          marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
+          trendlines: [
+            { color: KRX_COLORS.DOWN, style: 'dashed', points: [
+              { time: candles[h1.index].time, value: h1.price },
+              { time: candles[h2.index].time, value: h2.price },
+            ]},
+            { color: KRX_COLORS.UP, style: 'dashed', points: [
+              { time: candles[l1.index].time, value: l1.price },
+              { time: candles[l2.index].time, value: l2.price },
+            ]},
+          ],
+        });
+        break;  // 한 쌍 발견 시 내부 루프 탈출 (중복 방지)
       }
     }
     return results;

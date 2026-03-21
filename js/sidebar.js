@@ -36,12 +36,16 @@ const sidebarManager = (() => {
   let _kbFocusIndex = -1;            // R1: 키보드 포커스 인덱스
   let _recentStocks = [];            // R2: 최근 본 종목 코드 배열
   let _customOrder = null;           // R11: 사용자 정의 정렬 순서
+  let _activeSectorFilter = '';      // 업종 필터 (sector 문자열, 빈 문자열=전체)
+  const LS_SECTOR = 'krx_sector_filter';
 
   const MAX_RECENT = 5;
 
   const _prevPrices = {};
   const _stockChangeCache = {};
   const _stockPatternCache = {};     // code → { candle, indicator, volume, total, names }
+  const _rsiCache = {};              // code → { rsi: number, ts: number } (60s TTL)
+  var _allStocksMap = null;           // Map(code → stock) for O(1) lookup, built lazily
 
   // ── R13: 가상 스크롤 상태 ──
   var VIRTUAL_ITEM_HEIGHT = 42;      // 기본 모드 아이템 높이 (px), 모드별 자동 조정
@@ -120,7 +124,10 @@ const sidebarManager = (() => {
       }
     }
     // [OPT] index.json 요약 폴백 — 정렬 시 즉시 등락률 사용
-    if (typeof ALL_STOCKS !== 'undefined') {
+    if (_allStocksMap) {
+      var stock = _allStocksMap.get(code);
+      if (stock && stock.changePercent) return stock.changePercent;
+    } else if (typeof ALL_STOCKS !== 'undefined') {
       var stock = ALL_STOCKS.find(function(s) { return s.code === code; });
       if (stock && stock.changePercent) return stock.changePercent;
     }
@@ -135,15 +142,20 @@ const sidebarManager = (() => {
     return cached[category] || 0;
   }
 
-  /** R10: RSI(14) 값 계산 (캐시된 데이터에서만) */
+  /** R10: RSI(14) 값 계산 (캐시된 데이터에서만, 60s TTL 캐시) */
   function _getRSI(code) {
     if (typeof calcRSI !== 'function') return null;
+    // 캐시 확인 (60초 TTL)
+    var cached = _rsiCache[code];
+    if (cached && (Date.now() - cached.ts) < 60000) return cached.rsi;
     const candles = _getCachedCandles(code);
     if (!candles || candles.length < 16) return null;
     const closes = candles.map(function (c) { return c.close; });
     const rsi = calcRSI(closes, 14);
     const last = rsi[rsi.length - 1];
-    return (last != null && !isNaN(last)) ? Math.round(last) : null;
+    var val = (last != null && !isNaN(last)) ? Math.round(last) : null;
+    _rsiCache[code] = { rsi: val, ts: Date.now() };
+    return val;
   }
 
   /** R10: RSI 값에 따른 색상 */
@@ -210,6 +222,11 @@ const sidebarManager = (() => {
   function _sortStocks(stocks, sortBy) {
     const dir = _sortDirection === 'asc' ? -1 : 1;
 
+    // [OPT] ALL_STOCKS Map 빌드 (O(1) lookup, 'change' 정렬 O(n²) → O(n log n))
+    if (!_allStocksMap && typeof ALL_STOCKS !== 'undefined' && ALL_STOCKS.length) {
+      _allStocksMap = new Map(ALL_STOCKS.map(function(s) { return [s.code, s]; }));
+    }
+
     switch (sortBy) {
       case 'change':
         return [].concat(stocks).sort(function (a, b) {
@@ -257,6 +274,36 @@ const sidebarManager = (() => {
       return stocks.filter(function (s) { return _getVolumeRatio(s.code) >= 2.0; });
     }
     return stocks; // 'all' 또는 기타
+  }
+
+  /** 업종 필터 적용 */
+  function _filterBySector(stocks) {
+    if (!_activeSectorFilter) return stocks;
+    return stocks.filter(function (s) { return s.sector === _activeSectorFilter; });
+  }
+
+  /** 업종 드롭다운 옵션 채우기 (ALL_STOCKS 로드 후 1회) */
+  function _populateSectorSelect() {
+    var sel = document.getElementById('sb-sector-select');
+    if (!sel) return;
+    var allStocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : [];
+    var sectorMap = {};
+    allStocks.forEach(function (s) {
+      if (s.sector) {
+        sectorMap[s.sector] = (sectorMap[s.sector] || 0) + 1;
+      }
+    });
+    var sectors = Object.keys(sectorMap).sort();
+    // 기존 옵션 초기화 후 재생성
+    sel.innerHTML = '<option value="">모든 업종</option>';
+    sectors.forEach(function (name) {
+      var opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name + ' (' + sectorMap[name] + ')';
+      sel.appendChild(opt);
+    });
+    // localStorage에서 복원
+    sel.value = _activeSectorFilter;
   }
 
   /** R8: 패턴 감지 종목만 필터 */
@@ -1106,7 +1153,8 @@ const sidebarManager = (() => {
       // 종목 아이템 클릭 (sb-header 내부는 제외 — 아코디언 토글)
       if (e.target.closest('.sb-header')) return;
       // 필터/정렬/토글/더보기 버튼은 제외
-      if (e.target.closest('.sb-sort-select') || e.target.closest('.sb-chip') ||
+      if (e.target.closest('.sb-sort-select') || e.target.closest('.sb-sector-select') ||
+          e.target.closest('.sb-chip') ||
           e.target.closest('.sb-view-group') || e.target.closest('.sb-view-opt') ||
           e.target.closest('.sb-sort-dir') ||
           e.target.closest('.sb-pattern-only-chip')) return;
@@ -1219,6 +1267,18 @@ const sidebarManager = (() => {
       });
     }
 
+    // ── 업종 필터 드롭다운 ──
+    try { _activeSectorFilter = localStorage.getItem(LS_SECTOR) || ''; } catch (e) { _activeSectorFilter = ''; }
+    _populateSectorSelect();
+    var sectorSelect = document.getElementById('sb-sector-select');
+    if (sectorSelect) {
+      sectorSelect.addEventListener('change', function () {
+        _activeSectorFilter = sectorSelect.value;
+        try { localStorage.setItem(LS_SECTOR, _activeSectorFilter); } catch (e) { /* ignore */ }
+        build(_currentSort);
+      });
+    }
+
     // ── 동적 DOM 요소 생성 ──
     _ensureFilterChips();       // R6
     _ensureViewToggle();        // R5
@@ -1288,11 +1348,14 @@ const sidebarManager = (() => {
     // 검색 중이면 ALL_STOCKS 전체 검색, 아니면 ALL_STOCKS (index.json 로드됨)
     const allStocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : (typeof DEFAULT_STOCKS !== 'undefined' ? DEFAULT_STOCKS : []);
     let source = _searchQuery
-      ? _filterBySearch(allStocks).slice(0, 50)
+      ? _filterBySearch(allStocks)
       : allStocks;
 
     // R6: 퀵 필터 적용
     source = _filterByChip(source);
+
+    // 업종 필터 적용
+    source = _filterBySector(source);
 
     // R8: 패턴 감지 종목만 필터
     if (_currentSort === 'pattern') {

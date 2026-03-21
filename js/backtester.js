@@ -37,6 +37,7 @@ class PatternBacktester {
       descendingTriangle:     { name: '하락삼각',   signal: 'sell' },
       risingWedge:            { name: '상승쐐기',   signal: 'sell' },
       fallingWedge:           { name: '하락쐐기',   signal: 'buy'  },
+      symmetricTriangle:      { name: '대칭삼각',   signal: 'neutral' },
       doubleBottom:           { name: '이중바닥',   signal: 'buy'  },
       doubleTop:              { name: '이중천장',   signal: 'sell' },
       headAndShoulders:       { name: 'H&S',        signal: 'sell' },
@@ -119,6 +120,7 @@ class PatternBacktester {
 
   /**
    * 전체 캔들에서 모든 패턴 타입별 백테스트 실행
+   * + Holm-Bonferroni 다중비교 보정 (27 patterns × 5 horizons = 135 tests)
    * @param {Array} candles — OHLCV 배열
    * @returns {{ [patternType]: backtestResult }}
    */
@@ -132,7 +134,135 @@ class PatternBacktester {
         results[pType] = result;
       }
     }
+
+    // ── Holm-Bonferroni 다중비교 보정 ──────────────────
+    // 문제: m개 동시 검정 시 alpha=0.05에서 ~m×0.05건이 우연히 유의.
+    // Holm step-down: |t|가 큰 순으로 정렬 후 rank k에서
+    //   adjusted alpha_k = 0.05 / (m - k + 1)
+    // 해당 검정이 adjusted alpha를 통과하지 못하면 이후 모든 검정도 기각 불가.
+    this._applyHolmBonferroni(results);
+
     return results;
+  }
+
+  /**
+   * Holm-Bonferroni step-down 다중비교 보정
+   *
+   * 모든 (pattern, horizon) 쌍의 t-검정 결과를 모아
+   * family-wise error rate (FWER) 을 0.05 이하로 보정.
+   *
+   * 기존 significant (raw) 필드는 보존하고,
+   * adjustedSignificant 필드를 추가한다.
+   *
+   * @param {Object} results — { [patternType]: { horizons: { [h]: stats } } }
+   */
+  _applyHolmBonferroni(results) {
+    const ALPHA = 0.05;
+
+    // Step 1: 모든 검정 수집
+    const tests = [];
+    for (const pType of Object.keys(results)) {
+      const r = results[pType];
+      if (!r.horizons) continue;
+      for (const h of Object.keys(r.horizons)) {
+        const hs = r.horizons[h];
+        if (!hs || hs.n < 2) {
+          // 표본 부족 — 보정 이전에 이미 비유의
+          hs.adjustedSignificant = false;
+          continue;
+        }
+        tests.push({
+          pType: pType,
+          horizon: h,
+          absTStat: Math.abs(hs.tStat || 0),
+          stats: hs,
+        });
+      }
+    }
+
+    const m = tests.length;
+    if (m === 0) return;
+
+    // Step 2: |t-stat| 내림차순 정렬 (가장 유의한 것부터)
+    tests.sort(function(a, b) { return b.absTStat - a.absTStat; });
+
+    // Step 3: Holm step-down 절차
+    // t-분포 임계값 lookup: alpha → t-critical (양측)
+    // 각 rank k에서 adjusted alpha = ALPHA / (m - k + 1)
+    // 해당 df에서 adjusted alpha에 대응하는 t-critical을 구해 비교.
+    //
+    // 정확한 t-분포 역함수 대신, 보수적 근사 사용:
+    // Holm-Bonferroni에서는 Bonferroni보다 덜 보수적이므로,
+    // 각 단계별 adjusted alpha에 대한 t-critical을 _tCritical()로 계산.
+    let rejected = true;  // step-down: 이전 단계가 기각되어야 다음 단계도 검정 가능
+    for (let k = 0; k < m; k++) {
+      const test = tests[k];
+      const adjustedAlpha = ALPHA / (m - k);  // 0-indexed: m - k = (m - (k+1) + 1)
+      if (rejected) {
+        const tCrit = this._tCriticalForAlpha(adjustedAlpha, test.stats.n - 1);
+        if (test.absTStat > tCrit) {
+          test.stats.adjustedSignificant = true;
+        } else {
+          // 이 단계에서 기각 실패 → 이후 모든 검정도 비유의 처리
+          test.stats.adjustedSignificant = false;
+          rejected = false;
+        }
+      } else {
+        test.stats.adjustedSignificant = false;
+      }
+    }
+  }
+
+  /**
+   * 양측 t-검정 임계값 근사 (Cornish-Fisher 역변환 기반)
+   *
+   * 정확한 t-분포 역함수(qt) 없이 alpha/2 분위수를 근사.
+   * df >= 3에서 실용적 정확도 (~0.01 이내).
+   *
+   * 사용처: Holm-Bonferroni에서 adjusted alpha별 임계값 필요.
+   * 기존 _computeStats의 테이블 lookup은 alpha=0.05 고정이라 충분하지만,
+   * 다중비교 보정에서는 alpha가 0.05/135 ~ 0.05/1 범위로 변동.
+   *
+   * @param {number} alpha — 유의수준 (양측, e.g. 0.05)
+   * @param {number} df — 자유도 (n - 1)
+   * @returns {number} — t-critical (양수)
+   */
+  _tCriticalForAlpha(alpha, df) {
+    if (df < 1) return Infinity;
+    if (alpha <= 0) return Infinity;
+    if (alpha >= 1) return 0;
+
+    // 양측 → 단측 alpha
+    var a = alpha / 2;
+
+    // 표준정규 분위수 (Rational approximation, Abramowitz & Stegun 26.2.23)
+    // p = 1 - a (upper tail)
+    var p = 1 - a;
+    var t;
+    if (p > 0.5) {
+      t = Math.sqrt(-2 * Math.log(1 - p));
+    } else {
+      t = Math.sqrt(-2 * Math.log(p));
+    }
+    // Rational approximation coefficients
+    var c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+    var d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+    var zp = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+    if (p <= 0.5) zp = -zp;
+
+    // Cornish-Fisher expansion: t_df ≈ z + correction terms
+    // 1st order: z + (z^3 + z) / (4 * df)
+    // 2nd order: + (5z^5 + 16z^3 + 3z) / (96 * df^2)
+    var z = zp;
+    var z2 = z * z;
+    var z3 = z2 * z;
+    var z5 = z3 * z2;
+    var tVal = z + (z3 + z) / (4 * df);
+    if (df >= 3) {
+      tVal += (5 * z5 + 16 * z3 + 3 * z) / (96 * df * df);
+    }
+
+    return Math.abs(tVal);
   }
 
 
@@ -333,6 +463,7 @@ class PatternBacktester {
         riskReward,
         tStat: +tStat.toFixed(2),
         significant,
+        adjustedSignificant: false, // Holm-Bonferroni 보정 후 backtestAll()에서 갱신
         sampleWarning,
       };
 
@@ -421,7 +552,8 @@ class PatternBacktester {
     return {
       n: 0, mean: 0, median: 0, stdDev: 0, winRate: 0,
       maxLoss: 0, maxGain: 0, avgWin: 0, avgLoss: 0,
-      riskReward: 0, tStat: 0, significant: false, sampleWarning: 'insufficient',
+      riskReward: 0, tStat: 0, significant: false, adjustedSignificant: false,
+      sampleWarning: 'insufficient',
     };
   }
 

@@ -334,6 +334,14 @@ const signalRenderer = (() => {
           // 약세 다이버전스: 가격 고점 두 개를 잇는 상승선
           _buildDivergenceLine(s, candles, ts, series, cutoff, 'high', SELL_COLOR, divLines);
         }
+        if (s.type === 'macdHiddenBullishDivergence' || s.type === 'rsiHiddenBullishDivergence') {
+          // 히든 강세 다이버전스: 가격 저점 상승 + 지표 저점 하락
+          _buildDivergenceLine(s, candles, ts, series, cutoff, 'low', BUY_COLOR, divLines);
+        }
+        if (s.type === 'macdHiddenBearishDivergence' || s.type === 'rsiHiddenBearishDivergence') {
+          // 히든 약세 다이버전스: 가격 고점 하락 + 지표 고점 상승
+          _buildDivergenceLine(s, candles, ts, series, cutoff, 'high', SELL_COLOR, divLines);
+        }
       });
 
       // ── 거래량 급증 라벨 좌표 계산 ──

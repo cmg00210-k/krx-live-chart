@@ -26,14 +26,15 @@
 let _workerReady = false;
 
 // ── [PERF] 분석 결과 캐시 — 동일 캔들 재분석 방지 ────
-// 캔들 길이 + 마지막 캔들의 time + close로 변경 감지
+// 캔들 길이 + 마지막 캔들의 time + open + close로 변경 감지
 // drag 이벤트에서 동일 visible 구간 반복 요청 시 캐시 적중
+// NOTE: Worker msg에 stock code가 없으므로 open을 추가하여 충돌 확률 저감
 let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
 
 function _makeCacheKey(candles) {
   if (!candles || !candles.length) return '';
   var last = candles[candles.length - 1];
-  return candles.length + '_' + last.time + '_' + last.close;
+  return candles.length + '_' + last.time + '_' + last.open + '_' + last.close;
 }
 
 // ── Worker 내부에 필요한 스크립트 로드 ───────────────
@@ -130,6 +131,14 @@ self.onmessage = function (e) {
 
       // [PERF] 이전 analyze 결과가 동일 캔들이면
       // backtester의 _analyzeCache를 미리 채워서 중복 patternEngine.analyze() 방지
+      //
+      // WARNING: Direct mutation of backtester._analyzeCache (internal field).
+      // backtester._collectOccurrences() checks `this._analyzeCache._candles !== candles`
+      // to decide whether to re-run patternEngine.analyze(). Pre-seeding here avoids
+      // that redundant O(n) call when we already have the result from the 'analyze' step.
+      // If backtester's cache structure changes (field rename, shape change), this will
+      // silently stop working and fall back to re-analysis — safe but slower.
+      // No public setter exists on PatternBacktester for this purpose.
       const btCacheKey = _makeCacheKey(candles);
       if (_analyzeCache.key === btCacheKey && _analyzeCache.patterns) {
         backtester._analyzeCache = {
@@ -154,5 +163,9 @@ self.onmessage = function (e) {
         version: msg.version || -1,
       });
     }
+  }
+
+  else {
+    console.warn('[Worker] Unknown message type:', msg.type);
   }
 };

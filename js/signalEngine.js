@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  KRX LIVE — 복합 시그널 엔진 (Phase 2-3)
-//  지표 기반 5카테고리 시그널 감지 + 복합 시그널 매칭
+//  지표 기반 7카테고리 시그널 감지 + 복합 시그널 매칭
 //
 //  의존: indicators.js (IndicatorCache, calcMA, calcEMA 등)
 //        patterns.js  (patternEngine — 캔들 패턴)
@@ -104,15 +104,21 @@ class SignalEngine {
       maAlignment_bull: 2, maAlignment_bear: -2,
       // MACD
       macdBullishCross: 2, macdBearishCross: -2,
-      macdHistPositive: 1, macdHistNegative: -1,
       macdBullishDivergence: 2.5, macdBearishDivergence: -2.5,
+      macdHiddenBullishDivergence: 2.0, macdHiddenBearishDivergence: -2.0,
       // RSI
       rsiOversold: 1.5, rsiOversoldExit: 2.5,
       rsiOverbought: -1.5, rsiOverboughtExit: -2.5,
       rsiBullishDivergence: 2, rsiBearishDivergence: -2,
+      rsiHiddenBullishDivergence: 1.5, rsiHiddenBearishDivergence: -1.5,
       // 볼린저
-      bbLowerBounce: 1.5, bbUpperBreak: -1.5,
+      bbLowerBounce: 1.5, bbUpperBreak: 0,  // [ACC] neutral — 방향은 복합 시그널이 판단
       bbSqueeze: 0,  // 방향 중립
+      // 일목균형표
+      ichimokuBullishCross: 2.5, ichimokuBearishCross: -2.5,
+      ichimokuCloudBreakout: 3, ichimokuCloudBreakdown: -3,
+      // 허스트 지수 (레짐 필터 — 방향 중립)
+      hurstTrending: 0, hurstMeanReverting: 0,
       // 거래량
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
       // 복합 (가중치 = tier별 증폭)
@@ -138,13 +144,15 @@ class SignalEngine {
     // IndicatorCache 생성 (indicators.js 전역 함수 + 클래스 사용)
     const cache = new IndicatorCache(candles);
 
-    // 5카테고리 개별 시그널 감지
+    // 7카테고리 개별 시그널 감지
     const indicatorSignals = [];
     indicatorSignals.push(...this._detectMACross(candles, cache));
     indicatorSignals.push(...this._detectMACDSignals(candles, cache));
     indicatorSignals.push(...this._detectRSISignals(candles, cache));
     indicatorSignals.push(...this._detectBBSignals(candles, cache));
     indicatorSignals.push(...this._detectVolumeSignals(candles, cache));
+    indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
+    indicatorSignals.push(...this._detectHurstSignal(candles, cache));
 
     // 캔들 패턴 → 시그널 타입 맵 (복합 매칭용)
     const candleSignalMap = this._buildCandleSignalMap(candlePatterns);
@@ -340,36 +348,8 @@ class SignalEngine {
         });
       }
 
-      // 히스토그램 양전환/음전환
-      if (histogram[i] !== null && histogram[i - 1] !== null) {
-        if (histogram[i - 1] <= 0 && histogram[i] > 0) {
-          signals.push({
-            type: 'macdHistPositive',
-            source: 'indicator',
-            nameShort: 'MACD 히스토그램 양전환',
-            signal: 'buy',
-            strength: 'weak',
-            confidence: 50,
-            index: i,
-            time: candles[i].time,
-            description: 'MACD 히스토그램이 양(+)으로 전환 — 상승 모멘텀 증가',
-          });
-        }
-
-        if (histogram[i - 1] >= 0 && histogram[i] < 0) {
-          signals.push({
-            type: 'macdHistNegative',
-            source: 'indicator',
-            nameShort: 'MACD 히스토그램 음전환',
-            signal: 'sell',
-            strength: 'weak',
-            confidence: 48,
-            index: i,
-            time: candles[i].time,
-            description: 'MACD 히스토그램이 음(-)으로 전환 — 하락 모멘텀 증가',
-          });
-        }
-      }
+      // [ACC] 히스토그램 양전환/음전환 제거 — histogram = MACD - Signal 이므로
+      // 히스토그램 zero-cross는 MACD cross와 수학적으로 동일 이벤트 (이중 카운트)
     }
 
     // MACD 다이버전스 — [ACC] lookback 20→40: 주요 추세 반전 포착 확대
@@ -493,17 +473,19 @@ class SignalEngine {
       }
 
       // 상단 밴드 돌파
+      // [ACC] 'sell'→'neutral': 강한 추세에서 BB 상단 돌파는 추세 지속 신호일 수 있음
+      // (mean-reversion 가정은 횡보장에서만 유효 — 복합 시그널이 방향 판단)
       if (c.close > bb[i].upper && cPrev.close <= bb[i - 1].upper) {
         signals.push({
           type: 'bbUpperBreak',
           source: 'indicator',
           nameShort: 'BB 상단 돌파',
-          signal: 'sell',
-          strength: 'medium',
-          confidence: 58,
+          signal: 'neutral',
+          strength: 'weak',
+          confidence: 50,
           index: i,
           time: c.time,
-          description: '볼린저 상단 밴드 종가 돌파 — 과열 후 조정 가능',
+          description: '볼린저 상단 밴드 종가 돌파 — 추세 지속 또는 과열 (복합 확인 필요)',
         });
       }
     }
@@ -660,6 +642,173 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
+  //  6. 일목균형표 시그널
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * 일목균형표 기반 시그널 감지
+   * - 전환선/기준선 크로스 (TK Cross)
+   * - 구름 상향/하향 돌파 (Cloud Breakout/Breakdown)
+   *
+   * 시장 심리:
+   *   전환선(9일)은 단기 균형, 기준선(26일)은 중기 균형을 나타냄.
+   *   전환선이 기준선 위로 올라가면 단기 모멘텀이 중기 추세를 압도하는 것.
+   *   구름(선행스팬 A/B 사이)은 미래 지지/저항 영역으로,
+   *   가격이 구름을 돌파하면 추세 전환의 강한 확인 신호.
+   */
+  _detectIchimokuSignals(candles, cache) {
+    const signals = [];
+    const ich = cache.ichimoku();  // { tenkan, kijun, spanA, spanB, chikou }
+    if (!ich) return signals;
+
+    const { tenkan, kijun, spanA, spanB } = ich;
+
+    for (let i = 1; i < candles.length; i++) {
+      // ── TK Cross (전환선 × 기준선) ──
+      if (tenkan[i] !== null && tenkan[i - 1] !== null &&
+          kijun[i] !== null && kijun[i - 1] !== null) {
+
+        const prevDiff = tenkan[i - 1] - kijun[i - 1];
+        const currDiff = tenkan[i] - kijun[i];
+
+        // 강세 크로스: 전환선이 기준선 상향 돌파
+        if (prevDiff <= 0 && currDiff > 0) {
+          // 구름 위에서 발생하면 강도 상향
+          const cloudTop = (spanA[i] !== null && spanB[i] !== null)
+            ? Math.max(spanA[i], spanB[i]) : null;
+          const aboveCloud = cloudTop !== null && candles[i].close > cloudTop;
+          signals.push({
+            type: 'ichimokuBullishCross',
+            source: 'indicator',
+            nameShort: '일목 강세 크로스',
+            signal: 'buy',
+            strength: aboveCloud ? 'strong' : 'medium',
+            confidence: aboveCloud ? 72 : 65,
+            index: i,
+            time: candles[i].time,
+            description: `전환선이 기준선 상향 돌파${aboveCloud ? ' (구름 위, 강세)' : ''} — 단기 모멘텀 전환`,
+          });
+        }
+
+        // 약세 크로스: 전환선이 기준선 하향 돌파
+        if (prevDiff >= 0 && currDiff < 0) {
+          const cloudBottom = (spanA[i] !== null && spanB[i] !== null)
+            ? Math.min(spanA[i], spanB[i]) : null;
+          const belowCloud = cloudBottom !== null && candles[i].close < cloudBottom;
+          signals.push({
+            type: 'ichimokuBearishCross',
+            source: 'indicator',
+            nameShort: '일목 약세 크로스',
+            signal: 'sell',
+            strength: belowCloud ? 'strong' : 'medium',
+            confidence: belowCloud ? 72 : 65,
+            index: i,
+            time: candles[i].time,
+            description: `전환선이 기준선 하향 돌파${belowCloud ? ' (구름 아래, 약세)' : ''} — 단기 모멘텀 약화`,
+          });
+        }
+      }
+
+      // ── 구름 돌파 (Cloud Breakout/Breakdown) ──
+      if (spanA[i] !== null && spanB[i] !== null &&
+          spanA[i - 1] !== null && spanB[i - 1] !== null) {
+
+        const cloudTop     = Math.max(spanA[i], spanB[i]);
+        const cloudBottom  = Math.min(spanA[i], spanB[i]);
+        const prevCloudTop = Math.max(spanA[i - 1], spanB[i - 1]);
+        const prevCloudBottom = Math.min(spanA[i - 1], spanB[i - 1]);
+
+        // 상향 돌파: 이전 종가 ≤ 구름 상단, 현재 종가 > 구름 상단
+        if (candles[i - 1].close <= prevCloudTop && candles[i].close > cloudTop) {
+          signals.push({
+            type: 'ichimokuCloudBreakout',
+            source: 'indicator',
+            nameShort: '일목 구름 상향 돌파',
+            signal: 'buy',
+            strength: 'strong',
+            confidence: 70,
+            index: i,
+            time: candles[i].time,
+            description: '종가가 일목 구름 상단 돌파 — 강한 상승 추세 전환 신호',
+          });
+        }
+
+        // 하향 돌파: 이전 종가 ≥ 구름 하단, 현재 종가 < 구름 하단
+        if (candles[i - 1].close >= prevCloudBottom && candles[i].close < cloudBottom) {
+          signals.push({
+            type: 'ichimokuCloudBreakdown',
+            source: 'indicator',
+            nameShort: '일목 구름 하향 돌파',
+            signal: 'sell',
+            strength: 'strong',
+            confidence: 70,
+            index: i,
+            time: candles[i].time,
+            description: '종가가 일목 구름 하단 이탈 — 강한 하락 추세 전환 신호',
+          });
+        }
+      }
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  7. 허스트 지수 레짐 필터
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * 허스트 지수(Hurst Exponent) 기반 시장 레짐 감지
+   * - H > 0.6: 추세 지속 가능성 (trending regime)
+   * - H < 0.4: 평균 회귀 가능성 (mean-reverting regime)
+   * - 0.4 ≤ H ≤ 0.6: 랜덤워크 (시그널 없음)
+   *
+   * 시장 심리:
+   *   허스트 지수는 시계열의 장기 의존성(long-range dependence)을 측정.
+   *   H > 0.5는 과거 추세가 미래에도 지속될 확률이 높음을 의미하고,
+   *   H < 0.5는 과거 상승 후 하락(또는 반대) 가능성이 높음을 의미.
+   *   이는 매수/매도 방향이 아닌 "어떤 전략이 유효한가"의 레짐 필터.
+   */
+  _detectHurstSignal(candles, cache) {
+    const signals = [];
+    const H = cache.hurst();  // 단일 스칼라 값 (null 가능)
+    if (H === null || H === undefined) return signals;
+
+    // 마지막 캔들 인덱스에 레짐 시그널 배치 (전체 시계열 요약)
+    const lastIdx = candles.length - 1;
+
+    if (H > 0.6) {
+      signals.push({
+        type: 'hurstTrending',
+        source: 'indicator',
+        nameShort: '허스트 추세 레짐',
+        signal: 'neutral',
+        strength: 'weak',
+        confidence: 55,
+        index: lastIdx,
+        time: candles[lastIdx].time,
+        description: `허스트 지수 ${H.toFixed(2)} (>0.6) — 추세 지속 가능성 높음, 추세추종 전략 유리`,
+      });
+    } else if (H < 0.4) {
+      signals.push({
+        type: 'hurstMeanReverting',
+        source: 'indicator',
+        nameShort: '허스트 회귀 레짐',
+        signal: 'neutral',
+        strength: 'weak',
+        confidence: 55,
+        index: lastIdx,
+        time: candles[lastIdx].time,
+        description: `허스트 지수 ${H.toFixed(2)} (<0.4) — 평균 회귀 가능성 높음, 역추세 전략 유리`,
+      });
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
   //  범용 다이버전스 감지
   // ══════════════════════════════════════════════════════
 
@@ -719,6 +868,23 @@ class SignalEngine {
           description: `가격 신저가이나 ${name.toUpperCase()} 상승 — 하락세 약화, 반등 가능`,
         });
       }
+
+      // 히든 강세 다이버전스: 가격 저점 상승 but 지표 저점 하락 → 추세 지속
+      if (candles[curr].low > candles[prev].low &&
+          indicator[curr] < indicator[prev]) {
+        const typePrefix = name === 'macd' ? 'macd' : 'rsi';
+        signals.push({
+          type: `${typePrefix}HiddenBullishDivergence`,
+          source: 'indicator',
+          nameShort: `${name.toUpperCase()} 히든 강세 다이버전스`,
+          signal: 'buy',
+          strength: 'medium',
+          confidence: 62,
+          index: curr,
+          time: candles[curr].time,
+          description: `가격 고저점 상승이나 ${name.toUpperCase()} 하락 — 추세 지속 매수 신호`,
+        });
+      }
     }
 
     // 약세 다이버전스: 가격 신고가 but 지표 하락
@@ -742,6 +908,23 @@ class SignalEngine {
           index: curr,
           time: candles[curr].time,
           description: `가격 신고가이나 ${name.toUpperCase()} 하락 — 상승세 약화, 하락 가능`,
+        });
+      }
+
+      // 히든 약세 다이버전스: 가격 고점 하락 but 지표 고점 상승 → 추세 지속
+      if (candles[curr].high < candles[prev].high &&
+          indicator[curr] > indicator[prev]) {
+        const typePrefix = name === 'macd' ? 'macd' : 'rsi';
+        signals.push({
+          type: `${typePrefix}HiddenBearishDivergence`,
+          source: 'indicator',
+          nameShort: `${name.toUpperCase()} 히든 약세 다이버전스`,
+          signal: 'sell',
+          strength: 'medium',
+          confidence: 60,
+          index: curr,
+          time: candles[curr].time,
+          description: `가격 고점 하락이나 ${name.toUpperCase()} 상승 — 추세 지속 매도 신호`,
         });
       }
     }
@@ -901,7 +1084,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, composite: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, composite: 0,
     };
 
     for (const s of signals) {
@@ -952,10 +1135,12 @@ class SignalEngine {
    */
   _signalCategory(type) {
     if (type.startsWith('golden') || type.startsWith('dead') || type.startsWith('maAlignment')) return 'ma';
-    if (type.startsWith('macd'))    return 'macd';
-    if (type.startsWith('rsi'))     return 'rsi';
-    if (type.startsWith('bb'))      return 'bb';
-    if (type.startsWith('volume'))  return 'volume';
+    if (type.startsWith('macd'))     return 'macd';
+    if (type.startsWith('rsi'))      return 'rsi';
+    if (type.startsWith('bb'))       return 'bb';
+    if (type.startsWith('volume'))   return 'volume';
+    if (type.startsWith('ichimoku')) return 'ichimoku';
+    if (type.startsWith('hurst'))    return 'hurst';
     return 'ma'; // fallback
   }
 
@@ -981,7 +1166,7 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, composite: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, composite: 0 },
     };
   }
 }

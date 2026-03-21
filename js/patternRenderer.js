@@ -37,6 +37,7 @@ const patternRenderer = (() => {
   const GOLD_COLOR   = KRX_COLORS.PTN_STRUCT;
   const NEUTRAL_COLOR = KRX_COLORS.PTN_NEUTRAL;
   const MAX_PATTERNS = 5;
+  const MAX_EXTENDED_LINES = 10;
 
   // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
   const CANDLE_COLOR = KRX_COLORS.PTN_CANDLE;
@@ -72,7 +73,7 @@ const patternRenderer = (() => {
   const CHART_PATTERNS = new Set([
     'doubleBottom', 'doubleTop',
     'headAndShoulders', 'inverseHeadAndShoulders',
-    'ascendingTriangle', 'descendingTriangle',
+    'ascendingTriangle', 'descendingTriangle', 'symmetricTriangle',
     'risingWedge', 'fallingWedge',
   ]);
 
@@ -735,6 +736,7 @@ const patternRenderer = (() => {
     constructor(source) {
       this._source = source;
       this._drawData = _emptyData();
+      this._outcomeCache = new Map(); // Fix 3: cache outcome per pattern to avoid per-frame O(n)
     }
 
     zOrder() { return 'normal'; }
@@ -743,6 +745,7 @@ const patternRenderer = (() => {
       const src = this._source;
       if (!src._chart || !src._series || !src._patterns) {
         this._drawData = _emptyData();
+        this._outcomeCache.clear();
         return;
       }
 
@@ -779,7 +782,7 @@ const patternRenderer = (() => {
           this._buildHeadAndShoulders(candles, p, toXY, data, false);
         } else if (p.type === 'inverseHeadAndShoulders') {
           this._buildHeadAndShoulders(candles, p, toXY, data, true);
-        } else if (p.type === 'ascendingTriangle' || p.type === 'descendingTriangle') {
+        } else if (p.type === 'ascendingTriangle' || p.type === 'descendingTriangle' || p.type === 'symmetricTriangle') {
           this._buildTriangle(candles, p, toXY, data);
         } else if (p.type === 'risingWedge' || p.type === 'fallingWedge') {
           this._buildWedge(candles, p, toXY, data);
@@ -1238,20 +1241,27 @@ const patternRenderer = (() => {
       const confVal = p.quality != null ? p.quality : p.confidence;
       let name = confVal != null ? `${baseName} ${Math.round(confVal)}%` : baseName;
 
-      // ── 패턴 적중 추적: Active/Hit/Failed ──
+      // ── 패턴 적중 추적: Active/Hit/Failed (Fix 3: cached) ──
       let outcome = null;
       if ((p.priceTarget != null || p.stopLoss != null) && ei < candles.length - 1) {
-        const isBuy = _isBullish(p);
-        outcome = 'active';
-        for (let ci = ei + 1; ci < candles.length; ci++) {
-          if (p.priceTarget != null) {
-            if (isBuy && candles[ci].high >= p.priceTarget) { outcome = 'hit'; break; }
-            if (!isBuy && candles[ci].low <= p.priceTarget) { outcome = 'hit'; break; }
+        const cacheKey = p.type + '_' + ei;
+        const cached = this._outcomeCache.get(cacheKey);
+        if (cached && cached.checkedLength === candles.length) {
+          outcome = cached.outcome;
+        } else {
+          const isBuy = _isBullish(p);
+          outcome = 'active';
+          for (let ci = ei + 1; ci < candles.length; ci++) {
+            if (p.priceTarget != null) {
+              if (isBuy && candles[ci].high >= p.priceTarget) { outcome = 'hit'; break; }
+              if (!isBuy && candles[ci].low <= p.priceTarget) { outcome = 'hit'; break; }
+            }
+            if (p.stopLoss != null) {
+              if (isBuy && candles[ci].low <= p.stopLoss) { outcome = 'failed'; break; }
+              if (!isBuy && candles[ci].high >= p.stopLoss) { outcome = 'failed'; break; }
+            }
           }
-          if (p.stopLoss != null) {
-            if (isBuy && candles[ci].low <= p.stopLoss) { outcome = 'failed'; break; }
-            if (!isBuy && candles[ci].high >= p.stopLoss) { outcome = 'failed'; break; }
-          }
+          this._outcomeCache.set(cacheKey, { outcome, checkedLength: candles.length });
         }
       }
 
@@ -1461,10 +1471,10 @@ const patternRenderer = (() => {
         if (stopCoord.y != null) {
           zone.yStop = stopCoord.y;
 
-          // [UX] 손절존: 민트 통일, 손절 텍스트도 PTN_STOP 색상 사용
-          zone.stopFill   = 'rgba(150,220,200,0.10)';
-          zone.stopStripe = 'rgba(150,220,200,0.16)';
-          zone.stopBorder = 'rgba(150,220,200,0.35)';
+          // [UX] 손절존: 오렌지 경고색 (PTN_INVALID #FF6B35 기반 — 목표 민트와 시각 구분)
+          zone.stopFill   = 'rgba(255,107,53,0.06)';
+          zone.stopStripe = 'rgba(255,107,53,0.15)';
+          zone.stopBorder = 'rgba(255,107,53,0.25)';
           zone.stopColor  = KRX_COLORS.PTN_STOP;
         }
       }
@@ -1626,6 +1636,7 @@ const patternRenderer = (() => {
                 points: tl.points,
                 patternType: p.type,
                 patternName: PATTERN_NAMES_KO[p.type] || p.type,
+                confidence: p.confidence || 0,
               });
             }
           }
@@ -1655,12 +1666,22 @@ const patternRenderer = (() => {
               isNeckline: true,
               patternType: p.type,
               patternName: PATTERN_NAMES_KO[p.type] || p.type,
+              confidence: p.confidence || 0,
             });
           }
         }
       }
       // 계층 1 (캔들스틱) visible 밖 → 아무것도 안 함 (skip)
       // 계층 3 (지지/저항) → hlines가 이미 전체 너비, visiblePatterns에 자동 포함
+    }
+
+    // ── Fix 1: Cap extendedStructLines to MAX_EXTENDED_LINES, keep highest confidence ──
+    if (extendedStructLines.length > MAX_EXTENDED_LINES) {
+      // Attach source pattern confidence for sorting
+      extendedStructLines.sort(function(a, b) {
+        return (b.confidence || 0) - (a.confidence || 0);
+      });
+      extendedStructLines = extendedStructLines.slice(0, MAX_EXTENDED_LINES);
     }
 
     if (!visiblePatterns.length && !extendedStructLines.length) {

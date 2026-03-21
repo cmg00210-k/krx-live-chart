@@ -329,7 +329,7 @@ function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
   const emaSlow = calcEMA(closes, slow);
 
   const macdLine = emaFast.map((v, i) => i < slow - 1 ? null : v - emaSlow[i]);
-  const validMacd = macdLine.filter(v => v !== null);
+  const validMacd = macdLine.filter(v => v !== null && !isNaN(v));
   if (!validMacd.length) return { macdLine, signalLine: macdLine.map(() => null), histogram: macdLine.map(() => null) };
 
   const signalEma = calcEMA(validMacd, sig);
@@ -575,10 +575,10 @@ function calcADX(candles, period = 14) {
   if (adxStart >= len) return { adx, plusDI, minusDI };
 
   let dxSum = 0;
-  for (let i = period; i <= adxStart; i++) {
+  for (let i = period; i < adxStart; i++) {
     dxSum += (dx[i] || 0);
   }
-  adx[adxStart] = dxSum / (period + 1);
+  adx[adxStart] = dxSum / period;
 
   for (let i = adxStart + 1; i < len; i++) {
     adx[i] = (adx[i - 1] * (period - 1) + (dx[i] || 0)) / period;
@@ -678,7 +678,7 @@ class IndicatorCache {
 
   /** 종가 배열 (lazy) */
   get closes() {
-    if (!this._closes) {
+    if (this._closes === null) {
       this._closes = this._candles.map(c => c.close);
     }
     return this._closes;
@@ -686,7 +686,7 @@ class IndicatorCache {
 
   /** 거래량 배열 (lazy) */
   get volumes() {
-    if (!this._volumes) {
+    if (this._volumes === null) {
       this._volumes = this._candles.map(c => c.volume);
     }
     return this._volumes;
@@ -697,7 +697,7 @@ class IndicatorCache {
   /** SMA(n) — 기본 5, 20, 60 */
   ma(n) {
     const key = `ma_${n}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcMA(this.closes, n);
     }
     return this._cache[key];
@@ -706,7 +706,7 @@ class IndicatorCache {
   /** EMA(n) — 기본 12, 26 */
   ema(n) {
     const key = `ema_${n}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcEMA(this.closes, n);
     }
     return this._cache[key];
@@ -715,7 +715,7 @@ class IndicatorCache {
   /** 볼린저 밴드 (n, mult) */
   bb(n = 20, mult = 2) {
     const key = `bb_${n}_${mult}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcBB(this.closes, n, mult);
     }
     return this._cache[key];
@@ -724,7 +724,7 @@ class IndicatorCache {
   /** RSI (period) */
   rsi(period = 14) {
     const key = `rsi_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcRSI(this.closes, period);
     }
     return this._cache[key];
@@ -733,7 +733,7 @@ class IndicatorCache {
   /** ATR (period) */
   atr(period = 14) {
     const key = `atr_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcATR(this._candles, period);
     }
     return this._cache[key];
@@ -742,7 +742,7 @@ class IndicatorCache {
   /** MACD (fast, slow, sig) */
   macd(fast = 12, slow = 26, sig = 9) {
     const key = `macd_${fast}_${slow}_${sig}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcMACD(this.closes, fast, slow, sig);
     }
     return this._cache[key];
@@ -751,7 +751,7 @@ class IndicatorCache {
   /** 일목균형표 */
   ichimoku(conv = 9, base = 26, spanBPeriod = 52, displacement = 26) {
     const key = `ich_${conv}_${base}_${spanBPeriod}_${displacement}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcIchimoku(this._candles, conv, base, spanBPeriod, displacement);
     }
     return this._cache[key];
@@ -760,7 +760,7 @@ class IndicatorCache {
   /** 칼만 필터 */
   kalman(Q = 0.01, R = 1.0) {
     const key = `kalman_${Q}_${R}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcKalman(this.closes, Q, R);
     }
     return this._cache[key];
@@ -769,7 +769,7 @@ class IndicatorCache {
   /** 허스트 지수 (현재 미사용 — 향후 추세 지속성 분석용) */
   hurst(minWindow = 10) {
     const key = `hurst_${minWindow}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcHurst(this.closes, minWindow);
     }
     return this._cache[key];
@@ -780,7 +780,7 @@ class IndicatorCache {
   /** 스토캐스틱 (%K, %D) */
   stochastic(kPeriod = 14, dPeriod = 3, smooth = 3) {
     const key = `stoch_${kPeriod}_${dPeriod}_${smooth}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcStochastic(this._candles, kPeriod, dPeriod, smooth);
     }
     return this._cache[key];
@@ -789,7 +789,7 @@ class IndicatorCache {
   /** 스토캐스틱 RSI (%K, %D) */
   stochRsi(rsiPeriod = 14, kPeriod = 3, dPeriod = 3, stochPeriod = 14) {
     const key = `stochRsi_${rsiPeriod}_${kPeriod}_${dPeriod}_${stochPeriod}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcStochRSI(this.closes, rsiPeriod, kPeriod, dPeriod, stochPeriod);
     }
     return this._cache[key];
@@ -798,7 +798,7 @@ class IndicatorCache {
   /** CCI (Commodity Channel Index) */
   cci(period = 20) {
     const key = `cci_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcCCI(this._candles, period);
     }
     return this._cache[key];
@@ -807,7 +807,7 @@ class IndicatorCache {
   /** ADX (+DI, -DI, ADX) */
   adx(period = 14) {
     const key = `adx_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcADX(this._candles, period);
     }
     return this._cache[key];
@@ -816,7 +816,7 @@ class IndicatorCache {
   /** 윌리엄스 %R */
   williamsR(period = 14) {
     const key = `wr_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcWilliamsR(this._candles, period);
     }
     return this._cache[key];
@@ -825,7 +825,7 @@ class IndicatorCache {
   /** 모멘텀 */
   momentum(period = 10) {
     const key = `mom_${period}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcMomentum(this.closes, period);
     }
     return this._cache[key];
@@ -834,7 +834,7 @@ class IndicatorCache {
   /** 어썸 오실레이터 (AO) */
   ao(shortPeriod = 5, longPeriod = 34) {
     const key = `ao_${shortPeriod}_${longPeriod}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcAwesomeOscillator(this._candles, shortPeriod, longPeriod);
     }
     return this._cache[key];
@@ -845,7 +845,7 @@ class IndicatorCache {
   /** 거래량 이동평균 (Volume Moving Average) */
   vma(n = 20) {
     const key = `vma_${n}`;
-    if (!this._cache[key]) {
+    if (!(key in this._cache)) {
       this._cache[key] = calcMA(this.volumes, n);
     }
     return this._cache[key];

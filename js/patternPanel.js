@@ -11,7 +11,7 @@
 
 
 // ══════════════════════════════════════════════════════
-//  PATTERN_ACADEMIC_META — 27종 패턴 학술 메타데이터
+//  PATTERN_ACADEMIC_META — 30종 패턴 학술 메타데이터
 //
 //  각 패턴의 정식 명칭, 분류, 캔들 수, 학술적 설명,
 //  시장 심리 해설, Bulkowski 통계, 무효화 조건을 정의.
@@ -215,6 +215,36 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '두 봉의 고가 차이가 ATR의 10%를 초과하면 무효. 돌파 시 오히려 매수 신호.'
   },
 
+  bullishMarubozu: {
+    nameKo: '양봉 마루보주',
+    category: '캔들스틱 (지속)',
+    candles: 1,
+    academicDesc: '시가=저가, 종가=고가. 꼬리가 거의 없는 양봉으로, 시가부터 종가까지 매수세가 장 전체를 지배. 강한 상승 지속 신호.',
+    psychology: '매도세의 장중 반격이 전혀 없었으며, 매수세가 시가 이후 단 한 번도 밀리지 않고 종가까지 일방적으로 끌어올림. 극도로 강한 매수 심리.',
+    bulkowskiWinRate: 72,
+    invalidation: '거래량이 평균 이하이면 유동성 부족에 의한 왜곡 가능. 상승 추세 말기에 나타나면 클라이맥스 매수(고점 경고)로 해석될 수 있음.'
+  },
+
+  bearishMarubozu: {
+    nameKo: '음봉 마루보주',
+    category: '캔들스틱 (지속)',
+    candles: 1,
+    academicDesc: '시가=고가, 종가=저가. 꼬리가 거의 없는 음봉으로, 시가부터 종가까지 매도세가 장 전체를 지배. 강한 하락 지속 신호.',
+    psychology: '매수세의 장중 반등이 전혀 없었으며, 매도세가 시가 이후 단 한 번도 밀리지 않고 종가까지 일방적으로 압박. 극도로 강한 매도 심리(공포).',
+    bulkowskiWinRate: 71,
+    invalidation: '거래량이 평균 이하이면 유동성 부족에 의한 왜곡 가능. 하락 추세 말기에 나타나면 클라이맥스 매도(바닥 경고)로 해석될 수 있음.'
+  },
+
+  spinningTop: {
+    nameKo: '팽이형',
+    category: '캔들스틱 (중립)',
+    candles: 1,
+    academicDesc: '작은 실체(5~30%)에 양쪽으로 긴 꼬리가 달린 봉. 도지보다 실체가 있으나, 매수/매도 어느 쪽도 우위를 점하지 못한 우유부단 상태.',
+    psychology: '장중 매수세와 매도세가 번갈아 우위를 점했으나 종가에서 결국 큰 방향 결정 없이 마감. 기존 추세에 대한 확신이 약화되는 전조.',
+    bulkowskiWinRate: 51,
+    invalidation: '횡보장에서 빈번히 출현 시 의미 없음. 추세 말기에 출현할 때 반전 전조로 유효. 단독 사용보다 다른 신호와 복합 분석 권장.'
+  },
+
   ascendingTriangle: {
     nameKo: '상승삼각형',
     category: '차트패턴 (지속)',
@@ -253,6 +283,16 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     psychology: '가격이 하락하지만 범위가 좁아짐 -- 매도 모멘텀이 소진. 매도자의 피로가 누적되어 결국 상방 돌파.',
     bulkowskiWinRate: 68,
     invalidation: '하방 이탈 시 패턴 무효. 돌파 시 거래량 급증이 동반되어야 유효.'
+  },
+
+  symmetricTriangle: {
+    nameKo: '대칭삼각형',
+    category: '차트패턴 (중립)',
+    candles: 20,
+    academicDesc: '하향하는 고점 추세선과 상향하는 저점 추세선이 수렴. 매수세와 매도세가 균형을 이루며 에너지가 압축되다가 한쪽 방향으로 폭발적 돌파 발생.',
+    psychology: '시장 참여자들의 불확실성이 증가하며, 가격 변동폭이 줄어든다. 돌파 방향은 사전 예측 불가하나 Bulkowski 통계상 54%가 상방 돌파.',
+    bulkowskiWinRate: 66,
+    invalidation: '수렴 이탈 없이 삼각형 꼭짓점(apex)을 초과하면 패턴 소멸. 거짓 돌파(throwback) 37% 발생.'
   },
 
   doubleBottom: {
@@ -545,6 +585,10 @@ function updatePatternHistoryTable(patterns) {
     return;
   }
 
+  // backtestAll() 호출로 Holm-Bonferroni 다중비교 보정 적용
+  // (개별 backtest() 호출 시 보정 불가 — 전체 검정 family 필요)
+  const allBacktestResults = backtester.backtestAll(candles);
+
   // 각 패턴에 대해 backtester 호출 → 테이블 행 생성
   const horizons = [1, 3, 5, 10, 20];
   const rows = [];
@@ -553,7 +597,7 @@ function updatePatternHistoryTable(patterns) {
 
   for (let pi = 0; pi < topPatterns.length; pi++) {
     const p = topPatterns[pi];
-    const result = backtester.backtest(candles, p.type);
+    const result = allBacktestResults[p.type] || backtester.backtest(candles, p.type);
     if (!result || result.sampleSize === 0) continue;
 
     // 수익률 곡선 데이터 수집
@@ -589,9 +633,12 @@ function updatePatternHistoryTable(patterns) {
         continue;
       }
       const retCls = hs.mean > 0 ? 'up' : hs.mean < 0 ? 'dn' : '';
-      const boldCls = hs.significant ? ' php-sig' : '';
+      // adjustedSignificant: Holm-Bonferroni 다중비교 보정 후 유의성 (존재하면 사용, 없으면 raw fallback)
+      const _adjExists = hs.adjustedSignificant != null;
+      const boldCls = (_adjExists ? hs.adjustedSignificant : hs.significant) ? ' php-sig' : '';
       const sign = hs.mean > 0 ? '+' : '';
-      rowHtml += `<td class="php-ret ${retCls}${boldCls}" title="n=${hs.n}, stdev=${hs.stdDev}%, t=${hs.tStat}">${sign}${hs.mean.toFixed(1)}%</td>`;
+      const _rawNote = _adjExists && hs.significant && !hs.adjustedSignificant ? ' (raw p<0.05, 보정 후 비유의)' : '';
+      rowHtml += `<td class="php-ret ${retCls}${boldCls}" title="n=${hs.n}, stdev=${hs.stdDev}%, t=${hs.tStat}${_rawNote}">${sign}${hs.mean.toFixed(1)}%</td>`;
     }
 
     // 승률 (5일 기준)
@@ -639,7 +686,10 @@ function updatePatternHistoryTable(patterns) {
     _demoRowWarn = '<tr><td colspan="10" style="text-align:center;font-size:9px;color:rgba(255,152,0,0.65);padding:3px 6px;background:rgba(255,152,0,0.06);">\u26A0 시뮬레이션 데이터 기반 통계 \u2014 실제 시장 수익률이 아닙니다</td></tr>';
   }
 
-  tbody.innerHTML = _demoRowWarn + rows.join('');
+  // Holm-Bonferroni 다중비교 보정 안내 행
+  var _holmNote = '<tr><td colspan="10" style="text-align:right;font-size:9px;color:var(--text-muted);padding:2px 6px;border-top:1px solid rgba(255,255,255,0.05);">\u203B Holm-Bonferroni \uB2E4\uC911\uBE44\uAD50 \uBCF4\uC815 \uC801\uC6A9</td></tr>';
+
+  tbody.innerHTML = _demoRowWarn + rows.join('') + _holmNote;
 
   // 누적수익률 곡선 Canvas 그리기
   if (curvesData.length > 0) {
@@ -1079,7 +1129,7 @@ function renderPatternCards(patterns) {
     // 신뢰도 바
     const confBarHtml = `
       <div class="pp-conf-wrap">
-        <span class="pp-conf-label">신뢰도</span>
+        <span class="pp-conf-label">형태 점수</span>
         <div class="pp-conf-bar-track">
           <div class="pp-conf-bar-fill ${signalCls}" style="width:${Math.min(confVal, 100)}%"></div>
         </div>
