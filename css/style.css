@@ -1241,6 +1241,7 @@ html, body {
 #chart-wrap #pattern-history-bar { margin-left: var(--draw-toolbar-w); }
 .sub-chart-wrap { flex-shrink: 1; position: relative; }  /* [2-slot] flex-shrink:1 — 공간 부족 시 압축 허용 */
 .sub-chart {
+  height: 12vh; /* fallback for Safari <14 */
   height: clamp(80px, 12vh, 120px); position: relative;  /* [2-slot] 최대 2개이므로 높이 확대 */
   border-top: 1px solid var(--border);
   background: var(--chart-bg);
@@ -1491,6 +1492,7 @@ html, body {
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  max-height: 6.6em;  /* [FIX] Firefox fallback: ~4 lines at 1.65 line-height */
   word-break: keep-all;
 }
 
@@ -1661,6 +1663,7 @@ html, body {
   flex: 1; padding: var(--sp-2) var(--sp-3); overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 0;
   scrollbar-gutter: stable;  /* [FIX] Windows 17px 스크롤바 레이아웃 시프트 방지 */
+  scrollbar-width: thin;  /* [FIX] Firefox fallback: 고정폭 스크롤바로 레이아웃 시프트 방지 */
   min-height: 0;  /* [FIX] flex 자식 오버플로우 허용 — 콘텐츠가 패널 밀어내지 않도록 */
   word-break: keep-all;  /* [FIX] 한글 텍스트 단어 단위 줄바꿈 보장 */
 }
@@ -2104,6 +2107,7 @@ html, body {
   border-radius: var(--radius-lg);
   padding: var(--sp-2);
   min-width: 180px; max-width: 260px;
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   font-size: var(--fs-caption);
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
@@ -2392,6 +2396,7 @@ html, body {
   border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   z-index: 60;
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: 0 -4px 24px rgba(0,0,0,0.6);
   flex-direction: column; overflow: hidden;
@@ -2624,6 +2629,7 @@ html, body {
   pointer-events: none;
   background: rgba(19,23,34,0.92);
   padding: var(--sp-1) var(--sp-3); border-radius: var(--radius);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(42,46,57,0.3);
   line-height: 1.4;
@@ -3213,7 +3219,7 @@ html, body {
 
   #ticker-strip { gap: var(--sp-2); }
   .ticker-val { font-size: var(--fs-caption); }
-  .sub-chart { height: clamp(60px, 10vh, 90px); }  /* [2-slot] 480px에서도 넉넉하게 */
+  .sub-chart { height: 10vh; height: clamp(60px, 10vh, 90px); }  /* [2-slot] 480px에서도 넉넉하게, plain fallback for Safari <14 */
   #main-chart-container { min-height: 180px; }
 
   /* 헤더 로고 축소 */
@@ -3267,7 +3273,7 @@ html, body {
 /* ── 세로가 약간 짧은 화면 (소형 노트북) ── */
 @media (max-height: 800px) {
   #stock-header { min-height: 36px; padding: 2px var(--sp-3); }
-  .sub-chart { height: clamp(60px, 10vh, 100px); }  /* [2-slot] 최대 2개이므로 높이 확대 */
+  .sub-chart { height: 10vh; height: clamp(60px, 10vh, 100px); }  /* [2-slot] 최대 2개이므로 높이 확대, plain fallback for Safari <14 */
   #return-stats-area { max-height: 120px; }
 }
 
@@ -3276,7 +3282,7 @@ html, body {
   #stock-header { min-height: 36px; padding: 2px var(--sp-3); }
   .sh-price { font-size: var(--fs-heading); }
   .sh-details { display: none; }
-  .sub-chart { height: clamp(50px, 8vh, 80px); }  /* [2-slot] 짧은 화면에서도 최소 50px 확보 */
+  .sub-chart { height: 8vh; height: clamp(50px, 8vh, 80px); }  /* [2-slot] 짧은 화면에서도 최소 50px 확보, plain fallback for Safari <14 */
   #main-chart-container { min-height: 160px; }
   .rp-header { padding: var(--sp-1) var(--sp-2); }
   .pp-header { padding: var(--sp-1) var(--sp-2); }

@@ -1424,8 +1424,133 @@ function _getLatestEPS() {
 }
 
 /**
- * PER 밴드 차트 렌더링
- * Canvas에 주가 라인 + PER 배수(8x/12x/16x/20x) 수평 밴드 라인을 그린다.
+ * 분기 기간 문자열 → 날짜 범위 파싱
+ * "2024 Q3" 또는 "2024Q3" → {year, q, startDate, endDate}
+ * @param {string} p - 분기 기간 ("2024 Q3" 형식)
+ * @returns {object|null} {year, q, startDate, endDate} 또는 null
+ */
+function _parseQuarterPeriod(p) {
+  if (!p) return null;
+  var m = p.match(/(\d{4})\s*Q(\d)/);
+  if (!m) return null;
+  var year = parseInt(m[1]);
+  var q = parseInt(m[2]);
+  if (q < 1 || q > 4) return null;
+  // Q1: Jan 1 - Mar 31, Q2: Apr 1 - Jun 30, Q3: Jul 1 - Sep 30, Q4: Oct 1 - Dec 31
+  var starts = ['', '-01-01', '-04-01', '-07-01', '-10-01'];
+  var ends   = ['', '-03-31', '-06-30', '-09-30', '-12-31'];
+  return {
+    year: year,
+    q: q,
+    startDate: year + starts[q],
+    endDate: year + ends[q]
+  };
+}
+
+/**
+ * 발행주식수 추정 (시가총액 / 기준가)
+ * @param {string} code - 종목코드
+ * @returns {number} 추정 주식수 (0 = 산출 불가)
+ */
+function _getShareCount(code) {
+  if (typeof ALL_STOCKS === 'undefined') return 0;
+  var stock = ALL_STOCKS.find(function(s) { return s.code === code; });
+  if (!stock || !stock.marketCap || !stock.base || stock.base <= 0) return 0;
+  return Math.round(stock.marketCap * 100000000 / stock.base);
+}
+
+/**
+ * TTM EPS 시계열 구축 (계단형 PER 밴드용)
+ *
+ * 분기 순이익(ni, 억원)을 4분기 누적(Trailing Twelve Months)하여
+ * 분기별 TTM EPS 시계열을 반환한다.
+ *
+ * Q4 갭 보정: DART는 Q4 개별 공시가 없는 경우가 많음.
+ *   연간 ni - (Q1+Q2+Q3 ni) = Q4 ni 로 역산.
+ *
+ * @param {Array} quarterly - _financialCache quarterly (최신순 정렬, p: "2024 Q3")
+ * @param {Array} annual    - _financialCache annual (최신순 정렬, p: "2024")
+ * @param {number} shares   - 추정 발행주식수
+ * @returns {Array} [{startDate, endDate, ttmEPS, quarter}] 시간순 정렬. 4분기 미만이면 빈 배열.
+ */
+function _buildTTMEPSTimeSeries(quarterly, annual, shares) {
+  if (!quarterly || quarterly.length < 4 || !shares || shares <= 0) return [];
+
+  // 1) 분기 데이터를 시간순(오래된→최신) 복사 + 파싱
+  var parsed = [];
+  for (var i = 0; i < quarterly.length; i++) {
+    var info = _parseQuarterPeriod(quarterly[i].p);
+    if (!info) continue;
+    parsed.push({
+      year: info.year,
+      q: info.q,
+      startDate: info.startDate,
+      endDate: info.endDate,
+      ni: Number(quarterly[i].ni) || 0
+    });
+  }
+  // 시간순 정렬 (year ASC, q ASC)
+  parsed.sort(function(a, b) { return (a.year - b.year) || (a.q - b.q); });
+
+  // 2) Q4 갭 보정: 연간 데이터에서 Q4 역산
+  if (annual && annual.length > 0) {
+    // 연간 데이터를 year별 맵으로
+    var annualMap = {};
+    for (var ai = 0; ai < annual.length; ai++) {
+      var yr = parseInt(annual[ai].p);
+      if (!isNaN(yr)) annualMap[yr] = Number(annual[ai].ni) || 0;
+    }
+    // 각 연도별로 Q1+Q2+Q3가 있고 Q4가 없으면 역산
+    var yearGroups = {};
+    for (var pi = 0; pi < parsed.length; pi++) {
+      var key = parsed[pi].year;
+      if (!yearGroups[key]) yearGroups[key] = {};
+      yearGroups[key][parsed[pi].q] = parsed[pi];
+    }
+    var yearsToCheck = Object.keys(yearGroups);
+    for (var yi = 0; yi < yearsToCheck.length; yi++) {
+      var y = parseInt(yearsToCheck[yi]);
+      var grp = yearGroups[y];
+      if (grp[1] && grp[2] && grp[3] && !grp[4] && annualMap[y] !== undefined) {
+        var q4ni = annualMap[y] - (grp[1].ni + grp[2].ni + grp[3].ni);
+        parsed.push({
+          year: y,
+          q: 4,
+          startDate: y + '-10-01',
+          endDate: y + '-12-31',
+          ni: q4ni
+        });
+      }
+    }
+    // 재정렬
+    parsed.sort(function(a, b) { return (a.year - b.year) || (a.q - b.q); });
+  }
+
+  // 3) index 3부터 4분기 누적 TTM EPS 계산
+  if (parsed.length < 4) return [];
+  var result = [];
+  for (var ti = 3; ti < parsed.length; ti++) {
+    var ttmNi = parsed[ti].ni + parsed[ti - 1].ni + parsed[ti - 2].ni + parsed[ti - 3].ni;
+    // ttmNi는 억원 단위 → 원으로 변환 후 주식수로 나눔
+    var ttmEPS = (ttmNi * 100000000) / shares;
+    result.push({
+      startDate: parsed[ti].startDate,
+      endDate: parsed[ti].endDate,
+      ttmEPS: ttmEPS,
+      quarter: parsed[ti].year + ' Q' + parsed[ti].q
+    });
+  }
+  return result;
+}
+
+/**
+ * PER 밴드 차트 렌더링 (계단형 / 플랫 자동 전환)
+ *
+ * TTM EPS 시계열이 2개 이상이면 계단형(stepped) 밴드,
+ * 그렇지 않으면 기존 플랫(flat) 수평 밴드로 렌더링.
+ *
+ * 계단형: 분기별 TTM EPS 변화에 따라 PER 밴드가 수직 스텝으로 이동.
+ *         적자(ttmEPS < 0) 구간은 0 아래에 감소된 알파(0.3)로 표시 + "적자" 라벨.
  */
 var _perBandRetries = 0;  // 재시도 횟수 제한용
 
@@ -1466,15 +1591,47 @@ function _drawPERBandChart() {
   var candles_data = cached.candles;
   var closes = candles_data.map(function(c) { return c.close; });
 
-  // EPS 추출 (재무 데이터에서)
-  var eps = _getLatestEPS();
-  if (!eps || eps <= 0) {
-    ctx.fillStyle = '#808080';
-    ctx.font = "11px 'Pretendard', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('EPS 데이터 없음', parentW / 2, h / 2);
-    return;
+  // ── Step A: TTM EPS 시계열 구축 시도 ──
+  var finCache = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
+  // [CLEAN-DATA] seed 생성 가짜 데이터로는 TTM 시계열 구축하지 않음
+  var finSource = finCache ? finCache.source : null;
+  var isTrustedSource = (finSource === 'dart' || finSource === 'hardcoded');
+  var quarterly = (finCache && isTrustedSource) ? finCache.quarterly : null;
+  var annual = (finCache && isTrustedSource) ? finCache.annual : null;
+  var shares = _getShareCount(currentStock.code);
+  var ttmSeries = _buildTTMEPSTimeSeries(quarterly, annual, shares);
+  var useStepped = ttmSeries.length >= 2;
+
+  // EPS 추출: 계단형이면 최신 TTM EPS, 아니면 기존 _getLatestEPS()
+  var eps = useStepped ? ttmSeries[ttmSeries.length - 1].ttmEPS : _getLatestEPS();
+  if (!eps || eps === 0) {
+    // 계단형인데 최신 EPS가 0인 경우 — 유효한 마지막 비영 EPS 시도
+    if (useStepped) {
+      for (var ei = ttmSeries.length - 1; ei >= 0; ei--) {
+        if (ttmSeries[ei].ttmEPS !== 0) { eps = ttmSeries[ei].ttmEPS; break; }
+      }
+    }
+    if (!eps || eps === 0) {
+      ctx.fillStyle = '#808080';
+      ctx.font = "11px 'Pretendard', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('EPS 데이터 없음', parentW / 2, h / 2);
+      return;
+    }
+  }
+
+  // ── Step B: EPS per candle 매핑 (계단형 전용) ──
+  var epsPerCandle = [];
+  if (useStepped) {
+    var segIdx = 0;
+    for (var ci = 0; ci < candles_data.length; ci++) {
+      var date = typeof candles_data[ci].time === 'string'
+        ? candles_data[ci].time
+        : new Date(candles_data[ci].time * 1000).toISOString().slice(0, 10);
+      while (segIdx < ttmSeries.length - 1 && date >= ttmSeries[segIdx + 1].startDate) segIdx++;
+      epsPerCandle[ci] = (date >= ttmSeries[0].startDate) ? ttmSeries[segIdx].ttmEPS : null;
+    }
   }
 
   // PER 배수 라인 정의 (저평가→고평가)
@@ -1485,11 +1642,27 @@ function _drawPERBandChart() {
     { per: 20, color: 'rgba(224,80,80,0.75)',   label: '20x' },  // 빨강 (고평가)
   ];
 
-  // 가격 범위 계산 (주가 + 모든 밴드 포함)
+  // ── Step C: 가격 범위 계산 (주가 + 모든 밴드 포함) ──
   var allPrices = closes.slice();
-  bands.forEach(function(b) { allPrices.push(eps * b.per); });
-  var minP = Math.min.apply(null, allPrices) * 0.95;
-  var maxP = Math.max.apply(null, allPrices) * 1.05;
+  if (useStepped) {
+    // 계단형: 모든 EPS x 배수 조합의 밴드 가격 포함
+    for (var epi = 0; epi < epsPerCandle.length; epi++) {
+      if (epsPerCandle[epi] !== null) {
+        for (var bxi = 0; bxi < bands.length; bxi++) {
+          allPrices.push(epsPerCandle[epi] * bands[bxi].per);
+        }
+      }
+    }
+  } else {
+    bands.forEach(function(b) { allPrices.push(eps * b.per); });
+  }
+  var rawMin = Math.min.apply(null, allPrices);
+  var rawMax = Math.max.apply(null, allPrices);
+  // 음수 가격이 포함될 수 있으므로 (적자 구간) 절대값 기반 패딩
+  var padding = (rawMax - rawMin) * 0.05;
+  if (padding <= 0) padding = Math.abs(rawMax) * 0.05 || 1;
+  var minP = rawMin - padding;
+  var maxP = rawMax + padding;
   var rangeP = maxP - minP;
   if (rangeP <= 0) return;
 
@@ -1500,35 +1673,165 @@ function _drawPERBandChart() {
   var toX = function(i) { return padL + (i / (closes.length - 1)) * chartW; };
   var toY = function(p) { return padT + (1 - (p - minP) / rangeP) * chartH; };
 
-  // ── 1) 밴드 사이 영역 채우기 (반투명 그라디언트) ──
-  for (var bi = 0; bi < bands.length - 1; bi++) {
-    var yTop = toY(eps * bands[bi + 1].per);
-    var yBot = toY(eps * bands[bi].per);
-    ctx.fillStyle = bands[bi].color.replace('0.75', '0.12');
-    ctx.fillRect(padL, yTop, chartW, yBot - yTop);
+  // ═══════════════════════════════════════════════════════
+  //  STEPPED 렌더링 경로
+  // ═══════════════════════════════════════════════════════
+  if (useStepped) {
+
+    // ── 1S) 밴드 사이 영역 채우기 (계단형 폴리곤) ──
+    for (var bi = 0; bi < bands.length - 1; bi++) {
+      var lowerPer = bands[bi].per;
+      var upperPer = bands[bi + 1].per;
+      var fillAlpha = '0.12';
+      ctx.fillStyle = bands[bi].color.replace('0.75', fillAlpha);
+      ctx.beginPath();
+      var started = false;
+      // forward pass: lower band
+      for (var fi = 0; fi < closes.length; fi++) {
+        var eVal = epsPerCandle[fi];
+        if (eVal === null) continue;
+        var lp = eVal * lowerPer;
+        var fx = toX(fi);
+        // vertical step at EPS change
+        if (started && fi > 0 && epsPerCandle[fi] !== epsPerCandle[fi - 1] && epsPerCandle[fi - 1] !== null) {
+          var prevLp = epsPerCandle[fi - 1] * lowerPer;
+          ctx.lineTo(fx, toY(prevLp));
+          ctx.lineTo(fx, toY(lp));
+        }
+        if (!started) { ctx.moveTo(fx, toY(lp)); started = true; }
+        else ctx.lineTo(fx, toY(lp));
+      }
+      // reverse pass: upper band
+      for (var ri = closes.length - 1; ri >= 0; ri--) {
+        var eValR = epsPerCandle[ri];
+        if (eValR === null) continue;
+        var up = eValR * upperPer;
+        var rx = toX(ri);
+        if (ri < closes.length - 1 && epsPerCandle[ri] !== epsPerCandle[ri + 1] && epsPerCandle[ri + 1] !== null) {
+          var nextUp = epsPerCandle[ri + 1] * upperPer;
+          ctx.lineTo(rx, toY(nextUp));
+          ctx.lineTo(rx, toY(up));
+        }
+        ctx.lineTo(rx, toY(up));
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // 적자 구간 (lower band가 음수) — 감소된 알파로 재채움
+      var hasNeg = false;
+      for (var ngi = 0; ngi < epsPerCandle.length; ngi++) {
+        if (epsPerCandle[ngi] !== null && epsPerCandle[ngi] < 0) { hasNeg = true; break; }
+      }
+      if (hasNeg && bi === 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = 'rgba(224,80,80,0.15)';
+        ctx.fillRect(padL, toY(0), chartW, (padT + chartH) - toY(0));
+        ctx.restore();
+      }
+    }
+
+    // ── 2S) PER 밴드 점선 (계단형) ──
+    for (var bdi = 0; bdi < bands.length; bdi++) {
+      var bPer = bands[bdi].per;
+      ctx.strokeStyle = bands[bdi].color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      var bandStarted = false;
+      for (var si = 0; si < closes.length; si++) {
+        var sEps = epsPerCandle[si];
+        if (sEps === null) continue;
+        var bp = sEps * bPer;
+        var sx = toX(si);
+        var sy = toY(bp);
+        if (!bandStarted) { ctx.moveTo(sx, sy); bandStarted = true; }
+        else {
+          // vertical step at EPS change
+          if (si > 0 && epsPerCandle[si] !== epsPerCandle[si - 1] && epsPerCandle[si - 1] !== null) {
+            var prevBp = epsPerCandle[si - 1] * bPer;
+            ctx.lineTo(sx, toY(prevBp));
+            ctx.lineTo(sx, sy);
+          } else {
+            ctx.lineTo(sx, sy);
+          }
+        }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 라벨 (우측 — 마지막 캔들의 EPS 기준)
+      var lastEps = epsPerCandle[epsPerCandle.length - 1];
+      if (lastEps === null) {
+        // 끝에서부터 유효한 EPS 탐색
+        for (var le = epsPerCandle.length - 1; le >= 0; le--) {
+          if (epsPerCandle[le] !== null) { lastEps = epsPerCandle[le]; break; }
+        }
+      }
+      if (lastEps !== null) {
+        var labelY = toY(lastEps * bPer);
+        ctx.fillStyle = bands[bdi].color.replace('0.75', '0.9');
+        ctx.font = "9px 'JetBrains Mono', monospace";
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(bands[bdi].label, padL + chartW + 3, labelY);
+      }
+    }
+
+    // 적자 라벨
+    var hasNegEps = false;
+    for (var nci = 0; nci < epsPerCandle.length; nci++) {
+      if (epsPerCandle[nci] !== null && epsPerCandle[nci] < 0) { hasNegEps = true; break; }
+    }
+    if (hasNegEps) {
+      ctx.fillStyle = 'rgba(224,80,80,0.7)';
+      ctx.font = "bold 10px 'Pretendard', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      var zeroY = toY(0);
+      if (zeroY < padT + chartH - 14) {
+        ctx.fillText('적자', padL + chartW / 2, zeroY + 3);
+      }
+    }
+
+  // ═══════════════════════════════════════════════════════
+  //  FLAT 렌더링 경로 (기존 동작 그대로)
+  // ═══════════════════════════════════════════════════════
+  } else {
+    // ── 1) 밴드 사이 영역 채우기 (반투명 그라디언트) ──
+    for (var bi2 = 0; bi2 < bands.length - 1; bi2++) {
+      var yTopF = toY(eps * bands[bi2 + 1].per);
+      var yBotF = toY(eps * bands[bi2].per);
+      ctx.fillStyle = bands[bi2].color.replace('0.75', '0.12');
+      ctx.fillRect(padL, yTopF, chartW, yBotF - yTopF);
+    }
+
+    // ── 2) PER 밴드 점선 ──
+    bands.forEach(function(b) {
+      var bandPrice = eps * b.per;
+      var y = toY(bandPrice);
+
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + chartW, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 라벨 (우측)
+      ctx.fillStyle = b.color.replace('0.75', '0.9');
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.label, padL + chartW + 3, y);
+    });
   }
 
-  // ── 2) PER 밴드 점선 ──
-  bands.forEach(function(b) {
-    var bandPrice = eps * b.per;
-    var y = toY(bandPrice);
-
-    ctx.strokeStyle = b.color;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(padL + chartW, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // 라벨 (우측)
-    ctx.fillStyle = b.color.replace('0.75', '0.9');
-    ctx.font = "9px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(b.label, padL + chartW + 3, y);
-  });
+  // ═══════════════════════════════════════════════════════
+  //  공통 렌더링 (주가 라인, 현재가 점, X축 라벨, 현재 PER)
+  // ═══════════════════════════════════════════════════════
 
   // ── 3) 주가 라인 (그라디언트 영역 + 실선) ──
   // 영역 채우기
@@ -1594,22 +1897,33 @@ function _drawPERBandChart() {
       var ld = new Date(lastTime * 1000);
       lastDateStr = ld.getFullYear() + '-' + String(ld.getMonth() + 1).padStart(2, '0');
     }
-    var lp = lastDateStr.split('-');
-    var lastLbl = lp.length >= 2 ? "'" + lp[0].slice(2) + '.' + lp[1] : lastDateStr;
+    var lp2 = lastDateStr.split('-');
+    var lastLbl = lp2.length >= 2 ? "'" + lp2[0].slice(2) + '.' + lp2[1] : lastDateStr;
     ctx.fillText(lastLbl, toX(candles_data.length - 1), padT + chartH + 4);
   }
 
   // ── 6) 현재 PER 표시 (듀얼 폰트) ──
-  var currentPER = closes[closes.length - 1] / eps;
-  var perNumStr = currentPER.toFixed(1) + 'x';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'top';
-  // "12.5x" 숫자 부분 (JetBrains Mono)
-  ctx.fillStyle = KRX_COLORS.ACCENT;
-  ctx.font = "bold 10px 'JetBrains Mono', monospace";
-  var numW = ctx.measureText(perNumStr).width;
-  ctx.fillText(perNumStr, padL + chartW - 2, padT + 2);
-  // "현재 " 라벨 부분 (Pretendard)
-  ctx.font = "10px 'Pretendard', sans-serif";
-  ctx.fillText('현재 ', padL + chartW - 2 - numW, padT + 2);
+  // 계단형: 최신 TTM EPS 사용, 플랫: _getLatestEPS() 사용
+  var perEps = useStepped ? ttmSeries[ttmSeries.length - 1].ttmEPS : eps;
+  if (perEps && perEps > 0) {
+    var currentPER = closes[closes.length - 1] / perEps;
+    var perNumStr = currentPER.toFixed(1) + 'x';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    // "12.5x" 숫자 부분 (JetBrains Mono)
+    ctx.fillStyle = KRX_COLORS.ACCENT;
+    ctx.font = "bold 10px 'JetBrains Mono', monospace";
+    var numW = ctx.measureText(perNumStr).width;
+    ctx.fillText(perNumStr, padL + chartW - 2, padT + 2);
+    // "현재 " 라벨 부분 (Pretendard)
+    ctx.font = "10px 'Pretendard', sans-serif";
+    ctx.fillText('현재 ', padL + chartW - 2 - numW, padT + 2);
+  } else if (perEps && perEps < 0) {
+    // 적자 상태 — PER 대신 "적자" 표시
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(224,80,80,0.9)';
+    ctx.font = "bold 10px 'Pretendard', sans-serif";
+    ctx.fillText('적자 (EPS<0)', padL + chartW - 2, padT + 2);
+  }
 }

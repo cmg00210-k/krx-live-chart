@@ -331,7 +331,7 @@ var WATCHLIST_KEY = 'krx_watchlist';
 function _getWatchlist() {
   try { return JSON.parse(localStorage.getItem(WATCHLIST_KEY)) || []; } catch (e) { return []; }
 }
-function _saveWatchlist(list) { localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list)); }
+function _saveWatchlist(list) { try { localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list)); } catch(e) {} }
 function _toggleWatchlist(code) {
   var list = _getWatchlist();
   var idx = list.indexOf(code);
@@ -374,7 +374,7 @@ function _loadIndParams() {
     return JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS));
   } catch (e) { return JSON.parse(JSON.stringify(DEFAULT_IND_PARAMS)); }
 }
-function _saveIndParams(p) { localStorage.setItem('krx_ind_params', JSON.stringify(p)); }
+function _saveIndParams(p) { try { localStorage.setItem('krx_ind_params', JSON.stringify(p)); } catch(e) {} }
 var indParams = _loadIndParams();
 var _activeParamInd = null;
 
@@ -1168,7 +1168,7 @@ var ONBOARDING_KEY = 'krx_onboarding_v2';
 
 function showOnboarding() {
   // 이미 투어 완료했으면 표시하지 않음
-  if (localStorage.getItem(ONBOARDING_KEY)) return;
+  try { if (localStorage.getItem(ONBOARDING_KEY)) return; } catch(e) { return; }
 
   // ── 5단계 투어 정의 ──
   var steps = [
@@ -1225,7 +1225,7 @@ function showOnboarding() {
 
   // ── 투어 종료 (완료 또는 건너뛰기) ──
   function _endTour() {
-    localStorage.setItem(ONBOARDING_KEY, '1');
+    try { localStorage.setItem(ONBOARDING_KEY, '1'); } catch(e) {}
     _cleanup();
     if (overlay && overlay.parentNode) {
       overlay.style.animation = 'obFadeIn .2s ease reverse forwards';
