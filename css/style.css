@@ -1669,6 +1669,10 @@ html, body {
   padding-bottom: 2px; border-bottom: 1px solid var(--border-subtle);
 }
 .fin-section-title:first-of-type { margin-top: 0; }
+.fin-sector-tag {
+  color: var(--accent); font-weight: 600;
+  letter-spacing: 0; text-transform: none;
+}
 .fin-row {
   display: flex; align-items: baseline; justify-content: space-between;
   padding: 2px 0;
