@@ -247,7 +247,7 @@ class PatternEngine {
       results.push({
         type: 'threeWhiteSoldiers', name: '적삼병 (Three White Soldiers)', nameShort: '적삼병',
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `3연속 양봉 상승 — 강한 매수 신호. 신뢰도 ${confidence}%`,
+        description: `3연속 양봉 상승 — 강한 매수 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
         marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -290,7 +290,7 @@ class PatternEngine {
       results.push({
         type: 'threeBlackCrows', name: '흑삼병 (Three Black Crows)', nameShort: '흑삼병',
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `3연속 음봉 하락 — 강한 매도 신호. 신뢰도 ${confidence}%`,
+        description: `3연속 음봉 하락 — 강한 매도 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
         marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -332,7 +332,7 @@ class PatternEngine {
       results.push({
         type: 'hammer', name: '해머 (Hammer)', nameShort: '해머',
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `긴 아래꼬리 — 하락 반전 신호. 신뢰도 ${confidence}%`,
+        description: `긴 아래꼬리 — 하락 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -373,7 +373,7 @@ class PatternEngine {
       results.push({
         type: 'invertedHammer', name: '역해머 (Inverted Hammer)', nameShort: '역해머',
         signal: 'buy', strength: 'weak', confidence, stopLoss, priceTarget,  // Bulkowski: 승률 ~50%
-        description: `긴 윗꼬리 — 하락 반전 가능 신호. 신뢰도 ${confidence}%`,
+        description: `긴 윗꼬리 — 하락 반전 가능 신호. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -420,7 +420,7 @@ class PatternEngine {
       results.push({
         type: 'hangingMan', name: '교수형 (Hanging Man)', nameShort: '교수형',
         signal: 'sell', strength, confidence, stopLoss, priceTarget,
-        description: `상승 후 긴 아래꼬리 — 하락 반전 경고 (확인 필요). 신뢰도 ${confidence}%`,
+        description: `상승 후 긴 아래꼬리 — 하락 반전 경고 (확인 필요). 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -462,7 +462,7 @@ class PatternEngine {
       results.push({
         type: 'shootingStar', name: '유성형 (Shooting Star)', nameShort: '유성형',
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `상승 후 긴 윗꼬리 — 하락 반전 경고. 신뢰도 ${confidence}%`,
+        description: `상승 후 긴 윗꼬리 — 하락 반전 경고. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -501,7 +501,7 @@ class PatternEngine {
         signal, strength: 'weak', confidence,
         stopLoss: signal !== 'neutral' ? this._stopLoss(candles, i, signal, atr) : null,
         priceTarget: signal !== 'neutral' ? this._target(candles, i, i, signal) : null,
-        description: `시가 ≈ 종가 — 추세 전환 가능. 신뢰도 ${confidence}%`,
+        description: `시가 ≈ 종가 — 추세 전환 가능. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
       });
@@ -543,7 +543,7 @@ class PatternEngine {
             signal: 'buy', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
             priceTarget: this._target(candles, i - 1, i, 'buy'),
-            description: `양봉이 음봉을 감싸 — 강한 상승 반전. 신뢰도 ${confidence}%`,
+            description: `양봉이 음봉을 감싸 — 강한 상승 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
           });
@@ -562,7 +562,7 @@ class PatternEngine {
             signal: 'sell', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
             priceTarget: this._target(candles, i - 1, i, 'sell'),
-            description: `음봉이 양봉을 감싸 — 강한 하락 반전. 신뢰도 ${confidence}%`,
+            description: `음봉이 양봉을 감싸 — 강한 하락 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
           });
@@ -604,7 +604,7 @@ class PatternEngine {
             signal: 'buy', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
             priceTarget: this._target(candles, i - 1, i, 'buy'),
-            description: `작은 양봉이 음봉 내에 — 반전 가능 (확인 필요). 신뢰도 ${quality}%`,
+            description: `작은 양봉이 음봉 내에 — 반전 가능 (확인 필요). 형태 점수 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
           });
@@ -625,7 +625,7 @@ class PatternEngine {
             signal: 'sell', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
             priceTarget: this._target(candles, i - 1, i, 'sell'),
-            description: `작은 음봉이 양봉 내에 — 반전 가능 (확인 필요). 신뢰도 ${quality}%`,
+            description: `작은 음봉이 양봉 내에 — 반전 가능 (확인 필요). 형태 점수 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
           });
@@ -674,7 +674,7 @@ class PatternEngine {
       results.push({
         type: 'morningStar', name: '샛별형 (Morning Star)', nameShort: '샛별형',
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `음봉 → 소형봉 → 양봉 — 3봉 바닥 반전. 신뢰도 ${confidence}%`,
+        description: `음봉 → 소형봉 → 양봉 — 3봉 바닥 반전. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
         marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -721,7 +721,7 @@ class PatternEngine {
       results.push({
         type: 'eveningStar', name: '석별형 (Evening Star)', nameShort: '석별형',
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `양봉 → 소형봉 → 음봉 — 3봉 천장 반전. 신뢰도 ${confidence}%`,
+        description: `양봉 → 소형봉 → 음봉 — 3봉 천장 반전. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
         marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -783,7 +783,7 @@ class PatternEngine {
       results.push({
         type: 'piercingLine', name: '관통형 (Piercing Line)', nameShort: '관통형',
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `갭다운 후 전봉 50% 이상 회복 — 강세 반전 신호. 신뢰도 ${confidence}%`,
+        description: `갭다운 후 전봉 50% 이상 회복 — 강세 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 1, endIndex: i,
         marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -846,7 +846,7 @@ class PatternEngine {
       results.push({
         type: 'darkCloud', name: '먹구름형 (Dark Cloud Cover)', nameShort: '먹구름',
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `갭업 후 전봉 50% 이하 하락 — 약세 반전 신호. 신뢰도 ${confidence}%`,
+        description: `갭업 후 전봉 50% 이하 하락 — 약세 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 1, endIndex: i,
         marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -901,7 +901,7 @@ class PatternEngine {
       results.push({
         type: 'dragonflyDoji', name: '잠자리 도지 (Dragonfly Doji)', nameShort: '잠자리도지',
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `긴 하단꼬리 T형 도지 — 바닥 반전 신호. 신뢰도 ${confidence}%`,
+        description: `긴 하단꼬리 T형 도지 — 바닥 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -956,7 +956,7 @@ class PatternEngine {
       results.push({
         type: 'gravestoneDoji', name: '비석 도지 (Gravestone Doji)', nameShort: '비석도지',
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `긴 상단꼬리 역T형 도지 — 천장 반전 신호. 신뢰도 ${confidence}%`,
+        description: `긴 상단꼬리 역T형 도지 — 천장 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -1011,7 +1011,7 @@ class PatternEngine {
       results.push({
         type: 'tweezerBottom', name: '족집게 바닥 (Tweezer Bottom)', nameShort: '족집게바닥',
         signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `동일 저가 반복 지지 — 바닥 반전 신호. 신뢰도 ${confidence}%`,
+        description: `동일 저가 반복 지지 — 바닥 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 1, endIndex: i,
         marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -1066,7 +1066,7 @@ class PatternEngine {
       results.push({
         type: 'tweezerTop', name: '족집게 천장 (Tweezer Top)', nameShort: '족집게천장',
         signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
-        description: `동일 고가 반복 저항 — 천장 반전 신호. 신뢰도 ${confidence}%`,
+        description: `동일 고가 반복 저항 — 천장 반전 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 1, endIndex: i,
         marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -1142,8 +1142,8 @@ class PatternEngine {
         nameShort: isBullish ? '양봉마루보주' : '음봉마루보주',
         signal, strength: 'strong', confidence, stopLoss, priceTarget,
         description: isBullish
-          ? `시가=저가, 종가=고가 — 매수 압력 극대화. 신뢰도 ${confidence}%`
-          : `시가=고가, 종가=저가 — 매도 압력 극대화. 신뢰도 ${confidence}%`,
+          ? `시가=저가, 종가=고가 — 매수 압력 극대화. 형태 점수 ${confidence}%`
+          : `시가=고가, 종가=저가 — 매도 압력 극대화. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: {
           time: c.time,
@@ -1206,7 +1206,7 @@ class PatternEngine {
         type: 'spinningTop', name: '팽이형 (Spinning Top)', nameShort: '팽이형',
         signal: 'neutral', strength: 'weak', confidence,
         stopLoss: null, priceTarget: null,
-        description: `작은 실체 + 긴 양쪽 꼬리 — 시장 우유부단. 신뢰도 ${confidence}%`,
+        description: `작은 실체 + 긴 양쪽 꼬리 — 시장 우유부단. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
       });
@@ -1255,7 +1255,7 @@ class PatternEngine {
       results.push({
         type: 'ascendingTriangle', name: '상승 삼각형 (Ascending Triangle)', nameShort: '상승삼각',
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `수평 저항 + 상승 지지 — 상방 돌파 가능. 신뢰도 ${confidence}%`,
+        description: `수평 저항 + 상승 지지 — 상방 돌파 가능. 형태 점수 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
         trendlines: [
@@ -1314,7 +1314,7 @@ class PatternEngine {
       results.push({
         type: 'descendingTriangle', name: '하락 삼각형 (Descending Triangle)', nameShort: '하락삼각',
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 신뢰도 ${confidence}%`,
+        description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 형태 점수 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
         trendlines: [
@@ -1372,7 +1372,7 @@ class PatternEngine {
         results.push({
           type: 'risingWedge', name: '상승 쐐기 (Rising Wedge)', nameShort: '상승쐐기',
           signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
-          description: `상향 수렴 — 상승 피로, 하락 반전 가능. 신뢰도 ${confidence}%`,
+          description: `상향 수렴 — 상승 피로, 하락 반전 가능. 형태 점수 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
           marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
           trendlines: [
@@ -1432,7 +1432,7 @@ class PatternEngine {
         results.push({
           type: 'fallingWedge', name: '하락 쐐기 (Falling Wedge)', nameShort: '하락쐐기',
           signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
-          description: `하향 수렴 — 하락 피로, 상승 반전 가능. 신뢰도 ${confidence}%`,
+          description: `하향 수렴 — 하락 피로, 상승 반전 가능. 형태 점수 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
           marker: { time: candles[endIdx].time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
           trendlines: [
@@ -1513,7 +1513,7 @@ class PatternEngine {
           type: 'symmetricTriangle', name: '대칭 삼각형 (Symmetric Triangle)', nameShort: '대칭삼각',
           signal: 'neutral', strength: 'medium', confidence,
           stopLoss: null, priceTarget: null,
-          description: `대칭 수렴 — 매수·매도 균형, 방향 돌파 대기. 신뢰도 ${confidence}%`,
+          description: `대칭 수렴 — 매수·매도 균형, 방향 돌파 대기. 형태 점수 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
           marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
           trendlines: [
@@ -1564,7 +1564,7 @@ class PatternEngine {
       results.push({
         type: 'doubleBottom', name: '이중 바닥 (Double Bottom)', nameShort: '이중바닥',
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `W형 바닥 — 강한 지지 확인. 신뢰도 ${confidence}%`,
+        description: `W형 바닥 — 강한 지지 확인. 형태 점수 ${confidence}%`,
         startIndex: l1.index, endIndex: l2.index,
         marker: { time: candles[l2.index].time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
       });
@@ -1603,7 +1603,7 @@ class PatternEngine {
       results.push({
         type: 'doubleTop', name: '이중 천장 (Double Top)', nameShort: '이중천장',
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `M형 천장 — 강한 저항 확인. 신뢰도 ${confidence}%`,
+        description: `M형 천장 — 강한 저항 확인. 형태 점수 ${confidence}%`,
         startIndex: h1.index, endIndex: h2.index,
         marker: { time: candles[h2.index].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
@@ -1650,7 +1650,7 @@ class PatternEngine {
         type: 'headAndShoulders', name: '머리어깨형 (Head & Shoulders)', nameShort: 'H&S',
         signal: 'sell', strength: 'strong', confidence,
         stopLoss: +(head.price).toFixed(0), priceTarget,
-        description: `머리어깨 — 강한 하락 반전. 신뢰도 ${confidence}%`,
+        description: `머리어깨 — 강한 하락 반전. 형태 점수 ${confidence}%`,
         startIndex: ls.index, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
         trendlines: [
@@ -1701,7 +1701,7 @@ class PatternEngine {
         type: 'inverseHeadAndShoulders', name: '역머리어깨형 (Inverse H&S)', nameShort: '역H&S',
         signal: 'buy', strength: 'strong', confidence,
         stopLoss: +(head.price).toFixed(0), priceTarget,
-        description: `역머리어깨 — 강한 상승 반전. 신뢰도 ${confidence}%`,
+        description: `역머리어깨 — 강한 상승 반전. 형태 점수 ${confidence}%`,
         startIndex: ls.index, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
         trendlines: [

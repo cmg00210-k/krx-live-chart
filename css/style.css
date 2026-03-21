@@ -72,6 +72,7 @@
   /* ── 드로잉 툴바 (고유 색상) ── */
   --draw-toolbar-bg: #161616;
   --draw-btn-hover:  #B0B0B0;
+  --draw-toolbar-w:  40px;
 }
 
 html, body {
@@ -540,7 +541,7 @@ html, body {
 /* 섹션 접기/펼치기 화살표 */
 .sb-header::before {
   content: '\25BC'; /* ▼ */
-  font-size: 7px;
+  font-size: 9px;
   color: var(--text-muted);
   transition: transform .2s ease;
   flex-shrink: 0;
@@ -711,7 +712,7 @@ html, body {
 
 /* ── 17b. 사이드바 메타 레이블 (MC, V, R) ── */
 .sb-label {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 600;
   font-family: var(--font-mono);
   opacity: 0.45;
@@ -793,7 +794,7 @@ html, body {
   position: absolute;
   right: -1px;
   bottom: -8px;
-  font-size: 7px;
+  font-size: 10px;
   font-family: var(--font-mono);
   color: var(--text-muted);
   opacity: 0.7;
@@ -893,7 +894,7 @@ html, body {
 #sidebar.sb-analysis .sb-mcap,
 #sidebar.sb-analysis .sb-volume,
 #sidebar.sb-analysis .sb-rsi {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
 }
 #sidebar.sb-analysis .sb-mcap   { color: var(--text-sub); }
@@ -1206,13 +1207,13 @@ html, body {
 #main-chart-container {
   flex: 1; position: relative; min-height: 200px;
   background: var(--chart-bg);
-  margin-left: 40px;  /* 드로잉 툴바 폭만큼 여백 */
+  margin-left: var(--draw-toolbar-w);  /* 드로잉 툴바 폭만큼 여백 */
 }
 
 /* ═══ 드로잉 툴바 (좌측 수직) ═══ */
 .draw-toolbar {
   position: absolute; left: 0; top: 0; bottom: 0;
-  width: 40px; z-index: 30;
+  width: var(--draw-toolbar-w); z-index: 30;
   background: var(--draw-toolbar-bg);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
@@ -1262,10 +1263,10 @@ html, body {
 #main-chart-container.select-mode:active { cursor: grabbing; }
 
 /* 드로잉 툴바가 있을 때 내부 요소들의 왼쪽 여백 조정 */
-#chart-wrap .sub-chart-wrap { margin-left: 40px; }
-#chart-wrap #ohlc-bar { left: calc(40px + var(--sp-2)); }
-#chart-wrap #pattern-summary-wrap { margin-left: 40px; }
-#chart-wrap #pattern-history-bar { margin-left: 40px; }
+#chart-wrap .sub-chart-wrap { margin-left: var(--draw-toolbar-w); }
+#chart-wrap #ohlc-bar { left: calc(var(--draw-toolbar-w) + var(--sp-2)); }
+#chart-wrap #pattern-summary-wrap { margin-left: var(--draw-toolbar-w); }
+#chart-wrap #pattern-history-bar { margin-left: var(--draw-toolbar-w); }
 .sub-chart-wrap { flex-shrink: 1; position: relative; }  /* [2-slot] flex-shrink:1 — 공간 부족 시 압축 허용 */
 .sub-chart {
   height: clamp(80px, 12vh, 120px); position: relative;  /* [2-slot] 최대 2개이므로 높이 확대 */
@@ -1274,7 +1275,7 @@ html, body {
   box-shadow: inset 0 1px 0 rgba(42,46,57,0.4);
 }
 .sub-chart-label {
-  position: absolute; top: var(--sp-1); left: calc(40px + var(--sp-2));  /* 드로잉 툴바 40px 고려 */
+  position: absolute; top: var(--sp-1); left: calc(var(--draw-toolbar-w) + var(--sp-2));  /* 드로잉 툴바 고려 */
   font-size: var(--fs-caption); font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text); z-index: 10; pointer-events: none;
@@ -1302,7 +1303,7 @@ html, body {
 
 /* ── 패턴 패널 토글 버튼 (1200px 이하에서만 표시) ── */
 #pp-toggle {
-  display: none;              /* 큰 화면에서 숨김, @media에서 flex로 전환 */
+  display: flex;              /* 데스크톱에서도 표시 (패널 접기/펼치기) */
   position: fixed;
   top: calc(var(--header-h) + var(--toolbar-h) + 60px);
   right: 0;
@@ -1349,6 +1350,48 @@ html, body {
 #pp-backdrop.pp-bd-visible {
   display: block;
   opacity: 1;
+}
+
+/* ── 패턴 패널 접힘 상태 ── */
+#pattern-panel.pp-collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+}
+#main.pp-col-collapsed {
+  grid-template-columns:
+    minmax(0, var(--sidebar-w))
+    minmax(360px, 1fr)
+    0px
+    minmax(260px, var(--rpanel-w));
+}
+#main.pp-col-collapsed.sidebar-collapsed {
+  grid-template-columns:
+    var(--sidebar-collapsed)
+    minmax(360px, 1fr)
+    0px
+    minmax(260px, var(--rpanel-w));
+}
+.pp-toggle-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 40px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
 }
 
 .pp-header {
@@ -2227,7 +2270,7 @@ html, body {
   margin-bottom: var(--sp-1);
 }
 .ind-hint {
-  font-weight: 400; text-transform: none; opacity: 0.6; font-size: 9px;
+  font-weight: 400; text-transform: none; opacity: 0.6; font-size: 10px;
 }
 /* 지표/표시 드롭다운 내 첫 번째가 아닌 섹션 타이틀: 상단 여백 + 구분선 */
 .ind-dropdown-section-title + .ind-check + .ind-dropdown-section-title,
@@ -2570,7 +2613,7 @@ html, body {
 .php-expected.up { color: var(--up); }
 .php-expected.dn { color: var(--down); }
 .php-ci {
-  font-size: 9px; color: var(--text-muted);
+  font-size: 10px; color: var(--text-muted);
   white-space: nowrap; letter-spacing: -0.3px;
 }
 /* 95% CI가 0을 포함 → 통계적 비유의: muted + italic */
@@ -2612,7 +2655,7 @@ html, body {
   backdrop-filter: blur(8px);
   border: 1px solid rgba(42,46,57,0.3);
   line-height: 1.4;
-  max-width: calc(100% - var(--sp-4));  /* [FIX] 차트 영역 밖으로 넘침 방지 */
+  max-width: calc(100% - var(--draw-toolbar-w) - var(--sp-4));  /* [FIX] 드로잉 툴바 + 여백 고려, 차트 영역 밖 넘침 방지 */
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2865,7 +2908,7 @@ html, body {
 .rs-bar-label {
   position: absolute; right: 3px; top: 50%;
   transform: translateY(-50%);
-  font-family: var(--font-mono); font-size: 7px;
+  font-family: var(--font-mono); font-size: 9px;
   font-weight: 700; color: rgba(255,255,255,0.7);
   line-height: 1; pointer-events: none;
   font-feature-settings: "tnum";
@@ -3081,10 +3124,10 @@ html, body {
   #return-stats-area { display: none; }
 
   /* 툴바 반응형: 아이콘급 축소 + 구분선 제거 */
-  #chart-toolbar .tf-btn { padding: 2px 4px; font-size: 9px; }
-  #chart-toolbar .ct-btn { padding: 2px 4px; font-size: 9px; }
-  #chart-toolbar .ind-btn { padding: 2px 4px; font-size: 9px; }
-  #chart-toolbar .ind-dropdown-btn { padding: 2px 4px; font-size: 9px; }
+  #chart-toolbar .tf-btn { padding: 2px 4px; font-size: 10px; }
+  #chart-toolbar .ct-btn { padding: 2px 4px; font-size: 10px; }
+  #chart-toolbar .ind-btn { padding: 2px 4px; font-size: 10px; }
+  #chart-toolbar .ind-dropdown-btn { padding: 2px 4px; font-size: 10px; }
   #chart-toolbar .sh-action-btn { padding: 2px 4px; font-size: 11px; }
   #chart-toolbar .sep { margin: 0; width: 0; height: 0; border: none; }
   #chart-toolbar { gap: 1px; padding: 0 4px; }

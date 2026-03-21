@@ -1097,7 +1097,7 @@ class SignalEngine {
       }
 
       // 심리 계산은 최근 봉만
-      if (s.index <= cutoff) continue;
+      if (s.index < cutoff) continue;
 
       const w = this._weights[s.type] || 0;
       if (s.source === 'composite') {

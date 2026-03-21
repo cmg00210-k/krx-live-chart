@@ -13,6 +13,7 @@ let currentTimeframe = '1d';  // 기본 일봉 (장외에서도 데이터 있음
 let activeIndicators = new Set(['vol']);  // 기본: 거래량만 (pure price chart)
 let chartType = 'candle';
 let patternEnabled = false;  // 기본 OFF: pure price chart → 사용자가 [분석] 클릭 시 활성화
+let ppCollapsed = true;  // 기본 접힘: C열 패턴 패널 접기 (차트 영역 ~240px 확보)
 let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
@@ -521,6 +522,9 @@ function _applyPrefsToUI() {
   var retArea = document.getElementById('return-stats-area');
   if (retArea) retArea.style.display = patternEnabled ? '' : 'none';
 
+  // 패턴 패널 접기 상태 반영 (데스크탑 >1200px에서만 유효)
+  _applyPpCollapsed();
+
   // 지표 체크박스 동기화 (activeIndicators ↔ DOM)
   document.querySelectorAll('#ind-dropdown-menu input[data-ind]').forEach(function (cb) {
     cb.checked = activeIndicators.has(cb.dataset.ind);
@@ -709,6 +713,11 @@ async function _continueInit() {
   // 패턴 활성 상태 복원
   if (prefs && typeof prefs.patternEnabled === 'boolean') {
     patternEnabled = prefs.patternEnabled;
+  }
+
+  // 패턴 패널 접기 상태 복원 (기본: 접힘)
+  if (prefs && typeof prefs.ppCollapsed === 'boolean') {
+    ppCollapsed = prefs.ppCollapsed;
   }
 
   // 시각화 레이어 토글 복원
@@ -2940,42 +2949,81 @@ if (patternBtn) {
 }
 
 
-// ── 패턴 패널 슬라이드 토글 (1200px 이하 반응형) ──
+// ── 패턴 패널 접기/펼치기 ──
+// 데스크탑 (>1200px): #main.pp-col-collapsed로 C열 그리드 0px 전환
+// 모바일 (<=1200px): 기존 슬라이드 오버레이 (pp-visible / pp-open / pp-bd-visible)
+
+/** 데스크탑 접기 상태를 DOM에 반영 (init + toggle 양쪽에서 호출) */
+function _applyPpCollapsed() {
+  var mainEl = document.getElementById('main');
+  var ppPanel = document.getElementById('pattern-panel');
+  var ppToggle = document.getElementById('pp-toggle');
+  if (mainEl) mainEl.classList.toggle('pp-col-collapsed', ppCollapsed);
+  if (ppPanel) ppPanel.classList.toggle('pp-collapsed', ppCollapsed);
+  if (ppToggle) {
+    var icon = ppToggle.querySelector('.pp-toggle-icon');
+    if (icon) icon.innerHTML = ppCollapsed ? '&#9654;' : '&#9664;';  // ▶ : ◀
+  }
+}
+
 (function initPatternPanelToggle() {
-  const ppToggle = document.getElementById('pp-toggle');
-  const ppPanel = document.getElementById('pattern-panel');
-  const ppBackdrop = document.getElementById('pp-backdrop');
+  var ppToggle = document.getElementById('pp-toggle');
+  var ppPanel = document.getElementById('pattern-panel');
+  var ppBackdrop = document.getElementById('pp-backdrop');
   if (!ppToggle || !ppPanel) return;
 
-  function openPanel() {
+  var mqNarrow = window.matchMedia('(max-width: 1200px)');
+
+  // ── 모바일 슬라이드 오버레이 (<=1200px) ──
+  function openOverlay() {
     ppPanel.classList.add('pp-visible');
     ppToggle.classList.add('pp-open');
     if (ppBackdrop) ppBackdrop.classList.add('pp-bd-visible');
   }
-  function closePanel() {
+  function closeOverlay() {
     ppPanel.classList.remove('pp-visible');
     ppToggle.classList.remove('pp-open');
     if (ppBackdrop) ppBackdrop.classList.remove('pp-bd-visible');
   }
 
-  ppToggle.addEventListener('click', () => {
-    if (ppPanel.classList.contains('pp-visible')) {
-      closePanel();
+  // ── 데스크탑 접기/펼치기 (>1200px) ──
+  function toggleDesktop() {
+    ppCollapsed = !ppCollapsed;
+    _applyPpCollapsed();
+    _savePrefs({ ppCollapsed: ppCollapsed });
+  }
+
+  ppToggle.addEventListener('click', function() {
+    if (mqNarrow.matches) {
+      // 모바일 모드: 슬라이드 오버레이
+      if (ppPanel.classList.contains('pp-visible')) {
+        closeOverlay();
+      } else {
+        openOverlay();
+      }
     } else {
-      openPanel();
+      // 데스크탑 모드: 그리드 접기/펼치기
+      toggleDesktop();
     }
   });
 
-  // 백드롭 클릭 시 닫기
+  // 백드롭 클릭 시 닫기 (모바일 오버레이)
   if (ppBackdrop) {
-    ppBackdrop.addEventListener('click', closePanel);
+    ppBackdrop.addEventListener('click', closeOverlay);
   }
 
-  // 뷰포트가 넓어지면 (1200px 초과) 자동으로 상태 초기화
-  const mq = window.matchMedia('(max-width: 1200px)');
-  mq.addEventListener('change', (e) => {
-    if (!e.matches) closePanel();
+  // 뷰포트가 넓어지면 (1200px 초과) 오버레이 상태 초기화 + 데스크탑 접기 상태 복원
+  mqNarrow.addEventListener('change', function(e) {
+    if (!e.matches) {
+      closeOverlay();
+      _applyPpCollapsed();
+    }
   });
+
+  // 초기 상태: 데스크탑이면 접기 상태 즉시 적용
+  if (!mqNarrow.matches) {
+    _applyPpCollapsed();
+  }
 })();
 
 // ══════════════════════════════════════════════════════
