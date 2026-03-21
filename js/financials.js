@@ -1656,8 +1656,11 @@ function _drawPERBandChart() {
   } else {
     bands.forEach(function(b) { allPrices.push(eps * b.per); });
   }
-  var rawMin = Math.min.apply(null, allPrices);
-  var rawMax = Math.max.apply(null, allPrices);
+  var rawMin = allPrices[0], rawMax = allPrices[0];
+  for (var pi = 1; pi < allPrices.length; pi++) {
+    if (allPrices[pi] < rawMin) rawMin = allPrices[pi];
+    if (allPrices[pi] > rawMax) rawMax = allPrices[pi];
+  }
   // 음수 가격이 포함될 수 있으므로 (적자 구간) 절대값 기반 패딩
   var padding = (rawMax - rawMin) * 0.05;
   if (padding <= 0) padding = Math.abs(rawMax) * 0.05 || 1;

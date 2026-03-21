@@ -1262,18 +1262,18 @@ const sidebarManager = (() => {
     // ALL_STOCKS에서 시가총액 자동 빌드 (index.json 로드 후)
     _buildMarketCapFromStocks();
 
-    // localStorage에서 상태 복원
-    const saved = localStorage.getItem(LS_KEY);
-    _open = saved !== 'false';
+    // localStorage에서 상태 복원 (Safari private mode 안전)
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      _open = saved !== 'false';
+      const savedView = localStorage.getItem(LS_VIEW);
+      if (savedView) {
+        if (savedView === 'compact' || savedView === 'minimal') _viewMode = 'default';
+        else if (savedView === 'detailed') _viewMode = 'analysis';
+        else if (_viewModes.indexOf(savedView) !== -1) _viewMode = savedView;
+      }
+    } catch (e) { _open = true; }
     if (!_open) document.getElementById('main').classList.add('sidebar-collapsed');
-
-    // R5: 보기 모드 복원 (하위 호환: compact→minimal, detailed→analysis)
-    const savedView = localStorage.getItem(LS_VIEW);
-    if (savedView) {
-      if (savedView === 'compact' || savedView === 'minimal') _viewMode = 'default';
-      else if (savedView === 'detailed') _viewMode = 'analysis';
-      else if (_viewModes.indexOf(savedView) !== -1) _viewMode = savedView;
-    }
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
       sidebar.classList.remove('sb-compact', 'sb-detailed', 'sb-minimal', 'sb-analysis');
@@ -1401,7 +1401,7 @@ const sidebarManager = (() => {
   function toggle() {
     _open = !_open;
     document.getElementById('main').classList.toggle('sidebar-collapsed', !_open);
-    localStorage.setItem(LS_KEY, _open);
+    try { localStorage.setItem(LS_KEY, _open); } catch (e) {}
 
     // 사이드바 토글 후 차트 리사이즈 (grid transition 완료 대기)
     setTimeout(function () {
