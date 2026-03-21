@@ -1,12 +1,12 @@
 // ══════════════════════════════════════════════════════
-//  KRX LIVE — 사이드바 매니저 v11.0
-//  17개 기능:
+//  KRX LIVE — 사이드바 매니저 v12.0
+//  16개 기능:
 //    R1:  키보드 ↑↓ 네비게이션
 //    R2:  최근 본 종목 섹션
 //    R3:  코드→tooltip, 거래량 컬럼
 //    R4:  정렬 드롭다운 (시총/등락률/패턴/이름)
 //    R5:  3단계 보기 모드 (미니멀/기본/분석)
-//    R6:  빠른 필터 칩 (전체/상승/하락/대량거래)
+//    R6:  업종 필터 (16그룹 매핑)
 //    R7:  패턴명 표시
 //    R8:  패턴 감지 종목만 필터
 //    R9:  미니 스파크라인 (모든 뷰 모드, IntersectionObserver 지연 로드)
@@ -31,7 +31,6 @@ const sidebarManager = (() => {
   let _sortDirection = 'desc';
   let _searchQuery = '';
   let _viewMode = 'default';          // R5: 'default' | 'analysis'
-  let _activeFilter = 'all';         // R6: 'all' | 'up' | 'down' | 'highvol'
   let _patternOnlyFilter = false;    // R8: 패턴 감지 종목만
   let _kbFocusIndex = -1;            // R1: 키보드 포커스 인덱스
   let _recentStocks = [];            // R2: 최근 본 종목 코드 배열
@@ -79,6 +78,115 @@ const sidebarManager = (() => {
         MARKET_CAP[s.code] = s.base;
       }
     });
+  }
+
+
+  // ════════════════════════════════════════════════════
+  //  R6: 업종 → 16개 투자자 친화 그룹 매핑
+  // ════════════════════════════════════════════════════
+
+  var SECTOR_MAP = {
+    // 1. 반도체
+    '반도체 제조업': '반도체',
+    // 2. 전자/IT부품
+    '전자부품 제조업': '전자/IT부품', '통신 및 방송 장비 제조업': '전자/IT부품',
+    '영상 및 음향기기 제조업': '전자/IT부품', '컴퓨터 및 주변장치 제조업': '전자/IT부품',
+    '절연선 및 케이블 제조업': '전자/IT부품', '가정용 기기 제조업': '전자/IT부품',
+    '전구 및 조명장치 제조업': '전자/IT부품', '기타 전기장비 제조업': '전자/IT부품',
+    '마그네틱 및 광학 매체 제조업': '전자/IT부품',
+    '전동기, 발전기 및 전기 변환 · 공급 · 제어 장치 제조업': '전자/IT부품',
+    // 3. 자동차/운송
+    '자동차용 엔진 및 자동차 제조업': '자동차/운송', '자동차 신품 부품 제조업': '자동차/운송',
+    '자동차 차체 및 트레일러 제조업': '자동차/운송',
+    '선박 및 보트 건조업': '자동차/운송', '항공기,우주선 및 부품 제조업': '자동차/운송',
+    '철도장비 제조업': '자동차/운송', '그외 기타 운송장비 제조업': '자동차/운송',
+    // 4. 바이오/제약
+    '의약품 제조업': '바이오/제약', '기초 의약물질 제조업': '바이오/제약',
+    '의료용 기기 제조업': '바이오/제약',
+    '의료용품 및 기타 의약 관련제품 제조업': '바이오/제약',
+    '자연과학 및 공학 연구개발업': '바이오/제약',
+    // 5. 금융
+    '기타 금융업': '금융', '금융 지원 서비스업': '금융', '은행 및 저축기관': '금융',
+    '보험업': '금융', '보험 및 연금관련 서비스업': '금융', '재 보험업': '금융',
+    '신탁업 및 집합투자업': '금융',
+    // 6. 에너지/전력
+    '일차전지 및 이차전지 제조업': '에너지/전력', '전기업': '에너지/전력',
+    '연료용 가스 제조 및 배관공급업': '에너지/전력',
+    '증기, 냉·온수 및 공기조절 공급업': '에너지/전력',
+    '석유 정제품 제조업': '에너지/전력',
+    // 7. 화학/소재
+    '기초 화학물질 제조업': '화학/소재', '기타 화학제품 제조업': '화학/소재',
+    '합성고무 및 플라스틱 물질 제조업': '화학/소재', '화학섬유 제조업': '화학/소재',
+    '비료, 농약 및 살균, 살충제 제조업': '화학/소재',
+    '플라스틱제품 제조업': '화학/소재', '고무제품 제조업': '화학/소재',
+    // 8. 소프트웨어/IT
+    '소프트웨어 개발 및 공급업': '소프트웨어/IT',
+    '컴퓨터 프로그래밍, 시스템 통합 및 관리업': '소프트웨어/IT',
+    '자료처리, 호스팅, 포털 및 기타 인터넷 정보매개 서비스업': '소프트웨어/IT',
+    '기타 정보 서비스업': '소프트웨어/IT',
+    // 9. 기계/장비
+    '일반 목적용 기계 제조업': '기계/장비', '특수 목적용 기계 제조업': '기계/장비',
+    '측정, 시험, 항해, 제어 및 기타 정밀기기 제조업': '기계/장비',
+    '무기 및 총포탄 제조업': '기계/장비',
+    // 10. 철강/금속
+    '1차 철강 제조업': '철강/금속', '1차 비철금속 제조업': '철강/금속',
+    '기타 금속 가공제품 제조업': '철강/금속',
+    '구조용 금속제품, 탱크 및 증기발생기 제조업': '철강/금속',
+    '금속 주조업': '철강/금속',
+    // 11. 건설/부동산
+    '건물 건설업': '건설/부동산', '토목 건설업': '건설/부동산',
+    '건축기술, 엔지니어링 및 관련 기술 서비스업': '건설/부동산',
+    '건물설비 설치 공사업': '건설/부동산', '전기 및 통신 공사업': '건설/부동산',
+    '기반조성 및 시설물 축조관련 전문공사업': '건설/부동산',
+    '부동산 임대 및 공급업': '건설/부동산',
+    // 12. 유통/소비재
+    '종합 소매업': '유통/소비재', '기타 전문 도매업': '유통/소비재',
+    '상품 종합 도매업': '유통/소비재', '상품 중개업': '유통/소비재',
+    '기타 상품 전문 소매업': '유통/소비재', '무점포 소매업': '유통/소비재',
+    '생활용품 도매업': '유통/소비재', '음·식료품 및 담배 도매업': '유통/소비재',
+    '연료 소매업': '유통/소비재', '자동차 판매업': '유통/소비재',
+    '기계장비 및 관련 물품 도매업': '유통/소비재',
+    '섬유, 의복, 신발 및 가죽제품 소매업': '유통/소비재',
+    '가전제품 및 정보통신장비 소매업': '유통/소비재',
+    '산업용 농축산물 및 동·식물 도매업': '유통/소비재',
+    '건축자재, 철물 및 난방장치 도매업': '유통/소비재',
+    // 13. 음식료/생활
+    '기타 식품 제조업': '음식료/생활', '곡물가공품, 전분 및 전분제품 제조업': '음식료/생활',
+    '알코올음료 제조업': '음식료/생활', '비알코올음료 및 얼음 제조업': '음식료/생활',
+    '도축, 육류 가공 및 저장 처리업': '음식료/생활',
+    '수산물 가공 및 저장 처리업': '음식료/생활',
+    '동·식물성 유지 및 낙농제품 제조업': '음식료/생활',
+    '동물용 사료 및 조제식품 제조업': '음식료/생활',
+    '담배 제조업': '음식료/생활', '봉제의복 제조업': '음식료/생활',
+    '가구 제조업': '음식료/생활', '가죽, 가방 및 유사제품 제조업': '음식료/생활',
+    '신발 및 신발 부분품 제조업': '음식료/생활',
+    '과실, 채소 가공 및 저장 처리업': '음식료/생활',
+    // 14. 미디어/콘텐츠
+    '영화, 비디오물, 방송프로그램 제작 및 배급업': '미디어/콘텐츠',
+    '텔레비전 방송업': '미디어/콘텐츠', '광고업': '미디어/콘텐츠',
+    '전기 통신업': '미디어/콘텐츠',
+    '오디오물 출판 및 원판 녹음업': '미디어/콘텐츠',
+    '서적, 잡지 및 기타 인쇄물 출판업': '미디어/콘텐츠',
+    '유원지 및 기타 오락관련 서비스업': '미디어/콘텐츠',
+    '창작 및 예술관련 서비스업': '미디어/콘텐츠',
+    // 15. 운송/물류
+    '해상 운송업': '운송/물류', '항공 여객 운송업': '운송/물류',
+    '도로 화물 운송업': '운송/물류', '육상 여객 운송업': '운송/물류',
+    '기타 운송관련 서비스업': '운송/물류',
+    '여행사 및 기타 여행보조 서비스업': '운송/물류',
+    '운송장비 임대업': '운송/물류',
+  };
+
+  var SECTOR_ORDER = [
+    '반도체', '전자/IT부품', '자동차/운송', '바이오/제약',
+    '금융', '에너지/전력', '화학/소재', '소프트웨어/IT',
+    '기계/장비', '철강/금속', '건설/부동산', '유통/소비재',
+    '음식료/생활', '미디어/콘텐츠', '운송/물류', '기타'
+  ];
+
+  function _getSectorGroup(stock) {
+    var ind = stock.industry || stock.sector || '';
+    return SECTOR_MAP[ind] || '기타';
   }
 
 
@@ -268,38 +376,31 @@ const sidebarManager = (() => {
     });
   }
 
-  /** R6: 퀵 필터 칩 적용 (대량거래 토글만) */
-  function _filterByChip(stocks) {
-    if (_activeFilter === 'highvol') {
-      return stocks.filter(function (s) { return _getVolumeRatio(s.code) >= 2.0; });
-    }
-    return stocks; // 'all' 또는 기타
-  }
-
-  /** 업종 필터 적용 */
+  /** R6: 업종 그룹 필터 적용 */
   function _filterBySector(stocks) {
     if (!_activeSectorFilter) return stocks;
-    return stocks.filter(function (s) { return s.sector === _activeSectorFilter; });
+    return stocks.filter(function (s) { return _getSectorGroup(s) === _activeSectorFilter; });
   }
 
-  /** 업종 드롭다운 옵션 채우기 (ALL_STOCKS 로드 후 1회) */
+  /** 업종 그룹 드롭다운 옵션 채우기 (ALL_STOCKS 로드 후 1회) */
   function _populateSectorSelect() {
     var sel = document.getElementById('sb-sector-select');
     if (!sel) return;
     var allStocks = typeof ALL_STOCKS !== 'undefined' ? ALL_STOCKS : [];
-    var sectorMap = {};
+    // 그룹별 종목 수 집계
+    var groupCounts = {};
     allStocks.forEach(function (s) {
-      if (s.sector) {
-        sectorMap[s.sector] = (sectorMap[s.sector] || 0) + 1;
-      }
+      var grp = _getSectorGroup(s);
+      groupCounts[grp] = (groupCounts[grp] || 0) + 1;
     });
-    var sectors = Object.keys(sectorMap).sort();
-    // 기존 옵션 초기화 후 재생성
+    // 기존 옵션 초기화 후 SECTOR_ORDER 순서대로 재생성
     sel.innerHTML = '<option value="">모든 업종</option>';
-    sectors.forEach(function (name) {
+    SECTOR_ORDER.forEach(function (grpName) {
+      var cnt = groupCounts[grpName];
+      if (!cnt) return; // 해당 그룹에 종목이 없으면 생략
       var opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name + ' (' + sectorMap[name] + ')';
+      opt.value = grpName;
+      opt.textContent = grpName + ' (' + cnt + ')';
       sel.appendChild(opt);
     });
     // localStorage에서 복원
@@ -456,28 +557,6 @@ const sidebarManager = (() => {
     if (!group) return;
     group.querySelectorAll('.sb-view-opt').forEach(function(o) {
       o.classList.toggle('active', o.dataset.view === _viewMode);
-    });
-  }
-
-
-  // ════════════════════════════════════════════════════
-  //  R6: 퀵 필터 칩 이벤트 바인딩
-  // ════════════════════════════════════════════════════
-
-  function _ensureFilterChips() {
-    var volToggle = document.getElementById('sb-vol-toggle');
-    if (!volToggle) return;
-
-    volToggle.addEventListener('click', function () {
-      // 토글: active면 해제(전체), 아니면 활성화(대량거래)
-      if (_activeFilter === 'highvol') {
-        _activeFilter = 'all';
-        volToggle.classList.remove('active');
-      } else {
-        _activeFilter = 'highvol';
-        volToggle.classList.add('active');
-      }
-      build(_currentSort);
     });
   }
 
@@ -1280,7 +1359,6 @@ const sidebarManager = (() => {
     }
 
     // ── 동적 DOM 요소 생성 ──
-    _ensureFilterChips();       // R6
     _ensureViewToggle();        // R5
     _ensurePatternOnlyToggle(); // R8
     _ensureRecentSection();     // R2
@@ -1351,10 +1429,7 @@ const sidebarManager = (() => {
       ? _filterBySearch(allStocks)
       : allStocks;
 
-    // R6: 퀵 필터 적용
-    source = _filterByChip(source);
-
-    // 업종 필터 적용
+    // R6: 업종 그룹 필터 적용
     source = _filterBySector(source);
 
     // R8: 패턴 감지 종목만 필터

@@ -352,7 +352,7 @@ html, body {
   background-position: right 5px center;
   transition: border-color var(--transition);
   line-height: var(--ctrl-h-md);
-  max-width: 120px;
+  max-width: 160px;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
@@ -403,37 +403,9 @@ html, body {
   border-color: var(--accent);
   background: rgba(160,136,48,0.08);
 }
-/* 대량거래 토글 버튼 */
-.sb-vol-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-element);
-  border: 1px solid var(--border);
-  border-radius: var(--ctrl-radius);
-  color: var(--text-sub);
-  font-family: var(--font-sans);
-  font-size: var(--ctrl-font);
-  height: var(--ctrl-h-sm);
-  line-height: var(--ctrl-h-sm);
-  padding: 0 12px;
-  cursor: pointer;
-  transition: all .15s ease;
-}
-.sb-vol-toggle:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-.sb-vol-toggle.active {
-  background: rgba(160,136,48,0.18);
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
-}
 /* 사이드바 컨트롤 focus-visible 2px 통일 */
 .sb-sort-select:focus-visible,
 .sb-sector-select:focus-visible,
-.sb-vol-toggle:focus-visible,
 .sb-chip:focus-visible,
 .sb-view-opt:focus-visible,
 .sb-sort-dir:focus-visible {
@@ -3001,7 +2973,7 @@ html, body {
   }
   .sb-index-val { display: none; }
   .sb-sort-select { font-size: var(--fs-nano); }
-  .sb-sector-select { font-size: var(--fs-nano); max-width: 100px; }
+  .sb-sector-select { font-size: var(--fs-nano); max-width: 120px; }
   .sh-details { gap: var(--sp-1); }
   .sh-detail-item { min-width: 0; padding: 3px var(--sp-1); }  /* [FIX] 60px→0: 좁은 화면 오버플로우 방지 */
   #fin-trend-canvas { height: 80px; }
