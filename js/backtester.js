@@ -48,6 +48,9 @@ class PatternBacktester {
       gravestoneDoji:         { name: '비석도지',   signal: 'sell' },
       tweezerBottom:          { name: '족집게바닥', signal: 'buy'  },
       tweezerTop:             { name: '족집게천장', signal: 'sell' },
+      bullishMarubozu:        { name: '양봉마루보주', signal: 'buy'  },
+      bearishMarubozu:        { name: '음봉마루보주', signal: 'sell' },
+      spinningTop:            { name: '팽이형',     signal: 'neutral' },
     };
 
     /** 캐시 키 (종목코드 + 캔들길이) → 결과 */
@@ -94,6 +97,7 @@ class PatternBacktester {
         curve: [],
       };
       this._resultCache.set(cacheKey, empty);
+      if (this._resultCache.size > 200) this._resultCache.clear();
       return empty;
     }
 
@@ -110,6 +114,7 @@ class PatternBacktester {
       curve,
     };
     this._resultCache.set(cacheKey, result);
+    if (this._resultCache.size > 200) this._resultCache.clear();
     return result;
   }
 

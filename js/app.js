@@ -25,7 +25,8 @@ var _VIZ_CANDLE_TYPES = new Set([
   'hangingMan','shootingStar','doji','bullishEngulfing','bearishEngulfing',
   'bullishHarami','bearishHarami','morningStar','eveningStar',
   'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
-  'tweezerBottom','tweezerTop'
+  'tweezerBottom','tweezerTop',
+  'bullishMarubozu','bearishMarubozu','spinningTop'
 ]);
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([
@@ -119,6 +120,32 @@ function _buildWatermark(stockName, suffix) {
 var _lastDataTime = 0;
 var _freshnessTimer = null;
 
+/**
+ * 영업일 기준 날짜 라벨 반환
+ * @param {string} lastDateStr - "YYYY-MM-DD" 형식의 마지막 캔들 날짜
+ * @param {Date} kstNow - KST 보정된 현재 시각 (local accessor 사용 가능)
+ * @returns {string} "오늘" | "어제" | "M/D(요일)"
+ */
+function _getBusinessDayLabel(lastDateStr, kstNow) {
+  var dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  var todayStr = kstNow.getFullYear() + '-' + String(kstNow.getMonth() + 1).padStart(2, '0') + '-' + String(kstNow.getDate()).padStart(2, '0');
+  if (lastDateStr === todayStr) return '오늘';
+
+  // 직전 영업일 찾기: 오늘에서 하루씩 뒤로 가면서 토/일 건너뜀
+  var prev = new Date(kstNow.getFullYear(), kstNow.getMonth(), kstNow.getDate());
+  for (var i = 0; i < 4; i++) { // 최대 4일 뒤로 (금→목→수→화, 또는 월→일→토→금)
+    prev.setDate(prev.getDate() - 1);
+    if (prev.getDay() !== 0 && prev.getDay() !== 6) break; // 평일 발견
+  }
+  var prevStr = prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2, '0') + '-' + String(prev.getDate()).padStart(2, '0');
+  if (lastDateStr === prevStr) return '어제';
+
+  // 그 외: "M/D(요일)" 형식
+  var parts = lastDateStr.split('-');
+  var lastD = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  return parseInt(parts[1]) + '/' + parseInt(parts[2]) + '(' + dayNames[lastD.getDay()] + ')';
+}
+
 /** 데이터 수신 시각 갱신 표시 (10초마다 자동 갱신) */
 function _updateFreshness() {
   var el = document.getElementById('data-freshness');
@@ -171,36 +198,29 @@ function _updateFreshness() {
     return;
   }
 
-  // JSON 파일의 실제 갱신 시각 (Last-Modified 헤더 → KST)
-  var fileModTime = (typeof dataService !== 'undefined' && dataService._lastFileModified)
-    ? dataService._lastFileModified : _lastDataTime;
-  var modKst = new Date(fileModTime + 9 * 3600 * 1000);
-  var fileTimeStr = String(modKst.getUTCHours()).padStart(2, '0') + ':' + String(modKst.getUTCMinutes()).padStart(2, '0');
+  // Bug 1 fix: 일봉은 항상 15:30 (KRX 장마감), 분봉만 캔들 시각 사용
+  // Last-Modified 헤더는 daily_deploy.bat 실행 시각이므로 일봉에 무의미
+  var timeStr = isIntraday ? candleTimeStr : '15:30';
 
-  // 분봉: 캔들 자체 시각 사용, 일봉: JSON 파일 갱신 시각 사용
-  var timeStr = isIntraday ? candleTimeStr : fileTimeStr;
-
-  // 날짜를 "오늘", "어제", "M/D"로 변환
+  // Bug 3 fix: KST 변환을 getMarketState()와 동일한 패턴으로 통일
   var now = new Date();
-  var kstNow = new Date(now.getTime() + 9 * 3600 * 1000);
-  var todayStr = kstNow.getUTCFullYear() + '-' + String(kstNow.getUTCMonth() + 1).padStart(2, '0') + '-' + String(kstNow.getUTCDate()).padStart(2, '0');
-  var yesterday = new Date(kstNow.getTime() - 86400000);
-  var yesterdayStr = yesterday.getUTCFullYear() + '-' + String(yesterday.getUTCMonth() + 1).padStart(2, '0') + '-' + String(yesterday.getUTCDate()).padStart(2, '0');
+  var utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  var kstNow = new Date(utc + 9 * 3600000);
 
-  var parts = lastDate.split('-');
-  var displayDate = parseInt(parts[1]) + '/' + parseInt(parts[2]);
+  // Bug 2 fix: 영업일 기준 라벨 (토/일 건너뜀)
+  var dateLabel = _getBusinessDayLabel(lastDate, kstNow);
 
-  if (lastDate === todayStr) {
+  if (dateLabel === '오늘') {
     el.textContent = '오늘 ' + timeStr + ' 기준';
     el.style.color = 'var(--text-muted)';
-  } else if (lastDate === yesterdayStr) {
+  } else if (dateLabel === '어제') {
     el.textContent = '어제 ' + timeStr + ' 마감';
     el.style.color = 'var(--text-muted)';
   } else {
-    el.textContent = displayDate + ' ' + timeStr + ' 마감';
-    // 3일 이상 지나면 경고 색상
-    var daysDiff = Math.floor((kstNow.getTime() - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
-    el.style.color = daysDiff > 3 ? 'var(--neutral)' : 'var(--text-sub)';
+    el.textContent = dateLabel + ' ' + timeStr + ' 마감';
+    // 캘린더 일수 기준 경고 색상 (5일+ = 주말 포함 시 약 3영업일)
+    var daysDiff = Math.floor((kstNow.getTime() - new Date(lastDate + 'T00:00:00+09:00').getTime()) / 86400000);
+    el.style.color = daysDiff > 5 ? 'var(--neutral)' : 'var(--text-sub)';
   }
   el.title = '데이터 기준일: ' + lastDate + ' (파일 모드)';
 }
@@ -213,7 +233,10 @@ function _markDataFresh() {
 
 // 10초마다 freshness 텍스트 갱신
 _freshnessTimer = setInterval(_updateFreshness, 10000);
-window.addEventListener('beforeunload', function() { clearInterval(_freshnessTimer); });
+window.addEventListener('beforeunload', function() {
+  clearInterval(_freshnessTimer);
+  clearInterval(_marketStateTimer);
+});
 
 // ── DOM 캐시 (빈번 조회 요소) ──
 const _dom = {};
@@ -1311,6 +1334,7 @@ function _initAnalysisWorker() {
       // ── Worker 준비 완료 ──
       if (msg.type === 'ready') {
         _workerReady = true;
+        _workerRestartCount = 0;  // [FIX] 성공 시 재시작 카운터 리셋
         console.log('[Worker] 분석 Worker 초기화 완료');
         return;
       }
