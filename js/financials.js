@@ -1244,6 +1244,11 @@ function _renderPeerGroup() {
   var myStock = ALL_STOCKS.find(function(s) { return s.code === currentStock.code; });
   var myIndustry = myStock ? (myStock.industry || myStock.sector || '') : '';
 
+  if (!myStock) {
+    container.innerHTML = '<div class="fin-compare-placeholder">종목 정보 없음</div>';
+    return;
+  }
+
   // 섹터 라벨 업데이트 (WICS/FICS 기준 짧은 라벨)
   var titleEl = document.getElementById('fin-peers-title');
   if (titleEl) {
