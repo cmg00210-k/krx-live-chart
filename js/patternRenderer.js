@@ -288,7 +288,7 @@ const patternRenderer = (() => {
             ctx.lineTo(x2, hl.y);
             ctx.strokeStyle = hl.color;
             ctx.lineWidth = hl.width || 1;
-            ctx.setLineDash(hl.dash || [4, 3]);
+            ctx.setLineDash(hl.dash || [5, 3]);
             ctx.stroke();
             ctx.setLineDash([]);
 
@@ -376,7 +376,7 @@ const patternRenderer = (() => {
 
             ctx.strokeStyle = cn.color;
             ctx.lineWidth = cn.width || 1;
-            ctx.setLineDash(cn.dash || [2, 2]);
+            ctx.setLineDash(cn.dash || [2, 3]);
             ctx.globalAlpha = cn.alpha || 0.5;
             ctx.stroke();
             ctx.globalAlpha = 1;
@@ -526,15 +526,15 @@ const patternRenderer = (() => {
               const tH = Math.abs(fz.yTarget - fz.yEntry);
               if (tH > 2) {
                 const tGrad = ctx.createLinearGradient(0, fz.yEntry, 0, fz.yTarget);
-                tGrad.addColorStop(0, fz.targetFillNear || 'rgba(150,220,200,0.12)');
-                tGrad.addColorStop(1, fz.targetFillFar  || 'rgba(150,220,200,0.03)');
+                tGrad.addColorStop(0, fz.targetFillNear || KRX_COLORS.FZ_TARGET_NEAR);
+                tGrad.addColorStop(1, fz.targetFillFar  || KRX_COLORS.FZ_TARGET_FAR);
                 ctx.fillStyle = tGrad;
                 ctx.fillRect(zoneX, tY, zoneW, tH);
 
                 // 목표가 도달 점선 (가장자리)
-                ctx.strokeStyle = fz.targetBorder || 'rgba(150,220,200,0.35)';
+                ctx.strokeStyle = fz.targetBorder || KRX_COLORS.FZ_TARGET_BORDER;
                 ctx.lineWidth = 0.8;
-                ctx.setLineDash([4, 4]);
+                ctx.setLineDash([5, 3]);
                 ctx.beginPath();
                 ctx.moveTo(zoneX, fz.yTarget);
                 ctx.lineTo(zoneX + zoneW, fz.yTarget);
@@ -554,59 +554,49 @@ const patternRenderer = (() => {
                   ctx.beginPath();
                   _roundRect(ctx, retX - rtm.width / 2 - 4, retY - 7, rtm.width + 8, 14, 3);
                   ctx.fill();
-                  ctx.fillStyle = fz.returnColor || 'rgba(150,220,200,0.85)';
+                  ctx.fillStyle = fz.returnColor || KRX_COLORS.PTN_BUY;
                   ctx.fillText('목표 ' + fz.returnText, retX, retY);
                 }
               }
             }
 
-            // ── 손절 영역 (위험 구간): 사선 줄무늬 패턴 ──
+            // ── 손절 영역 (위험 구간): 오렌지 그라데이션 ──
             if (fz.yStop != null) {
               const sY = Math.min(fz.yEntry, fz.yStop);
               const sH = Math.abs(fz.yStop - fz.yEntry);
               if (sH > 2) {
-                // 반투명 배경
-                ctx.fillStyle = fz.stopFill || 'rgba(150,220,200,0.06)';
+                // 그라데이션 채우기 (진입점 → 손절가: 오렌지 fade)
+                const stopGrad = ctx.createLinearGradient(zoneX, fz.yEntry, zoneX, fz.yStop);
+                stopGrad.addColorStop(0, fz.stopFill || KRX_COLORS.FZ_STOP_NEAR);
+                stopGrad.addColorStop(1, KRX_COLORS.FZ_STOP_FAR);
+                ctx.fillStyle = stopGrad;
                 ctx.fillRect(zoneX, sY, zoneW, sH);
 
-                // 사선 줄무늬 (위험 표시)
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(zoneX, sY, zoneW, sH);
-                ctx.clip();
-                ctx.strokeStyle = fz.stopStripe || 'rgba(150,220,200,0.12)';
-                ctx.lineWidth = 1.0;
-                const step = 6;
-                for (let sx = zoneX - sH; sx < zoneX + zoneW + sH; sx += step) {
-                  ctx.beginPath();
-                  ctx.moveTo(sx, sY + sH);
-                  ctx.lineTo(sx + sH, sY);
-                  ctx.stroke();
-                }
-                ctx.restore();
-
                 // 손절가 점선
-                ctx.strokeStyle = fz.stopBorder || 'rgba(150,220,200,0.35)';
+                ctx.strokeStyle = fz.stopBorder || KRX_COLORS.FZ_STOP_BORDER;
                 ctx.lineWidth = 0.8;
-                ctx.setLineDash([3, 3]);
+                ctx.setLineDash([5, 3]);
                 ctx.beginPath();
                 ctx.moveTo(zoneX, fz.yStop);
                 ctx.lineTo(zoneX + zoneW, fz.yStop);
                 ctx.stroke();
                 ctx.setLineDash([]);
 
-                // [UX] 손절 텍스트 라벨 (작은 빨강/파랑 폰트)
+                // [UX] 손절 텍스트 라벨 (목표 라벨과 대칭 — 영역 중앙, 11px, 700)
                 if (fz.stopColor) {
-                  const slText = '손절';
-                  ctx.font = "600 9px 'Pretendard', sans-serif";
-                  ctx.textAlign = 'right';
+                  const stopPct = (fz.entry && fz.stopPrice)
+                    ? (Math.abs(fz.entry - fz.stopPrice) / fz.entry * 100).toFixed(1)
+                    : null;
+                  const slText = stopPct ? '손절 -' + stopPct + '%' : '손절';
+                  const slX = zoneX + zoneW / 2;
+                  const slY = (fz.yEntry + fz.yStop) / 2;
+                  ctx.font = "700 11px 'Pretendard', sans-serif";
+                  ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
                   const slm = ctx.measureText(slText);
-                  const slX = zoneX + zoneW - 4;
-                  const slY = fz.yStop;
                   ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
                   ctx.beginPath();
-                  _roundRect(ctx, slX - slm.width - 4, slY - 6, slm.width + 8, 12, 2);
+                  _roundRect(ctx, slX - slm.width / 2 - 4, slY - 7, slm.width + 8, 14, 3);
                   ctx.fill();
                   ctx.fillStyle = fz.stopColor;
                   ctx.fillText(slText, slX, slY);
@@ -619,13 +609,13 @@ const patternRenderer = (() => {
               if (barX < w - 40) {
                 // 목표 구간 수직선 (민트)
                 ctx.lineWidth = 2.5;
-                ctx.strokeStyle = fz.targetBorder || 'rgba(150,220,200,0.65)';
+                ctx.strokeStyle = fz.targetBorder || KRX_COLORS.FZ_TARGET_BORDER;
                 ctx.beginPath();
                 ctx.moveTo(barX, fz.yEntry);
                 ctx.lineTo(barX, fz.yTarget);
                 ctx.stroke();
-                // 손절 구간 수직선
-                ctx.strokeStyle = fz.stopColor || 'rgba(150,220,200,0.55)';
+                // 손절 구간 수직선 (오렌지 — 목표 민트와 시각 구분)
+                ctx.strokeStyle = fz.stopColor || KRX_COLORS.PTN_STOP;
                 ctx.beginPath();
                 ctx.moveTo(barX, fz.yEntry);
                 ctx.lineTo(barX, fz.yStop);
@@ -646,7 +636,7 @@ const patternRenderer = (() => {
                 ctx.beginPath();
                 _roundRect(ctx, barX + 5, rrY - 7, rrM.width + 8, 14, 3);
                 ctx.fill();
-                ctx.fillStyle = fz.rrRatio >= 1.5 ? 'rgba(150,220,200,0.9)' : 'rgba(150,220,200,0.5)';
+                ctx.fillStyle = fz.rrRatio >= 1.5 ? KRX_COLORS.PTN_BUY : 'rgba(150,220,200,0.5)';
                 ctx.fillText(rrText, barX + 9, rrY);
               }
             }
@@ -654,7 +644,7 @@ const patternRenderer = (() => {
         }
 
         // ── 9. 연장 구조선 (visible 밖 차트 패턴의 넥라인/추세선 → 현재 범위까지 연장) ──
-        //  accent 금색 점선, lineWidth 1.5, dash [6, 4], alpha 0.25
+        //  accent 금색 점선, lineWidth 1.5, dash [8, 4] (LONG), alpha 0.25
         if (d._extendedLines && d._extendedLines.length) {
           d._extendedLines.forEach(line => {
             const pts = line.points;
@@ -667,7 +657,7 @@ const patternRenderer = (() => {
             ctx.globalAlpha = 0.25;
             ctx.strokeStyle = KRX_COLORS.ACCENT;
             ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 4]);
+            ctx.setLineDash([8, 4]);
 
             if (line.isNeckline) {
               // 넥라인: 수평선으로 전체 너비 연장
@@ -922,15 +912,15 @@ const patternRenderer = (() => {
 
         data.polylines.push({
           points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
-          color: 'rgba(150,220,200,0.60)',
+          color: BUY_COLOR,
           width: 1.5,
-          dash: [4, 3],
+          dash: [5, 3],
         });
         data.polylines.push({
           points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
-          color: 'rgba(150,220,200,0.60)',
+          color: BUY_COLOR,
           width: 1.5,
-          dash: [4, 3],
+          dash: [5, 3],
         });
       }
 
@@ -997,15 +987,15 @@ const patternRenderer = (() => {
 
         data.polylines.push({
           points: [{ x: rx, y: ry }, { x: rx, y: ry + rh }],
-          color: 'rgba(150,220,200,0.60)',
+          color: BUY_COLOR,
           width: 1.5,
-          dash: [4, 3],
+          dash: [5, 3],
         });
         data.polylines.push({
           points: [{ x: rx + rw, y: ry }, { x: rx + rw, y: ry + rh }],
-          color: 'rgba(150,220,200,0.60)',
+          color: BUY_COLOR,
           width: 1.5,
-          dash: [4, 3],
+          dash: [5, 3],
         });
       }
 
@@ -1077,7 +1067,7 @@ const patternRenderer = (() => {
         ],
         color: GOLD_COLOR,
         width: 1,
-        dash: [4, 3],
+        dash: [5, 3],
       });
       data.polylines.push({
         points: [
@@ -1086,7 +1076,7 @@ const patternRenderer = (() => {
         ],
         color: GOLD_COLOR,
         width: 1,
-        dash: [4, 3],
+        dash: [5, 3],
       });
 
       // 어깨/머리 극값 찾기 (빈 원 마커용)
@@ -1180,7 +1170,7 @@ const patternRenderer = (() => {
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: 'rgba(150,220,200,0.10)',
+          fill: BUY_FILL,
         });
       }
     }
@@ -1224,7 +1214,7 @@ const patternRenderer = (() => {
       if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
         data.trendAreas.push({
           points: [u1, u2, l2, l1],
-          fill: 'rgba(150,220,200,0.10)',
+          fill: BUY_FILL,
         });
       }
     }
@@ -1334,7 +1324,7 @@ const patternRenderer = (() => {
             y: y,
             color: KRX_COLORS.PTN_STOP,
             width: 1.5,
-            dash: [6, 3],
+            dash: [8, 4],
             marker: 'stop',
             priceLabel: '손절 ' + top.stopLoss.toLocaleString('ko-KR'),
           };
@@ -1349,7 +1339,7 @@ const patternRenderer = (() => {
             y: y,
             color: KRX_COLORS.PTN_TARGET,
             width: 1.5,
-            dash: [6, 3],
+            dash: [8, 4],
             marker: 'target',
             priceLabel: '목표 ' + top.priceTarget.toLocaleString('ko-KR'),
           };
@@ -1382,7 +1372,7 @@ const patternRenderer = (() => {
               y: y,
               color: KRX_COLORS.PTN_INVALID,
               width: 1.2,
-              dash: [3, 3],
+              dash: [5, 3],
               marker: 'invalid',
               priceLabel: '패턴이탈 ' + invalidPrice.toLocaleString('ko-KR'),
             };
@@ -1436,6 +1426,8 @@ const patternRenderer = (() => {
         yEntry: startCoord.y,
         yTarget: null,
         yStop: null,
+        entry: entry,
+        stopPrice: null,
         returnText: null,
         returnColor: null,
         targetFillNear: null,
@@ -1459,9 +1451,9 @@ const patternRenderer = (() => {
 
           // [UX] 목표가 수익률 텍스트: 민트 통일 (패턴 전용 색상 — 차트 UP/DOWN과 무관)
           zone.returnColor = KRX_COLORS.PTN_BUY;
-          zone.targetFillNear = 'rgba(150,220,200,0.22)';
-          zone.targetFillFar  = 'rgba(150,220,200,0.05)';
-          zone.targetBorder   = 'rgba(150,220,200,0.45)';
+          zone.targetFillNear = KRX_COLORS.FZ_TARGET_NEAR;
+          zone.targetFillFar  = KRX_COLORS.FZ_TARGET_FAR;
+          zone.targetBorder   = KRX_COLORS.FZ_TARGET_BORDER;
         }
       }
 
@@ -1470,11 +1462,12 @@ const patternRenderer = (() => {
         const stopCoord = toXY(candles[fzStart].time, p.stopLoss);
         if (stopCoord.y != null) {
           zone.yStop = stopCoord.y;
+          zone.stopPrice = p.stopLoss;
 
           // [UX] 손절존: 오렌지 경고색 (PTN_INVALID #FF6B35 기반 — 목표 민트와 시각 구분)
-          zone.stopFill   = 'rgba(255,107,53,0.06)';
-          zone.stopStripe = 'rgba(255,107,53,0.15)';
-          zone.stopBorder = 'rgba(255,107,53,0.25)';
+          zone.stopFill   = KRX_COLORS.FZ_STOP_NEAR;
+          zone.stopStripe = null;  // v3.1: 사선 줄무늬 제거, 그라데이션으로 대체
+          zone.stopBorder = KRX_COLORS.FZ_STOP_BORDER;
           zone.stopColor  = KRX_COLORS.PTN_STOP;
         }
       }

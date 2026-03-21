@@ -69,7 +69,7 @@ const signalRenderer = (() => {
             ctx.lineTo(dl.x2, dl.y2);
             ctx.strokeStyle = dl.color;
             ctx.lineWidth = dl.width || 1.5;
-            ctx.setLineDash(dl.dash || [6, 3]);
+            ctx.setLineDash(dl.dash || [5, 3]);
             ctx.stroke();
           });
           ctx.globalAlpha = 1;
@@ -432,7 +432,7 @@ const signalRenderer = (() => {
       x1, y1, x2, y2,
       color,
       width: 1.5,
-      dash: [6, 3],
+      dash: [5, 3],
     });
   }
 

@@ -403,7 +403,7 @@ const drawingTools = (() => {
       const lineAlpha = (level === 0 || level === 0.5 || level === 1) ? 0.8 : 0.4;
       ctx.strokeStyle = color;
       ctx.lineWidth = isSelected ? ((level === 0.5) ? 2 : 1.2) : ((level === 0.5) ? 1.2 : 0.8);
-      ctx.setLineDash((level === 0 || level === 1) ? [] : [4, 3]);
+      ctx.setLineDash((level === 0 || level === 1) ? [] : [5, 3]);
       ctx.globalAlpha = alpha * lineAlpha;
       ctx.beginPath();
       ctx.moveTo(0, y);

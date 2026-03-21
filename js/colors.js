@@ -52,8 +52,16 @@ const KRX_COLORS = Object.freeze({
   PTN_SELL_FILL: 'rgba(150,220,200,0.12)',    // [통일] 매도 영역도 민트
   PTN_NEUTRAL:   'rgba(200,200,200,0.55)',    // 중립/도지: 실버
   PTN_STRUCT:    'rgba(200,200,200,0.45)',    // 구조선 (넥라인 등)
-  PTN_STOP:      'rgba(150,220,200,0.55)',    // [통일] 손절: 민트 (라벨로 구분)
+  PTN_STOP:      'rgba(255,107,53,0.55)',     // 손절: 오렌지 (PTN_INVALID 계열 — 목표 민트와 시각 구분)
   PTN_TARGET:    'rgba(150,220,200,0.55)',    // 목표: 민트
+
+  // ── Forecast Zone 색상 (patternRenderer에서 참조) ──
+  FZ_TARGET_NEAR:   'rgba(150,220,200,0.22)',  // 목표 그라데이션 (진입점 쪽)
+  FZ_TARGET_FAR:    'rgba(150,220,200,0.05)',  // 목표 그라데이션 (목표가 쪽)
+  FZ_TARGET_BORDER: 'rgba(150,220,200,0.45)',  // 목표가 점선
+  FZ_STOP_NEAR:     'rgba(255,107,53,0.15)',   // 손절 그라데이션 (진입점 쪽)
+  FZ_STOP_FAR:      'rgba(255,107,53,0.03)',   // 손절 그라데이션 (손절가 쪽)
+  FZ_STOP_BORDER:   'rgba(255,107,53,0.25)',   // 손절가 점선
   PTN_MARKER_BUY:  'rgba(130,210,185,0.8)',   // 민트 마커
   PTN_MARKER_SELL: 'rgba(130,210,185,0.8)',   // [통일] 매도 마커도 민트
 
