@@ -1306,7 +1306,7 @@ html, body {
   display: flex;              /* 데스크톱에서도 표시 (패널 접기/펼치기) */
   position: fixed;
   top: calc(var(--header-h) + var(--toolbar-h) + 60px);
-  right: 0;
+  right: var(--rpanel-w);
   z-index: 91;
   width: 28px; height: 56px;
   align-items: center; justify-content: center;
@@ -1334,7 +1334,7 @@ html, body {
   transform: rotate(180deg);
 }
 #pp-toggle.pp-open {
-  right: min(280px, 80vw);
+  right: calc(var(--rpanel-w) + var(--pattern-panel-w));
 }
 
 /* 패널 뒤 백드롭 (1024px 이하) */
@@ -3049,7 +3049,8 @@ html, body {
   }
 
   /* 패널 토글 버튼 표시 */
-  #pp-toggle { display: flex; }
+  #pp-toggle { display: flex; right: 0; }
+  #pp-toggle.pp-open { right: min(280px, 80vw); }
 
   /* 툴바 반응형: 텍스트 축약 + 패딩 축소 */
   #chart-toolbar .tf-btn { padding: 2px 4px; font-size: 10px; }
