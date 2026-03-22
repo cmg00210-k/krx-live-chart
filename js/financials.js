@@ -785,7 +785,7 @@ function drawOPMSparkline(data) {
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 0.8;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([5, 3]);
     ctx.beginPath();
     ctx.moveTo(paddingL, zeroY);
     ctx.lineTo(w - paddingR, zeroY);
@@ -1739,7 +1739,7 @@ function _drawPERBandChart() {
       var bPer = bands[bdi].per;
       ctx.strokeStyle = bands[bdi].color;
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
+      ctx.setLineDash([5, 3]);
       ctx.beginPath();
       var bandStarted = false;
       for (var si = 0; si < closes.length; si++) {
@@ -1816,7 +1816,7 @@ function _drawPERBandChart() {
 
       ctx.strokeStyle = b.color;
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
+      ctx.setLineDash([5, 3]);
       ctx.beginPath();
       ctx.moveTo(padL, y);
       ctx.lineTo(padL + chartW, y);

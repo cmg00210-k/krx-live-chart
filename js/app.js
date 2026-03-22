@@ -13,7 +13,7 @@ let currentTimeframe = '1d';  // 기본 일봉 (장외에서도 데이터 있음
 let activeIndicators = new Set(['vol']);  // 기본: 거래량만 (pure price chart)
 let chartType = 'candle';
 let patternEnabled = false;  // 기본 OFF: pure price chart → 사용자가 [분석] 클릭 시 활성화
-let ppCollapsed = true;  // 기본 접힘: C열 패턴 패널 접기 (차트 영역 ~240px 확보)
+// ppCollapsed 제거됨 — 통합 탭 패널로 전환 (<=1200px에서 C+D 통합)
 let detectedPatterns = [];
 let detectedSignals = [];
 let signalStats = {};
@@ -522,8 +522,10 @@ function _applyPrefsToUI() {
   var retArea = document.getElementById('return-stats-area');
   if (retArea) retArea.style.display = patternEnabled ? '' : 'none';
 
-  // 패턴 패널 접기 상태 반영 (데스크탑 >1200px에서만 유효)
-  _applyPpCollapsed();
+  // 통합 탭 패널: 활성 탭 반영
+  if (window.matchMedia('(max-width: 1200px)').matches) {
+    _switchRpTab(_rpActiveTab);
+  }
 
   // 지표 체크박스 동기화 (activeIndicators ↔ DOM)
   document.querySelectorAll('#ind-dropdown-menu input[data-ind]').forEach(function (cb) {
@@ -715,9 +717,9 @@ async function _continueInit() {
     patternEnabled = prefs.patternEnabled;
   }
 
-  // 패턴 패널 접기 상태 복원 (기본: 접힘)
-  if (prefs && typeof prefs.ppCollapsed === 'boolean') {
-    ppCollapsed = prefs.ppCollapsed;
+  // 통합 탭 패널: 활성 탭 복원
+  if (prefs && typeof prefs.rpActiveTab === 'string') {
+    _rpActiveTab = prefs.rpActiveTab;
   }
 
   // 시각화 레이어 토글 복원
@@ -2949,81 +2951,125 @@ if (patternBtn) {
 }
 
 
-// ── 패턴 패널 접기/펼치기 ──
-// 데스크탑 (>1200px): #main.pp-col-collapsed로 C열 그리드 0px 전환
-// 모바일 (<=1200px): 기존 슬라이드 오버레이 (pp-visible / pp-open / pp-bd-visible)
+// ── 통합 탭 패널 (<=1200px: C+D 통합) ──
+// >1200px: C열(패턴) + D열(재무) 분리 — 기존 4열 그리드
+// <=1200px: #right-panel 내 탭 바로 재무/패턴 전환, #pp-cards DOM 이동
 
-/** 데스크탑 접기 상태를 DOM에 반영 (init + toggle 양쪽에서 호출) */
-function _applyPpCollapsed() {
-  var mainEl = document.getElementById('main');
-  var ppPanel = document.getElementById('pattern-panel');
-  var ppToggle = document.getElementById('pp-toggle');
-  if (mainEl) mainEl.classList.toggle('pp-col-collapsed', ppCollapsed);
-  if (ppPanel) ppPanel.classList.toggle('pp-collapsed', ppCollapsed);
-  if (ppToggle) {
-    var icon = ppToggle.querySelector('.pp-toggle-icon');
-    if (icon) icon.innerHTML = ppCollapsed ? '&#9654;' : '&#9664;';  // ▶ : ◀
+/** 활성 탭 ID ('fin' | 'pattern') */
+var _rpActiveTab = 'fin';
+
+/** 탭 스크롤 위치 보존 */
+var _tabScrollPos = { fin: 0, pattern: 0 };
+
+/**
+ * #pp-cards DOM 이동: C열 ↔ D열 탭
+ * <=1200px일 때 #pp-cards를 #rp-pattern-content로 이동
+ * >1200px로 복귀 시 원래 #pp-content로 복원
+ */
+function _migratePpCards(toTab) {
+  var ppCards = document.getElementById('pp-cards');
+  if (!ppCards) return;
+  var target = toTab
+    ? document.getElementById('rp-pattern-content')
+    : document.getElementById('pp-content');
+  if (target && ppCards.parentElement !== target) {
+    target.appendChild(ppCards);
   }
 }
 
-(function initPatternPanelToggle() {
-  var ppToggle = document.getElementById('pp-toggle');
-  var ppPanel = document.getElementById('pattern-panel');
-  var ppBackdrop = document.getElementById('pp-backdrop');
-  if (!ppToggle || !ppPanel) return;
+/**
+ * 탭 전환: 인디케이터 슬라이딩 + 콘텐츠 교체
+ */
+function _switchRpTab(tabId) {
+  var tabBar = document.getElementById('rp-tab-bar');
+  if (!tabBar) return;
+  var tabs = tabBar.querySelectorAll('.rp-tab');
+  var indicator = tabBar.querySelector('.rp-tab-indicator');
+  var finContent = document.getElementById('fin-content');
+  var patternContent = document.getElementById('rp-pattern-content');
 
-  var mqNarrow = window.matchMedia('(max-width: 1200px)');
+  // 현재 탭 스크롤 위치 저장
+  var curContent = tabId === 'fin' ? patternContent : finContent;
+  if (curContent) _tabScrollPos[_rpActiveTab] = curContent.scrollTop;
 
-  // ── 모바일 슬라이드 오버레이 (<=1200px) ──
-  function openOverlay() {
-    ppPanel.classList.add('pp-visible');
-    ppToggle.classList.add('pp-open');
-    if (ppBackdrop) ppBackdrop.classList.add('pp-bd-visible');
+  _rpActiveTab = tabId;
+
+  // 탭 버튼 active 상태
+  tabs.forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === tabId);
+  });
+
+  // 콘텐츠 전환
+  if (finContent) finContent.classList.toggle('active', tabId === 'fin');
+  if (patternContent) patternContent.classList.toggle('active', tabId === 'pattern');
+
+  // 인디케이터 슬라이딩
+  if (indicator) {
+    var activeBtn = tabBar.querySelector('.rp-tab.active');
+    if (activeBtn) {
+      indicator.style.left = activeBtn.offsetLeft + 'px';
+      indicator.style.width = activeBtn.offsetWidth + 'px';
+    }
   }
-  function closeOverlay() {
-    ppPanel.classList.remove('pp-visible');
-    ppToggle.classList.remove('pp-open');
-    if (ppBackdrop) ppBackdrop.classList.remove('pp-bd-visible');
+
+  // 새 탭 스크롤 위치 복원
+  var newContent = tabId === 'fin' ? finContent : patternContent;
+  if (newContent) newContent.scrollTop = _tabScrollPos[tabId] || 0;
+}
+
+(function initRpTabPanel() {
+  var tabBar = document.getElementById('rp-tab-bar');
+  if (!tabBar) return;
+
+  var tabs = tabBar.querySelectorAll('.rp-tab');
+  var indicator = tabBar.querySelector('.rp-tab-indicator');
+  var mqTabMode = window.matchMedia('(max-width: 1200px)');
+
+  // 탭 클릭 핸들러
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      _switchRpTab(tab.dataset.tab);
+      _savePrefs({ rpActiveTab: _rpActiveTab });
+    });
+  });
+
+  // 인디케이터 초기 위치
+  function positionIndicator() {
+    if (!indicator) return;
+    var activeBtn = tabBar.querySelector('.rp-tab.active');
+    if (activeBtn) {
+      indicator.style.left = activeBtn.offsetLeft + 'px';
+      indicator.style.width = activeBtn.offsetWidth + 'px';
+    }
   }
 
-  // ── 데스크탑 접기/펼치기 (>1200px) ──
-  function toggleDesktop() {
-    ppCollapsed = !ppCollapsed;
-    _applyPpCollapsed();
-    _savePrefs({ ppCollapsed: ppCollapsed });
-  }
-
-  ppToggle.addEventListener('click', function() {
-    if (mqNarrow.matches) {
-      // 모바일 모드: 슬라이드 오버레이
-      if (ppPanel.classList.contains('pp-visible')) {
-        closeOverlay();
-      } else {
-        openOverlay();
-      }
+  // matchMedia: 탭 모드 전환 시 DOM 이동
+  function onModeChange(e) {
+    if (e.matches) {
+      // <=1200px: 탭 모드 진입 — #pp-cards를 D열 탭으로 이동
+      _migratePpCards(true);
+      requestAnimationFrame(positionIndicator);
     } else {
-      // 데스크탑 모드: 그리드 접기/펼치기
-      toggleDesktop();
+      // >1200px: 데스크탑 복원 — #pp-cards를 C열로 복귀
+      _migratePpCards(false);
+      // 재무 탭을 항상 활성으로 리셋 (D열은 재무 전용)
+      _rpActiveTab = 'fin';
+      _switchRpTab('fin');
     }
-  });
-
-  // 백드롭 클릭 시 닫기 (모바일 오버레이)
-  if (ppBackdrop) {
-    ppBackdrop.addEventListener('click', closeOverlay);
   }
 
-  // 뷰포트가 넓어지면 (1200px 초과) 오버레이 상태 초기화 + 데스크탑 접기 상태 복원
-  mqNarrow.addEventListener('change', function(e) {
-    if (!e.matches) {
-      closeOverlay();
-      _applyPpCollapsed();
-    }
-  });
+  mqTabMode.addEventListener('change', onModeChange);
 
-  // 초기 상태: 데스크탑이면 접기 상태 즉시 적용
-  if (!mqNarrow.matches) {
-    _applyPpCollapsed();
+  // 초기 상태
+  if (mqTabMode.matches) {
+    _migratePpCards(true);
+    requestAnimationFrame(positionIndicator);
   }
+
+  // 리사이즈 시 인디케이터 위치 재계산
+  window.addEventListener('resize', function() {
+    if (mqTabMode.matches) positionIndicator();
+  });
 })();
 
 // ══════════════════════════════════════════════════════

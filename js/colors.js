@@ -14,15 +14,21 @@ const KRX_COLORS = Object.freeze({
   ICH_TENKAN: '#E040FB', ICH_KIJUN: '#00BFA5',
   ICH_SPANA: 'rgba(129,199,132,0.35)', ICH_SPANB: 'rgba(239,154,154,0.35)',
   ICH_CHIKOU: '#78909C',
-  KALMAN: '#76FF03', RSI: '#ff9800',
+  KALMAN: '#76FF03', RSI: '#ff9800', VOL_MA: '#B0BEC5',  // Volume MA: 청회색 (Price MA와 구분)
   MACD_LINE: '#2962ff', MACD_SIGNAL: '#ff9800',
 
   // ── 추가 서브차트 지표 색상 ──
-  STOCH_K: '#ff9800', STOCH_D: '#e91e63',
+  STOCH_K: '#7CB342', STOCH_D: '#e91e63',  // STOCH_K: 연초록 (#ff9800→#7CB342, RSI와 구분)
   CCI: '#26C6DA',
   ADX: '#AB47BC',
   WILLR: '#FF7043',
   ATR_LINE: '#FFA726',
+
+  // ── chart.js 중앙화 색상 (하드코딩 제거) ──
+  ICH_BULL_FILL: 'rgba(129,199,132,0.10)',   // Ichimoku 양운 영역
+  ICH_BEAR_FILL: 'rgba(239,154,154,0.10)',   // Ichimoku 음운 영역
+  BB_FILL:       'rgba(255,140,66,0.06)',     // Bollinger band 영역
+  ADX_REF_LINE:  'rgba(255,255,255,0.2)',     // ADX 25 기준선
 
   // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
   PTN_CANDLE: '#B388FF',

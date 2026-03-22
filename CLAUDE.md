@@ -4,325 +4,90 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-KRX Live Chart (CheeseStock) — a Korean stock market (KOSPI/KOSDAQ) charting web app with 26-pattern technical analysis. No build system, no bundler. Deployed to Cloudflare Pages at `cheesestock.pages.dev` / `cheesestock.co.kr`. Local dev: open `index.html` via HTTP server (VS Code Live Server or `npx serve`).
+KRX Live Chart (CheeseStock) — Korean stock market (KOSPI/KOSDAQ) charting web app with 30+ pattern technical analysis. No build system, no bundler. Deployed to Cloudflare Pages at `cheesestock.pages.dev` / `cheesestock.co.kr`. Local dev: open `index.html` via HTTP server (VS Code Live Server or `npx serve`).
 
 ## Architecture
 
-**No module system, no bundler, no package.json, no test framework.** All JS files use global variables and classes. Script load order in `index.html` is critical — breaking it causes reference errors.
+**No module system, no bundler, no package.json, no test framework.** All JS files use global variables. Script load order in `index.html` is critical — breaking it causes reference errors.
 
-### CDN Dependencies (loaded in `index.html`)
-
-| Library | Version | CDN |
-|---------|---------|-----|
-| TradingView Lightweight Charts | v4.2.3 | unpkg.com |
-| Pretendard (Korean font) | v1.3.9 | jsDelivr (orioncactus/pretendard) |
-| JetBrains Mono (code font) | — | Google Fonts |
-
-### Script Load Order
+### Script Load Order (16 files, all `defer`)
 
 ```
 colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → drawingTools.js → app.js
 ```
 
-All scripts use `defer` — execution order is preserved but download is parallel.
+See `.claude/rules/architecture.md` for file responsibilities table and data flow.
 
-### File Responsibilities (16 JS files)
+### CDN Dependencies
 
-| File | Globals Exported | Role |
-|------|-----------------|------|
-| `js/colors.js` | `KRX_COLORS` | Frozen color constants (30+) — UP/DOWN, PTN_BUY(mint)/PTN_CANDLE(purple)/PTN_SELL, TAG_BG(alpha), indicator colors, PTN_INVALID |
-| `js/data.js` | `PAST_DATA`, `getPastData()`, `getFinancialData()` | Historical financial data; async loader tries `data/financials/{code}.json` first, falls back to hardcoded/seed data |
-| `js/api.js` | `_idb`, `KRX_API_CONFIG`, `ALL_STOCKS`, `DEFAULT_STOCKS`, `TIMEFRAMES`, `dataService` | Data service layer (ws/file/demo, 2,700+ stocks from index.json, L1 memory + L2 IndexedDB + L3 network 3-tier caching, marketCap/sector fields) |
-| `js/realtimeProvider.js` | `realtimeProvider` | WebSocket client for Kiwoom OCX server, demo fallback |
-| `js/indicators.js` | `calcMA()`, `calcEMA()`, `calcBB()`, `calcRSI()`, `calcMACD()`, `calcATR()`, `calcIchimoku()`, `calcKalman()`, `calcHurst()`, `calcWLSRegression()`, `_invertMatrix()`, `IndicatorCache` | 9 technical indicators + WLS regression engine + lazy-evaluation cache with VMA/volRatio |
-| `js/patterns.js` | `patternEngine` | PatternEngine class — 26 patterns (17 candle + 8 chart + S/R) with ATR normalization, quality scoring |
-| `js/signalEngine.js` | `COMPOSITE_SIGNAL_DEFS`, `signalEngine` | SignalEngine class — 16 indicator signals (5 categories) + 6 composite signals (3 tiers) + divergence detection |
-| `js/chart.js` | `chartManager` | ChartManager class using TradingView Lightweight Charts v4.2.3 (indicators delegated to indicators.js) |
-| `js/patternRenderer.js` | `patternRenderer` | ISeriesPrimitive-based HTS-grade Canvas pattern visualization (glows, brackets, trendAreas, polylines, hlines, labels, connectors, forecastZones) with 3-tier visibility filtering and label collision avoidance |
-| `js/signalRenderer.js` | `signalRenderer` | ISeriesPrimitive-based Canvas signal visualization (diamonds, stars, vbands, divergence lines, volume highlight) |
-| `js/backtester.js` | `backtester` | PatternBacktester class — per-pattern N-day return statistics + WLS regression return prediction + backtest panel rendering |
-| `js/analysisWorker.js` | (Web Worker) | Offloads pattern + signal + backtest analysis to Web Worker thread; loads colors/indicators/patterns/signalEngine/backtester via importScripts |
-| `js/sidebar.js` | `sidebarManager` | Collapsible sidebar with KOSPI/KOSDAQ stock lists, virtual scroll (2700+ stocks, ~40 DOM), accordion sections |
-| `js/patternPanel.js` | `PATTERN_ACADEMIC_META`, `renderPatternPanel()`, `renderPatternCards()`, etc. | 27-pattern academic metadata + pattern UI panel (summary bar, history table, return curve, cards) |
-| `js/financials.js` | `updateFinancials()`, `drawFinTrendChart()`, `drawOPMSparkline()`, etc. | Financial panel (D column): PER/PBR/PSR, CAGR, investment score, trend charts, sparklines |
-| `js/drawingTools.js` | `drawingTools` | Left vertical toolbar + ISeriesPrimitive drawing overlay (trendline, hline, vline, rect, fib, eraser) with localStorage persistence per stock |
-| `js/app.js` | (none — side effects only) | State management, UI event binding, initialization, Web Worker orchestration |
+| Library | Version | CDN |
+|---------|---------|-----|
+| TradingView Lightweight Charts | v4.2.3 | unpkg.com |
+| Pretendard (Korean font) | v1.3.9 | jsDelivr |
+| JetBrains Mono | — | Google Fonts |
 
-### File Dependency Graph
+## Core Principles
 
-```
-colors.js ← (no deps — loaded first, provides KRX_COLORS)
-  ↓
-data.js ← (no deps)
-  ↓
-api.js ← data.js (PAST_DATA)
-  ↓
-realtimeProvider.js ← api.js (KRX_API_CONFIG, dataService)
-  ↓
-indicators.js ← (no deps — pure math functions)
-  ↓
-patterns.js ← indicators.js (calcATR for internal _calcATR cross-reference)
-  ↓
-signalEngine.js ← indicators.js (IndicatorCache), patterns.js (patternEngine)
-  ↓
-chart.js ← indicators.js (calcMA, calcEMA, ...), colors.js (KRX_COLORS)
-  ↓
-patternRenderer.js ← chart.js (chartManager.candleSeries)
-  ↓
-signalRenderer.js ← chart.js (chartManager.candleSeries, volumeSeries)
-  ↓
-backtester.js ← patterns.js (patternEngine.analyze), indicators.js (calcATR, calcMA, calcWLSRegression)
-  ↓
-sidebar.js ← api.js (ALL_STOCKS)
-  ↓
-patternPanel.js ← colors.js (KRX_COLORS), backtester.js (backtester)
-  ↓
-financials.js ← data.js (getFinancialData), colors.js (KRX_COLORS), sidebar.js (sidebarManager)
-  ↓
-drawingTools.js ← chart.js (chartManager.candleSeries — ISeriesPrimitive attach)
-  ↓
-app.js ← all of the above (orchestrates everything)
+- **Dual-mode required**: All features must work in both WS (real-time Kiwoom) and file (static JSON) modes. File mode first, WS upgrade in background. Domain detection in `api.js` for `cheesestock.co.kr`/`.pages.dev`→WSS, localhost→`ws://localhost:8765`.
+- **Use `KRX_COLORS.*` or `var(--*)`** for all colors. See `.claude/rules/colors.md`.
+- **Web Worker offloads analysis** — IndicatorCache contains functions (cannot postMessage). Pattern analysis throttled to 3s intervals.
+- **Service Worker** (`sw.js`): Cache name `cheesestock-v2`. Bump `CACHE_NAME` when deploying breaking changes.
 
-analysisWorker.js ← (Web Worker, separate context)
-  importScripts: colors.js, indicators.js, patterns.js, signalEngine.js, backtester.js
-```
+## Key Patterns
 
-### Key Patterns
+- **Chart Lifecycle**: `_resizeMap` tracks ResizeObservers. Sub-charts have explicit `destroyRSI()`/`destroyMACD()`. Time scale sync via `_syncUnsubs` + `_rebuildSync()`.
+- **Drawing tools active** → disable `handleScroll.pressedMouseMove` AND `handleScale.axisPressedMouseMove`.
+- **Rendering**: See `.claude/rules/rendering.md` for 9 draw layers, ISeriesPrimitive reconnection, density limits.
+- **Caching**: 3 layers — IndicatorCache (lazy-eval), chart.js `_indicatorCache` (key: length+time+close), Worker `_analyzeCache` (fingerprint).
 
-**Chart Lifecycle & Memory**
-- **ChartManager** uses `_resizeMap` (Map) to track ResizeObservers per container, preventing memory leaks.
-- **Sub-charts** (RSI, MACD) have explicit `destroyRSI()` / `destroyMACD()` methods that clean up observers and rebuild time scale sync.
-- **Time scale sync** across main/RSI/MACD charts uses `_syncUnsubs` array; `_rebuildSync()` unsubscribes all before re-subscribing.
-- **Drawing tools**: When active, `handleScroll.pressedMouseMove` AND `handleScale.axisPressedMouseMove` must be disabled, or LWC consumes click events for scrolling instead of forwarding to `subscribeClick`.
+## Development
 
-**Rendering (ISeriesPrimitive Canvas2D)**
-- **PatternRenderer**: 9 draw layers (glows → brackets → trendAreas → polylines → hlines → connectors → labels → forecastZones → extendedLines). Max 5 patterns (`MAX_PATTERNS`), 3-tier visibility filtering. Must re-attach primitive when `candleSeries` is recreated (tracked via `_attachedSeries`).
-- **SignalRenderer**: Dual PaneViews (bg `zOrder='bottom'` for vbands, fg `zOrder='top'` for diamonds/stars/divlines). Also highlights volumeSeries colors for breakout bars.
-- **Dual Color System**: Candle patterns = `PTN_CANDLE` (purple `#B388FF`), chart patterns = `PTN_BUY` (mint). Forecast zones are mint-only. Pattern colors are distinct from main UP/DOWN colors.
-- **Visualization Toggles** (`vizToggles` in app.js): 4-category filter (candle/chart/signal/forecast). Analysis engine runs regardless; filtering at render time via `_filterPatternsForViz()`. Centralized render via `_renderOverlays()`.
+No build step:
+1. `python scripts/download_ohlcv.py` (first time, ~40 min)
+2. `index.html` via HTTP server (`npx serve -l 5500 -s`)
+3. Without `data/` folder, demo mode runs automatically
 
-**Caching (3 layers)**
-- **IndicatorCache** (indicators.js): Lazy evaluation — each indicator computed only on first access, cached until `setCandles()` or `invalidate()`.
-- **Indicator Cache** (chart.js `_indicatorCache`): Keyed by `candles.length + lastTime + lastClose`. Prevents redundant O(n) recomputation on repeated `updateMain()` calls.
-- **Worker Analysis Cache** (analysisWorker.js `_analyzeCache`): Caches pattern/signal results by candle fingerprint. Drag-repeat and rapid stock re-selection skip re-analysis.
+Verification checkpoints (F12 Console):
+- `[KRX] index.json 로드 완료: N종목` — data layer initialized
+- `[Worker] 분석 Worker 초기화 완료` — Web Worker ready
+- Toast `N개 패턴 감지됨` — pattern pipeline working end-to-end
 
-**Worker & Analysis**
-- **Web Worker** (`analysisWorker.js`) offloads pattern + signal + backtest off main thread. Messages use `version` field for stale-result rejection. Uses `importScripts()` — only loads non-DOM files.
-- **IndicatorCache objects contain functions** — cannot be sent via `postMessage` (structured clone fails).
-- **Pattern analysis** throttled to 3-second intervals (`_lastPatternAnalysis` in app.js).
-- **Pattern button** uses class `.pattern-btn`, excluded from indicator handlers via `.ind-btn:not(.pattern-btn)`.
+See `.claude/rules/scripts.md` for all script commands and deployment.
 
-**UI & Layout**
-- **index.html**: 4-column grid (A=sidebar, B=chart+return stats, C=pattern panel, D=financial panel). Responsive breakpoints: 1200px, 1024px, 768px, 480px.
-- **Virtual Scroll** (sidebar.js): ~40 DOM elements for 2700+ stocks. `.sb-body` scroll container; `_renderVisibleItems()` via rAF throttling.
-- **KRX_COLORS** (colors.js) centralizes all color constants. Never hardcode hex — use `KRX_COLORS.*` or CSS `var(--*)`.
+## WebSocket Server (Kiwoom OCX)
 
-**Service Worker** (`sw.js`): Cache name `cheesestock-v2`. Cache-First for static assets, Network-First for data files, stale-while-revalidate for CDN. WebSocket not intercepted. **Bump `CACHE_NAME` version when deploying breaking changes to force cache refresh.**
+Start: `server\start_server.bat`. Full setup in `docs/developer-setup.md`.
+- **KNOWSTOCK와 동시 실행 불가** — Kiwoom allows only 1 concurrent connection.
+- **Respect single login limit** — Kiwoom locks accounts after 5 failed passwords (3-4 day unlock). Server has 7-layer protection. See `server/ws_server.py`.
 
-### Data Flow
-
-```
-app.js init() → dataService.initFromIndex() → loads data/index.json → populates ALL_STOCKS
-
-dataService.getCandles(stock, timeframe)
-  → file mode + 1d: fetch data/{market}/{code}.json
-  → file mode + intraday: fetch data/{market}/{code}_{timeframe}.json, demo fallback if missing
-  → ws mode + connected: 서버 subscribe 응답 (서버 측 Kiwoom TR, 일봉 pykrx 폴백)
-  → ws mode + disconnected: 일봉=file 폴백, 분봉=서버 재연결 대기
-  → candles[] (OHLCV array)
-
-Analysis path (main thread or Web Worker):
-  → patternEngine.analyze(candles)           → patterns[] (26 types)
-  → signalEngine.analyze(candles, patterns)  → { signals[], cache, stats }
-  → backtester.backtestAll(candles)          → backtestResults[]
-
-Rendering path:
-  → chartManager.updateMain(candles, chartType, indicators, patterns, indParams)
-    → _renderOverlays():
-      → _filterPatternsForViz(detectedPatterns)  // vizToggles filter
-      → patternRenderer.render(chartManager, candles, chartType, filteredPatterns)
-      → signalRenderer.render(chartManager, candles, filteredSignals)
-  → chartManager.updateRSI(candles) / updateMACD(candles) / etc.
-```
-
-### Data Modes
-
-- **ws** (default): Kiwoom OCX WebSocket 서버 연결. `server/ws_server.py`가 PyQt5 + QAxWidget으로 Kiwoom OpenAPI+ OCX에 직접 연결. 실시간 체결(OnReceiveRealData), 일봉/분봉 TR 조회. `server/start_server.bat`로 서버 시작.
-- **file**: Loads real OHLCV from `data/kospi/`, `data/kosdaq/` JSON files. Daily from local JSON, intraday from `{code}_{timeframe}.json` (generated by `generate_intraday.py`). Falls back to daily data if intraday file missing. Stock list from `data/index.json` (~2,733 stocks).
-- **demo**: Deterministic simulated data using stock code hash as random seed.
-
-`data/` folder is partially in `.gitignore`. Tracked in git: `data/index.json` (2,733 stock list), `data/kospi/*.json` and `data/kosdaq/*.json` (top 55 stocks daily + intraday for 6 timeframes). Full data (~2,736 stocks) generated locally by `scripts/download_ohlcv.py` and deployed to Cloudflare Pages via `wrangler pages deploy`.
-
-### WebSocket Server (Kiwoom OCX)
-
-```
-Architecture:
-  Main Thread:  PyQt5 QApplication + Kiwoom OCX (QAxWidget)
-  WS Thread:    asyncio + websockets server (port 8765)
-  Communication: queue.Queue (WS → Main), broadcast() (Main → WS)
-```
-
-Requirements:
-- Python 3.9 32-bit (default: `%LOCALAPPDATA%\Programs\Python\Python39-32`, override: `KRX_PYTHON32` env var)
-- PyQt5 (32-bit)
-- Kiwoom OpenAPI+ OCX registered (`C:\OpenAPI\khopenapi.ocx`)
-- Kiwoom HTS logged in
-
-```bash
-server\start_server.bat
-```
-
-The server provides:
-- **WebSocket** `ws://localhost:8765` — subscribe/unsubscribe protocol for real-time candle + tick data
-- KOSPI/KOSDAQ index real-time via OnReceiveRealData (업종지수)
-- DataProvider abstraction: KiwoomProvider (current) / KoscomProvider (stub)
-
-**KNOWSTOCK(kiwoom_project)와 동시 실행 불가** — Kiwoom 동시 접속 1개 제한. Screen numbers 2000~2999 사용 (KNOWSTOCK과 겹치지 않음).
-
-**Kiwoom Login Safety (7-layer protection)**: Kiwoom locks accounts after 5 failed passwords (3-4 day unlock). The server enforces: max 2 login attempts per session, 60s cooldown between attempts, immediate lockout on password error, `.login_guard.json` persists cumulative 3-attempt limit across restarts, browser-side WS reconnect cap at 20 attempts. **Never add code that calls `CommConnect()` in a loop.**
-
-## Scripts
-
-### Stock Data (OHLCV)
-
-```bash
-python scripts/download_ohlcv.py              # All stocks, 1 year (default)
-python scripts/download_ohlcv.py --years 3    # 3 years
-python scripts/download_ohlcv.py --market KOSPI  # KOSPI only
-python scripts/download_ohlcv.py --code 005930   # Single stock
-python scripts/download_ohlcv.py --cron        # Unattended mode (log to file, exit codes)
-```
-
-Requires: `pip install pykrx FinanceDataReader`. Output: `data/kospi/*.json`, `data/kosdaq/*.json`, `data/index.json`.
-
-### Intraday Candles (Interpolation)
-
-```bash
-python scripts/generate_intraday.py                    # All stocks, all timeframes
-python scripts/generate_intraday.py --code 005930      # Single stock
-python scripts/generate_intraday.py --timeframe 5m     # 5-minute candles only
-```
-
-Generates intraday candle JSON from daily OHLCV using Brownian bridge interpolation. Supported timeframes: `1m`, `5m`, `15m`, `30m`, `1h`. Uses `calendar.timegm()` for UTC timestamp generation (KST-safe). Output: `data/{market}/{code}_{timeframe}.json`.
-
-### Financial Statements (DART)
-
-```bash
-python scripts/download_financials.py --api-key YOUR_DART_KEY          # All stocks
-python scripts/download_financials.py --api-key YOUR_KEY --code 005930 # Single stock
-python scripts/download_financials.py --demo                           # No API key (dummy data)
-```
-
-Requires: `pip install requests`. Output: `data/financials/{code}.json`. DART API key: register free at https://opendart.fss.or.kr/. Without `data/financials/`, the app uses hardcoded data (Samsung/SK Hynix) or seed-based dummy data.
-
-### Other Scripts
-
-```bash
-python scripts/download_sector.py          # Sector fundamental data
-python scripts/update_index_prices.py      # Update index.json prices offline
-```
-
-### Daily Update / Deploy
-
-```bash
-scripts\daily_update.bat    # OHLCV download → intraday gen → index price update
-scripts\daily_deploy.bat    # daily_update + wrangler deploy to Cloudflare Pages
-```
-
-Windows Task Scheduler: `CheeseStock_HourlyDeploy` runs `daily_deploy.bat` every hour 09:30-16:05 Mon-Fri.
-
-### One-Click Launch
-
-```bash
-CheeseStock.bat    # Starts Kiwoom WS server + opens browser (requires Node.js for HTTP server)
-```
-
-## Deployment (Cloudflare Pages)
-
-Static files deployed to Cloudflare Pages (`cheesestock.pages.dev`). WebSocket relay runs on seth1's PC via Cloudflare Tunnel (`wss://ws.cheesestock.co.kr/ws`).
-
-```bash
-# Manual deploy (from project root)
-wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message="deploy"
-```
-
-### Dual-Mode Architecture
-
-- **실시간 (WS)**: seth1's Kiwoom server ON → all users get real-time data via WS broadcast
-- **파일 (file)**: seth1's server OFF → static JSON from Cloudflare CDN (직전 영업일까지)
-- Mode auto-detection: `api.js` probes `wss://ws.cheesestock.co.kr/ws` (non-blocking, 3s timeout). File mode first, WS mode upgrade in background.
-- Domain detection: `api.js` checks `window.location.hostname` for `cheesestock.co.kr` / `.pages.dev` → sets WSS URL automatically. localhost → `ws://localhost:8765`.
-- **All features must work in both WS and file modes.** Never create server-dependent features without file-mode fallback.
-
-## Dual Developer Setup
-
-Two developers each run their own Kiwoom OCX server independently:
-- **seth1**: Production server (Cloudflare Tunnel → `wss://ws.cheesestock.co.kr`)
-- **최민규**: Local development (`ws://localhost:8765`)
-- Both have independent Kiwoom accounts (동일 계정 동시 로그인 불가)
-- DART API keys: each developer registers their own at https://opendart.fss.or.kr/
-- Python path: set `KRX_PYTHON32` env var if not default location (see `docs/developer-setup.md`)
-- Git workflow: feature branches → merge to main
-
-## Collaboration Rules (from GUIDE.md)
+## Collaboration
 
 - **chart.js + patternRenderer.js** = technical analysis owner
 - **css/style.css + index.html** = UI/design owner
 - **app.js** = shared — coordinate before editing
-- Never `git add .` — stage specific files only
-- Never `git push --force`
+- Stage specific files only (`git add js/file.js`). Use standard push with upstream tracking.
 - Always `git pull` before starting work
-
-## Color System (한국식)
-
-Centralized in `js/colors.js` as `KRX_COLORS` frozen object. CSS variables in `:root`.
-
-| Purpose | JS Constant | CSS Variable | Hex |
-|---------|------------|-------------|-----|
-| 상승/매수 | `UP` | `--up` | `#E05050` (빨강) |
-| 하락/매도 | `DOWN` | `--down` | `#5086DC` (파랑) |
-| 중립 | `NEUTRAL` | `--neutral` | `#ffeb3b` |
-| 구조선/accent | `ACCENT` | `--accent` | `#A08830` |
-| 재무 양호 | — | `--fin-good` | `#6BCB77` (초록) |
-| 차트 패턴 | `PTN_BUY` | — | mint `rgba(150,220,200)` |
-| 캔들 패턴 | `PTN_CANDLE` | — | purple `#B388FF` |
-| 태그 배경 | `TAG_BG(alpha)` | — | `rgba(19,23,34,alpha)` |
-| 패턴이탈선 | `PTN_INVALID` | — | `#FF6B35` (오렌지) |
-
-**Rule**: 차트 좌측 = 빨강/파랑(방향), 재무 우측 = 초록/파랑(수준). 패턴 = 민트(차트)/보라(캔들). Never hardcode hex — always use `KRX_COLORS.*` or `var(--*)`.
-
-## Reference Documents
-
-- **`core_data/`** — 17 academic markdown documents (Korean with English terms) covering math, statistics, econophysics, finance theory, pattern algorithms, game theory, optimal control, RL, EVT, information geometry, and pattern references. Documentation only — not loaded at runtime.
-- **`pattern_impl/`** — 5 implementation bridge documents: theory→code mapping, 42-pattern census, composite signal design, line-by-line code location mapping, and pipeline analysis.
-- **`docs/`** — Developer setup guide, deployment guide, QA checklist (100+ items), ambiguous items log.
-
-## Development
-
-No build step. To develop:
-1. `python scripts/download_ohlcv.py` (first time — downloads stock data, ~40 min)
-2. Open `index.html` via HTTP server (VS Code Live Server or `npx serve -l 5500 -s`)
-3. Select **일봉** timeframe to see real data; intraday uses interpolated or demo data
-4. Check F12 Console for `[KRX] index.json 로드 완료: N종목` message
-5. Without `data/` folder, demo mode runs automatically with simulated data
 
 ## Timezone (KST = UTC+9)
 
-All timestamps must be KST-aware:
-- **Daily candles**: `"YYYY-MM-DD"` strings — no timezone issue
-- **Intraday candles**: Unix timestamps where 09:00 KST = 00:00 UTC. `generate_intraday.py` uses `calendar.timegm()` (NOT `datetime.timestamp()` which double-subtracts on KST machines)
-- **chart.js `tickMarkFormatter`**: Converts UTC timestamps to KST for X-axis labels. Handles string dates, businessDay objects, and Unix timestamps with try/catch fallback.
-- **chart.js `timeFormatter`**: Same KST conversion for crosshair tooltip.
-- **Market hours**: 09:00-15:30 KST (pre-market 08:00, after-hours 15:30-16:00)
+- Daily candles: `"YYYY-MM-DD"` strings. Intraday: Unix timestamps (09:00 KST = 00:00 UTC).
+- `generate_intraday.py` uses `calendar.timegm()` (NOT `datetime.timestamp()`).
+- `tickMarkFormatter` and `timeFormatter` must handle both string dates and timestamps.
+- Market hours: 09:00-15:30 KST.
 
 ## Common Pitfalls
 
-- Adding `<script>` tags out of order breaks everything — see load order above
-- **`file://` protocol causes CORS errors** — `data/index.json` fetch fails. Always use HTTP server
-- Sub-chart labels must be **outside** chart containers (Lightweight Charts takes over container DOM)
-- Markers in line chart mode must be set on `indicatorSeries._priceLine`, not `candleSeries`
-- `calcEMA([])` and `calcMACD()` with empty valid data need early returns to avoid NaN propagation
-- File mode candles use `"YYYY-MM-DD"` string dates (not Unix timestamps). **Both `tickMarkFormatter` and `timeFormatter` must handle string dates.**
-- **Canvas DPR**: All canvas drawing (financials.js) must call `ctx.setTransform(1,0,0,1,0,0)` before `ctx.scale(dpr,dpr)` to prevent DPR accumulation
-- **Wrangler deploy**: `--commit-message` must be ASCII — Korean causes Cloudflare API error
-- **bat files**: Must use ASCII-only text — Korean breaks on Windows cmd.exe (CP949 vs UTF-8)
+- Serve via HTTP — `file://` causes CORS errors on `data/index.json`
+- Sub-chart labels must be outside chart containers (LWC takes over container DOM)
+- Line chart markers go on `indicatorSeries._priceLine`, not `candleSeries`
+- `calcEMA([])`/`calcMACD()` with empty data need early returns to avoid NaN
+- Both `tickMarkFormatter` and `timeFormatter` must handle `"YYYY-MM-DD"` strings
+- Canvas DPR: `ctx.setTransform(1,0,0,1,0,0)` before `ctx.scale(dpr,dpr)`
+- Wrangler `--commit-message` and `.bat` files: ASCII-only (Korean breaks both)
+
+## Reference
+
+- `.claude/rules/` — Detailed rules for architecture, colors, rendering, patterns, financial, scripts, UI layout
+- `core_data/` — 17 academic documents (math, finance theory, pattern algorithms). Not loaded at runtime.
+- `pattern_impl/` — 5 implementation bridge documents (theory→code mapping).
+- `docs/` — Developer setup, QA checklist (100+ items). Note: `docs/deployment.md` describes old Lightsail setup — current deployment uses Cloudflare Pages.

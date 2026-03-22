@@ -70,10 +70,6 @@
     </div>
   </div>
 
-  <!-- 패턴 패널 토글 버튼 + 백드롭 (데스크탑: 접기/펼치기, 모바일: 슬라이드 오버레이) -->
-  <button id="pp-toggle" class="pp-toggle-btn" title="패턴 패널"><span class="pp-toggle-icon">&#9654;</span></button>
-  <div id="pp-backdrop"></div>
-
   <!-- 모바일 사이드바 백드롭 (768px 이하) -->
   <div id="sb-backdrop"></div>
 
@@ -407,10 +403,20 @@
       </div>
     </div>
 
-    <!-- ── D열: 주요재무지표 (확대) ── -->
+    <!-- ── D열: 주요재무지표 (확대) / <=1200px에서 C+D 통합 탭 패널 ── -->
     <div id="right-panel">
+      <!-- 기존 헤더: >1200px에서만 표시 (탭 없을 때) -->
       <div class="rp-header">주요재무지표<span id="fin-source-badge" class="fin-source-badge" style="display:none"></span></div>
-      <div id="fin-content">
+
+      <!-- 탭 바: <=1200px에서 표시 -->
+      <div class="rp-tab-bar" id="rp-tab-bar">
+        <button class="rp-tab active" data-tab="fin">재무</button>
+        <button class="rp-tab" data-tab="pattern">패턴</button>
+        <div class="rp-tab-indicator"></div>
+      </div>
+
+      <!-- 재무 탭 콘텐츠 -->
+      <div id="fin-content" class="rp-tab-content active">
         <!-- [FIX-8] 시드 데이터 경고 배너 -->
         <div id="fin-seed-warning" style="display:none; padding:3px 8px; margin:0 0 4px 0; background:rgba(255,180,50,0.12); border:1px solid rgba(255,180,50,0.25); border-radius:4px; font-size:10px; color:rgba(255,180,50,0.7); text-align:center;">추정치 데이터 (DART 미연동)</div>
         <!-- 기간 표시 -->
@@ -575,6 +581,10 @@
           </div>
           <div class="fin-source">출처: DART 전자공시</div>
         </div>
+      </div>
+
+      <!-- 패턴 탭 콘텐츠: <=1200px에서 JS가 #pp-cards를 여기로 이동 -->
+      <div id="rp-pattern-content" class="rp-tab-content">
       </div>
     </div>
 

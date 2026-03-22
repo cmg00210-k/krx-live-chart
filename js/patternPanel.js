@@ -757,7 +757,7 @@ function drawReturnCurve(curvesData) {
   const zeroY = toY(0);
   ctx.strokeStyle = 'rgba(255,255,255,0.12)';
   ctx.lineWidth = 0.5;
-  ctx.setLineDash([3, 3]);
+  ctx.setLineDash([5, 3]);
   ctx.beginPath();
   ctx.moveTo(pad.left, zeroY);
   ctx.lineTo(w - pad.right, zeroY);

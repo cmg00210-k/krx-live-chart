@@ -688,7 +688,7 @@ class ChartManager {
       if (!this._volMaSeries) {
         this._volMaSeries = this.mainChart.addLineSeries({
           priceScaleId: 'vol',
-          color: KRX_COLORS.MA_MID,
+          color: KRX_COLORS.VOL_MA,              // 청회색 (Price MA20 노랑과 구분)
           lineWidth: 1,
           lineStyle: 2,                          // Dashed (점선)
           priceLineVisible: false,
@@ -781,7 +781,7 @@ class ChartManager {
       // 강세 구름 (초록 틴트)
       if (!this.indicatorSeries._ichBullCeil) {
         this.indicatorSeries._ichBullCeil = this.mainChart.addAreaSeries({
-          topColor: 'rgba(129,199,132,0.10)',
+          topColor: KRX_COLORS.ICH_BULL_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
           lineWidth: 0,
@@ -807,7 +807,7 @@ class ChartManager {
       // 약세 구름 (빨강 틴트)
       if (!this.indicatorSeries._ichBearCeil) {
         this.indicatorSeries._ichBearCeil = this.mainChart.addAreaSeries({
-          topColor: 'rgba(239,154,154,0.10)',
+          topColor: KRX_COLORS.ICH_BEAR_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
           lineWidth: 0,
@@ -874,7 +874,7 @@ class ChartManager {
       }
       if (!this.indicatorSeries._bbCeil) {
         this.indicatorSeries._bbCeil = this.mainChart.addAreaSeries({
-          topColor: 'rgba(255,140,66,0.06)',
+          topColor: KRX_COLORS.BB_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
           lineWidth: 0,
@@ -1295,8 +1295,8 @@ class ChartManager {
     this.adxSeries = this.adxChart.addLineSeries({ color: KRX_COLORS.ADX, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
     this.adxPlusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
     this.adxMinusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
-    // ADX 25선: rgba(255,255,255,0.2) — KRX_COLORS에 정확한 대응 없음, 유지
-    this.adxSeries.createPriceLine({ price: 25, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
+    // ADX 25선
+    this.adxSeries.createPriceLine({ price: 25, color: KRX_COLORS.ADX_REF_LINE, lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.adxChart);
     this._rebuildSync();
     return this.adxChart;

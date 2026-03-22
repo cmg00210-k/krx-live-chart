@@ -42,7 +42,7 @@ const patternRenderer = (() => {
   // ── 캔들 패턴 전용 색상 (연보라 — 차트 패턴 민트와 구분) ──
   const CANDLE_COLOR = KRX_COLORS.PTN_CANDLE;
   const CANDLE_FILL  = KRX_COLORS.PTN_CANDLE_FILL;
-  const CANDLE_NEUTRAL = 'rgba(200,200,200,0.55)';
+  const CANDLE_NEUTRAL = KRX_COLORS.PTN_NEUTRAL;  // rgba(200,200,200,0.55)
 
   // ── 패턴 유형별 분류 ──
   const ZONE_PATTERNS = {
@@ -68,6 +68,9 @@ const patternRenderer = (() => {
     doji:           { key: 'close', color: CANDLE_NEUTRAL, direction: 'neutral' },
     dragonflyDoji:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
     gravestoneDoji: { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
+    bullishMarubozu:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    bearishMarubozu:  { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
+    spinningTop:      { key: 'close', color: CANDLE_NEUTRAL, direction: 'neutral' },
   };
 
   const CHART_PATTERNS = new Set([
@@ -87,6 +90,7 @@ const patternRenderer = (() => {
     'threeWhiteSoldiers', 'threeBlackCrows',
     'piercingLine', 'darkCloud',
     'tweezerBottom', 'tweezerTop',
+    'bullishMarubozu', 'bearishMarubozu', 'spinningTop',
   ]);
 
   // ── 패턴 한글 이름 (간결) ──
@@ -106,6 +110,8 @@ const patternRenderer = (() => {
     headAndShoulders: '머리어깨형', inverseHeadAndShoulders: '역머리어깨형',
     ascendingTriangle: '상승삼각형', descendingTriangle: '하락삼각형',
     risingWedge: '상승쐐기', fallingWedge: '하락쐐기',
+    bullishMarubozu: '양봉마루보주', bearishMarubozu: '음봉마루보주',
+    spinningTop: '팽이형',
     symmetricTriangle: '대칭삼각형', bullishFlag: '상승깃발',
     bearishFlag: '하락깃발', cupAndHandle: '컵핸들',
     channel: '채널', rectangle: '박스권',
@@ -117,13 +123,13 @@ const patternRenderer = (() => {
     'morningStar', 'threeWhiteSoldiers', 'doubleBottom',
     'inverseHeadAndShoulders', 'fallingWedge', 'bullishFlag',
     'ascendingTriangle', 'cupAndHandle', 'piercingLine',
-    'dragonflyDoji', 'tweezerBottom',
+    'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
   ]);
   const BEARISH_TYPES = new Set([
     'hangingMan', 'shootingStar', 'bearishEngulfing', 'bearishHarami',
     'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
     'risingWedge', 'bearishFlag', 'descendingTriangle',
-    'darkCloud', 'gravestoneDoji', 'tweezerTop',
+    'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
   ]);
 
 
@@ -531,31 +537,22 @@ const patternRenderer = (() => {
                 ctx.fillStyle = tGrad;
                 ctx.fillRect(zoneX, tY, zoneW, tH);
 
-                // 목표가 도달 점선 (가장자리)
-                ctx.strokeStyle = fz.targetBorder || KRX_COLORS.FZ_TARGET_BORDER;
-                ctx.lineWidth = 0.8;
-                ctx.setLineDash([5, 3]);
-                ctx.beginPath();
-                ctx.moveTo(zoneX, fz.yTarget);
-                ctx.lineTo(zoneX + zoneW, fz.yTarget);
-                ctx.stroke();
-                ctx.setLineDash([]);
+                // 목표가 점선 제거됨 — hline(Layer 5)이 동일 Y에 이미 그림
 
-                // 수익률 텍스트 (영역 중앙)
+                // 수익률 텍스트 (영역 중앙, 퍼센트만 표시)
                 if (fz.returnText) {
                   const retX = zoneX + zoneW / 2;
                   const retY = (fz.yEntry + fz.yTarget) / 2;
                   ctx.font = "700 11px 'Pretendard', sans-serif";
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
-                  // 텍스트 배경 (가독성)
-                  const rtm = ctx.measureText('목표 ' + fz.returnText);
+                  const rtm = ctx.measureText(fz.returnText);
                   ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
                   ctx.beginPath();
                   _roundRect(ctx, retX - rtm.width / 2 - 4, retY - 7, rtm.width + 8, 14, 3);
                   ctx.fill();
                   ctx.fillStyle = fz.returnColor || KRX_COLORS.PTN_BUY;
-                  ctx.fillText('목표 ' + fz.returnText, retX, retY);
+                  ctx.fillText(fz.returnText, retX, retY);
                 }
               }
             }
@@ -572,34 +569,28 @@ const patternRenderer = (() => {
                 ctx.fillStyle = stopGrad;
                 ctx.fillRect(zoneX, sY, zoneW, sH);
 
-                // 손절가 점선
-                ctx.strokeStyle = fz.stopBorder || KRX_COLORS.FZ_STOP_BORDER;
-                ctx.lineWidth = 0.8;
-                ctx.setLineDash([5, 3]);
-                ctx.beginPath();
-                ctx.moveTo(zoneX, fz.yStop);
-                ctx.lineTo(zoneX + zoneW, fz.yStop);
-                ctx.stroke();
-                ctx.setLineDash([]);
+                // 손절가 점선 제거됨 — hline(Layer 5)이 동일 Y에 이미 그림
 
-                // [UX] 손절 텍스트 라벨 (목표 라벨과 대칭 — 영역 중앙, 11px, 700)
+                // 손절 텍스트 라벨 (퍼센트만 표시)
                 if (fz.stopColor) {
                   const stopPct = (fz.entry && fz.stopPrice)
                     ? (Math.abs(fz.entry - fz.stopPrice) / fz.entry * 100).toFixed(1)
                     : null;
-                  const slText = stopPct ? '손절 -' + stopPct + '%' : '손절';
-                  const slX = zoneX + zoneW / 2;
-                  const slY = (fz.yEntry + fz.yStop) / 2;
-                  ctx.font = "700 11px 'Pretendard', sans-serif";
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  const slm = ctx.measureText(slText);
-                  ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
-                  ctx.beginPath();
-                  _roundRect(ctx, slX - slm.width / 2 - 4, slY - 7, slm.width + 8, 14, 3);
-                  ctx.fill();
-                  ctx.fillStyle = fz.stopColor;
-                  ctx.fillText(slText, slX, slY);
+                  const slText = stopPct ? '-' + stopPct + '%' : '';
+                  if (slText) {
+                    const slX = zoneX + zoneW / 2;
+                    const slY = (fz.yEntry + fz.yStop) / 2;
+                    ctx.font = "700 11px 'Pretendard', sans-serif";
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    const slm = ctx.measureText(slText);
+                    ctx.fillStyle = KRX_COLORS.TAG_BG(0.75);
+                    ctx.beginPath();
+                    _roundRect(ctx, slX - slm.width / 2 - 4, slY - 7, slm.width + 8, 14, 3);
+                    ctx.fill();
+                    ctx.fillStyle = fz.stopColor;
+                    ctx.fillText(slText, slX, slY);
+                  }
                 }
               }
             }
@@ -654,7 +645,7 @@ const patternRenderer = (() => {
             const p2 = pts[pts.length - 1];
 
             ctx.save();
-            ctx.globalAlpha = 0.25;
+            ctx.globalAlpha = 0.35;  // 0.25→0.35: 구조선 가시성 향상 (Kiwoom 0.35 기준)
             ctx.strokeStyle = KRX_COLORS.ACCENT;
             ctx.lineWidth = 1.5;
             ctx.setLineDash([8, 4]);
@@ -1326,7 +1317,7 @@ const patternRenderer = (() => {
             width: 1.5,
             dash: [8, 4],
             marker: 'stop',
-            priceLabel: '손절 ' + top.stopLoss.toLocaleString('ko-KR'),
+            priceLabel: top.stopLoss.toLocaleString('ko-KR'),
           };
           if (x1 != null) hl.x1 = x1;
           hlines.push(hl);
@@ -1341,7 +1332,7 @@ const patternRenderer = (() => {
             width: 1.5,
             dash: [8, 4],
             marker: 'target',
-            priceLabel: '목표 ' + top.priceTarget.toLocaleString('ko-KR'),
+            priceLabel: top.priceTarget.toLocaleString('ko-KR'),
           };
           if (x1 != null) hl.x1 = x1;
           hlines.push(hl);

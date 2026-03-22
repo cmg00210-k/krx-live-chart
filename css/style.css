@@ -1275,99 +1275,6 @@ html, body {
   min-width: 0;  /* [FIX] grid 자식 오버플로우 방지 — C열 콘텐츠가 그리드 밀어내기 차단 */
 }
 
-/* ── 패턴 패널 토글 버튼 (1200px 이하에서만 표시) ── */
-#pp-toggle {
-  display: flex;              /* 데스크톱에서도 표시 (패널 접기/펼치기) */
-  position: fixed;
-  top: calc(var(--header-h) + var(--toolbar-h) + 60px);
-  right: var(--rpanel-w);
-  z-index: 91;
-  width: 28px; height: 56px;
-  align-items: center; justify-content: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: var(--radius) 0 0 var(--radius);
-  color: var(--accent);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background var(--transition), right .25s ease;
-  box-shadow: -2px 0 8px rgba(0,0,0,0.3);
-}
-#pp-toggle:hover {
-  background: var(--bg-elevated);
-}
-#pp-toggle .pp-toggle-icon {
-  display: inline-block;
-  transition: transform .25s ease;
-  font-size: 11px;
-  line-height: 1;
-}
-/* 패널 열렸을 때 화살표 방향 전환 + 패널 너비만큼 왼쪽으로 이동 */
-#pp-toggle.pp-open .pp-toggle-icon {
-  transform: rotate(180deg);
-}
-#pp-toggle.pp-open {
-  right: calc(var(--rpanel-w) + var(--pattern-panel-w));
-}
-
-/* 패널 뒤 백드롭 (1024px 이하) */
-#pp-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 89;
-  background: rgba(0,0,0,0.4);
-  opacity: 0;
-  transition: opacity .25s ease;
-}
-#pp-backdrop.pp-bd-visible {
-  display: block;
-  opacity: 1;
-}
-
-/* ── 패턴 패널 접힘 상태 ── */
-#pattern-panel.pp-collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 0;
-  border: none;
-}
-#main.pp-col-collapsed {
-  grid-template-columns:
-    minmax(0, var(--sidebar-w))
-    minmax(360px, 1fr)
-    0px
-    minmax(260px, var(--rpanel-w));
-}
-#main.pp-col-collapsed.sidebar-collapsed {
-  grid-template-columns:
-    var(--sidebar-collapsed)
-    minmax(360px, 1fr)
-    0px
-    minmax(260px, var(--rpanel-w));
-}
-.pp-toggle-btn {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 40px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: var(--radius) 0 0 var(--radius);
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-}
-
 .pp-header {
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-body); font-weight: 600;
@@ -1662,12 +1569,75 @@ html, body {
 }
 #fin-content {
   flex: 1; padding: var(--sp-2) var(--sp-3); overflow-y: auto; overflow-x: hidden;
-  display: flex; flex-direction: column; gap: 0;
+  flex-direction: column; gap: 0;
   scrollbar-gutter: stable;  /* [FIX] Windows 17px 스크롤바 레이아웃 시프트 방지 */
   scrollbar-width: thin;  /* [FIX] Firefox fallback: 고정폭 스크롤바로 레이아웃 시프트 방지 */
   min-height: 0;  /* [FIX] flex 자식 오버플로우 허용 — 콘텐츠가 패널 밀어내지 않도록 */
   word-break: keep-all;  /* [FIX] 한글 텍스트 단어 단위 줄바꿈 보장 */
 }
+
+/* ── 통합 탭 바 (<=1200px에서 C+D 통합) ── */
+.rp-tab-bar {
+  display: none;                      /* 기본: 숨김 (>1200px) */
+  height: 36px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+}
+.rp-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0 var(--sp-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  position: relative;
+}
+.rp-tab:hover {
+  color: var(--text-sub);
+}
+.rp-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* 슬라이딩 인디케이터 */
+.rp-tab-indicator {
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+  transition: left .2s ease, width .2s ease;
+  pointer-events: none;
+}
+/* 탭 콘텐츠 영역 */
+.rp-tab-content {
+  display: none;
+}
+.rp-tab-content.active {
+  display: flex;
+  flex-direction: column;
+}
+/* 패턴 탭 콘텐츠 스타일 */
+#rp-pattern-content {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-3);
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
 .fin-period-row {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: var(--sp-2);
@@ -2975,7 +2945,7 @@ html, body {
 @media (max-width: 1200px) {
   :root {
     --sidebar-w: 200px;
-    --rpanel-w: 280px;
+    --rpanel-w: 300px;
     --pattern-panel-w: 200px;
   }
   .sb-index-val { display: none; }
@@ -2991,45 +2961,30 @@ html, body {
   .pp-card-invalid { display: none; }
   .pp-card { padding: var(--sp-2); }
 
-  /* C열: 그리드에서 빠져 오버레이 슬라이드 패널로 전환 */
+  /* C+D 통합: C열 숨기고 D열을 탭 패널로 전환 */
   #main {
     grid-template-columns:
       minmax(0, var(--sidebar-w))
       minmax(360px, 1fr)
       0px
-      minmax(240px, var(--rpanel-w));
+      var(--rpanel-w);
   }
   #main.sidebar-collapsed {
     grid-template-columns:
       var(--sidebar-collapsed)
       minmax(360px, 1fr)
       0px
-      minmax(240px, var(--rpanel-w));
+      var(--rpanel-w);
   }
 
-  #pattern-panel {
-    position: fixed;
-    top: var(--header-h);
-    right: 0;
-    width: min(280px, 80vw);
-    height: calc(100vh - var(--header-h));
-    z-index: 90;
-    transform: translateX(100%);
-    transition: transform .25s ease, box-shadow .25s ease;
-    box-shadow: none;
-    border-left: 1px solid var(--border);
-    border-right: none;  /* [FIX] 고정 위치에서는 우측 보더 불필요 */
-    will-change: transform;  /* [FIX] GPU 가속으로 슬라이드 시 폰트 렌더링 안정 */
-    overflow-y: auto;  /* [FIX] 고정 위치 패널에서 세로 스크롤 보장 */
-  }
-  #pattern-panel.pp-visible {
-    transform: translateX(0);
-    box-shadow: -4px 0 20px rgba(0,0,0,0.5);
-  }
+  /* C열: 그리드에서 완전 숨김 — 콘텐츠는 JS가 D열 탭으로 이동 */
+  #pattern-panel { display: none; }
 
-  /* 패널 토글 버튼 표시 */
-  #pp-toggle { display: flex; right: 0; }
-  #pp-toggle.pp-open { right: min(280px, 80vw); }
+  /* 탭 바 활성화 */
+  .rp-tab-bar { display: flex; }
+
+  /* 기존 D열 헤더 숨김 (탭이 대체) */
+  .rp-header { display: none; }
 
   /* 툴바 반응형: 텍스트 축약 + 패딩 축소 */
   #chart-toolbar .tf-btn { padding: 2px 4px; font-size: 10px; }
@@ -3044,13 +2999,16 @@ html, body {
 
 /* ── 1024px: 사이드바 → 슬라이드 드로어 전환 ── */
 @media (max-width: 1024px) {
+  :root {
+    --rpanel-w: 260px;
+  }
   #main {
-    grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
+    grid-template-columns: 0px 1fr 0px var(--rpanel-w);
     min-width: 0;
   }
   /* [FIX] sidebar-collapsed 상태도 동일 그리드 적용 — 1200px 규칙 상속 방지 */
   #main.sidebar-collapsed {
-    grid-template-columns: 0px 1fr 0px minmax(180px, 240px);
+    grid-template-columns: 0px 1fr 0px var(--rpanel-w);
   }
 
   /* [FIX] 사이드바를 고정 오버레이 드로어로 전환 — 토글 버튼으로 열기/닫기 가능 */
@@ -3138,8 +3096,17 @@ html, body {
   }
   /* [FIX] 단일 열에서 grid-column:2 무효화 */
   #chart-area    { grid-column: 1; grid-row: 1; }
-  #pattern-panel { grid-column: 1; }
+  #pattern-panel { display: none; }  /* 1200px에서 이미 숨김 — 확실히 유지 */
   #right-panel   { grid-column: 1; }
+
+  /* 탭 바: 바텀시트 내 상단 고정 */
+  .rp-tab-bar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--panel);
+    /* border-radius 제거 — 부모 #right-panel이 12px radius + overflow 처리 */
+  }
 
   /* A열: 사이드바 드로어 스타일은 1024px에서 이미 정의됨 — 768px에서 상속 */
 
