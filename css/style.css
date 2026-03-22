@@ -3177,9 +3177,20 @@ html, body {
     height: var(--toolbar-h);  /* 고정 높이로 한 줄 유지 */
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;            /* Firefox */
+    /* [FIX] 스크롤 힌트: Lea Verou 스크롤 그림자 기법
+       local 배경은 스크롤 콘텐츠와 함께 이동, scroll 배경은 뷰포트에 고정
+       → 스크롤 끝에 도달하면 local이 scroll 위를 덮어 그림자가 사라짐 */
+    background:
+      /* 우측 페이드 그림자 (고정, scroll attachment) */
+      linear-gradient(to left, rgba(0,0,0,0.35), transparent 28px) right / 28px 100% no-repeat scroll,
+      /* 우측 그림자 커버 — 스크롤 끝에서 그림자를 가림 (콘텐츠와 함께 이동) */
+      linear-gradient(to left, var(--bg-element), transparent 28px) right / 28px 100% no-repeat local,
+      /* 기본 배경 */
+      var(--bg-element);
   }
   #chart-toolbar::-webkit-scrollbar { display: none; }
-  .toolbar-right { margin-left: var(--sp-2); flex-shrink: 0; }
+  /* [FIX] flex-shrink:0 제거 — 패턴/표시 버튼이 스크롤 영역 밖으로 밀리는 문제 해결 */
+  .toolbar-right { margin-left: var(--sp-2); flex-shrink: 1; min-width: 0; }
 
   /* 타임프레임 버튼 간격 축소 */
   .tf-btn { padding: var(--sp-1) 6px; font-size: var(--fs-micro); }
@@ -3199,8 +3210,21 @@ html, body {
 
 /* ── 480px: 초소형 모바일 ── */
 @media (max-width: 480px) {
+  /* [FIX] ticker-strip 숨기되, market-state 배지는 stock-header로 이동 표시 */
   #ticker-strip { display: none; }
-  #search-wrap { max-width: none; flex: 1; }
+  #market-state {
+    display: inline-block;   /* ticker-strip 숨김에도 불구하고 표시 유지 */
+    position: fixed;
+    top: calc(var(--header-h) / 2);
+    transform: translateY(-50%);  /* 헤더 세로 중앙 */
+    right: var(--sp-2);
+    z-index: 501;            /* header(500) 위에 표시 */
+    margin: 0;
+    padding: 2px 6px;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+  #search-wrap { max-width: none; flex: 1; margin-right: 44px; /* market-state 공간 확보 */ }
   #logo { display: none; }
   .tf-btn { padding: var(--sp-1) 4px; }
   #stock-header { gap: var(--sp-1); }

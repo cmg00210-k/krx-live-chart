@@ -1239,10 +1239,11 @@ class ChartManager {
     this._rebuildSync();
     return this.stochChart;
   }
-  updateStochastic(candles) {
+  updateStochastic(candles, params) {
     if (!this.stochChart || !this.stochKSeries) return;
     var sc = this._getSubChartCache(candles);
-    var stoch = sc['stoch'] || (sc['stoch'] = calcStochastic(candles));
+    var sp = (params && params.stoch) ? params.stoch : { kPeriod: 14, dPeriod: 3, smooth: 3 };
+    var stoch = sc['stoch'] || (sc['stoch'] = calcStochastic(candles, sp.kPeriod || 14, sp.dPeriod || 3, sp.smooth || 3));
     this.stochKSeries.setData(stoch.k.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
     this.stochDSeries.setData(stoch.d.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
@@ -1270,10 +1271,11 @@ class ChartManager {
     this._rebuildSync();
     return this.cciChart;
   }
-  updateCCI(candles) {
+  updateCCI(candles, params) {
     if (!this.cciChart || !this.cciSeries) return;
     var sc = this._getSubChartCache(candles);
-    var cci = sc['cci'] || (sc['cci'] = calcCCI(candles));
+    var cp = (params && params.cci) ? params.cci : { period: 20 };
+    var cci = sc['cci'] || (sc['cci'] = calcCCI(candles, cp.period || 20));
     this.cciSeries.setData(cci.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyCCI() {
@@ -1301,10 +1303,11 @@ class ChartManager {
     this._rebuildSync();
     return this.adxChart;
   }
-  updateADX(candles) {
+  updateADX(candles, params) {
     if (!this.adxChart || !this.adxSeries) return;
     var sc = this._getSubChartCache(candles);
-    var adxData = sc['adx'] || (sc['adx'] = calcADX(candles));
+    var ap = (params && params.adx) ? params.adx : { period: 14 };
+    var adxData = sc['adx'] || (sc['adx'] = calcADX(candles, ap.period || 14));
     this.adxSeries.setData(adxData.adx.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
     this.adxPlusDISeries.setData(adxData.plusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
     this.adxMinusDISeries.setData(adxData.minusDI.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
@@ -1333,10 +1336,11 @@ class ChartManager {
     this._rebuildSync();
     return this.willrChart;
   }
-  updateWilliamsR(candles) {
+  updateWilliamsR(candles, params) {
     if (!this.willrChart || !this.willrSeries) return;
     var sc = this._getSubChartCache(candles);
-    var willr = sc['willr'] || (sc['willr'] = calcWilliamsR(candles));
+    var wp = (params && params.willr) ? params.willr : { period: 14 };
+    var willr = sc['willr'] || (sc['willr'] = calcWilliamsR(candles, wp.period || 14));
     this.willrSeries.setData(willr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyWilliamsR() {
@@ -1360,10 +1364,11 @@ class ChartManager {
     this._rebuildSync();
     return this.atrChart;
   }
-  updateATR(candles) {
+  updateATR(candles, params) {
     if (!this.atrChart || !this.atrSeries) return;
     var sc = this._getSubChartCache(candles);
-    var atrVals = sc['atr'] || (sc['atr'] = calcATR(candles));
+    var tp = (params && params.atr) ? params.atr : { period: 14 };
+    var atrVals = sc['atr'] || (sc['atr'] = calcATR(candles, tp.period || 14));
     this.atrSeries.setData(atrVals.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean));
   }
   destroyATR() {

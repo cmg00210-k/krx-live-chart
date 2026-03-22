@@ -112,23 +112,21 @@ const patternRenderer = (() => {
     risingWedge: '상승쐐기', fallingWedge: '하락쐐기',
     bullishMarubozu: '양봉마루보주', bearishMarubozu: '음봉마루보주',
     spinningTop: '팽이형',
-    symmetricTriangle: '대칭삼각형', bullishFlag: '상승깃발',
-    bearishFlag: '하락깃발', cupAndHandle: '컵핸들',
-    channel: '채널', rectangle: '박스권',
+    symmetricTriangle: '대칭삼각형',
   };
 
   // ── 패턴 방향 판별 ──
   const BULLISH_TYPES = new Set([
     'hammer', 'invertedHammer', 'bullishEngulfing', 'bullishHarami',
     'morningStar', 'threeWhiteSoldiers', 'doubleBottom',
-    'inverseHeadAndShoulders', 'fallingWedge', 'bullishFlag',
-    'ascendingTriangle', 'cupAndHandle', 'piercingLine',
+    'inverseHeadAndShoulders', 'fallingWedge',
+    'ascendingTriangle', 'piercingLine',
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
   ]);
   const BEARISH_TYPES = new Set([
     'hangingMan', 'shootingStar', 'bearishEngulfing', 'bearishHarami',
     'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
-    'risingWedge', 'bearishFlag', 'descendingTriangle',
+    'risingWedge', 'descendingTriangle',
     'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
   ]);
 

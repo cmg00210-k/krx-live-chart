@@ -46,6 +46,7 @@ def main():
         # 재무 데이터 로드
         fin_path = os.path.join(fin_dir, f"{code}.json")
         per, pbr, roe, opm = 0, 0, 0, 0
+        mcap = s.get("marketCap", 0)  # 억원 단위
 
         if os.path.exists(fin_path):
             try:
@@ -65,9 +66,26 @@ def main():
                         roe = float(roe_str.replace("%", ""))
                     except (ValueError, TypeError):
                         roe = 0
-                    # per/pbr은 financials에 없음 — lastClose/EPS로 추후 계산 가능
-                    per = 0
-                    pbr = 0
+
+                    # PER = 시가총액(원) / TTM 순이익(원)
+                    if mcap > 0:
+                        # TTM NI: 최근 4분기 합산 (가능하면), 아니면 최신 분기 × 4
+                        ttm_ni = 0
+                        if len(quarterly) >= 4:
+                            ttm_ni = sum(q.get("ni", 0) or 0 for q in quarterly[-4:])
+                        elif latest.get("ni"):
+                            ttm_ni = (latest["ni"] or 0) * 4  # 연율화
+                        if ttm_ni > 0:
+                            _per = mcap * 1e8 / ttm_ni
+                            if 0 < _per < 500:  # PER 500 이상은 이상치 제외
+                                per = round(_per, 1)
+
+                        # PBR = 시가총액(원) / 자본총계(원)
+                        equity = latest.get("total_equity", 0) or 0
+                        if equity > 0:
+                            _pbr = mcap * 1e8 / equity
+                            if 0 < _pbr < 100:  # PBR 100 이상은 이상치 제외
+                                pbr = round(_pbr, 2)
             except Exception:
                 pass
 
@@ -79,7 +97,7 @@ def main():
             "pbr": pbr,
             "roe": roe,
             "opm": opm,
-            "marketCap": s.get("marketCap", 0),
+            "marketCap": mcap,
         }
 
         if sector not in sector_stocks:

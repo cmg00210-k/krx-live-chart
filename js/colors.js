@@ -71,6 +71,12 @@ const KRX_COLORS = Object.freeze({
   PTN_MARKER_BUY:  'rgba(130,210,185,0.8)',   // 민트 마커
   PTN_MARKER_SELL: 'rgba(130,210,185,0.8)',   // [통일] 매도 마커도 민트
 
+  // ── 드로잉 도구 색상 ──
+  DRAW_GOLD:   '#C9A84C',     // 추세선 기본
+  DRAW_GRAY:   '#787B86',     // 수평/수직선/피보나치 기본
+  DRAW_BLUE:   '#2962FF',     // TradingView 관례
+  DRAW_CYAN:   '#26C6DA',     // 선택 핸들
+
   // ── Visible 고/저점 색상 ──
   VIS_HIGH_FILL: (a) => `rgba(224,80,80,${a})`,      // 고점 (빨강 계열)
   VIS_LOW_FILL:  (a) => `rgba(100,200,255,${a})`,    // 저점 (하늘색 — 볼륨 파랑과 구분)

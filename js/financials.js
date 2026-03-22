@@ -1788,7 +1788,7 @@ function _drawPERBandChart() {
     }
     if (hasNegEps) {
       ctx.fillStyle = 'rgba(224,80,80,0.7)';
-      ctx.font = "bold 10px 'Pretendard', sans-serif";
+      ctx.font = "700 10px 'Pretendard', sans-serif";
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       var zeroY = toY(0);
@@ -1915,7 +1915,7 @@ function _drawPERBandChart() {
     ctx.textBaseline = 'top';
     // "12.5x" 숫자 부분 (JetBrains Mono)
     ctx.fillStyle = KRX_COLORS.ACCENT;
-    ctx.font = "bold 10px 'JetBrains Mono', monospace";
+    ctx.font = "700 10px 'JetBrains Mono', monospace";
     var numW = ctx.measureText(perNumStr).width;
     ctx.fillText(perNumStr, padL + chartW - 2, padT + 2);
     // "현재 " 라벨 부분 (Pretendard)
@@ -1926,7 +1926,7 @@ function _drawPERBandChart() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(224,80,80,0.9)';
-    ctx.font = "bold 10px 'Pretendard', sans-serif";
+    ctx.font = "700 10px 'Pretendard', sans-serif";
     ctx.fillText('적자 (EPS<0)', padL + chartW - 2, padT + 2);
   }
 }

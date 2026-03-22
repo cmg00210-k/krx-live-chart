@@ -55,37 +55,37 @@ const drawingTools = (() => {
   const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
   const FIB_LABELS = ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%'];
 
-  // 사용자 선택 가능 색상 팔레트 (6개)
+  // 사용자 선택 가능 색상 팔레트 (6개) — KRX_COLORS 참조
   const DRAW_COLORS = [
-    '#C9A84C',   // gold (기본 추세선)
-    '#787B86',   // gray (기본 수평/수직선)
-    '#2962FF',   // blue (TradingView 관례)
-    '#E05050',   // red (KRX 상승)
-    '#5086DC',   // blue (KRX 하락)
-    '#26C6DA',   // cyan
+    KRX_COLORS.DRAW_GOLD,    // gold (기본 추세선)
+    KRX_COLORS.DRAW_GRAY,    // gray (기본 수평/수직선)
+    KRX_COLORS.DRAW_BLUE,    // blue (TradingView 관례)
+    KRX_COLORS.UP,           // red (KRX 상승)
+    KRX_COLORS.DOWN,         // blue (KRX 하락)
+    KRX_COLORS.DRAW_CYAN,    // cyan
   ];
 
   // 드로잉 기본 색상 (도구별)
   const DEFAULT_COLORS = {
-    trendline: '#C9A84C',     // 금색 (accent)
-    hline:     '#787B86',     // 회색
-    vline:     '#787B86',     // 회색
-    rect:      '#2962FF',     // 파란색 (테두리 기준)
-    fib:       '#787B86',     // 회색
+    trendline: KRX_COLORS.DRAW_GOLD,
+    hline:     KRX_COLORS.DRAW_GRAY,
+    vline:     KRX_COLORS.DRAW_GRAY,
+    rect:      KRX_COLORS.DRAW_BLUE,
+    fib:       KRX_COLORS.DRAW_GRAY,
   };
 
   // 렌더링에서 쓰는 기본 색상 (하위 호환)
   const COLORS = {
-    trendline: '#A08830',
-    hline:     '#787B86',
-    vline:     '#787B86',
+    trendline: KRX_COLORS.ACCENT,
+    hline:     KRX_COLORS.DRAW_GRAY,
+    vline:     KRX_COLORS.DRAW_GRAY,
     rect:      'rgba(41,98,255,0.25)',
-    rectBorder:'#2962ff',
-    fib:       '#787B86',
+    rectBorder: KRX_COLORS.DRAW_BLUE,
+    fib:       KRX_COLORS.DRAW_GRAY,
     fibFill:   'rgba(41,98,255,0.06)',
-    eraser:    '#E05050',
-    preview:   'rgba(160,136,48,0.5)',
-    select:    '#26C6DA',     // 선택 앵커 핸들 색상 (시안)
+    eraser:    KRX_COLORS.UP,
+    preview:   KRX_COLORS.ACCENT_FILL(0.5),
+    select:    KRX_COLORS.DRAW_CYAN,
   };
 
 

@@ -355,10 +355,16 @@ var DEFAULT_IND_PARAMS = {
   rsi: { period: 14 },
   macd: { fast: 12, slow: 26, signal: 9 },
   ich: { tenkan: 9, kijun: 26, senkou: 52 },
+  stoch: { kPeriod: 14, dPeriod: 3, smooth: 3 },
+  cci: { period: 20 },
+  adx: { period: 14 },
+  willr: { period: 14 },
+  atr: { period: 14 },
 };
 var _PARAM_LABELS = {
   p1: '단기', p2: '중기', p3: '장기', period: '기간', stdDev: '표준편차',
   fast: '빠른선', slow: '느린선', signal: '시그널', tenkan: '전환선', kijun: '기준선', senkou: '선행스팬',
+  kPeriod: 'K 기간', dPeriod: 'D 기간', smooth: 'Smooth',
 };
 function _loadIndParams() {
   try {
@@ -1757,7 +1763,7 @@ function updateChartFull() {
     _dom.stochContainer.style.display = 'block';
     if (_dom.stochLabel) _dom.stochLabel.style.display = 'block';
     if (!chartManager.stochChart) chartManager.createStochasticChart(_dom.stochContainer);
-    chartManager.updateStochastic(candles);
+    chartManager.updateStochastic(candles, indParams);
   } else if (_dom.stochContainer) {
     _dom.stochContainer.style.display = 'none';
     if (_dom.stochLabel) _dom.stochLabel.style.display = 'none';
@@ -1769,7 +1775,7 @@ function updateChartFull() {
     _dom.cciContainer.style.display = 'block';
     if (_dom.cciLabel) _dom.cciLabel.style.display = 'block';
     if (!chartManager.cciChart) chartManager.createCCIChart(_dom.cciContainer);
-    chartManager.updateCCI(candles);
+    chartManager.updateCCI(candles, indParams);
   } else if (_dom.cciContainer) {
     _dom.cciContainer.style.display = 'none';
     if (_dom.cciLabel) _dom.cciLabel.style.display = 'none';
@@ -1781,7 +1787,7 @@ function updateChartFull() {
     _dom.adxContainer.style.display = 'block';
     if (_dom.adxLabel) _dom.adxLabel.style.display = 'block';
     if (!chartManager.adxChart) chartManager.createADXChart(_dom.adxContainer);
-    chartManager.updateADX(candles);
+    chartManager.updateADX(candles, indParams);
   } else if (_dom.adxContainer) {
     _dom.adxContainer.style.display = 'none';
     if (_dom.adxLabel) _dom.adxLabel.style.display = 'none';
@@ -1793,7 +1799,7 @@ function updateChartFull() {
     _dom.willrContainer.style.display = 'block';
     if (_dom.willrLabel) _dom.willrLabel.style.display = 'block';
     if (!chartManager.willrChart) chartManager.createWilliamsRChart(_dom.willrContainer);
-    chartManager.updateWilliamsR(candles);
+    chartManager.updateWilliamsR(candles, indParams);
   } else if (_dom.willrContainer) {
     _dom.willrContainer.style.display = 'none';
     if (_dom.willrLabel) _dom.willrLabel.style.display = 'none';
@@ -1805,7 +1811,7 @@ function updateChartFull() {
     _dom.atrContainer.style.display = 'block';
     if (_dom.atrLabel) _dom.atrLabel.style.display = 'block';
     if (!chartManager.atrChart) chartManager.createATRChart(_dom.atrContainer);
-    chartManager.updateATR(candles);
+    chartManager.updateATR(candles, indParams);
   } else if (_dom.atrContainer) {
     _dom.atrContainer.style.display = 'none';
     if (_dom.atrLabel) _dom.atrLabel.style.display = 'none';
