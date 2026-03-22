@@ -52,8 +52,12 @@ def main():
             try:
                 with open(fin_path, "r", encoding="utf-8") as f:
                     fin = json.load(f)
-                quarterly = fin.get("quarterly", [])
-                if quarterly:
+                # 데모/시드 데이터 제외 — 단위(억원)가 DART(원)와 다름
+                fin_source = fin.get("source", "")
+                if fin_source in ("demo", "seed"):
+                    pass  # PER/PBR/ROE/OPM 모두 0 유지 (데모 데이터 무시)
+                elif fin.get("quarterly"):
+                    quarterly = fin["quarterly"]
                     latest = quarterly[-1]
                     # opm/roe는 "14.1%" 문자열 → float 변환
                     opm_str = str(latest.get("opm", "0"))
