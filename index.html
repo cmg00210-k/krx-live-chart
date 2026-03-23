@@ -612,7 +612,17 @@
   <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
-      navigator.serviceWorker.register('/sw.js').catch(function() {});
+      navigator.serviceWorker.register('/sw.js').then(function(reg) {
+        // 새 SW 발견 시 즉시 활성화 (대기 상태 건너뜀)
+        reg.addEventListener('updatefound', function() {
+          var nw = reg.installing;
+          if (nw) nw.addEventListener('statechange', function() {
+            if (nw.state === 'activated') location.reload();
+          });
+        });
+        // 주기적 업데이트 체크 (1시간)
+        setInterval(function() { reg.update(); }, 3600000);
+      }).catch(function() {});
     });
   }
   </script>
