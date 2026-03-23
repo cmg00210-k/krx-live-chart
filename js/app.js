@@ -1388,7 +1388,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=6');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
