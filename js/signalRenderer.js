@@ -525,11 +525,13 @@ const signalRenderer = (() => {
     volBreakoutSet.forEach(function(idx) {
       if (idx < 0 || idx >= candles.length) return;
       var c = candles[idx];
-      cm.volumeSeries.update({
-        time: c.time,
-        value: c.volume || 0,
-        color: KRX_COLORS.ACCENT_FILL(0.7),
-      });
+      try {
+        cm.volumeSeries.update({
+          time: c.time,
+          value: c.volume || 0,
+          color: KRX_COLORS.ACCENT_FILL(0.7),
+        });
+      } catch (e) { /* LWC: time outside displayed range */ }
     });
   }
 
