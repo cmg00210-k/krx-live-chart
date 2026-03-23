@@ -154,7 +154,7 @@ class PatternEngine {
     const entry = candles[ei].close;
     // 단일 캔들 패턴은 패턴 높이가 매우 작을 수 있음 → ATR을 최소값으로 보장
     const atrAtEnd = atr[ei] || (entry * PatternEngine.ATR_FALLBACK_PCT);
-    const height = Math.max(h - l, atrAtEnd);
+    const height = Math.min(Math.max(h - l, atrAtEnd), atrAtEnd * 2);
     // Bulkowski "measured move": 패턴 높이의 1.0배가 표준 목표가
     // 1.5x는 목표가 과대 추정 → 리스크-리워드 왜곡 및 매도 타이밍 지연
     return signal === 'buy' ? +(entry + height * 1.0).toFixed(0)
@@ -1259,7 +1259,7 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantLows[relevantLows.length - 1].price - a).toFixed(0);
-      const patternHeight = resistanceLevel - relevantLows[0].price;
+      const patternHeight = Math.min(resistanceLevel - relevantLows[0].price, a * 4);
       const priceTarget = +(resistanceLevel + patternHeight).toFixed(0);
 
       results.push({
@@ -1318,7 +1318,7 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
-      const patternHeight = relevantHighs[0].price - supportLevel;
+      const patternHeight = Math.min(relevantHighs[0].price - supportLevel, a * 4);
       const priceTarget = +(supportLevel - patternHeight).toFixed(0);
 
       results.push({
@@ -1559,12 +1559,12 @@ class PatternEngine {
       const span = l2.index - l1.index;
       if (span < 5 || span > 40) continue;
 
-      // 넥라인 (두 저점 사이 최고점)
+      // 넥라인 (두 저점 사이 최고 종가 — 꼬리 봉 과대 산정 방지)
       let neckline = 0;
       for (let j = l1.index; j <= l2.index; j++) {
-        if (candles[j].high > neckline) neckline = candles[j].high;
+        if (candles[j].close > neckline) neckline = candles[j].close;
       }
-      const patternHeight = neckline - Math.min(l1.price, l2.price);
+      const patternHeight = Math.min(neckline - Math.min(l1.price, l2.price), a * 4);
 
       const volumeScore = Math.min(this._volRatio(candles, l2.index, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(l1.price - l2.price) / a });
@@ -1598,12 +1598,12 @@ class PatternEngine {
       const span = h2.index - h1.index;
       if (span < 5 || span > 40) continue;
 
-      // 넥라인 (두 고점 사이 최저점)
+      // 넥라인 (두 고점 사이 최저 종가 — 꼬리 봉 과대 산정 방지)
       let neckline = Infinity;
       for (let j = h1.index; j <= h2.index; j++) {
-        if (candles[j].low < neckline) neckline = candles[j].low;
+        if (candles[j].close < neckline) neckline = candles[j].close;
       }
-      const patternHeight = Math.max(h1.price, h2.price) - neckline;
+      const patternHeight = Math.min(Math.max(h1.price, h2.price) - neckline, a * 4);
 
       const volumeScore = Math.min(this._volRatio(candles, h2.index, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(h1.price - h2.price) / a });
@@ -1650,7 +1650,7 @@ class PatternEngine {
       const a = this._atr(atr, endIdx, candles);
       if (lastClose > neckAtEnd + a * 0.5) continue;
 
-      const patternHeight = head.price - (t1.price + t2.price) / 2;
+      const patternHeight = Math.min(head.price - (t1.price + t2.price) / 2, a * 4);
       const priceTarget = +(neckAtEnd - patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / head.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
@@ -1701,7 +1701,7 @@ class PatternEngine {
       const a = this._atr(atr, endIdx, candles);
       if (lastClose < neckAtEnd - a * 0.5) continue;
 
-      const patternHeight = (t1.price + t2.price) / 2 - head.price;
+      const patternHeight = Math.min((t1.price + t2.price) / 2 - head.price, a * 4);
       const priceTarget = +(neckAtEnd + patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / ls.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);

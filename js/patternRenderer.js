@@ -876,10 +876,10 @@ const patternRenderer = (() => {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      // 넥라인 찾기 (두 저점 사이 최고점)
+      // 넥라인 찾기 (두 저점 사이 최고 종가 — patterns.js와 일치)
       let neckline = -Infinity, neckIdx = si;
       for (let j = si; j <= ei && j < candles.length; j++) {
-        if (candles[j].high > neckline) { neckline = candles[j].high; neckIdx = j; }
+        if (candles[j].close > neckline) { neckline = candles[j].close; neckIdx = j; }
       }
       if (!isFinite(neckline)) return;
 
@@ -951,10 +951,10 @@ const patternRenderer = (() => {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      // 넥라인 찾기 (두 고점 사이 최저점)
+      // 넥라인 찾기 (두 고점 사이 최저 종가 — patterns.js와 일치)
       let neckline = Infinity, neckIdx = si;
       for (let j = si; j <= ei && j < candles.length; j++) {
-        if (candles[j].low < neckline) { neckline = candles[j].low; neckIdx = j; }
+        if (candles[j].close < neckline) { neckline = candles[j].close; neckIdx = j; }
       }
       if (!isFinite(neckline)) return;
 
