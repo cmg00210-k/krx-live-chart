@@ -1270,7 +1270,7 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantLows[relevantLows.length - 1].price - a).toFixed(0);
-      const patternHeight = Math.min(resistanceLevel - relevantLows[0].price, a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min(resistanceLevel - relevantLows[0].price, a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
       const priceTarget = +(resistanceLevel + patternHeight).toFixed(0);
 
       results.push({
@@ -1329,7 +1329,7 @@ class PatternEngine {
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
-      const patternHeight = Math.min(relevantHighs[0].price - supportLevel, a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min(relevantHighs[0].price - supportLevel, a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
       const priceTarget = +(supportLevel - patternHeight).toFixed(0);
 
       results.push({
@@ -1577,7 +1577,7 @@ class PatternEngine {
       for (let j = l1.index; j <= l2.index; j++) {
         if (candles[j].close > neckline) neckline = candles[j].close;
       }
-      const patternHeight = Math.min(neckline - Math.min(l1.price, l2.price), a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min(neckline - Math.min(l1.price, l2.price), a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
 
       const volumeScore = Math.min(this._volRatio(candles, l2.index, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(l1.price - l2.price) / a });
@@ -1616,7 +1616,7 @@ class PatternEngine {
       for (let j = h1.index; j <= h2.index; j++) {
         if (candles[j].close < neckline) neckline = candles[j].close;
       }
-      const patternHeight = Math.min(Math.max(h1.price, h2.price) - neckline, a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min(Math.max(h1.price, h2.price) - neckline, a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
 
       const volumeScore = Math.min(this._volRatio(candles, h2.index, vma) / 2, 1);
       const confidence = this._quality({ body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(h1.price - h2.price) / a });
@@ -1663,7 +1663,7 @@ class PatternEngine {
       const a = this._atr(atr, endIdx, candles);
       if (lastClose > neckAtEnd + a * 0.5) continue;
 
-      const patternHeight = Math.min(head.price - (t1.price + t2.price) / 2, a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min(head.price - (t1.price + t2.price) / 2, a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
       const priceTarget = +(neckAtEnd - patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / head.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
@@ -1714,7 +1714,7 @@ class PatternEngine {
       const a = this._atr(atr, endIdx, candles);
       if (lastClose < neckAtEnd - a * 0.5) continue;
 
-      const patternHeight = Math.min((t1.price + t2.price) / 2 - head.price, a * 4, candles[candles.length-1].close * 0.10) * hw * vw;
+      const patternHeight = Math.min(Math.min((t1.price + t2.price) / 2 - head.price, a * 4) * hw * vw, candles[candles.length-1].close * 0.10);
       const priceTarget = +(neckAtEnd + patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / ls.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
