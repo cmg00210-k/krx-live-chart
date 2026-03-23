@@ -1143,9 +1143,10 @@ class PatternEngine {
       const stopLoss = isBullish
         ? +(c.low - a * 1.5).toFixed(0)
         : +(c.high + a * 1.5).toFixed(0);
+      const cappedBody = Math.min(body, a * 2);
       const priceTarget = isBullish
-        ? +(c.close + body).toFixed(0)
-        : +(c.close - body).toFixed(0);
+        ? +(c.close + cappedBody).toFixed(0)
+        : +(c.close - cappedBody).toFixed(0);
 
       results.push({
         type, name: isBullish ? '양봉 마루보주 (Bullish Marubozu)' : '음봉 마루보주 (Bearish Marubozu)',
@@ -1377,7 +1378,8 @@ class PatternEngine {
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
         const confidence = this._quality({ body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
         const stopLoss = +(h2.price + a).toFixed(0);
-        const priceTarget = +(l1.price).toFixed(0);
+        const lastClose = candles[endIdx].close;
+        const priceTarget = +(Math.max(l1.price, lastClose - a * 4)).toFixed(0);
 
         results.push({
           type: 'risingWedge', name: '상승 쐐기 (Rising Wedge)', nameShort: '상승쐐기',
@@ -1437,7 +1439,8 @@ class PatternEngine {
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
         const confidence = this._quality({ body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
         const stopLoss = +(l2.price - a).toFixed(0);
-        const priceTarget = +(h1.price).toFixed(0);
+        const lastClose = candles[endIdx].close;
+        const priceTarget = +(Math.min(h1.price, lastClose + a * 4)).toFixed(0);
 
         results.push({
           type: 'fallingWedge', name: '하락 쐐기 (Falling Wedge)', nameShort: '하락쐐기',
