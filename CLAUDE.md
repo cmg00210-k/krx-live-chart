@@ -47,7 +47,14 @@ No build step:
 2. `index.html` via HTTP server (`npx serve -l 5500 -s`)
 3. Without `data/` folder, demo mode runs automatically
 
-Verification checkpoints (F12 Console):
+Verification (closest thing to lint/test):
+```bash
+python scripts/verify.py              # 5-category pre-deploy check (exit 0=pass)
+python scripts/verify.py --strict     # Fail on warnings too
+python scripts/verify.py --check colors   # Single category: colors/patterns/dashes/globals/scripts
+```
+
+Runtime checkpoints (F12 Console):
 - `[KRX] index.json 로드 완료: N종목` — data layer initialized
 - `[Worker] 분석 Worker 초기화 완료` — Web Worker ready
 - Toast `N개 패턴 감지됨` — pattern pipeline working end-to-end
@@ -84,6 +91,7 @@ Start: `server\start_server.bat`. Full setup in `docs/developer-setup.md`.
 - Both `tickMarkFormatter` and `timeFormatter` must handle `"YYYY-MM-DD"` strings
 - Canvas DPR: `ctx.setTransform(1,0,0,1,0,0)` before `ctx.scale(dpr,dpr)`
 - Wrangler `--commit-message` and `.bat` files: ASCII-only (Korean breaks both)
+- Adding/removing JS files → update `sw.js` `STATIC_ASSETS` array too (cache miss = broken offline)
 
 ## Reference
 

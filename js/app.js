@@ -436,15 +436,20 @@ function showToast(message, type) {
 
   var el = document.createElement('div');
   el.className = 'toast toast-' + type;
-  el.innerHTML =
-    '<span class="toast-icon">' + (_TOAST_ICONS[type] || 'i') + '</span>' +
-    '<span class="toast-msg">' + message + '</span>' +
-    '<button class="toast-close" title="\uB2EB\uAE30">&times;</button>';
-
-  // 닫기 버튼
-  el.querySelector('.toast-close').addEventListener('click', function () {
-    _dismissToast(el);
-  });
+  var icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = _TOAST_ICONS[type] || 'i';
+  var msg = document.createElement('span');
+  msg.className = 'toast-msg';
+  msg.textContent = message;
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.title = '\uB2EB\uAE30';
+  closeBtn.textContent = '\u00D7';
+  closeBtn.addEventListener('click', function () { _dismissToast(el); });
+  el.appendChild(icon);
+  el.appendChild(msg);
+  el.appendChild(closeBtn);
 
   container.appendChild(el);
 
@@ -800,6 +805,8 @@ async function _continueInit() {
     } else if (status === 'login_failed') {
       // 로그인 실패 → 오버레이 숨기고 파일 모드 전환
       _hideLoadingOverlay();
+      KRX_API_CONFIG.mode = 'file';
+      realtimeProvider._loginErrorReceived = true;
       showToast('Kiwoom 로그인 실패 — 파일 모드로 전환', 'error');
       updateLiveStatus('file');
     }
@@ -1525,7 +1532,7 @@ function _flushTickRender() {
 
   // 캔들이 있을 때만 차트 업데이트
   if (data.candles && data.candles.length > 0) {
-    candles = data.candles;
+    candles = dataService._sanitizeCandles(data.candles, currentTimeframe);
     _markDataFresh();  // WS 캔들 수신 시각 기록
 
     // WS에서 받은 캔들을 dataService 캐시에도 반영 (L1 메모리 + L2 IDB)
