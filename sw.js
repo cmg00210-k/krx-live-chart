@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  CheeseStock Service Worker — 오프라인 캐싱
-//  정적 자산: Cache-First (빠른 로딩)
+//  정적 자산: Stale-While-Revalidate (캐시 즉시 반환 + 백그라운드 갱신)
 //  데이터 파일: Network-First (최신 데이터 우선)
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
@@ -118,13 +118,11 @@ self.addEventListener('fetch', function(event) {
     return;
   }
 
-  // 정적 자산 (HTML, CSS, JS) — Cache-First (빠른 로딩)
-  // 캐시에 없으면 네트워크에서 가져와 캐싱
+  // 정적 자산 (HTML, CSS, JS) — Stale-While-Revalidate
+  // 캐시 즉시 반환 + 백그라운드에서 네트워크 갱신 → 다음 방문 시 최신 반영
   event.respondWith(
     caches.match(event.request).then(function(cached) {
-      if (cached) return cached;
-      return fetch(event.request).then(function(response) {
-        // 유효한 응답만 캐싱 (에러 페이지 캐싱 방지)
+      var fetchPromise = fetch(event.request).then(function(response) {
         if (response && response.ok) {
           var clone = response.clone();
           caches.open(CACHE_NAME).then(function(cache) {
@@ -132,7 +130,9 @@ self.addEventListener('fetch', function(event) {
           });
         }
         return response;
-      });
+      }).catch(function() { return cached; });
+
+      return cached || fetchPromise;
     })
   );
 });
