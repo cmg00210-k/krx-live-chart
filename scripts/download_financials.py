@@ -524,13 +524,11 @@ def download_stock_financials(api_key: str, stock_code: str,
         for rcode, rname in report_codes.items():
             items = fetch_financials(api_key, corp_code, year, rcode)
             if items is None:
-                time.sleep(delay)
-                continue
+                continue  # 데이터 없음 — sleep 불필요 (API 미호출 또는 "013" 응답)
 
             period_data = extract_period_data(items, year, rcode)
             if period_data is None:
-                time.sleep(delay)
-                continue
+                continue  # 파싱 실패 — sleep 불필요
 
             # 비율 지표 계산
             period_data = calc_ratios(period_data)
@@ -770,6 +768,8 @@ def main():
                         help="API 키 없이 더미 데이터 생성")
     parser.add_argument("--include-shares", action="store_true",
                         help="발행주식수 + 업종코드 추가 조회 (API 호출 +2건/종목)")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="이미 DART 데이터가 있는 종목 건너뛰기 (데모 데이터만 갱신)")
     args = parser.parse_args()
 
     # .env 파일에서 API 키 자동 로드
@@ -868,6 +868,19 @@ def main():
         if not corp_info:
             skip += 1
             continue
+
+        # --skip-existing: 이미 DART 데이터가 있으면 건너뛰기
+        if args.skip_existing:
+            existing_path = os.path.join(FINANCIALS_DIR, f"{code}.json")
+            if os.path.exists(existing_path):
+                try:
+                    with open(existing_path, "r", encoding="utf-8") as ef:
+                        existing = json.load(ef)
+                    if existing.get("source") not in ("demo", "seed") and existing.get("quarterly"):
+                        skip += 1
+                        continue
+                except Exception:
+                    pass
 
         result = download_stock_financials(
             api_key=args.api_key,
