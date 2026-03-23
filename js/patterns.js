@@ -230,6 +230,19 @@ class PatternEngine {
     // R:R 검증 게이트 — 전망이론 λ=2.25 기반 (Kahneman & Tversky 1979)
     this._applyRRGate(patterns, candles);
 
+    // 최종 목표가 클램프 — 현재가 ±10% 절대 상한
+    var lastClose = candles[candles.length - 1].close;
+    if (lastClose > 0) {
+      var maxT = +(lastClose * 1.10).toFixed(0);
+      var minT = +(lastClose * 0.90).toFixed(0);
+      for (var pi = 0; pi < patterns.length; pi++) {
+        var pp = patterns[pi];
+        if (pp.priceTarget == null) continue;
+        if (pp.signal === 'buy' && pp.priceTarget > maxT) pp.priceTarget = maxT;
+        if (pp.signal === 'sell' && pp.priceTarget < minT) pp.priceTarget = minT;
+      }
+    }
+
     return this._dedup(patterns);
   }
 
