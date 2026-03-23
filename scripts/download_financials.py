@@ -550,6 +550,7 @@ def download_stock_financials(api_key: str, stock_code: str,
     result = {
         "code": stock_code,
         "name": corp_name,
+        "source": "dart",
         "updated": datetime.now().strftime("%Y-%m-%d"),
         "quarterly": quarterly_data,
         "annual": annual_data,
