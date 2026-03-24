@@ -72,13 +72,14 @@ class PatternBacktester {
     if (this._rlPolicyAttempted) return;
     this._rlPolicyAttempted = true;
     var self = this;
-    var policyUrl = (typeof self !== 'undefined' && self.constructor && self.constructor.name === 'DedicatedWorkerGlobalScope')
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var policyUrl = isWorker
       ? '../data/backtest/rl_policy.json'
       : 'data/backtest/rl_policy.json';
     fetch(policyUrl)
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (data && data.thetas && data.action_factors) {
+        if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
           self._rlPolicy = data;
         }
       })

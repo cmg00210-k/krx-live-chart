@@ -280,11 +280,11 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     for (var j = 0; j < p; j++) meat[j] = new Array(p).fill(0);
     for (var i = 0; i < n; i++) {
       var w = weights ? weights[i] : 1;
-      // leverage h_ii = x_i' * inv * x_i
+      // leverage h_ii = w_i * x_i' * inv * x_i (WLS hat matrix, MacKinnon & White 1985)
       var h_ii = 0;
       for (var j = 0; j < p; j++) {
         for (var k = 0; k < p; k++) {
-          h_ii += X[i][j] * inv[j][k] * X[i][k];
+          h_ii += X[i][j] * inv[j][k] * X[i][k] * w;
         }
       }
       var denom = (1 - Math.min(h_ii, 0.99));
