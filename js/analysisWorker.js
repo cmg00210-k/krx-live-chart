@@ -31,6 +31,9 @@ let _workerReady = false;
 // NOTE: Worker msg에 stock code가 없으므로 open을 추가하여 충돌 확률 저감
 let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
 
+// ── 적응형 가중치 — 백테스트 WLS 계수에서 추출 ────
+let _learnedWeights = {};
+
 function _makeCacheKey(candles) {
   if (!candles || !candles.length) return '';
   var last = candles[candles.length - 1];
@@ -54,6 +57,26 @@ try {
   self.postMessage({ type: 'error', message: 'importScripts 실패: ' + err.message, version: -1 });
 }
 
+
+// ── 백테스트 WLS 계수 → 적응형 가중치 추출 ──────────
+// h5(5일 수익률) 회귀 결과가 충분히 신뢰할 때만 저장.
+// rSquared > 0.01 + n >= 30: 통계적 의미 최소 기준.
+// confidence = rSquared² × clamp(n/100, 0, 1): 샘플 수 패널티 포함.
+function _extractLearnedWeights(backtestResults) {
+  for (var pType in backtestResults) {
+    var bt = backtestResults[pType];
+    if (!bt || !bt.horizons) continue;
+    var h5 = bt.horizons[5];
+    if (h5 && h5.regression && h5.regression.rSquared > 0.01 && h5.n >= 30) {
+      _learnedWeights[pType] = {
+        beta: h5.regression.coeffs,
+        rSquared: h5.regression.rSquared,
+        n: h5.n,
+        confidence: Math.pow(h5.regression.rSquared, 2) * Math.min(h5.n / 100, 1),
+      };
+    }
+  }
+}
 
 // ── 메시지 핸들러 ────────────────────────────────────
 self.onmessage = function (e) {
@@ -83,6 +106,14 @@ self.onmessage = function (e) {
       // drag 이벤트에서 동일 visible 구간 반복 요청 시 효과적
       const cacheKey = _makeCacheKey(analyzeCandles);
       let patterns, signals, stats;
+
+      // 적응형 가중치 주입 (이전 백테스트에서 학습)
+      if (msg.learnedWeights) {
+        _learnedWeights = msg.learnedWeights;
+      }
+      if (typeof patternEngine !== 'undefined' && patternEngine.constructor) {
+        patternEngine.constructor._globalLearnedWeights = _learnedWeights;
+      }
 
       if (_analyzeCache.key === cacheKey && _analyzeCache.patterns) {
         // 캐시 적중: 이전 분석 결과 재사용
@@ -148,10 +179,12 @@ self.onmessage = function (e) {
       }
 
       const results = backtester.backtestAll(candles);
+      _extractLearnedWeights(results);
 
       self.postMessage({
         type: 'backtestResult',
         results: results,
+        learnedWeights: _learnedWeights,
         candleLength: candles.length,
         version: version,
       });

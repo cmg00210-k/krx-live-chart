@@ -555,6 +555,49 @@ const patternRenderer = (() => {
               }
             }
 
+            // ── 목표가 화면 밖 fallback: 차트 경계 화살표 + 수익률 라벨 ──
+            // 목표가 y좌표가 null(화면 외부)이면 상/하단 경계에 방향 화살표를 표시한다.
+            // buy 패턴 → 위(y≈0), sell 패턴 → 아래(y≈h)
+            if (fz.offScreenTarget && fz.returnText) {
+              ctx.save();
+
+              const arrowX = zoneX + zoneW / 2;
+              const isBuyDir = fz.isBuy !== false;  // 기본값 true(보수적)
+              const edgeY = isBuyDir ? 6 : h - 6;
+              const arrowDir = isBuyDir ? -1 : 1;   // -1=위(▲), +1=아래(▼)
+
+              const arrowColor = fz.returnColor || KRX_COLORS.PTN_BUY;
+
+              // 삼각형 화살표
+              const aW = 7;   // 화살표 가로 반폭
+              const aH = 6;   // 화살표 세로 높이
+              ctx.fillStyle = arrowColor;
+              ctx.globalAlpha = 0.85;
+              ctx.beginPath();
+              ctx.moveTo(arrowX,        edgeY);
+              ctx.lineTo(arrowX - aW,   edgeY + arrowDir * aH);
+              ctx.lineTo(arrowX + aW,   edgeY + arrowDir * aH);
+              ctx.closePath();
+              ctx.fill();
+
+              // 수익률 pill 라벨 (화살표 바로 아래/위)
+              const lblY = isBuyDir ? edgeY + aH + 10 : edgeY - aH - 10;
+              ctx.font = "700 10px 'Pretendard', sans-serif";
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              const rtm = ctx.measureText(fz.returnText);
+              ctx.globalAlpha = 0.82;
+              ctx.fillStyle = KRX_COLORS.TAG_BG(0.80);
+              ctx.beginPath();
+              _roundRect(ctx, arrowX - rtm.width / 2 - 5, lblY - 7, rtm.width + 10, 14, 3);
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              ctx.fillStyle = arrowColor;
+              ctx.fillText(fz.returnText, arrowX, lblY);
+
+              ctx.restore();
+            }
+
             // ── 손절 영역 (위험 구간): 오렌지 그라데이션 ──
             if (fz.yStop != null) {
               const sY = Math.min(fz.yEntry, fz.yStop);
@@ -876,12 +919,9 @@ const patternRenderer = (() => {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      // 넥라인 찾기 (두 저점 사이 최고 종가 — patterns.js와 일치)
-      let neckline = -Infinity, neckIdx = si;
-      for (let j = si; j <= ei && j < candles.length; j++) {
-        if (candles[j].close > neckline) { neckline = candles[j].close; neckIdx = j; }
-      }
-      if (!isFinite(neckline)) return;
+      // 넥라인: 패턴 객체에서 직접 읽기 (독립 재계산 제거 — patterns.js와 완전 일치 보장)
+      const neckline = p.neckline;
+      if (neckline == null || !isFinite(neckline)) return;
 
       // 두 저점의 최저가
       let minLow = Infinity;
@@ -951,12 +991,9 @@ const patternRenderer = (() => {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      // 넥라인 찾기 (두 고점 사이 최저 종가 — patterns.js와 일치)
-      let neckline = Infinity, neckIdx = si;
-      for (let j = si; j <= ei && j < candles.length; j++) {
-        if (candles[j].close < neckline) { neckline = candles[j].close; neckIdx = j; }
-      }
-      if (!isFinite(neckline)) return;
+      // 넥라인: 패턴 객체에서 직접 읽기 (독립 재계산 제거 — patterns.js와 완전 일치 보장)
+      const neckline = p.neckline;
+      if (neckline == null || !isFinite(neckline)) return;
 
       // 두 고점의 최고가
       let maxHigh = -Infinity;
@@ -1416,6 +1453,7 @@ const patternRenderer = (() => {
         yTarget: null,
         yStop: null,
         entry: entry,
+        isBuy: isBuy,
         stopPrice: null,
         returnText: null,
         returnColor: null,
@@ -1425,24 +1463,29 @@ const patternRenderer = (() => {
         stopFill: null,
         stopStripe: null,
         stopBorder: null,
+        offScreenTarget: false,
       };
 
       // 목표가 영역
       if (p.priceTarget != null) {
         const targetCoord = toXY(candles[fzStart].time, p.priceTarget);
+
+        // 예상 수익률 계산 (화면 내/밖 공통으로 미리 계산)
+        const retPct = ((p.priceTarget - entry) / entry * 100);
+        const retSign = retPct >= 0 ? '+' : '';
+        zone.returnText = `${retSign}${retPct.toFixed(1)}%`;
+        zone.returnColor = KRX_COLORS.PTN_BUY;
+
         if (targetCoord.y != null) {
           zone.yTarget = targetCoord.y;
 
-          // 예상 수익률 계산
-          const retPct = ((p.priceTarget - entry) / entry * 100);
-          const retSign = retPct >= 0 ? '+' : '';
-          zone.returnText = `${retSign}${retPct.toFixed(1)}%`;
-
           // [UX] 목표가 수익률 텍스트: 민트 통일 (패턴 전용 색상 — 차트 UP/DOWN과 무관)
-          zone.returnColor = KRX_COLORS.PTN_BUY;
           zone.targetFillNear = KRX_COLORS.FZ_TARGET_NEAR;
           zone.targetFillFar  = KRX_COLORS.FZ_TARGET_FAR;
           zone.targetBorder   = KRX_COLORS.FZ_TARGET_BORDER;
+        } else {
+          // 목표가가 현재 화면 밖 → 차트 경계에 방향 화살표 + 수익률 라벨 표시
+          zone.offScreenTarget = true;
         }
       }
 
@@ -1624,21 +1667,10 @@ const patternRenderer = (() => {
           }
         }
         // doubleBottom/doubleTop은 trendlines 없음 → 넥라인 수평선으로 연장
-        // (neckline은 패턴 객체에 포함되지 않으므로 candles에서 직접 계산)
+        // neckline은 패턴 객체에서 직접 읽기 (독립 재계산 제거 — high/low 불일치 버그 수정)
         if ((p.type === 'doubleBottom' || p.type === 'doubleTop') &&
             si < candles.length && ei < candles.length) {
-          var neckVal = null;
-          if (p.type === 'doubleBottom') {
-            neckVal = -Infinity;
-            for (var ni = si; ni <= ei && ni < candles.length; ni++) {
-              if (candles[ni].high > neckVal) neckVal = candles[ni].high;
-            }
-          } else {
-            neckVal = Infinity;
-            for (var ni = si; ni <= ei && ni < candles.length; ni++) {
-              if (candles[ni].low < neckVal) neckVal = candles[ni].low;
-            }
-          }
+          var neckVal = p.neckline || null;
           if (neckVal != null && isFinite(neckVal)) {
             extendedStructLines.push({
               points: [
