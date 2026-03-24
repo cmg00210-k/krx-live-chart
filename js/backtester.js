@@ -148,7 +148,7 @@ class PatternBacktester {
     var bestA = 2, bestScore = -Infinity; // default: trust_mra (action 2)
     for (var a = 0; a < p.K; a++) {
       var score = p.thetas[a][0]; // bias
-      for (var j = 0; j < 10; j++) {
+      for (var j = 0; j < p.d; j++) {
         score += p.thetas[a][j + 1] * context[j];
       }
       if (score > bestScore) { bestScore = score; bestA = a; }

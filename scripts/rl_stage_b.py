@@ -58,7 +58,7 @@ TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
          "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
-CONTEXT_DIM = 10
+CONTEXT_DIM = 10  # 12-dim tested (moveATR+D_J): mature IC 0.325→0.309, reverted
 MIN_TRAIN_FOR_EVAL = 119000  # minimum samples seen before evaluating IC (Period 5+ stable)
 
 

@@ -270,11 +270,53 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     return stdErrors[j] > 0 ? b / stdErrors[j] : 0;
   });
 
+  // HC3 이분산-견고 표준오차 (White 1980, MacKinnon & White 1985)
+  // Cov_HC3 = inv * (X'W diag(e²/(1-h)²) WX) * inv
+  // h_ii = x_i' inv x_i (hat matrix diagonal, leverage)
+  var hcStdErrors = new Array(p).fill(0);
+  var hcTStats = tStats;
+  if (df > 0) {
+    var meat = [];
+    for (var j = 0; j < p; j++) meat[j] = new Array(p).fill(0);
+    for (var i = 0; i < n; i++) {
+      var w = weights ? weights[i] : 1;
+      // leverage h_ii = x_i' * inv * x_i
+      var h_ii = 0;
+      for (var j = 0; j < p; j++) {
+        for (var k = 0; k < p; k++) {
+          h_ii += X[i][j] * inv[j][k] * X[i][k];
+        }
+      }
+      var denom = (1 - Math.min(h_ii, 0.99));
+      var eScaled = w * residuals[i] / (denom * denom);  // w * e_i / (1-h_ii)^2
+      for (var j = 0; j < p; j++) {
+        for (var k = 0; k < p; k++) {
+          meat[j][k] += X[i][j] * w * eScaled * residuals[i] * X[i][k];
+        }
+      }
+    }
+    // sandwich: inv * meat * inv
+    for (var j = 0; j < p; j++) {
+      var s = 0;
+      for (var a = 0; a < p; a++) {
+        for (var b = 0; b < p; b++) {
+          s += inv[j][a] * meat[a][b] * inv[b][j];
+        }
+      }
+      hcStdErrors[j] = Math.sqrt(Math.max(0, s));
+    }
+    hcTStats = coeffs.map(function(b, j) {
+      return hcStdErrors[j] > 0 ? b / hcStdErrors[j] : 0;
+    });
+  }
+
   return {
     coeffs: coeffs,
     rSquared: rSquared,
     stdErrors: stdErrors,
     tStats: tStats,
+    hcStdErrors: hcStdErrors,
+    hcTStats: hcTStats,
     df: df,
     fitted: fitted,
     sigmaHat2: sigmaHat2,

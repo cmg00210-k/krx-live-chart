@@ -66,6 +66,8 @@ CONTEXT_NAMES = [
     "pattern_tier",     # 7
     "confidence_norm",  # 8
     "raw_hurst",        # 9
+    "move_atr",         # 10: |close - MA50| / ATR14 (mean-reversion proxy)
+    "jeffrey_div",      # 11: Jeffrey divergence 60 vs 20 bar (regime shift)
 ]
 
 TIER1 = {"doubleBottom", "doubleTop", "risingWedge", "threeWhiteSoldiers"}  # invertedHammer: Tier-2 (52.3% win rate)
@@ -176,29 +178,97 @@ def load_ohlcv(code, market):
         return None, None
 
 
+def compute_move_atr(candles, idx, lookback=80):
+    """Compute |close - MA50| / ATR14 at given index.
+    Measures how far price is from its 50-bar mean in ATR units.
+    """
+    start = max(0, idx - lookback + 1)
+    window = candles[start:idx + 1]
+    if len(window) < 50:
+        return None
+
+    closes = [c["close"] for c in window]
+    ma50 = np.mean(closes[-50:])
+
+    # ATR14 (simplified: average of high-low over last 14 bars)
+    if len(window) < 14:
+        return None
+    trs = []
+    for j in range(-14, 0):
+        c = window[j]
+        prev_close = window[j - 1]["close"] if j > -len(window) else c["close"]
+        tr = max(c["high"] - c["low"],
+                 abs(c["high"] - prev_close),
+                 abs(c["low"] - prev_close))
+        trs.append(tr)
+    atr14 = np.mean(trs)
+    if atr14 < 1e-10:
+        return None
+
+    return float(abs(closes[-1] - ma50) / atr14)
+
+
+def compute_jeffrey_div(candles, idx, long_window=60, short_window=20):
+    """Compute Jeffrey (symmetric KL) divergence between two return periods.
+    Measures regime shift between past (60 bars) and recent (20 bars).
+    Matches patterns.js:252-272 logic.
+    """
+    total_needed = long_window + short_window
+    if idx < total_needed:
+        return None
+
+    # Long period returns (idx-80 to idx-20)
+    returns_long = []
+    for j in range(idx - total_needed, idx - short_window):
+        if j > 0 and candles[j - 1]["close"] > 0:
+            returns_long.append(
+                (candles[j]["close"] - candles[j - 1]["close"]) / candles[j - 1]["close"])
+
+    # Short period returns (idx-20 to idx)
+    returns_short = []
+    for j in range(idx - short_window, idx):
+        if j > 0 and candles[j - 1]["close"] > 0:
+            returns_short.append(
+                (candles[j]["close"] - candles[j - 1]["close"]) / candles[j - 1]["close"])
+
+    if len(returns_long) < 10 or len(returns_short) < 5:
+        return None
+
+    mu1 = np.mean(returns_long)
+    mu2 = np.mean(returns_short)
+    s1sq = np.var(returns_long) or 1e-10
+    s2sq = np.var(returns_short) or 1e-10
+
+    dj = (0.5 * (s1sq / s2sq + s2sq / s1sq - 2)
+          + 0.5 * (mu1 - mu2) ** 2 * (1 / s1sq + 1 / s2sq))
+    return float(max(dj, 0.0))
+
+
 def get_ohlcv_features(code, market, date_str, lookback=80):
     """Compute OHLCV-based features at a given date.
-    Returns (ewma_vol, raw_hurst) or (None, None) if insufficient data.
+    Returns (ewma_vol, raw_hurst, move_atr, jeffrey_div) or (None,...) if insufficient data.
     """
     candles, date_map = load_ohlcv(code, market)
     if candles is None or date_str not in date_map:
-        return None, None
+        return None, None, None, None
 
     idx = date_map[date_str]
     if idx < lookback - 1:
-        return None, None
+        return None, None, None, None
 
     # Extract lookback window of closes
     window = candles[idx - lookback + 1:idx + 1]
     closes = np.array([c["close"] for c in window], dtype=np.float64)
 
     if len(closes) < lookback:
-        return None, None
+        return None, None, None, None
 
     ewma = compute_ewma_vol(closes)
     hurst = compute_hurst(closes)
+    move_atr = compute_move_atr(candles, idx, lookback)
+    jeff_div = compute_jeffrey_div(candles, idx)
 
-    return ewma, hurst
+    return ewma, hurst, move_atr, jeff_div
 
 
 # ──────────────────────────────────────────────
@@ -264,7 +334,7 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("Stage B-2: Context Feature Engineering (10-dim)")
+    print("Stage B-2: Context Feature Engineering (12-dim)")
     print("=" * 60)
 
     # ── Step 1: Load residuals ──
@@ -312,7 +382,7 @@ def main():
 
     # ── Step 3: Compute OHLCV regime features ──
     print("\n[3/5] Computing OHLCV regime features (ewma_vol, raw_hurst)...")
-    ohlcv_features = [None] * n_total  # (ewma_vol, raw_hurst)
+    ohlcv_features = [None] * n_total  # (ewma_vol, raw_hurst, move_atr, jeffrey_div)
     n_ohlcv_ok = 0
     n_ohlcv_miss = 0
     unique_stocks = set(r["code"] for r in rows)
@@ -325,9 +395,9 @@ def main():
             elapsed = time.time() - t0
             print(f"  -> {pct:.0f}% ({i:,}/{n_total:,}) elapsed={elapsed:.0f}s")
 
-        ewma, hurst = get_ohlcv_features(r["code"], r["market"], r["date"])
+        ewma, hurst, move_atr, jeff_div = get_ohlcv_features(r["code"], r["market"], r["date"])
         if ewma is not None and hurst is not None:
-            ohlcv_features[i] = (ewma, hurst)
+            ohlcv_features[i] = (ewma, hurst, move_atr, jeff_div)
             n_ohlcv_ok += 1
         else:
             n_ohlcv_miss += 1
@@ -335,7 +405,7 @@ def main():
     print(f"  -> OHLCV features: {n_ohlcv_ok:,} OK, {n_ohlcv_miss:,} missing")
 
     # ── Step 4: Assemble 10-dim context ──
-    print("\n[4/5] Assembling 10-dim context vectors...")
+    print("\n[4/5] Assembling 12-dim context vectors...")
 
     # Global stats for normalization
     all_y_pred = np.array([r["y_pred"] for r in rows])
@@ -351,7 +421,17 @@ def main():
     hurst_mean = float(np.mean(all_hurst)) if all_hurst else 0.5
     hurst_std = float(np.std(all_hurst)) if all_hurst else 0.1
 
-    contexts = np.zeros((n_total, 10))
+    all_move_atr = [ohlcv_features[i][2] for i in range(n_total)
+                    if ohlcv_features[i] is not None and ohlcv_features[i][2] is not None]
+    move_atr_mean = float(np.mean(all_move_atr)) if all_move_atr else 1.5
+    move_atr_std = float(np.std(all_move_atr)) if all_move_atr else 1.0
+
+    all_jeff = [ohlcv_features[i][3] for i in range(n_total)
+                if ohlcv_features[i] is not None and ohlcv_features[i][3] is not None]
+    jeff_mean = float(np.mean(all_jeff)) if all_jeff else 0.5
+    jeff_std = float(np.std(all_jeff)) if all_jeff else 0.5
+
+    contexts = np.zeros((n_total, 12))
     n_complete = 0
 
     for i, r in enumerate(rows):
@@ -396,6 +476,14 @@ def main():
             contexts[i, 9] = (of[1] - hurst_mean) / max(hurst_std, 1e-6)
         # else: 0.0
 
+        # Dim 10: move_atr (z-scored) — |close - MA50| / ATR14
+        if of is not None and of[2] is not None:
+            contexts[i, 10] = (of[2] - move_atr_mean) / max(move_atr_std, 1e-6)
+
+        # Dim 11: jeffrey_div (z-scored) — regime shift measure
+        if of is not None and of[3] is not None:
+            contexts[i, 11] = (of[3] - jeff_mean) / max(jeff_std, 1e-6)
+
         if rf is not None and of is not None:
             n_complete += 1
 
@@ -422,7 +510,7 @@ def main():
                 r["date"], r["code"], r["market"], r["type"], r["signal"],
                 f"{r['y_pred']:.6f}", f"{r['y_actual']:.6f}",
                 f"{r['residual']:.6f}", r["wf_period"],
-            ] + [f"{contexts[i, j]:.6f}" for j in range(10)]
+            ] + [f"{contexts[i, j]:.6f}" for j in range(12)]
             writer.writerow(row)
     print(f"  -> CSV: {OUT_CSV} ({n_total:,} rows)")
 
@@ -467,6 +555,8 @@ def main():
         "ewma_vol": {"mean": round(ewma_mean, 6), "std": round(ewma_std, 6)},
         "raw_hurst": {"mean": round(hurst_mean, 6), "std": round(hurst_std, 6)},
         "pred_std": round(pred_std, 6),
+        "move_atr": {"mean": round(move_atr_mean, 6), "std": round(move_atr_std, 6)},
+        "jeffrey_div": {"mean": round(jeff_mean, 6), "std": round(jeff_std, 6)},
     }
 
     elapsed = time.time() - t0
