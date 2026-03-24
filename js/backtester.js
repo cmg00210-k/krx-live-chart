@@ -105,11 +105,13 @@ class PatternBacktester {
     const maxHorizon = Math.max(...horizons);
     const curve = this._cumulativeCurve(candles, occurrences, maxHorizon);
 
+    const stockWc = occurrences.length > 0 ? occurrences[0].wc : 1;
     const result = {
       patternType,
       name: meta.name,
       signal: meta.signal,
       sampleSize: occurrences.length,
+      stockWc: +stockWc.toFixed(4),
       horizons: horizonStats,
       curve,
     };
@@ -362,6 +364,7 @@ class PatternBacktester {
         trendStrength: trendStrength,
         volumeRatio: volumeRatio,
         atrNorm: atrNorm,
+        wc: (p.hw || 1) * (p.mw || 1),
       });
     }
     return occurrences;
@@ -441,7 +444,7 @@ class PatternBacktester {
       const lossReturns = returns.filter(r => r < 0);
       const avgWin = winReturns.length ? winReturns.reduce((a, b) => a + b, 0) / winReturns.length : 0;
       const avgLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0) / lossReturns.length) : 0;
-      const riskReward = avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? Infinity : 0);
+      const riskReward = avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? 999.99 : 0);
 
       // t-검정: H0: mean = 0 (소표본 보정: 정밀 t-분포 임계값 테이블, 95% 양측)
       const tStat = stdDev > 0 && n > 1 ? mean / (stdDev / Math.sqrt(n)) : 0;
@@ -507,6 +510,7 @@ class PatternBacktester {
         var reg = calcWLSRegression(X, returns, weights);
         if (reg) {
           stats.regression = {
+            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
             tStats: reg.tStats.map(function(t) { return +t.toFixed(2); }),

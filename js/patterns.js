@@ -315,6 +315,14 @@ class PatternEngine {
     const sr = this.detectSupportResistance(candles, swH, swL, ctx);
     this._applyConfluence(patterns, sr, ctx);
 
+    // Wc 가중치를 패턴 객체에 기록 (Stage 5 백테스트 분석용)
+    for (var pi = 0; pi < patterns.length; pi++) {
+      patterns[pi].hw = hurstWeight;
+      patterns[pi].vw = volWeight;
+      patterns[pi].mw = meanRevWeight;
+      patterns[pi].rw = regimeWeight;
+    }
+
     // R:R 검증 게이트 — 전망이론 λ=2.25 기반 (Kahneman & Tversky 1979)
     this._applyRRGate(patterns, candles);
 
@@ -1359,7 +1367,7 @@ class PatternEngine {
       const confidence = this._adaptiveQuality('ascendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantLows[relevantLows.length - 1].price - a).toFixed(0);
       const raw = resistanceLevel - relevantLows[0].price;
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(resistanceLevel + patternHeight).toFixed(0);
 
       results.push({
@@ -1419,7 +1427,7 @@ class PatternEngine {
       const confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
       const raw = relevantHighs[0].price - supportLevel;
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(supportLevel - patternHeight).toFixed(0);
 
       results.push({
@@ -1479,7 +1487,7 @@ class PatternEngine {
         const confidence = this._adaptiveQuality('risingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
         const stopLoss = +(h2.price + a).toFixed(0);
         const wedgeHeight = h2.price - l2.price;
-        const priceTarget = +(Math.max(l1.price, candles[endIdx].close - Math.min(wedgeHeight * hw * vw * mw * rw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP))).toFixed(0);
+        const priceTarget = +(Math.max(l1.price, candles[endIdx].close - Math.min(wedgeHeight * hw * mw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP))).toFixed(0);
 
         results.push({
           type: 'risingWedge', name: '상승 쐐기 (Rising Wedge)', nameShort: '상승쐐기',
@@ -1528,7 +1536,7 @@ class PatternEngine {
         const a = this._atr(atr, h2.index, candles);
         const highSlope = Math.abs(h2.price - h1.price) / (h2.index - h1.index) / a;
         const lowSlope = Math.abs(l2.price - l1.price) / (l2.index - l1.index) / a;
-        if (highSlope >= lowSlope) continue;
+        if (lowSlope >= highSlope) continue;
 
         const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
         if (span < 8) continue;
@@ -1540,7 +1548,7 @@ class PatternEngine {
         const confidence = this._adaptiveQuality('fallingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
         const stopLoss = +(l2.price - a).toFixed(0);
         const wedgeHeight = h2.price - l2.price;
-        const priceTarget = +(Math.min(h1.price, candles[endIdx].close + Math.min(wedgeHeight * hw * vw * mw * rw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP))).toFixed(0);
+        const priceTarget = +(Math.min(h1.price, candles[endIdx].close + Math.min(wedgeHeight * hw * mw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP))).toFixed(0);
 
         results.push({
           type: 'fallingWedge', name: '하락 쐐기 (Falling Wedge)', nameShort: '하락쐐기',
@@ -1668,7 +1676,7 @@ class PatternEngine {
         if (candles[j].close > neckline) neckline = candles[j].close;
       }
       const raw = neckline - Math.min(l1.price, l2.price);
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
 
       const volumeScore = Math.min(this._volRatio(candles, l2.index, vma) / 2, 1);
       const confidence = this._adaptiveQuality('doubleBottom', { body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(l1.price - l2.price) / a });
@@ -1709,7 +1717,7 @@ class PatternEngine {
         if (candles[j].close < neckline) neckline = candles[j].close;
       }
       const raw = Math.max(h1.price, h2.price) - neckline;
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
 
       const volumeScore = Math.min(this._volRatio(candles, h2.index, vma) / 2, 1);
       const confidence = this._adaptiveQuality('doubleTop', { body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(h1.price - h2.price) / a });
@@ -1758,7 +1766,7 @@ class PatternEngine {
       if (lastClose > neckAtEnd + a * 0.5) continue;
 
       const raw = head.price - (t1.price + t2.price) / 2;
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(neckAtEnd - patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / head.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
@@ -1810,7 +1818,7 @@ class PatternEngine {
       if (lastClose < neckAtEnd - a * 0.5) continue;
 
       const raw = (t1.price + t2.price) / 2 - head.price;
-      const patternHeight = Math.min(raw * hw * vw * mw * rw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
+      const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(neckAtEnd + patternHeight).toFixed(0);
       const symmetry = 1 - Math.abs(ls.price - rs.price) / ls.price * 10;
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
@@ -1918,6 +1926,7 @@ class PatternEngine {
       var risk = Math.abs(entry - p.stopLoss);
       if (risk <= 0) continue;
       var rr = reward / risk;
+      p.riskReward = +rr.toFixed(2);
       if (rr < 1.0) {
         p.confidence = Math.max(10, p.confidence - 15);
       } else if (rr < 1.5) {

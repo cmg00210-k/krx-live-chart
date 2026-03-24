@@ -104,7 +104,44 @@ function analyzeStock(sandbox, code, market) {
     vw: p.vw,
     mw: p.mw,
     rw: p.rw,
+    wc: +((p.hw || 1) * (p.mw || 1)).toFixed(4),
   }));
+
+  // Per-occurrence Wc + actual return pairs (Phase C input)
+  const HORIZONS = [1, 3, 5, 10, 20];
+  const KRX_COST = 0.36;
+  const occurrenceReturns = [];
+  for (const p of patterns) {
+    const idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;
+    if (idx === undefined) continue;
+    const entryIdx = idx + 1;
+    if (entryIdx >= candles.length) continue;
+    const entryPrice = candles[entryIdx].open || candles[idx].close;
+    if (!entryPrice || entryPrice === 0) continue;
+
+    const returns = {};
+    for (const h of HORIZONS) {
+      const exitIdx = idx + h;
+      if (exitIdx < candles.length) {
+        returns[h] = +((candles[exitIdx].close - entryPrice) / entryPrice * 100 - KRX_COST).toFixed(3);
+      }
+    }
+    if (Object.keys(returns).length > 0) {
+      occurrenceReturns.push({
+        type: p.type,
+        signal: p.signal,
+        idx,
+        date: candles[idx].time,
+        wc: +((p.hw || 1) * (p.mw || 1)).toFixed(4),
+        hw: p.hw,
+        vw: p.vw,
+        mw: p.mw,
+        rw: p.rw,
+        confidence: p.confidence,
+        returns,
+      });
+    }
+  }
 
   return {
     code,
@@ -113,6 +150,7 @@ function analyzeStock(sandbox, code, market) {
     candleCount: candles.length,
     patternCount: patterns.length,
     patterns: patternSummary,
+    occurrenceReturns,
     backtest: backtestResults,
   };
 }

@@ -218,6 +218,10 @@ def aggregate_theory_vs_actual(results):
             if target is None or end_idx is None:
                 continue
 
+            hw = p.get("hw") or 1
+            vw = p.get("vw") or 1
+            mw = p.get("mw") or 1
+            rw = p.get("rw") or 1
             records.append({
                 "code": code,
                 "type": p["type"],
@@ -231,6 +235,7 @@ def aggregate_theory_vs_actual(results):
                 "vw": p.get("vw"),
                 "mw": p.get("mw"),
                 "rw": p.get("rw"),
+                "wc": round(hw * mw, 4),
                 "candleCount": candle_count,
             })
 
@@ -262,6 +267,8 @@ def aggregate_theory_vs_actual(results):
                 "max": round(max(vals), 4),
             }
 
+        wc_vals = [r["wc"] for r in recs if r.get("wc") is not None]
+
         summary[ptype] = {
             "count": len(recs),
             "confidence": _stats(conf_vals),
@@ -270,12 +277,60 @@ def aggregate_theory_vs_actual(results):
             "vw": _stats(vw_vals),
             "mw": _stats(mw_vals),
             "rw": _stats(rw_vals),
+            "wc": _stats(wc_vals),
         }
 
     return {
         "total_targets": len(records),
         "by_pattern_type": summary,
     }
+
+
+def generate_wc_return_pairs(results):
+    """Per-occurrence (Wc, actual returns) CSV — Phase C의 핵심 입력 파일"""
+    import csv
+
+    csv_path = BACKTEST_DIR / "wc_return_pairs.csv"
+    fieldnames = [
+        "code", "market", "type", "signal", "date",
+        "wc", "hw", "vw", "mw", "rw", "confidence",
+        "ret_1", "ret_3", "ret_5", "ret_10", "ret_20",
+    ]
+
+    total = 0
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for r in results:
+            code = r.get("code", "")
+            market = r.get("market", "").lower()
+            occ_list = r.get("occurrenceReturns", [])
+
+            for occ in occ_list:
+                rets = occ.get("returns", {})
+                row = {
+                    "code": code,
+                    "market": market,
+                    "type": occ.get("type", ""),
+                    "signal": occ.get("signal", ""),
+                    "date": occ.get("date", ""),
+                    "wc": occ.get("wc"),
+                    "hw": occ.get("hw"),
+                    "vw": occ.get("vw"),
+                    "mw": occ.get("mw"),
+                    "rw": occ.get("rw"),
+                    "confidence": occ.get("confidence"),
+                    "ret_1": rets.get("1"),
+                    "ret_3": rets.get("3"),
+                    "ret_5": rets.get("5"),
+                    "ret_10": rets.get("10"),
+                    "ret_20": rets.get("20"),
+                }
+                writer.writerow(row)
+                total += 1
+
+    return total
 
 
 def main():
@@ -320,6 +375,9 @@ def main():
     with open(BACKTEST_DIR / "theory_vs_actual.json", "w", encoding="utf-8") as f:
         json.dump(theory_actual, f, ensure_ascii=False, indent=2)
     print(f"  -> theory_vs_actual.json ({theory_actual['total_targets']} targets)")
+
+    wc_pairs_count = generate_wc_return_pairs(results)
+    print(f"  -> wc_return_pairs.csv ({wc_pairs_count} occurrence-return pairs)")
 
     # Step 4: Summary
     print("[4/4] Summary:")
