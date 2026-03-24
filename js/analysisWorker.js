@@ -61,7 +61,7 @@ try {
 // ── 백테스트 WLS 계수 → 적응형 가중치 추출 ──────────
 // h5(5일 수익률) 회귀 결과가 충분히 신뢰할 때만 저장.
 // rSquared > 0.01 + n >= 30: 통계적 의미 최소 기준.
-// confidence = rSquared² × clamp(n/100, 0, 1): 샘플 수 패널티 포함.
+// confidence = rSquared² × clamp(n/200, 0, 1): 샘플 수 패널티 포함 (C-2 교정: 100→200).
 function _extractLearnedWeights(backtestResults) {
   for (var pType in backtestResults) {
     var bt = backtestResults[pType];

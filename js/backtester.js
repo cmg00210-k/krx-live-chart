@@ -364,7 +364,7 @@ class PatternBacktester {
         trendStrength: trendStrength,
         volumeRatio: volumeRatio,
         atrNorm: atrNorm,
-        wc: p.wc || ((p.hw || 1) * (p.mw || 1)),
+        wc: p.wc != null ? p.wc : ((p.hw || 1) * (p.mw || 1)),
       });
     }
     return occurrences;
