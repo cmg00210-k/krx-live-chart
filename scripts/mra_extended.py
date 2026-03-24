@@ -43,9 +43,9 @@ BACKTEST_DIR = ROOT / "data" / "backtest"
 CSV_PATH = BACKTEST_DIR / "wc_return_pairs.csv"
 
 # Tier classification from Phase A findings
-TIER1 = {"doubleBottom", "doubleTop", "risingWedge", "threeWhiteSoldiers", "invertedHammer"}
+TIER1 = {"doubleBottom", "doubleTop", "risingWedge", "threeWhiteSoldiers"}
 TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
-         "hangingMan", "shootingStar", "eveningStar"}
+         "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
 # 12 feature names (6 original + 6 derived)

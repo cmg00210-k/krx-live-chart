@@ -58,6 +58,71 @@ class PatternBacktester {
 
     /** 개별 backtest() 결과 캐시: "캔들수_마지막날짜_패턴" → result */
     this._resultCache = new Map();
+
+    /** LinUCB policy (Stage B) — loaded lazily from rl_policy.json */
+    this._rlPolicy = null;
+    this._rlPolicyAttempted = false;
+    this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
+    this._rlTier3 = new Set(['spinningTop','doji','fallingWedge']);
+    this._loadRLPolicy();
+  }
+
+  /** Load LinUCB policy JSON (graceful: missing file = no-op) */
+  _loadRLPolicy() {
+    if (this._rlPolicyAttempted) return;
+    this._rlPolicyAttempted = true;
+    var self = this;
+    var policyUrl = (typeof self !== 'undefined' && self.constructor && self.constructor.name === 'DedicatedWorkerGlobalScope')
+      ? '../data/backtest/rl_policy.json'
+      : 'data/backtest/rl_policy.json';
+    fetch(policyUrl)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data && data.thetas && data.action_factors) {
+          self._rlPolicy = data;
+        }
+      })
+      .catch(function() { /* silent fallback */ });
+  }
+
+  /** Build 10-dim context vector for LinUCB */
+  _buildRLContext(predicted, signal, patternType, latest) {
+    // Dims 0-2: residual history (not available at runtime, default 0)
+    // Dim 3: ewma_vol (not available, default 0)
+    // Dim 4: pred_magnitude = |predicted| / 5.0
+    // Dim 5: signal_dir
+    // Dim 6: market_type (not available in backtester scope, default 0)
+    // Dim 7: pattern_tier remapped
+    // Dim 8: confidence_norm
+    // Dim 9: raw_hurst (not available, default 0)
+    var tier = this._rlTier1.has(patternType) ? -1 : (this._rlTier3.has(patternType) ? 1 : 0);
+    var sigDir = signal === 'buy' ? 1 : (signal === 'sell' ? -1 : 0);
+    return [
+      0,                                           // 0: resid_sign
+      0,                                           // 1: resid_mag_z
+      0,                                           // 2: resid_run_len
+      0,                                           // 3: ewma_vol
+      Math.min(Math.abs(predicted) / 5.0, 3),     // 4: pred_magnitude
+      sigDir,                                       // 5: signal_dir
+      0,                                           // 6: market_type
+      tier,                                         // 7: pattern_tier
+      (latest.confidence || 50) / 100,             // 8: confidence_norm
+      0                                            // 9: raw_hurst
+    ];
+  }
+
+  /** Apply LinUCB: dot product + argmax over 5 actions */
+  _applyLinUCB(context) {
+    var p = this._rlPolicy;
+    var bestA = 2, bestScore = -Infinity; // default: trust_mra (action 2)
+    for (var a = 0; a < p.K; a++) {
+      var score = p.thetas[a][0]; // bias
+      for (var j = 0; j < 10; j++) {
+        score += p.thetas[a][j + 1] * context[j];
+      }
+      if (score > bestScore) { bestScore = score; bestA = a; }
+    }
+    return { action: bestA, factor: p.action_factors[bestA] };
   }
 
 
@@ -101,7 +166,7 @@ class PatternBacktester {
       return empty;
     }
 
-    const horizonStats = this._computeStats(candles, occurrences, horizons, meta.signal);
+    const horizonStats = this._computeStats(candles, occurrences, horizons, meta.signal, patternType);
     const maxHorizon = Math.max(...horizons);
     const curve = this._cumulativeCurve(candles, occurrences, maxHorizon);
 
@@ -383,7 +448,7 @@ class PatternBacktester {
    * @param {string} patternSignal — 'buy' | 'sell' | 'neutral'
    * @returns {Object} — { [horizon]: statsObj }
    */
-  _computeStats(candles, occurrences, horizons, patternSignal) {
+  _computeStats(candles, occurrences, horizons, patternSignal, patternType) {
     const result = {};
 
     for (const h of horizons) {
@@ -533,6 +598,16 @@ class PatternBacktester {
               predicted += xNew[j] * reg.coeffs[j];
             }
             stats.expectedReturn = +predicted.toFixed(2);
+
+            // ── LinUCB Contextual Bandit 조정 (Stage B) ──
+            if (this._rlPolicy) {
+              var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest);
+              var rlResult = this._applyLinUCB(rlCtx);
+              stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
+              stats.rlAction = rlResult.action;
+              stats.rlFactor = rlResult.factor;
+              predicted = stats.expectedReturn; // CI도 조정된 예측값 기준
+            }
 
             // 95% 신뢰구간: SE = sqrt(sigma^2 * (1 + x' (X'WX)^-1 x))
             var xInvx = 0;

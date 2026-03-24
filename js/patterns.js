@@ -358,7 +358,8 @@ class PatternEngine {
       const shadowScore = 1 - Math.min((w0 / b0 + w1 / b1 + w2 / b2) / 3, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trend = this._detectTrend(candles, i - 2, 10, a);
-      const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
+      if (trend.direction === 'up') continue;  // Nison: 반전 패턴이므로 상승추세에서는 무효
+      const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
@@ -1481,6 +1482,11 @@ class PatternEngine {
         const lowSlope = (l2.price - l1.price) / (l2.index - l1.index) / a;
         if (highSlope >= lowSlope) continue;
 
+        // 쐐기 수렴 검증: 끝 높이가 시작 높이보다 좁아야 함
+        const startHeight = h1.price - l1.price;
+        const endHeight = h2.price - l2.price;
+        if (startHeight <= 0 || endHeight >= startHeight * 0.9) continue;
+
         const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
         if (span < 8) continue;
 
@@ -1669,15 +1675,15 @@ class PatternEngine {
     for (let i = 0; i < recent.length - 1; i++) {
       const l1 = recent[i], l2 = recent[i + 1];
       const a = this._atr(atr, l2.index, candles);
-      if (Math.abs(l1.price - l2.price) > a * 1.0) continue;
+      if (Math.abs(l1.price - l2.price) > a * 0.5) continue;  // Bulkowski: ±0.5 ATR (tighter)
 
       const span = l2.index - l1.index;
       if (span < 5 || span > 40) continue;
 
-      // 넥라인 (두 저점 사이 최고 종가 — 꼬리 봉 과대 산정 방지)
+      // 넥라인 (두 저점 사이 최고 고가 — 실제 저항선 반영)
       let neckline = 0;
       for (let j = l1.index; j <= l2.index; j++) {
-        if (candles[j].close > neckline) neckline = candles[j].close;
+        if (candles[j].high > neckline) neckline = candles[j].high;
       }
       const raw = neckline - Math.min(l1.price, l2.price);
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
@@ -1710,15 +1716,15 @@ class PatternEngine {
     for (let i = 0; i < recent.length - 1; i++) {
       const h1 = recent[i], h2 = recent[i + 1];
       const a = this._atr(atr, h2.index, candles);
-      if (Math.abs(h1.price - h2.price) > a * 1.0) continue;
+      if (Math.abs(h1.price - h2.price) > a * 0.5) continue;  // Bulkowski: ±0.5 ATR (tighter)
 
       const span = h2.index - h1.index;
       if (span < 5 || span > 40) continue;
 
-      // 넥라인 (두 고점 사이 최저 종가 — 꼬리 봉 과대 산정 방지)
+      // 넥라인 (두 고점 사이 최저 저가 — 실제 지지선 반영)
       let neckline = Infinity;
       for (let j = h1.index; j <= h2.index; j++) {
-        if (candles[j].close < neckline) neckline = candles[j].close;
+        if (candles[j].low < neckline) neckline = candles[j].low;
       }
       const raw = Math.max(h1.price, h2.price) - neckline;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
