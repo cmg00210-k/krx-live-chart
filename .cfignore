@@ -1,0 +1,3 @@
+data/backtest/raw_results.ndjson
+data/backtest/wc_return_pairs.csv
+data/backtest/results/
