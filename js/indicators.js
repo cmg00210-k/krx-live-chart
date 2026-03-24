@@ -196,7 +196,7 @@ function calcHurst(closes, minWindow = 10) {
  * @returns {{ coeffs, rSquared, stdErrors, tStats, df, fitted, sigmaHat2, invXtWX }}
  *          또는 표본 부족/특이행렬 시 null
  */
-function calcWLSRegression(X, y, weights) {
+function calcWLSRegression(X, y, weights, ridgeLambda) {
   var n = X.length, p = X[0].length;
   if (n < p + 2) return null;  // 최소 표본 부족
 
@@ -218,7 +218,14 @@ function calcWLSRegression(X, y, weights) {
     }
   }
 
-  // (X^T W X)^{-1} via Gauss-Jordan 소거법
+  // Ridge regularization: (X^T W X + λI) — 절편(j=0)은 페널티 미적용
+  if (ridgeLambda && ridgeLambda > 0) {
+    for (var j = 1; j < p; j++) {
+      XtWX[j][j] += ridgeLambda;
+    }
+  }
+
+  // (X^T W X + λI)^{-1} via Gauss-Jordan 소거법
   var inv = _invertMatrix(XtWX);
   if (!inv) return null;  // 특이 행렬 (다중공선성 등)
 

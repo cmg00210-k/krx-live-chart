@@ -508,7 +508,7 @@ class PatternBacktester {
           weights.push(Math.pow(lambda, returns.length - 1 - ri));
         }
 
-        var reg = calcWLSRegression(X, returns, weights);
+        var reg = calcWLSRegression(X, returns, weights, 2.0);
         if (reg) {
           stats.regression = {
             labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm', 'wc'],

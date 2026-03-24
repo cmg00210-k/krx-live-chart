@@ -44,11 +44,11 @@ function _makeCacheKey(candles) {
 // importScripts 경로는 Worker 파일(js/) 기준 상대 경로
 try {
   importScripts(
-    'colors.js?v=10',
-    'indicators.js?v=10',
-    'patterns.js?v=10',
-    'signalEngine.js?v=10',
-    'backtester.js?v=10'
+    'colors.js?v=11',
+    'indicators.js?v=11',
+    'patterns.js?v=11',
+    'signalEngine.js?v=11',
+    'backtester.js?v=11'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
