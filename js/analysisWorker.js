@@ -72,7 +72,7 @@ function _extractLearnedWeights(backtestResults) {
         beta: h5.regression.coeffs,
         rSquared: h5.regression.rSquared,
         n: h5.n,
-        confidence: Math.pow(h5.regression.rSquared, 2) * Math.min(h5.n / 100, 1),
+        confidence: Math.pow(h5.regression.rSquared, 2) * Math.min(h5.n / 200, 1),
       };
     }
   }

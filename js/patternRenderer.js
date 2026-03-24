@@ -473,10 +473,11 @@ const patternRenderer = (() => {
             _roundRect(ctx, boxX, boxY, 3, boxH, [radius, 0, 0, radius]);
             ctx.fill();
 
-            // ── 테두리 ──
+            // ── 테두리 (Wc 높을수록 두껍고 불투명) ──
+            var wcAlpha = lb.wc != null ? Math.min(0.3 + 0.5 * lb.wc, 1.0) : 0.65;
             ctx.strokeStyle = lb.color;
-            ctx.lineWidth = 0.8;
-            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = lb.wc != null ? Math.max(0.5, Math.min(lb.wc * 1.2, 2.0)) : 0.8;
+            ctx.globalAlpha = wcAlpha;
             ctx.beginPath();
             _roundRect(ctx, boxX, boxY, boxW, boxH, radius);
             ctx.stroke();
@@ -523,6 +524,10 @@ const patternRenderer = (() => {
             // canvas 경계로 클리핑
             if (zoneX < 0) { zoneW += zoneX; zoneX = 0; }
             if (zoneX + zoneW > w) { zoneW = w - zoneX; }
+
+            // ── Wc 기반 전체 영역 alpha 변조 (Wc 낮을수록 투명) ──
+            var fzAlpha = fz.wc != null ? Math.min(0.4 + 0.5 * fz.wc, 1.0) : 1.0;
+            ctx.globalAlpha = fzAlpha;
 
             // ── 목표 영역 (수익 구간): 부드러운 그라데이션 ──
             if (fz.yTarget != null) {
@@ -672,6 +677,8 @@ const patternRenderer = (() => {
                 ctx.fillText(rrText, barX + 9, rrY);
               }
             }
+            // Wc alpha 복원
+            ctx.globalAlpha = 1;
           });
         }
 
@@ -1256,6 +1263,9 @@ const patternRenderer = (() => {
       // 신뢰도(%) 추가: "이중바닥 82%"
       const confVal = p.quality != null ? p.quality : p.confidence;
       let name = confVal != null ? `${baseName} ${Math.round(confVal)}%` : baseName;
+      if (p.wc != null && Math.abs(p.wc - 1) > 0.01) {
+        name += ` W${p.wc.toFixed(2)}`;
+      }
 
       // ── 패턴 적중 추적: Active/Hit/Failed (Fix 3: cached) ──
       let outcome = null;
@@ -1325,6 +1335,7 @@ const patternRenderer = (() => {
         borderColor: color,
         confidence: p.confidence,
         outcome: outcome,
+        wc: p.wc || 1,
       });
     }
 
@@ -1464,6 +1475,7 @@ const patternRenderer = (() => {
         stopStripe: null,
         stopBorder: null,
         offScreenTarget: false,
+        wc: p.wc || 1,
       };
 
       // 목표가 영역

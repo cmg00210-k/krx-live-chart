@@ -364,7 +364,7 @@ class PatternBacktester {
         trendStrength: trendStrength,
         volumeRatio: volumeRatio,
         atrNorm: atrNorm,
-        wc: (p.hw || 1) * (p.mw || 1),
+        wc: p.wc || ((p.hw || 1) * (p.mw || 1)),
       });
     }
     return occurrences;
@@ -501,7 +501,8 @@ class PatternBacktester {
             (occ.confidence || 50) / 100,                  // 신뢰도 (0-1)
             occ.trendStrength || 0,                        // 추세 강도
             Math.log(Math.max(occ.volumeRatio || 1, 0.1)), // ln(거래량비)
-            occ.atrNorm || 0.02                            // ATR / 종가
+            occ.atrNorm || 0.02,                           // ATR / 종가
+            occ.wc || 1                                    // Wc = hw × mw (적응형 가중치)
           ]);
           // 지수 감소 가중치: 최신 패턴에 높은 가중치
           weights.push(Math.pow(lambda, returns.length - 1 - ri));
@@ -510,7 +511,7 @@ class PatternBacktester {
         var reg = calcWLSRegression(X, returns, weights);
         if (reg) {
           stats.regression = {
-            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm'],
+            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm', 'wc'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
             tStats: reg.tStats.map(function(t) { return +t.toFixed(2); }),
@@ -524,7 +525,8 @@ class PatternBacktester {
               (latest.confidence || 50) / 100,
               latest.trendStrength || 0,
               Math.log(Math.max(latest.volumeRatio || 1, 0.1)),
-              latest.atrNorm || 0.02
+              latest.atrNorm || 0.02,
+              latest.wc || 1
             ];
             var predicted = 0;
             for (var j = 0; j < xNew.length; j++) {

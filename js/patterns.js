@@ -316,11 +316,15 @@ class PatternEngine {
     this._applyConfluence(patterns, sr, ctx);
 
     // Wc 가중치를 패턴 객체에 기록 (Stage 5 백테스트 분석용)
+    // sell 조건부: 추세 지속(hw>1)은 sell에 불리 → hw 반전 (2-hw)
+    // 근거: Phase A IC — buy +0.030(정방향) vs sell +0.041(역방향 MISMATCH)
     for (var pi = 0; pi < patterns.length; pi++) {
       patterns[pi].hw = hurstWeight;
       patterns[pi].vw = volWeight;
       patterns[pi].mw = meanRevWeight;
       patterns[pi].rw = regimeWeight;
+      var effectiveHw = patterns[pi].signal === 'sell' ? (2 - hurstWeight) : hurstWeight;
+      patterns[pi].wc = +(effectiveHw * meanRevWeight).toFixed(4);
     }
 
     // R:R 검증 게이트 — 전망이론 λ=2.25 기반 (Kahneman & Tversky 1979)
@@ -334,7 +338,7 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectThreeWhiteSoldiers(candles, ctx = {}) {
     const results = [];
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
     for (let i = 2; i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       if (c0.close <= c0.open || c1.close <= c1.open || c2.close <= c2.open) continue;
@@ -1337,7 +1341,7 @@ class PatternEngine {
   detectAscendingTriangle(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const recentHighs = swingHighs.filter(h => h.index >= candles.length - 40);
     const recentLows = swingLows.filter(l => l.index >= candles.length - 40);
@@ -1397,7 +1401,7 @@ class PatternEngine {
   detectDescendingTriangle(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const recentHighs = swingHighs.filter(h => h.index >= candles.length - 40);
     const recentLows = swingLows.filter(l => l.index >= candles.length - 40);
@@ -1457,7 +1461,7 @@ class PatternEngine {
   detectRisingWedge(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const recentHighs = swingHighs.filter(h => h.index >= candles.length - 50);
     const recentLows = swingLows.filter(l => l.index >= candles.length - 50);
@@ -1518,7 +1522,7 @@ class PatternEngine {
   detectFallingWedge(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const recentHighs = swingHighs.filter(h => h.index >= candles.length - 50);
     const recentLows = swingLows.filter(l => l.index >= candles.length - 50);
@@ -1583,7 +1587,7 @@ class PatternEngine {
   detectSymmetricTriangle(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     // 최근 50봉 내 스윙 포인트만 사용
     const recentHighs = swingHighs.filter(h => h.index >= candles.length - 50);
@@ -1659,7 +1663,7 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectDoubleBottom(candles, swingLows, ctx = {}) {
     const results = [];
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
     const recent = swingLows.filter(l => l.index >= candles.length - 50);
 
     for (let i = 0; i < recent.length - 1; i++) {
@@ -1700,7 +1704,7 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectDoubleTop(candles, swingHighs, ctx = {}) {
     const results = [];
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
     const recent = swingHighs.filter(h => h.index >= candles.length - 50);
 
     for (let i = 0; i < recent.length - 1; i++) {
@@ -1742,7 +1746,7 @@ class PatternEngine {
   detectHeadAndShoulders(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingHighs.length < 3 || swingLows.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const rH = swingHighs.filter(h => h.index >= candles.length - 60);
     const rL = swingLows.filter(l => l.index >= candles.length - 60);
@@ -1796,7 +1800,7 @@ class PatternEngine {
   detectInverseHeadAndShoulders(candles, swingHighs, swingLows, ctx = {}) {
     const results = [];
     if (swingLows.length < 3 || swingHighs.length < 2) return results;
-    const { atr = [], vma = [], hurstWeight: hw = 1, volWeight: vw = 1, meanRevWeight: mw = 1, regimeWeight: rw = 1 } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
     const rL = swingLows.filter(l => l.index >= candles.length - 60);
     const rH = swingHighs.filter(h => h.index >= candles.length - 60);

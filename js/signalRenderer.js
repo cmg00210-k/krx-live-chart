@@ -305,8 +305,9 @@ const signalRenderer = (() => {
           diamonds.push({
             x, y,
             color: isBuy ? BUY_COLOR : SELL_COLOR,
-            size: s.strength === 'strong' ? 10 : 8,
+            size: (s.strength === 'strong' ? 10 : 8) * (s.wc != null ? Math.max(0.7, Math.min(s.wc, 1.5)) : 1),
             confidence: s.confidence || 0,
+            wc: s.wc || 1,
           });
         }
 
@@ -327,8 +328,9 @@ const signalRenderer = (() => {
           stars.push({
             x, y,
             color: isBuy ? BUY_COLOR : SELL_COLOR,
-            size: 12,
+            size: 12 * (s.wc != null ? Math.max(0.7, Math.min(s.wc, 1.5)) : 1),
             confidence: s.confidence || 0,
+            wc: s.wc || 1,
           });
         }
 

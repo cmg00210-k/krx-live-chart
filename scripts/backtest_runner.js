@@ -104,7 +104,7 @@ function analyzeStock(sandbox, code, market) {
     vw: p.vw,
     mw: p.mw,
     rw: p.rw,
-    wc: +((p.hw || 1) * (p.mw || 1)).toFixed(4),
+    wc: p.wc || +((p.hw || 1) * (p.mw || 1)).toFixed(4),
   }));
 
   // Per-occurrence Wc + actual return pairs (Phase C input)
@@ -132,7 +132,7 @@ function analyzeStock(sandbox, code, market) {
         signal: p.signal,
         idx,
         date: candles[idx].time,
-        wc: +((p.hw || 1) * (p.mw || 1)).toFixed(4),
+        wc: p.wc || +((p.hw || 1) * (p.mw || 1)).toFixed(4),
         hw: p.hw,
         vw: p.vw,
         mw: p.mw,

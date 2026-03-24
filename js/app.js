@@ -1430,6 +1430,7 @@ function _initAnalysisWorker() {
             if (s.index != null) s.index += clampFrom;
           });
           detectedSignals = dragSignals;
+          _injectWcToSignals(detectedSignals, detectedPatterns);
           signalStats = msg.stats;
 
           _renderOverlays();  // vizToggles 필터 적용된 통합 렌더
@@ -1452,6 +1453,7 @@ function _initAnalysisWorker() {
 
         detectedPatterns = msg.patterns;
         detectedSignals = msg.signals;
+        _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
 
         // 차트 패턴 구조선 보존 (드래그 시 소실 방지)
@@ -1923,6 +1925,23 @@ function _categorizePatterns(patterns, signals) {
 }
 
 /**
+ * Signal에 Wc 주입 — detectedPatterns의 평균 wc를 모든 시그널에 매칭
+ * wc가 없는 패턴(seed/null)은 평균 계산에서 제외
+ */
+function _injectWcToSignals(signals, patterns) {
+  if (!signals || signals.length === 0) return;
+  if (!patterns || patterns.length === 0) return;
+  var sum = 0, cnt = 0;
+  for (var wi = 0; wi < patterns.length; wi++) {
+    if (patterns[wi].wc != null) { sum += patterns[wi].wc; cnt++; }
+  }
+  var avgWc = cnt > 0 ? sum / cnt : 1;
+  for (var si = 0; si < signals.length; si++) {
+    signals[si].wc = avgWc;
+  }
+}
+
+/**
  * 메인 스레드 동기 분석 (Worker 미지원 / 에러 시 폴백)
  * 기존 로직과 동일
  */
@@ -1932,6 +1951,7 @@ function _analyzeOnMainThread() {
   detectedPatterns = patternEngine.analyze(analyzeCandles);
   const result = signalEngine.analyze(analyzeCandles, detectedPatterns);
   detectedSignals = result.signals;
+  _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;
 
   // 차트 패턴 구조선 보존 (드래그 시 소실 방지)
@@ -1984,6 +2004,7 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
     detectedSignals.forEach(s => {
       if (s.index != null) s.index += clampFrom;
     });
+    _injectWcToSignals(detectedSignals, detectedPatterns);
     signalStats = result.stats;
 
     const filteredSignals = _filterSignalsByCategory(detectedSignals);
