@@ -27,6 +27,8 @@ Usage:
     python scripts/rl_stage_b.py
     python scripts/rl_stage_b.py --alpha 1.5    (exploration parameter)
     python scripts/rl_stage_b.py --no-schedule   (constant alpha)
+    python scripts/rl_stage_b.py --window 3      (sliding window: last 3 periods)
+    python scripts/rl_stage_b.py --window 0      (cumulative: all prior periods)
 """
 
 import csv
@@ -139,13 +141,14 @@ def compute_ic_by_group(meta_subset, y_adjusted, y_original, group_fn):
 # ──────────────────────────────────────────────
 
 def run_walk_forward(contexts, meta, alpha_init=2.0, alpha_exploit=0.5,
-                     use_schedule=True):
+                     use_schedule=True, window_size=0):
     """Run walk-forward LinUCB: per-period reset, shuffled training.
 
     For each period:
-      1. Train fresh LinUCB on ALL prior periods (shuffled)
+      1. Train fresh LinUCB on prior periods (shuffled)
       2. Test greedy on current period
-    This was the approach that produced IC 0.25-0.29 on mature periods.
+
+    window_size: 0 = cumulative (all prior), N>0 = sliding (last N periods).
     """
     # Group by WF period
     periods = defaultdict(list)
@@ -154,7 +157,8 @@ def run_walk_forward(contexts, meta, alpha_init=2.0, alpha_exploit=0.5,
 
     period_ids = sorted(periods.keys())
     n_periods = len(period_ids)
-    print(f"  -> {n_periods} walk-forward periods (per-period reset)")
+    mode = f"sliding-{window_size}" if window_size > 0 else "cumulative"
+    print(f"  -> {n_periods} walk-forward periods (per-period reset, {mode})")
 
     all_results = []
     cumulative_train = []
@@ -164,7 +168,15 @@ def run_walk_forward(contexts, meta, alpha_init=2.0, alpha_exploit=0.5,
 
     for p_idx, pid in enumerate(period_ids):
         test_indices = periods[pid]
-        train_indices = cumulative_train[:]
+
+        # Sliding window: only use last N periods for training
+        if window_size > 0 and p_idx > 0:
+            start = max(0, p_idx - window_size)
+            train_indices = []
+            for prev_pid in period_ids[start:p_idx]:
+                train_indices.extend(periods[prev_pid])
+        else:
+            train_indices = cumulative_train[:]
         n_train = len(train_indices)
 
         print(f"\n  Period {pid} ({p_idx + 1}/{n_periods}): "
@@ -304,16 +316,19 @@ def run_walk_forward(contexts, meta, alpha_init=2.0, alpha_exploit=0.5,
 # Aggregate Analysis
 # ──────────────────────────────────────────────
 
-def analyze_results(all_results):
+def analyze_results(all_results, min_train_override=None):
     """Aggregate walk-forward results and check abort criteria."""
-    # Skip periods with insufficient training data (<50K samples seen)
-    # Early periods have too little data for LinUCB to learn stable policies
-    MIN_TRAIN = MIN_TRAIN_FOR_EVAL
+    MIN_TRAIN = min_train_override if min_train_override is not None else MIN_TRAIN_FOR_EVAL
     valid = [r for r in all_results
              if r["ic_adjusted"] is not None and r["n_trained_before"] >= MIN_TRAIN]
 
     if not valid:
-        return {"status": "ABORT", "reason": "No valid periods with training data"}
+        return {
+            "status": "ABORT", "reason": "No valid periods with training data",
+            "n_valid_periods": 0, "mean_ic_original": 0, "mean_ic_adjusted": 0,
+            "mean_delta_ic": 0, "std_delta_ic": 0, "t_stat_delta": 0,
+            "t_stat_adjusted": 0, "ic_positive_pct": 0, "improvement_pct": 0,
+        }
 
     ics_orig = np.array([r["ic_original"] for r in valid])
     ics_adj = np.array([r["ic_adjusted"] for r in valid])
@@ -406,6 +421,7 @@ def main():
     args = sys.argv[1:]
     alpha_init = 2.0
     use_schedule = True
+    window_size = 3  # sliding window: last N periods (0=cumulative)
 
     i = 0
     while i < len(args):
@@ -413,6 +429,8 @@ def main():
             alpha_init = float(args[i + 1]); i += 2
         elif args[i] == "--no-schedule":
             use_schedule = False; i += 1
+        elif args[i] == "--window" and i + 1 < len(args):
+            window_size = int(args[i + 1]); i += 2
         else:
             i += 1
 
@@ -424,7 +442,8 @@ def main():
     print("=" * 70)
     print("Stage B-4: Walk-Forward LinUCB Training + IC Validation")
     print("=" * 70)
-    print(f"  alpha_init={alpha_init}, schedule={'20%->0.5' if use_schedule else 'constant'}")
+    wmode = f"sliding-{window_size}" if window_size > 0 else "cumulative"
+    print(f"  alpha_init={alpha_init}, schedule={'20%->0.5' if use_schedule else 'constant'}, window={wmode}")
     print(f"  Actions: {ACTION_NAMES}")
     print(f"  Factors: {ACTION_FACTORS}")
 
@@ -441,11 +460,17 @@ def main():
         alpha_init=alpha_init,
         alpha_exploit=0.5,
         use_schedule=use_schedule,
+        window_size=window_size,
     )
 
     # ── Aggregate Analysis ──
     print("\n[3/4] Aggregate analysis...")
-    summary = analyze_results(all_results)
+    # Sliding window: lower min_train threshold (require >=2 periods of data)
+    min_train = None
+    if window_size > 0 and all_results:
+        avg_period_size = n // max(len(all_results), 1)
+        min_train = avg_period_size * max(window_size - 1, 1)
+    summary = analyze_results(all_results, min_train_override=min_train)
 
     print(f"\n{'=' * 70}")
     print("RESULTS SUMMARY")

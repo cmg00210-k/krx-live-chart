@@ -85,29 +85,60 @@ class PatternBacktester {
       .catch(function() { /* silent fallback */ });
   }
 
-  /** Build 10-dim context vector for LinUCB */
-  _buildRLContext(predicted, signal, patternType, latest) {
-    // Dims 0-2: residual history (not available at runtime, default 0)
-    // Dim 3: ewma_vol (not available, default 0)
-    // Dim 4: pred_magnitude = |predicted| / 5.0
-    // Dim 5: signal_dir
-    // Dim 6: market_type (not available in backtester scope, default 0)
-    // Dim 7: pattern_tier remapped
-    // Dim 8: confidence_norm
-    // Dim 9: raw_hurst (not available, default 0)
+  /** Build 10-dim context vector for LinUCB
+   *  @param {number} predicted — WLS predicted return
+   *  @param {string} signal — 'buy'/'sell'/'neutral'
+   *  @param {string} patternType — pattern name
+   *  @param {Object} latest — latest occurrence object
+   *  @param {Array} candles — OHLCV candles for ewma_vol + hurst
+   */
+  _buildRLContext(predicted, signal, patternType, latest, candles) {
     var tier = this._rlTier1.has(patternType) ? -1 : (this._rlTier3.has(patternType) ? 1 : 0);
     var sigDir = signal === 'buy' ? 1 : (signal === 'sell' ? -1 : 0);
+
+    // Dim 3: EWMA volatility (lambda=0.94, z-scored)
+    var ewmaVol = 0;
+    if (candles && candles.length >= 2) {
+      var closes = candles.slice(-80);
+      var varT = 0;
+      for (var i = 1; i < closes.length; i++) {
+        var prev = closes[i - 1].close || 1;
+        var ret = (closes[i].close - prev) / Math.max(prev, 1e-10);
+        varT = i === 1 ? ret * ret : 0.94 * varT + 0.06 * ret * ret;
+      }
+      var rawVol = Math.sqrt(Math.max(varT, 0));
+      ewmaVol = Math.max(-3, Math.min(3, (rawVol - 0.026541) / 0.017892));
+    }
+
+    // Dim 6: market_type (KOSDAQ=1, KOSPI=0)
+    var marketType = 0;
+    if (typeof currentStock !== 'undefined' && currentStock && currentStock.market) {
+      marketType = currentStock.market.toUpperCase() === 'KOSDAQ' ? 1 : 0;
+    }
+
+    // Dim 9: raw_hurst (R/S analysis, z-scored) — reuse calcHurst from indicators.js
+    var rawHurst = 0;
+    if (candles && candles.length >= 40 && typeof calcHurst === 'function') {
+      var hCloses = [];
+      var hStart = Math.max(0, candles.length - 80);
+      for (var h = hStart; h < candles.length; h++) hCloses.push(candles[h].close);
+      var hVal = calcHurst(hCloses);
+      if (hVal != null && isFinite(hVal)) {
+        rawHurst = Math.max(-3, Math.min(3, (hVal - 0.946613) / 0.075216));
+      }
+    }
+
     return [
-      0,                                           // 0: resid_sign
-      0,                                           // 1: resid_mag_z
-      0,                                           // 2: resid_run_len
-      0,                                           // 3: ewma_vol
+      0,                                           // 0: resid_sign (runtime N/A)
+      0,                                           // 1: resid_mag_z (runtime N/A)
+      0,                                           // 2: resid_run_len (runtime N/A)
+      ewmaVol,                                     // 3: ewma_vol (z-scored)
       Math.min(Math.abs(predicted) / 5.0, 3),     // 4: pred_magnitude
       sigDir,                                       // 5: signal_dir
-      0,                                           // 6: market_type
+      marketType,                                   // 6: market_type
       tier,                                         // 7: pattern_tier
       (latest.confidence || 50) / 100,             // 8: confidence_norm
-      0                                            // 9: raw_hurst
+      rawHurst                                     // 9: raw_hurst (z-scored)
     ];
   }
 
@@ -601,7 +632,7 @@ class PatternBacktester {
 
             // ── LinUCB Contextual Bandit 조정 (Stage B) ──
             if (this._rlPolicy) {
-              var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest);
+              var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
               var rlResult = this._applyLinUCB(rlCtx);
               stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
               stats.rlAction = rlResult.action;

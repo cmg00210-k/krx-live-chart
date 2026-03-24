@@ -7,7 +7,7 @@ LinUCB algorithm with:
   - Sherman-Morrison incremental inverse update (O(d²) per step)
   - 5 discrete actions: strong_dampen(0.3), slight_dampen(0.7),
     trust_mra(1.0), slight_boost(1.3), reverse(-0.5)
-  - Log-compressed reward: sign(r) * log(1 + |r|)
+  - Directional reward aligned with IC: r = y_adj*y_actual - y_mra*y_actual
   - UCB exploration with alpha scheduling
   - Policy export to JSON for JS integration (~30 lines)
 
@@ -54,17 +54,18 @@ K_ACTIONS = len(ACTION_FACTORS)
 # ──────────────────────────────────────────────
 
 def compute_reward(y_actual, y_mra, action_factor):
-    """Per-sample reward: squared-error reduction with log compression.
+    """Per-sample directional reward aligned with IC (Grinold 1989).
 
-    r_raw = (y_actual - y_mra)² - (y_actual - y_mra * f_a)²
-    r = sign(r_raw) * log(1 + |r_raw|)
+    r_raw = y_adj * y_actual - y_mra * y_actual
+          = y_actual * y_mra * (action_factor - 1)
 
-    Positive when LinUCB's adjustment moves prediction closer to reality.
-    Log compression stabilizes extreme rewards (kurtosis=73.5 in residuals).
+    Positive when the action improves directional alignment with actual.
+    Removes magnitude-shrinkage bias of squared-error reward that caused
+    strong_dampen dominance (49% selection, IC -0.112 in persistent mode).
+    Log compression stabilizes extreme rewards (kurtosis=73.5).
     """
-    resid_orig = (y_actual - y_mra) ** 2
-    resid_adj = (y_actual - y_mra * action_factor) ** 2
-    r_raw = resid_orig - resid_adj
+    y_adj = y_mra * action_factor
+    r_raw = y_adj * y_actual - y_mra * y_actual
     return math.copysign(math.log1p(abs(r_raw)), r_raw)
 
 
@@ -254,28 +255,38 @@ def _test_basic():
 
 
 def _test_reward():
-    """Test reward function properties."""
-    print("[Test 2] Reward function properties...")
+    """Test directional reward function properties."""
+    print("[Test 2] Directional reward properties...")
 
-    # When action=trust(1.0), reward should be 0
+    # When action=trust(1.0), reward should be 0 (no change from baseline)
     r = compute_reward(5.0, 3.0, 1.0)
     assert abs(r) < 1e-10, f"trust_mra reward should be 0, got {r}"
 
-    # When prediction is perfect (y_pred == y_actual), any change should be negative
-    r = compute_reward(3.0, 3.0, 0.7)
-    assert r < 0, f"Changing perfect prediction should give negative reward, got {r}"
+    # MRA correct direction: dampen should be penalized
+    r = compute_reward(2.0, 3.0, 0.3)  # y_mra*y_actual > 0, f_a < 1
+    assert r < 0, f"Dampening correct prediction should give negative reward, got {r}"
 
-    # When prediction is wrong direction, reverse should help
-    r = compute_reward(-2.0, 3.0, -0.5)  # actual=-2, predicted=+3, reverse to -1.5
-    # resid_orig = (-2-3)^2 = 25, resid_adj = (-2-(-1.5))^2 = 0.25
-    # r_raw = 25 - 0.25 = 24.75 > 0
-    assert r > 0, f"Reversing wrong prediction should give positive reward, got {r}"
+    # MRA correct direction: boost should be rewarded
+    r = compute_reward(2.0, 3.0, 1.3)  # y_mra*y_actual > 0, f_a > 1
+    assert r > 0, f"Boosting correct prediction should give positive reward, got {r}"
+
+    # MRA wrong direction: dampen should be rewarded
+    r = compute_reward(-2.0, 3.0, 0.3)  # y_mra*y_actual < 0, f_a < 1
+    assert r > 0, f"Dampening wrong prediction should give positive reward, got {r}"
+
+    # MRA wrong direction: reverse should give highest reward
+    r_rev = compute_reward(-2.0, 3.0, -0.5)
+    r_damp = compute_reward(-2.0, 3.0, 0.3)
+    assert r_rev > r_damp, f"Reverse should beat dampen on wrong prediction: {r_rev} vs {r_damp}"
 
     # Log compression: large rewards should be bounded
-    r_large = compute_reward(100.0, 1.0, 0.3)
-    r_small = compute_reward(2.0, 1.0, 0.3)
+    r_large = compute_reward(100.0, 100.0, 0.3)
     assert r_large < 20, f"Log compression should bound large rewards, got {r_large}"
-    assert abs(r_large) < abs(100.0 - 1.0) ** 2, "Log compression should reduce magnitude"
+
+    # Symmetry: reward magnitude should not depend on sign convention
+    r_pos = compute_reward(2.0, 3.0, 0.7)
+    r_neg = compute_reward(-2.0, -3.0, 0.7)
+    assert abs(r_pos - r_neg) < 1e-10, f"Reward should be symmetric: {r_pos} vs {r_neg}"
 
     print("  -> PASSED")
 
