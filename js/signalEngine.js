@@ -15,7 +15,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'strong',
     tier: 1,
-    baseConfidence: 82,
+    baseConfidence: 61, // [C-8] 82→61 calibrated (composite_calibration.json, hammer WR=47.9%)
     required: ['hammer', 'rsiOversoldExit'],
     optional: ['volumeBreakout'],
     optionalBonus: 5,
@@ -28,7 +28,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'sell',
     strength: 'strong',
     tier: 1,
-    baseConfidence: 80,
+    baseConfidence: 69, // [C-8] 80→69 calibrated (shootingStar WR=56.0%)
     required: ['shootingStar', 'macdBearishCross'],
     optional: ['volumeSelloff'],
     optionalBonus: 5,
@@ -43,7 +43,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'medium',
     tier: 2,
-    baseConfidence: 72,
+    baseConfidence: 58, // [C-8] 72→58 calibrated (composite_calibration.json)
     required: ['goldenCross'],
     optional: ['rsiOversoldExit', 'volumeBreakout'],
     optionalBonus: 4,
@@ -56,7 +56,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'sell',
     strength: 'medium',
     tier: 2,
-    baseConfidence: 70,
+    baseConfidence: 58, // [C-8] 70→58 calibrated (composite_calibration.json)
     required: ['deadCross'],
     optional: ['macdBearishCross', 'rsiOverboughtExit'],
     optionalBonus: 4,
@@ -71,7 +71,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'weak',
     tier: 3,
-    baseConfidence: 60,
+    baseConfidence: 55, // [C-8] 60→55 calibrated (composite_calibration.json)
     required: ['bbLowerBounce'],
     optional: ['rsiOversold', 'volumeBreakout'],
     optionalBonus: 3,
@@ -84,7 +84,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'sell',
     strength: 'weak',
     tier: 3,
-    baseConfidence: 58,
+    baseConfidence: 55, // [C-8] 58→55 calibrated (composite_calibration.json)
     required: ['bbUpperBreak'],
     optional: ['rsiOverbought', 'volumeSelloff'],
     optionalBonus: 3,
