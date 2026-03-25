@@ -17,9 +17,9 @@ class PatternBacktester {
 
     /** KRX 왕복 비용 구성 (%) — calibrated_constants.json 기준 */
     this.KRX_COMMISSION = 0.03;   // 수수료 편도 0.015% × 2
-    this.KRX_TAX = 0.33;          // 증권거래세 0.18% + 농특세 0.15% (2025 KOSPI)
+    this.KRX_TAX = 0.18;           // KOSPI 0.03%+농특세0.15% / KOSDAQ 0.18% (2025 동일)
     this.KRX_SLIPPAGE = 0.10;     // 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
-    this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.46%
+    this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
 
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
     this._META = {
@@ -154,6 +154,7 @@ class PatternBacktester {
   /** Apply LinUCB: dot product + argmax over 5 actions */
   _applyLinUCB(context) {
     var p = this._rlPolicy;
+    if (!p || context.length !== p.d) return { action: 2, factor: 1.0 };
     var bestA = 2, bestScore = -Infinity; // default: trust_mra (action 2)
     for (var a = 0; a < p.K; a++) {
       var score = p.thetas[a][0]; // bias
@@ -604,7 +605,9 @@ class PatternBacktester {
       }
 
       // ── Phase C: WLS 다중 회귀 (calcWLSRegression 사용) ──
-      // 7열 설계행렬: [intercept, confidence, trendStrength, lnVolRatio, atrNorm, wc, momentum60]
+      // 5열 설계행렬: [intercept, confidence, trendStrength, lnVolRatio, atrNorm]
+      // [Phase 7 C-1] wc 제거 (look-ahead bias: analyze(전체candles)의 hw/mw가 미래 반영)
+      //               momentum60 제거 (parsimony: 7→5열 축소, 과적합 방지)
       if (returns.length >= 30 && typeof calcWLSRegression === 'function') {
         var X = [], weights = [];
         var lambda = 0.995;
@@ -616,8 +619,6 @@ class PatternBacktester {
             occ.trendStrength || 0,                        // 추세 강도
             Math.log(Math.max(occ.volumeRatio || 1, 0.1)), // ln(거래량비)
             occ.atrNorm || 0.02,                           // ATR / 종가
-            occ.wc || 1,                                   // Wc = hw × mw (적응형 가중치)
-            occ.momentum60 || 0                            // APT: 60일 모멘텀 (Jegadeesh & Titman 1993)
           ]);
           // 지수 감소 가중치: 최신 패턴에 높은 가중치
           weights.push(Math.pow(lambda, returns.length - 1 - ri));
@@ -626,7 +627,7 @@ class PatternBacktester {
         var reg = calcWLSRegression(X, returns, weights, 2.0);
         if (reg) {
           stats.regression = {
-            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm', 'wc', 'momentum60'],
+            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
             tStats: reg.tStats.map(function(t) { return +t.toFixed(2); }),
@@ -641,8 +642,6 @@ class PatternBacktester {
               latest.trendStrength || 0,
               Math.log(Math.max(latest.volumeRatio || 1, 0.1)),
               latest.atrNorm || 0.02,
-              latest.wc || 1,
-              latest.momentum60 || 0
             ];
             var predicted = 0;
             for (var j = 0; j < xNew.length; j++) {

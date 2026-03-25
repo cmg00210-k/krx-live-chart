@@ -161,7 +161,7 @@ class PatternEngine {
     const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
     // ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용
     // atrVal이 없으면 가격 평균의 2%를 fallback (ATR_FALLBACK_PCT = 0.02 일관)
-    const divisor = atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT);
+    const divisor = (atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT)) || 1e-10;
     const norm = slope / divisor;
     const T = PatternEngine.TREND_THRESHOLD;
     return {
@@ -1940,7 +1940,7 @@ class PatternEngine {
     const { atr = [] } = ctx;
 
     patterns.forEach(p => {
-      if (!p.confidence || !p.endIndex) return;
+      if (p.confidence == null || p.endIndex == null) return;
       const a = atr[p.endIndex] || 1;
       let boost = 0;
 
@@ -1970,7 +1970,7 @@ class PatternEngine {
   _applyRRGate(patterns, candles) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
-      if (!p.priceTarget || !p.stopLoss || !p.endIndex) continue;
+      if (p.priceTarget == null || p.stopLoss == null || p.endIndex == null) continue;
       var entry = candles[p.endIndex] ? candles[p.endIndex].close : null;
       if (!entry) continue;
       var reward = Math.abs(p.priceTarget - entry);

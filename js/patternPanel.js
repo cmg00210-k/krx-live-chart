@@ -1065,8 +1065,6 @@ function renderPatternCards(patterns) {
               trendStrength:'추세강도',
               lnVolumeRatio:'거래량비',
               atrNorm:      '변동성',
-              wc:           'Wc 가중',
-              momentum60:   '모멘텀60'
             };
             const tStats  = h5.regression.tStats  || [];
             const tLabels = h5.regression.labels   || [];
