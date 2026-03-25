@@ -102,6 +102,15 @@ class PatternEngine {
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
   static CHART_TARGET_RAW_CAP = 2.0;
 
+  /** 넥라인 돌파 확인 — lookforward bar 수 상한
+   *  Bulkowski (2005): 패턴 완성 후 평균 돌파 시점은 5~15일.
+   *  20 bar 이후 돌파는 패턴 효력 소멸로 판단 (time decay). */
+  static NECKLINE_BREAK_LOOKFORWARD = 20;
+
+  /** 넥라인 돌파 ATR 필터 배수 — 노이즈 돌파 제거 (0.5 ATR 이상 이탈 시 확인)
+   *  Edwards & Magee (2018): 유의미한 돌파는 일정 거리 이상 이격 필요 */
+  static NECKLINE_BREAK_ATR_MULT = 0.5;
+
   /** Dual Confidence: 패턴별 실측 5일 승률 (pattern_performance.json 기반)
    *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
    *  Guo et al. (2017) Temperature Scaling: calibrated = form / T  */
@@ -327,6 +336,15 @@ class PatternEngine {
     patterns.push(...this.detectSymmetricTriangle(candles, swH, swL, ctx));
     patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
     patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
+
+    // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop
+    for (let ni = 0; ni < patterns.length; ni++) {
+      const pt = patterns[ni].type;
+      if (pt === 'headAndShoulders' || pt === 'inverseHeadAndShoulders' ||
+          pt === 'doubleBottom' || pt === 'doubleTop') {
+        this._checkNecklineBreak(candles, patterns[ni], atr14);
+      }
+    }
 
     // 지지/저항 + 컨플루언스
     const sr = this.detectSupportResistance(candles, swH, swL, ctx);
@@ -1998,6 +2016,109 @@ class PatternEngine {
       if (isLow) lows.push({ index: i, price: candles[i].low, time: candles[i].time });
     }
     return lows;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  넥라인 돌파 확인 (H&S, 역H&S, doubleBottom, doubleTop)
+  //
+  //  시장 심리:
+  //  넥라인은 H&S/이중천장에서 매수세의 최후 방어선, 이중바닥/역H&S에서
+  //  매도세의 최후 방어선이다. 가격이 이 수준을 ATR*0.5 이상 이탈하면
+  //  수급 균형이 깨졌음을 의미하며, 패턴의 예측력이 실현 단계에 진입한다.
+  //  Edwards & Magee (2018): "The breakout through the neckline is the
+  //  definitive confirmation of the pattern's validity."
+  //
+  //  알고리즘:
+  //  1. endIndex 이후 최대 NECKLINE_BREAK_LOOKFORWARD 봉까지 검사
+  //  2. 넥라인 가격 계산 (수평 또는 기울기 보간)
+  //  3. close가 넥라인 ± ATR*NECKLINE_BREAK_ATR_MULT 이상 이탈 시 돌파 확인
+  //  4. 최초 돌파 bar의 index와 가격 기록
+  // ══════════════════════════════════════════════════
+  _checkNecklineBreak(candles, pattern, atr) {
+    // 기본값: 미확인 상태
+    pattern.necklineBreakConfirmed = false;
+    pattern.breakIndex = null;
+    pattern.breakPrice = null;
+
+    const ei = pattern.endIndex;
+    if (ei == null || ei >= candles.length - 1) return;
+
+    const lookforward = PatternEngine.NECKLINE_BREAK_LOOKFORWARD;
+    const atrMult = PatternEngine.NECKLINE_BREAK_ATR_MULT;
+    const maxIdx = Math.min(ei + lookforward, candles.length - 1);
+
+    const type = pattern.type;
+
+    // ── H&S / 역H&S: 기울기 넥라인 ──
+    if (type === 'headAndShoulders' || type === 'inverseHeadAndShoulders') {
+      if (!pattern.trendlines || !pattern.trendlines[0] ||
+          !pattern.trendlines[0].points || pattern.trendlines[0].points.length < 2) return;
+
+      const pts = pattern.trendlines[0].points;
+      // 넥라인 양 끝점의 캔들 인덱스 찾기
+      const i1 = candles.findIndex(c => c.time === pts[0].time);
+      const i2 = candles.findIndex(c => c.time === pts[1].time);
+      if (i1 < 0 || i2 < 0 || i1 === i2) return;
+
+      const v1 = pts[0].value, v2 = pts[1].value;
+      const slope = (v2 - v1) / (i2 - i1);
+
+      for (let j = ei + 1; j <= maxIdx; j++) {
+        const neckPrice = v1 + slope * (j - i1);
+        const a = this._atr(atr, j, candles);
+        const threshold = a * atrMult;
+        const close = candles[j].close;
+
+        if (type === 'headAndShoulders') {
+          // H&S (sell): 가격이 넥라인 아래로 돌파
+          if (close < neckPrice - threshold) {
+            pattern.necklineBreakConfirmed = true;
+            pattern.breakIndex = j;
+            pattern.breakPrice = close;
+            return;
+          }
+        } else {
+          // 역H&S (buy): 가격이 넥라인 위로 돌파
+          if (close > neckPrice + threshold) {
+            pattern.necklineBreakConfirmed = true;
+            pattern.breakIndex = j;
+            pattern.breakPrice = close;
+            return;
+          }
+        }
+      }
+      return;
+    }
+
+    // ── doubleBottom / doubleTop: 수평 넥라인 ──
+    if (type === 'doubleBottom' || type === 'doubleTop') {
+      const neckline = pattern.neckline;
+      if (neckline == null || !isFinite(neckline)) return;
+
+      for (let j = ei + 1; j <= maxIdx; j++) {
+        const a = this._atr(atr, j, candles);
+        const threshold = a * atrMult;
+        const close = candles[j].close;
+
+        if (type === 'doubleBottom') {
+          // doubleBottom (buy): 가격이 넥라인 위로 돌파
+          if (close > neckline + threshold) {
+            pattern.necklineBreakConfirmed = true;
+            pattern.breakIndex = j;
+            pattern.breakPrice = close;
+            return;
+          }
+        } else {
+          // doubleTop (sell): 가격이 넥라인 아래로 돌파
+          if (close < neckline - threshold) {
+            pattern.necklineBreakConfirmed = true;
+            pattern.breakIndex = j;
+            pattern.breakPrice = close;
+            return;
+          }
+        }
+      }
+    }
   }
 
   _dedup(patterns) {

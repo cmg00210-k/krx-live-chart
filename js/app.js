@@ -1479,10 +1479,19 @@ function _initAnalysisWorker() {
         // 차트에 패턴 렌더링 반영 + 오버레이 통합 렌더 (vizToggles 필터 적용)
         chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
         _renderOverlays();
+
+        // ── analyze 완료 후 백테스트 요청 (승률 + 적응형 가중치 수신) ──
+        if (_analysisWorker && _workerReady && candles && candles.length >= 50) {
+          _analysisWorker.postMessage({
+            type: 'backtest',
+            candles: candles,
+            version: _workerVersion,
+          });
+        }
         return;
       }
 
-      // ── 백테스트 결과 (적응형 가중치 수신) ──
+      // ── 백테스트 결과 (적응형 가중치 + 승률 맵 갱신) ──
       if (msg.type === 'backtestResult') {
         if (msg.learnedWeights) {
           adaptiveWeights = msg.learnedWeights;

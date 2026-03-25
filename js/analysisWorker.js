@@ -34,6 +34,11 @@ let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
 // ── 적응형 가중치 — 백테스트 WLS 계수에서 추출 ────
 let _learnedWeights = {};
 
+// ── 승률 맵 — 백테스트 결과에서 패턴별 5일 승률 캐시 ────
+// { [patternType]: { winRate: number, sampleSize: number } }
+// backtest 메시지 처리 후 갱신, analyze 결과 패턴에 부착
+let _winRateMap = {};
+
 function _makeCacheKey(candles) {
   if (!candles || !candles.length) return '';
   var last = candles[candles.length - 1];
@@ -46,7 +51,7 @@ try {
   importScripts(
     'colors.js?v=11',
     'indicators.js?v=12',
-    'patterns.js?v=13',
+    'patterns.js?v=14',
     'signalEngine.js?v=14',
     'backtester.js?v=15'
   );
@@ -74,6 +79,43 @@ function _extractLearnedWeights(backtestResults) {
         n: h5.n,
         confidence: Math.pow(h5.regression.rSquared, 2) * Math.min(h5.n / 200, 1),
       };
+    }
+  }
+}
+
+// ── 백테스트 결과 → 승률 맵 추출 ──────────────────────
+// horizons[5] (5일 승률)을 패턴별로 캐시.
+// sampleSize < 10이면 신뢰도 부족으로 저장하지 않음.
+function _extractWinRateMap(backtestResults) {
+  _winRateMap = {};  // 종목 전환 시 이전 종목 데이터 오염 방지
+  for (var pType in backtestResults) {
+    var bt = backtestResults[pType];
+    if (!bt || !bt.horizons) continue;
+    var h5 = bt.horizons[5];
+    if (h5 && h5.n >= 10) {
+      _winRateMap[pType] = {
+        winRate: h5.winRate,
+        sampleSize: h5.n,
+      };
+    }
+  }
+}
+
+// ── 패턴 배열에 승률 정보 부착 ──────────────────────────
+// _winRateMap이 채워진 상태에서만 의미 있음.
+// analyze보다 backtest가 나중에 실행되므로 첫 호출에는 빈 맵.
+// 이후 재분석 시에는 이전 백테스트 승률이 자동 부착됨.
+function _attachWinRates(patterns) {
+  if (!patterns || !patterns.length) return;
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    var entry = _winRateMap[p.type];
+    if (entry) {
+      p.backtestWinRate = entry.winRate;
+      p.backtestSampleSize = entry.sampleSize;
+    } else {
+      p.backtestWinRate = null;
+      p.backtestSampleSize = null;
     }
   }
 }
@@ -136,6 +178,9 @@ self.onmessage = function (e) {
         _analyzeCache = { key: cacheKey, patterns: patterns, signals: signals, stats: stats };
       }
 
+      // 이전 백테스트에서 캐시된 승률을 패턴에 부착 (첫 분석 시 빈 맵 → null 부착)
+      _attachWinRates(patterns);
+
       self.postMessage({
         type: 'result',
         patterns: patterns,
@@ -180,6 +225,8 @@ self.onmessage = function (e) {
 
       const results = backtester.backtestAll(candles);
       _extractLearnedWeights(results);
+      // 승률 맵 갱신 (다음 analyze 호출 시 패턴에 자동 부착됨)
+      _extractWinRateMap(results);
 
       self.postMessage({
         type: 'backtestResult',

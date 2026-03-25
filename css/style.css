@@ -1503,6 +1503,45 @@ html, body {
   word-break: keep-all;
 }
 
+/* ── 회귀 상세 접이식 ── */
+.pp-reg-toggle {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; padding: 4px var(--sp-2);
+  background: none; border: none; border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted); font-family: var(--font-sans);
+  font-size: var(--fs-nano); cursor: pointer;
+  text-align: left; transition: color var(--transition);
+}
+.pp-reg-toggle:hover { color: var(--accent); }
+.pp-reg-arrow {
+  font-size: 9px; line-height: 1; color: inherit;
+  transition: none;
+}
+.pp-reg-detail {
+  display: none;
+  padding: 2px 0 4px;
+  background: rgba(255,255,255,0.018);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.pp-reg-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px var(--sp-2);
+  transition: background var(--transition);
+}
+.pp-reg-row:hover { background: rgba(255,255,255,0.04); }
+.pp-reg-lbl {
+  font-family: var(--font-sans); font-size: var(--fs-nano);
+  color: var(--text-muted);
+}
+.pp-reg-tval {
+  font-family: var(--font-mono); font-size: var(--fs-nano);
+  color: var(--text-sub);
+  font-feature-settings: "tnum";
+  letter-spacing: 0.01em;
+}
+.pp-reg-sig .pp-reg-lbl  { color: var(--text); font-weight: 700; }
+.pp-reg-sig .pp-reg-tval { color: var(--accent); font-weight: 700; }
+
 /* ── 합류 분석 ── */
 .pp-confluence {
   background: var(--bg-element);
@@ -1549,6 +1588,62 @@ html, body {
   line-height: 1.8; padding: var(--sp-5);
   min-height: 120px;
   opacity: 0.6;
+}
+
+/* ── 모델 성능 섹션 (Phase 4-4: OOS IC + 95% CI) ── */
+.pp-model-perf {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) 0 var(--sp-1);
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.pp-model-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-nano);
+  font-weight: 700;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 var(--sp-2) var(--sp-1);
+}
+.pp-model-subtitle {
+  font-weight: 400;
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.pp-model-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 3px var(--sp-2);
+  transition: background var(--transition);
+}
+.pp-model-row:nth-child(even) {
+  background: rgba(255,255,255,0.015);
+}
+.pp-model-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+.pp-model-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-nano);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.pp-model-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+  font-feature-settings: "tnum";
+}
+.pp-model-value.up { color: var(--up); }
+.pp-model-value.dn { color: var(--down); }
+.pp-model-ci {
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 3px;
 }
 
 
@@ -2959,7 +3054,10 @@ html, body {
   .pp-card-desc { -webkit-line-clamp: 2; }
   .pp-card-psych { display: none; }
   .pp-card-invalid { display: none; }
+  .pp-reg-toggle { display: none; }
+  .pp-reg-detail { display: none !important; }
   .pp-card { padding: var(--sp-2); }
+  .pp-model-perf { display: none; }
 
   /* C+D 통합: C열 숨기고 D열을 탭 패널로 전환 */
   #main {

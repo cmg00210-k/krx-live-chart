@@ -556,6 +556,38 @@ const patternRenderer = (() => {
                   ctx.fill();
                   ctx.fillStyle = fz.returnColor || KRX_COLORS.PTN_BUY;
                   ctx.fillText(fz.returnText, retX, retY);
+
+                  // 승률 텍스트 (return % 아래, sampleSize >= 10 조건 충족 시만)
+                  if (fz.probWinRate != null) {
+                    const wrText = '승률 ' + Math.round(fz.probWinRate) + '%';
+                    const wrY = retY + 14;
+                    // 영역 내에 들어가는지 확인 (목표존 경계 벗어나면 표시 안함)
+                    const zoneTop = Math.min(fz.yEntry, fz.yTarget);
+                    const zoneBot = Math.max(fz.yEntry, fz.yTarget);
+                    if (wrY - 6 >= zoneTop && wrY + 6 <= zoneBot) {
+                      // 조건부 색상: winRate > 60 → 민트, 40~60 → 노랑, <40 → 파랑
+                      let wrColor;
+                      if (fz.probWinRate > 60) {
+                        wrColor = KRX_COLORS.PTN_BUY;
+                      } else if (fz.probWinRate >= 40) {
+                        wrColor = KRX_COLORS.NEUTRAL;
+                      } else {
+                        wrColor = KRX_COLORS.DOWN;
+                      }
+                      ctx.save();
+                      ctx.font = "700 9px 'Pretendard', sans-serif";
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'middle';
+                      const wrm = ctx.measureText(wrText);
+                      ctx.fillStyle = KRX_COLORS.TAG_BG(0.70);
+                      ctx.beginPath();
+                      _roundRect(ctx, retX - wrm.width / 2 - 4, wrY - 6, wrm.width + 8, 12, 3);
+                      ctx.fill();
+                      ctx.fillStyle = wrColor;
+                      ctx.fillText(wrText, retX, wrY);
+                      ctx.restore();
+                    }
+                  }
                 }
               }
             }
@@ -960,18 +992,40 @@ const patternRenderer = (() => {
         });
       }
 
-      // 넥라인 수평 연장 (점선) — 패턴 범위 + 우측 3봉만 (공간 분리)
+      // 넥라인 수평 연장 — 패턴 범위 + 우측 3봉만 (공간 분리)
+      // 돌파 확인 시: 실선 + mint 색상 (확정된 구조선)
+      // 미확인 시: 점선 + silver (잠정 구조선)
+      const breakConfirmed = !!p.necklineBreakConfirmed;
+      const neckColor = breakConfirmed ? BUY_COLOR : GOLD_COLOR;
+      const neckDash = breakConfirmed ? [] : [5, 3];
+      const neckWidth = breakConfirmed ? 2 : 1.5;
       const extIdx = Math.min(ei + 3, candles.length - 1);
       const nStart = toXY(candles[Math.max(si - 1, 0)].time, neckline);
       const nEnd = toXY(candles[extIdx].time, neckline);
       data.hlines.push({
         y: nStart.y,
         x1: nStart.x, x2: nEnd.x,
-        color: GOLD_COLOR,
-        width: 1.5,
-        dash: [5, 3],
+        color: neckColor,
+        width: neckWidth,
+        dash: neckDash,
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
+
+      // 돌파 지점 마커 (breakIndex 위치에 solid circle, 4px)
+      if (breakConfirmed && p.breakIndex != null && p.breakIndex < candles.length) {
+        const brkPt = toXY(candles[p.breakIndex].time, neckline);
+        if (brkPt.x != null && brkPt.y != null) {
+          data.trendAreas.push({
+            points: [
+              { x: brkPt.x, y: brkPt.y - 4 },
+              { x: brkPt.x + 4, y: brkPt.y },
+              { x: brkPt.x, y: brkPt.y + 4 },
+              { x: brkPt.x - 4, y: brkPt.y },
+            ],
+            fill: BUY_COLOR,
+          });
+        }
+      }
 
       // 두 저점에 상향 삼각형 마커 (▲, 5px) — trendAreas를 사용해 삼각형 렌더링
       const trough1 = toXY(candles[si].time, candles[si].low);
@@ -1033,17 +1087,39 @@ const patternRenderer = (() => {
       }
 
       // 넥라인 수평 연장 — 패턴 범위 + 우측 3봉만 (공간 분리)
+      // 돌파 확인 시: 실선 + mint 색상 (확정된 구조선)
+      // 미확인 시: 점선 + silver (잠정 구조선)
+      const breakConfirmed = !!p.necklineBreakConfirmed;
+      const neckColor = breakConfirmed ? BUY_COLOR : GOLD_COLOR;
+      const neckDash = breakConfirmed ? [] : [5, 3];
+      const neckWidth = breakConfirmed ? 2 : 1.5;
       const extIdx = Math.min(ei + 3, candles.length - 1);
       const nStart = toXY(candles[Math.max(si - 1, 0)].time, neckline);
       const nEnd = toXY(candles[extIdx].time, neckline);
       data.hlines.push({
         y: nStart.y,
         x1: nStart.x, x2: nEnd.x,
-        color: GOLD_COLOR,
-        width: 1.5,
-        dash: [5, 3],
+        color: neckColor,
+        width: neckWidth,
+        dash: neckDash,
         priceLabel: neckline.toLocaleString('ko-KR'),
       });
+
+      // 돌파 지점 마커 (breakIndex 위치에 다이아몬드, 4px)
+      if (breakConfirmed && p.breakIndex != null && p.breakIndex < candles.length) {
+        const brkPt = toXY(candles[p.breakIndex].time, neckline);
+        if (brkPt.x != null && brkPt.y != null) {
+          data.trendAreas.push({
+            points: [
+              { x: brkPt.x, y: brkPt.y - 4 },
+              { x: brkPt.x + 4, y: brkPt.y },
+              { x: brkPt.x, y: brkPt.y + 4 },
+              { x: brkPt.x - 4, y: brkPt.y },
+            ],
+            fill: BUY_COLOR,
+          });
+        }
+      }
 
       // 두 고점에 하향 삼각형 마커 (▼, 5px) — trendAreas를 사용
       const peak1 = toXY(candles[si].time, candles[si].high);
@@ -1076,17 +1152,25 @@ const patternRenderer = (() => {
       const i2 = candles.findIndex(c => c.time === pt2.time);
       if (i1 < 0 || i2 < 0 || i1 === i2) return;
 
-      // 넥라인 (실선 + 연장 점선)
+      // 돌파 확인 시: mint 색상 + 연장선도 실선 (확정된 구조선)
+      // 미확인 시: silver 실선 + 연장 점선 (잠정 구조선)
+      const breakConfirmed = !!p.necklineBreakConfirmed;
+      const neckColor = breakConfirmed ? BUY_COLOR : GOLD_COLOR;
+      const neckWidth = breakConfirmed ? 2 : 1.5;
+      const extDash = breakConfirmed ? [] : [5, 3];
+      const extWidth = breakConfirmed ? 1.5 : 1;
+
+      // 넥라인 (실선)
       const nk1 = toXY(pt1.time, pt1.value);
       const nk2 = toXY(pt2.time, pt2.value);
       data.polylines.push({
         points: [nk1, nk2],
-        color: GOLD_COLOR,
-        width: 1.5,
+        color: neckColor,
+        width: neckWidth,
         dash: [],
       });
 
-      // 넥라인 연장 (점선)
+      // 넥라인 연장
       const slope = (pt2.value - pt1.value) / (i2 - i1);
       const extIdx = Math.min(p.endIndex + 12, candles.length - 1);
       const extVal = pt2.value + slope * (extIdx - i2);
@@ -1098,19 +1182,36 @@ const patternRenderer = (() => {
           toXY(candles[preIdx].time, preVal),
           nk1,
         ],
-        color: GOLD_COLOR,
-        width: 1,
-        dash: [5, 3],
+        color: neckColor,
+        width: extWidth,
+        dash: extDash,
       });
       data.polylines.push({
         points: [
           nk2,
           toXY(candles[extIdx].time, extVal),
         ],
-        color: GOLD_COLOR,
-        width: 1,
-        dash: [5, 3],
+        color: neckColor,
+        width: extWidth,
+        dash: extDash,
       });
+
+      // 돌파 지점 마커 (breakIndex 위치에 넥라인 가격 기준 다이아몬드, 4px)
+      if (breakConfirmed && p.breakIndex != null && p.breakIndex < candles.length) {
+        const brkNeckVal = pt1.value + slope * (p.breakIndex - i1);
+        const brkPt = toXY(candles[p.breakIndex].time, brkNeckVal);
+        if (brkPt.x != null && brkPt.y != null) {
+          data.trendAreas.push({
+            points: [
+              { x: brkPt.x, y: brkPt.y - 4 },
+              { x: brkPt.x + 4, y: brkPt.y },
+              { x: brkPt.x, y: brkPt.y + 4 },
+              { x: brkPt.x - 4, y: brkPt.y },
+            ],
+            fill: BUY_COLOR,
+          });
+        }
+      }
 
       // 어깨/머리 극값 찾기 (빈 원 마커용)
       const si = p.startIndex, ei = p.endIndex;
@@ -1259,8 +1360,10 @@ const patternRenderer = (() => {
       const si = p.startIndex, ei = p.endIndex;
       if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
 
-      const baseName = PATTERN_NAMES_KO[p.type] || p.type;
-      // 신뢰도(%) 추가: "이중바닥 82%"
+      let baseName = PATTERN_NAMES_KO[p.type] || p.type;
+      // 넥라인 돌파 확인 시 라벨에 "(확인)" 추가 — 패턴 유효성 확정 표시
+      if (p.necklineBreakConfirmed) baseName += ' (확인)';
+      // 신뢰도(%) 추가: "이중바닥 82%" 또는 "이중바닥 (확인) 82%"
       const confVal = p.quality != null ? p.quality : p.confidence;
       let name = confVal != null ? `${baseName} ${Math.round(confVal)}%` : baseName;
       if (p.wc != null && Math.abs(p.wc - 1) > 0.01) {
@@ -1476,6 +1579,10 @@ const patternRenderer = (() => {
         stopBorder: null,
         offScreenTarget: false,
         wc: p.wc || 1,
+        // 백테스트 5일 승률 (backtester → analysisWorker → patterns → 여기)
+        // sampleSize < 10 또는 null이면 렌더러에서 표시하지 않음
+        probWinRate: (p.backtestSampleSize >= 10) ? p.backtestWinRate : null,
+        probSampleSize: p.backtestSampleSize || null,
       };
 
       // 목표가 영역

@@ -341,6 +341,10 @@ const PATTERN_ACADEMIC_META = Object.freeze({
 //  패턴 분석 패널
 // ══════════════════════════════════════════════════════
 
+// ── 모델 성능 섹션 — fetch 캐시 (전체 모델 수준, 종목 무관) ──
+var _modelPerfCache  = null;   // 파싱된 walk_forward 객체 또는 false (로드 실패)
+var _modelPerfFetching = false; // 중복 fetch 방지
+
 function renderPatternPanel(patterns) {
   // 요약 바 업데이트
   updatePatternSummaryBar(patterns);
@@ -356,6 +360,9 @@ function renderPatternPanel(patterns) {
 
   // Phase 1: C열 패턴 카드 (#pp-cards)
   renderPatternCards(patterns);
+
+  // Phase 4-4: 모델 성능 섹션 (OOS IC + 95% CI)
+  renderModelPerfSection();
 
   const panel = document.getElementById('pattern-list');
   if (!panel) return;
@@ -1052,6 +1059,51 @@ function renderPatternCards(patterns) {
               <span class="pp-stat-label">R\u00B2</span>
               <span class="pp-stat-value" title="가중 결정계수">${h5.regression.rSquared}</span>
             </div>`;
+            // 접이식 회귀 상세 (tStats 6개, intercept 제외)
+            const REG_LABEL_MAP = {
+              confidence:   '신뢰도',
+              trendStrength:'추세강도',
+              lnVolumeRatio:'거래량비',
+              atrNorm:      '변동성',
+              wc:           'Wc 가중',
+              momentum60:   '모멘텀60'
+            };
+            const tStats  = h5.regression.tStats  || [];
+            const tLabels = h5.regression.labels   || [];
+            // labels[0]은 intercept → index 1부터 표시
+            const regRows = [];
+            for (let _i = 1; _i < tLabels.length && _i < tStats.length; _i++) {
+              const rawLabel = tLabels[_i];
+              const tVal     = tStats[_i];
+              if (tVal == null) continue;
+              const dispLabel = REG_LABEL_MAP[rawLabel] || rawLabel;
+              const abst      = Math.abs(tVal);
+              const sig       = abst > 2;
+              const sign      = tVal >= 0 ? '+' : '';
+              const tText     = sign + tVal.toFixed(2);
+              regRows.push(
+                `<div class="pp-reg-row${sig ? ' pp-reg-sig' : ''}">` +
+                  `<span class="pp-reg-lbl">${dispLabel}</span>` +
+                  `<span class="pp-reg-tval">t=${tText}${sig ? ' \u2605' : ''}</span>` +
+                `</div>`
+              );
+            }
+            if (regRows.length > 0) {
+              const toggleId = 'pp-reg-' + p.type.replace(/[^a-z0-9]/gi, '_');
+              expRetHtml += `
+            <button class="pp-reg-toggle" type="button"
+              onclick="(function(btn){
+                var d=document.getElementById('${toggleId}');
+                var open=d.style.display==='block';
+                d.style.display=open?'none':'block';
+                btn.querySelector('.pp-reg-arrow').textContent=open?'\u25b8':'\u25be';
+              })(this)">
+              <span class="pp-reg-arrow">\u25b8</span> 회귀 상세
+            </button>
+            <div class="pp-reg-detail" id="${toggleId}">
+              ${regRows.join('\n              ')}
+            </div>`;
+            }
           }
         }
 
@@ -1163,4 +1215,179 @@ function renderPatternCards(patterns) {
   }
 
   container.innerHTML = _demoCardWarn + cards.join('');
+}
+
+
+// ══════════════════════════════════════════════════════
+//  모델 성능 섹션 (Phase 4-4)
+//
+//  Walk-Forward OOS IC + 95% CI + t-stat을 C열 패턴 카드
+//  영역 하단에 표시.
+//
+//  데이터 소스: data/backtest/rl_residuals_summary.json
+//    analysis.walk_forward: { n_periods, mean_ic, std_ic,
+//                             t_stat, ic_positive_pct }
+//
+//  캐시 전략: 모델 성능은 전체 모델 수준 — 종목 변경 시
+//  재로드 불필요. _modelPerfCache 에 한 번만 저장.
+//
+//  실패 시: console.warn 후 섹션 숨김 (에러 토스트 없음)
+// ══════════════════════════════════════════════════════
+
+/**
+ * #pp-model-perf 컨테이너를 찾거나 동적 생성.
+ * #pp-cards 다음에 삽입 (없으면 #pp-content 끝에).
+ */
+function _ensureModelPerfContainer() {
+  var existing = document.getElementById('pp-model-perf');
+  if (existing) return existing;
+
+  var el = document.createElement('div');
+  el.id = 'pp-model-perf';
+  el.className = 'pp-model-perf';
+
+  // #pp-cards 다음 형제로 삽입
+  var cards = document.getElementById('pp-cards');
+  if (cards && cards.parentNode) {
+    cards.parentNode.insertBefore(el, cards.nextSibling);
+  } else {
+    // 폴백: #pp-content 끝에 추가
+    var content = document.getElementById('pp-content');
+    if (content) content.appendChild(el);
+  }
+  return el;
+}
+
+/**
+ * 모델 성능 섹션 렌더링.
+ * 캐시 히트 시 즉시 렌더. 미캐시 시 fetch 후 렌더.
+ */
+function renderModelPerfSection() {
+  var container = _ensureModelPerfContainer();
+  if (!container) return;
+
+  // 캐시 히트 — 즉시 렌더
+  if (_modelPerfCache !== null) {
+    _drawModelPerfHtml(container, _modelPerfCache);
+    return;
+  }
+
+  // 아직 fetch 중이면 로딩 상태만 표시하고 대기
+  if (_modelPerfFetching) {
+    _drawModelPerfHtml(container, null);
+    return;
+  }
+
+  // 최초 fetch
+  _modelPerfFetching = true;
+  _drawModelPerfHtml(container, null); // 로딩 플레이스홀더
+
+  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var timeoutId = setTimeout(function() {
+    if (controller) controller.abort();
+  }, 10000);
+
+  fetch('data/backtest/rl_residuals_summary.json', controller ? { signal: controller.signal } : {})
+    .then(function(res) {
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function(json) {
+      var wf = json && json.analysis && json.analysis.walk_forward
+               ? json.analysis.walk_forward : null;
+      if (!wf || wf.mean_ic == null) throw new Error('walk_forward 필드 없음');
+      _modelPerfCache = wf;
+      _modelPerfFetching = false;
+      // 현재 컨테이너가 여전히 DOM에 있으면 갱신
+      var cur = document.getElementById('pp-model-perf');
+      if (cur) _drawModelPerfHtml(cur, wf);
+    })
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      _modelPerfFetching = false;
+      _modelPerfCache = false; // 실패 마킹 — 재시도 안 함
+      if (err && err.name !== 'AbortError') {
+        console.warn('[ModelPerf] rl_residuals_summary.json 로드 실패:', err.message || err);
+      }
+      var cur = document.getElementById('pp-model-perf');
+      if (cur) cur.style.display = 'none';
+    });
+}
+
+/**
+ * 모델 성능 HTML 빌드 및 컨테이너에 삽입.
+ * @param {Element} container  #pp-model-perf 엘리먼트
+ * @param {Object|null|false} wf  walk_forward 데이터 (null=로딩중, false=실패)
+ */
+function _drawModelPerfHtml(container, wf) {
+  // 실패 상태면 숨김
+  if (wf === false) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = '';
+
+  // 로딩 중 플레이스홀더
+  if (wf === null) {
+    container.innerHTML =
+      '<div class="pp-model-title">모델 성능 <span class="pp-model-subtitle">(Walk-Forward OOS)</span></div>' +
+      '<div class="pp-model-row">' +
+        '<span class="pp-model-label">IC</span>' +
+        '<span class="pp-model-value">--</span>' +
+      '</div>';
+    return;
+  }
+
+  // 값 계산
+  var meanIc  = wf.mean_ic;
+  var stdIc   = wf.std_ic;
+  var n       = wf.n_periods;
+  var tStat   = wf.t_stat;
+  var posPct  = wf.ic_positive_pct;
+
+  // 95% CI: mean ± 1.96 * std / sqrt(n)
+  var ciHalf  = (n > 0) ? (1.96 * stdIc / Math.sqrt(n)) : 0;
+  var ciLo    = meanIc - ciHalf;
+  var ciHi    = meanIc + ciHalf;
+
+  // IC 색상 클래스
+  var icCls   = meanIc > 0.05 ? 'up' : meanIc <= 0 ? 'dn' : '';
+
+  // t-stat 별 등급
+  var absT    = Math.abs(tStat);
+  var tStars  = absT > 3.29 ? '\u2605\u2605\u2605' :
+                absT > 2.58 ? '\u2605\u2605'        :
+                absT > 1.96 ? '\u2605'               : '';
+
+  // 양수비율 색상 클래스
+  var posCls  = posPct >= 100 ? 'up' : posPct < 50 ? 'dn' : '';
+
+  var icText  = meanIc.toFixed(3);
+  var ciText  = '[' + ciLo.toFixed(3) + ', ' + ciHi.toFixed(3) + ']';
+  var tText   = tStat.toFixed(2) + (tStars ? ' ' + tStars : '');
+  var posText = posPct.toFixed(0) + '%';
+  var nText   = String(n);
+
+  container.innerHTML =
+    '<div class="pp-model-title">모델 성능 <span class="pp-model-subtitle">(Walk-Forward OOS)</span></div>' +
+    '<div class="pp-model-row">' +
+      '<span class="pp-model-label">IC</span>' +
+      '<span class="pp-model-value ' + icCls + '" title="IC 95% 신뢰구간: ' + ciText + '">' +
+        icText + ' <span class="pp-model-ci">' + ciText + '</span>' +
+      '</span>' +
+    '</div>' +
+    '<div class="pp-model-row">' +
+      '<span class="pp-model-label">t-stat</span>' +
+      '<span class="pp-model-value ' + icCls + '">' + tText + '</span>' +
+    '</div>' +
+    '<div class="pp-model-row">' +
+      '<span class="pp-model-label">양수비율</span>' +
+      '<span class="pp-model-value ' + posCls + '">' + posText + '</span>' +
+    '</div>' +
+    '<div class="pp-model-row">' +
+      '<span class="pp-model-label">기간수</span>' +
+      '<span class="pp-model-value">' + nText + '</span>' +
+    '</div>';
 }
