@@ -42,8 +42,12 @@ CZW_v2 = hw * mw * (1 + alpha_momentum * momentum_rank
                        + alpha_size * size_rank)
 ```
 
-alpha 계수: mra_extended.py에서 17열 Ridge로 calibration
+alpha 계수: mra_apt_extended.py에서 17열 Ridge로 calibration 완료
 ```
-코드 매핑: patterns.js:327 (CZW 주입점), backtester.js:590-608 (WLS 회귀)
-엔진 효과: 종목 고유 팩터 반영 → IC +0.02~0.05 기대
+코드 매핑: backtester.js:600-615 (WLS 7열 회귀), rl_residuals.py (17열 Ridge)
+
+Phase 4-1 실측 결과 (2026-03-25, 297K samples):
+  12-col WF IC: 0.0567 → 17-col WF IC: 0.0998 (delta: +0.0430)
+  모든 5개 APT 팩터 p<0.001 유의
+  liquidity t=-27.6, log_size t=+20.0, value t=-14.6, beta t=+11.9, momentum t=-6.0
 ```

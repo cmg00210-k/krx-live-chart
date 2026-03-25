@@ -459,6 +459,12 @@ class PatternBacktester {
         atrNorm = atr[idx] / candles[idx].close;
       }
 
+      // APT Factor: 60-day momentum (Jegadeesh & Titman 1993)
+      var momentum60 = 0;
+      if (idx >= 60 && candles[idx - 60].close > 0) {
+        momentum60 = (candles[idx].close / candles[idx - 60].close - 1) * 100;
+      }
+
       occurrences.push({
         idx: idx,
         confidence: confidence,
@@ -466,6 +472,7 @@ class PatternBacktester {
         volumeRatio: volumeRatio,
         atrNorm: atrNorm,
         wc: p.wc != null ? p.wc : ((p.hw || 1) * (p.mw || 1)),
+        momentum60: momentum60,
       });
     }
     return occurrences;
@@ -592,6 +599,7 @@ class PatternBacktester {
       }
 
       // ── Phase C: WLS 다중 회귀 (calcWLSRegression 사용) ──
+      // 7열 설계행렬: [intercept, confidence, trendStrength, lnVolRatio, atrNorm, wc, momentum60]
       if (returns.length >= 30 && typeof calcWLSRegression === 'function') {
         var X = [], weights = [];
         var lambda = 0.995;
@@ -603,7 +611,8 @@ class PatternBacktester {
             occ.trendStrength || 0,                        // 추세 강도
             Math.log(Math.max(occ.volumeRatio || 1, 0.1)), // ln(거래량비)
             occ.atrNorm || 0.02,                           // ATR / 종가
-            occ.wc || 1                                    // Wc = hw × mw (적응형 가중치)
+            occ.wc || 1,                                   // Wc = hw × mw (적응형 가중치)
+            occ.momentum60 || 0                            // APT: 60일 모멘텀 (Jegadeesh & Titman 1993)
           ]);
           // 지수 감소 가중치: 최신 패턴에 높은 가중치
           weights.push(Math.pow(lambda, returns.length - 1 - ri));
@@ -612,7 +621,7 @@ class PatternBacktester {
         var reg = calcWLSRegression(X, returns, weights, 2.0);
         if (reg) {
           stats.regression = {
-            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm', 'wc'],
+            labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm', 'wc', 'momentum60'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
             tStats: reg.tStats.map(function(t) { return +t.toFixed(2); }),
@@ -627,7 +636,8 @@ class PatternBacktester {
               latest.trendStrength || 0,
               Math.log(Math.max(latest.volumeRatio || 1, 0.1)),
               latest.atrNorm || 0.02,
-              latest.wc || 1
+              latest.wc || 1,
+              latest.momentum60 || 0
             ];
             var predicted = 0;
             for (var j = 0; j < xNew.length; j++) {

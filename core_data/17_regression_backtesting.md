@@ -47,7 +47,7 @@ Lo & MacKinlay (1999) "A Non-Random Walk Down Wall Street":
 
 ### 모델 사양
 
-$$E[R_{N}] = \alpha_p + \beta_1 \cdot \text{conf} + \beta_2 \cdot \text{trend} + \beta_3 \cdot \ln(\text{volRatio}) + \beta_4 \cdot \text{atrNorm} + \beta_5 \cdot \text{wc}$$
+$$E[R_{N}] = \alpha_p + \beta_1 \cdot \text{conf} + \beta_2 \cdot \text{trend} + \beta_3 \cdot \ln(\text{volRatio}) + \beta_4 \cdot \text{atrNorm} + \beta_5 \cdot \text{wc} + \beta_6 \cdot \text{mom60}$$
 
 여기서:
 - $R_N$ = 패턴 완성 후 N일 수익률 (%)
@@ -57,6 +57,7 @@ $$E[R_{N}] = \alpha_p + \beta_1 \cdot \text{conf} + \beta_2 \cdot \text{trend} +
 - $\ln(\text{volRatio})$ = 거래량비 자연로그 (우편향 안정화)
 - $\text{atrNorm}$ = ATR / 종가 (변동성 체제 보정)
 - $\text{wc}$ = 적응형 가중치 hw * mw (시장 미시구조 보정, §17.14 참조)
+- $\text{mom60}$ = 60일 모멘텀 수익률 % (Jegadeesh & Titman 1993, APT 팩터)
 
 ### 가중치 체계
 
@@ -71,7 +72,7 @@ $$w_i = \lambda^{T - t_i}, \quad \lambda = 0.995$$
 $$\hat{\beta} = (X^T W X)^{-1} X^T W y$$
 
 여기서:
-- $X$ = 설계 행렬 [1, conf, trend, lnVol, atrNorm, wc] (n × 6, §17.14 참조)
+- $X$ = 설계 행렬 [1, conf, trend, lnVol, atrNorm, wc, mom60] (n × 7, §17.14 참조)
 - $W$ = 대각 가중 행렬 ($W_{ii} = w_i$)
 - $y$ = 관측 수익률 벡터 (n × 1)
 
@@ -96,6 +97,7 @@ $$R^2 = 1 - \frac{\sum w_i (y_i - \hat{y}_i)^2}{\sum w_i (y_i - \bar{y}_w)^2}$$
 | ln(volumeRatio) | -2.3+ | `Math.log(max(volRatio, 0.1))` | Caginalp: 거래량 확인 필수 |
 | atrNorm | 0+ | `calcATR(candles)[i] / close[i]` | 변동성 정규화 (다중 종목 비교 가능) |
 | wc | 0.36-1.40 | `occ.wc` (hw * mw) | Lo(2004) AMH: 적응형 시장 미시구조 가중치 |
+| momentum60 | -100%~+∞ | `(close[t]/close[t-60]-1)*100` | Jegadeesh & Titman(1993): 모멘텀 팩터 |
 
 ### ln(거래량비) 변환 근거
 - 원시 거래량비는 우편향 분포 (대부분 1-2, 간혹 10+)

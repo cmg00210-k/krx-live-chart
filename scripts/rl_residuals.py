@@ -3,10 +3,18 @@
 """
 rl_residuals.py — Stage B-1: Walk-Forward MRA Residual Extraction Pipeline
 
-Extracts per-sample residuals from the 12-col Ridge MRA using strict walk-forward:
+Extracts per-sample residuals from the 17-col Ridge MRA using strict walk-forward:
   - 60-day train, 20-day test windows (no overlap, no look-ahead)
   - Ridge lambda=2.0 (from Stage A-1 optimal)
+  - 12 original features + 5 APT factors (Phase 4-1)
   - Each test sample gets: y_predicted, y_actual, residual = y_actual - y_predicted
+
+APT Factors (Phase 4-1, Ross 1976):
+  12. momentum_60d   — 60-day return (Jegadeesh & Titman 1993)
+  13. beta_60d       — rolling beta vs market (Sharpe 1964)
+  14. value_inv_pbr  — 1/PBR (Fama & French 1993)
+  15. log_size       — log(marketCap) (Fama & French 1993)
+  16. liquidity_20d  — 20-day avg turnover (Amihud 2002)
 
 Output:
   data/backtest/rl_residuals.csv     — per-sample residuals with metadata + features
@@ -14,6 +22,7 @@ Output:
 
 References:
   - Stage A-1: mra_extended.py (IC 0.057, Ridge lambda=2.0)
+  - Phase 4-1: mra_apt_extended.py (IC 0.100, +0.043 OOS)
   - Stage B plan: project_stage_b_rl_plan.md (LinUCB input)
   - Li et al. (2010) LinUCB, core_data/11_RL §7.3
 
@@ -23,6 +32,7 @@ Usage:
     python scripts/rl_residuals.py --train-days 60   (default: 60)
     python scripts/rl_residuals.py --test-days 20    (default: 20)
     python scripts/rl_residuals.py --lambda 2.0      (default: 2.0)
+    python scripts/rl_residuals.py --12col            (use 12-col only, skip APT)
 """
 
 import csv
@@ -38,7 +48,10 @@ from scipy import stats as sp_stats
 
 ROOT = Path(__file__).resolve().parent.parent
 BACKTEST_DIR = ROOT / "data" / "backtest"
+DATA_DIR = ROOT / "data"
 CSV_PATH = BACKTEST_DIR / "wc_return_pairs.csv"
+INDEX_PATH = DATA_DIR / "index.json"
+FIN_DIR = DATA_DIR / "financials"
 OUT_CSV = BACKTEST_DIR / "rl_residuals.csv"
 OUT_JSON = BACKTEST_DIR / "rl_residuals_summary.json"
 
@@ -48,20 +61,220 @@ TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
          "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
-# 12 feature names (same as mra_extended.py)
-FEATURE_NAMES = [
+# 12 original feature names (Stage A-1)
+FEATURE_NAMES_12 = [
     "hw", "vw", "mw", "rw", "confidence_norm", "signal_dir",
     "market_type", "log_confidence", "pattern_tier",
     "hw_x_signal", "vw_x_signal", "conf_x_signal",
 ]
+
+# 5 APT factors (Phase 4-1)
+APT_NAMES = [
+    "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
+]
+
+# Full 17 features (default)
+FEATURE_NAMES = FEATURE_NAMES_12 + APT_NAMES
+
+
+# ──────────────────────────────────────────────
+# APT Factor Loading (Phase 4-1)
+# ──────────────────────────────────────────────
+
+def _load_index():
+    """Load index.json → {code: {marketCap, market}}."""
+    if not INDEX_PATH.exists():
+        return {}
+    with open(INDEX_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    return {s["code"]: {"marketCap": s.get("marketCap", 0), "market": s.get("market", "").lower()}
+            for s in data["stocks"]}
+
+
+def _load_financials():
+    """Load financials → {code: total_equity}."""
+    result = {}
+    if not FIN_DIR.exists():
+        return result
+    for fp in FIN_DIR.glob("*.json"):
+        try:
+            with open(fp, encoding="utf-8") as f:
+                d = json.load(f)
+            annual = d.get("annual")
+            if annual and isinstance(annual, list):
+                for a in annual:
+                    eq = a.get("total_equity")
+                    if eq and eq > 0:
+                        result[d["code"]] = eq
+                        break
+        except Exception:
+            pass
+    return result
+
+
+def _load_ohlcv_all(index_info):
+    """Load all OHLCV → {code: [(date, close, volume), ...]}."""
+    ohlcv = {}
+    for code, info in index_info.items():
+        market = info["market"]
+        if not market:
+            continue
+        fpath = DATA_DIR / market / f"{code}.json"
+        if not fpath.exists():
+            continue
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                d = json.load(f)
+            candles = d.get("candles", [])
+            if len(candles) < 10:
+                continue
+            series = [(c["time"], c["close"], c.get("volume", 0))
+                      for c in candles if c.get("time") and c.get("close", 0) > 0]
+            if series:
+                ohlcv[code] = series
+        except Exception:
+            pass
+    return ohlcv
+
+
+def _compute_market_returns(ohlcv, index_info, top_n=100):
+    """Cap-weighted daily market return from top N stocks."""
+    sorted_stocks = sorted(
+        [(code, index_info[code]["marketCap"]) for code in ohlcv if code in index_info],
+        key=lambda x: -x[1]
+    )[:top_n]
+    top_codes = [s[0] for s in sorted_stocks]
+    top_caps = np.array([s[1] for s in sorted_stocks], dtype=np.float64)
+    total_cap = top_caps.sum() or 1.0
+    weights = top_caps / total_cap
+
+    code_closes = {}
+    all_dates = set()
+    for code in top_codes:
+        closes = {}
+        for dt, cl, _ in ohlcv[code]:
+            closes[dt] = cl
+            all_dates.add(dt)
+        code_closes[code] = closes
+
+    mkt_returns = {}
+    prev_closes = [0.0] * len(top_codes)
+    for dt in sorted(all_dates):
+        w_ret = 0.0
+        w_sum = 0.0
+        for i, code in enumerate(top_codes):
+            cl = code_closes[code].get(dt)
+            if cl is not None and cl > 0:
+                if prev_closes[i] > 0:
+                    ret = (cl - prev_closes[i]) / prev_closes[i]
+                    w_ret += weights[i] * ret
+                    w_sum += weights[i]
+                prev_closes[i] = cl
+        if w_sum > 0.3:
+            mkt_returns[dt] = w_ret
+    return mkt_returns
+
+
+def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials):
+    """Compute 5 APT factors per sample. Returns np.array (n, 5) with NaN for missing."""
+    n = len(rows)
+    factors = np.full((n, 5), np.nan)
+    date_idx = {}
+    for code, series in ohlcv.items():
+        date_idx[code] = {s[0]: i for i, s in enumerate(series)}
+
+    for i, row in enumerate(rows):
+        code = row["code"]
+        date = row["date"]
+        if code not in ohlcv or code not in date_idx:
+            continue
+        series = ohlcv[code]
+        didx = date_idx[code]
+        idx = didx.get(date)
+        if idx is None:
+            continue
+
+        # momentum_60d
+        if idx >= 60:
+            cur = series[idx][1]
+            past = series[idx - 60][1]
+            if past > 0:
+                factors[i, 0] = (cur / past - 1.0) * 100
+
+        # beta_60d
+        if idx >= 60:
+            sr, mr = [], []
+            for j in range(max(1, idx - 59), idx + 1):
+                dt_j = series[j][0]
+                if series[j - 1][1] > 0 and dt_j in mkt_returns:
+                    sr.append((series[j][1] - series[j - 1][1]) / series[j - 1][1])
+                    mr.append(mkt_returns[dt_j])
+            if len(sr) >= 20:
+                var_m = np.var(mr, ddof=1)
+                if var_m > 1e-12:
+                    factors[i, 1] = np.cov(sr, mr, ddof=1)[0, 1] / var_m
+
+        # value_inv_pbr
+        mcap = index_info.get(code, {}).get("marketCap", 0)
+        equity = financials.get(code)
+        if mcap > 0 and equity and equity > 0:
+            pbr = (mcap * 1e8) / equity
+            if pbr > 0.01:
+                factors[i, 2] = 1.0 / pbr
+
+        # log_size
+        if mcap > 0:
+            factors[i, 3] = math.log(mcap)
+
+        # liquidity_20d
+        if idx >= 20 and mcap > 0:
+            vols = [series[j][2] for j in range(idx - 19, idx + 1)]
+            avg_vol = np.mean(vols)
+            cur_price = series[idx][1]
+            if cur_price > 0 and avg_vol > 0:
+                factors[i, 4] = (avg_vol * cur_price) / (mcap * 1e8) * 100
+
+    return factors
+
+
+def _zscore_by_date(factors, dates):
+    """Cross-sectional MAD-robust z-score, winsorized ±3, NaN→0."""
+    result = factors.copy()
+    date_to_indices = defaultdict(list)
+    for i, d in enumerate(dates):
+        date_to_indices[d].append(i)
+
+    for dt, idxs in date_to_indices.items():
+        if len(idxs) < 5:
+            continue
+        for col in range(factors.shape[1]):
+            vals = factors[idxs, col]
+            valid = ~np.isnan(vals)
+            if valid.sum() < 3:
+                continue
+            vv = vals[valid]
+            mu = np.median(vv)
+            mad = np.median(np.abs(vv - mu))
+            scale = mad * 1.4826 if mad > 1e-10 else np.std(vv, ddof=1)
+            if scale < 1e-10:
+                continue
+            for idx in idxs:
+                if np.isnan(factors[idx, col]):
+                    result[idx, col] = 0.0
+                else:
+                    result[idx, col] = np.clip((factors[idx, col] - mu) / scale, -3, 3)
+
+    return np.nan_to_num(result, nan=0.0)
 
 
 # ──────────────────────────────────────────────
 # Data Loading + Feature Engineering (reused from mra_extended.py)
 # ──────────────────────────────────────────────
 
-def load_and_engineer(horizon):
-    """Load CSV, derive 6 new features, return X (n x 12), y (n,), dates[], meta[]."""
+def load_and_engineer(horizon, use_apt=True):
+    """Load CSV, derive features, return X (n x 17 or 12), y (n,), dates[], meta[].
+    When use_apt=True (default), adds 5 APT factors from OHLCV/index/financials.
+    """
     col = f"ret_{horizon}"
     rows = []
     with open(CSV_PATH, encoding="utf-8") as f:
@@ -118,14 +331,17 @@ def load_and_engineer(horizon):
             })
 
     n = len(rows)
-    X = np.zeros((n, len(FEATURE_NAMES)))
+    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_12
+
+    # Build base 12-col matrix
+    X12 = np.zeros((n, len(FEATURE_NAMES_12)))
     y = np.zeros(n)
     dates = []
     meta = []
 
     for i, r in enumerate(rows):
-        for j, fname in enumerate(FEATURE_NAMES):
-            X[i, j] = r[fname]
+        for j, fname in enumerate(FEATURE_NAMES_12):
+            X12[i, j] = r[fname]
         y[i] = r["ret"]
         dates.append(r["date"])
         meta.append({
@@ -134,6 +350,32 @@ def load_and_engineer(horizon):
             "signal": r["signal"],
             "market": r["market"],
         })
+
+    if not use_apt:
+        return X12, y, dates, meta
+
+    # Load APT auxiliary data
+    print("  -> Loading APT auxiliary data (index, financials, OHLCV)...")
+    index_info = _load_index()
+    financials = _load_financials()
+    ohlcv = _load_ohlcv_all(index_info)
+    print(f"     Index: {len(index_info)}, Financials: {len(financials)}, OHLCV: {len(ohlcv)}")
+
+    if not ohlcv:
+        print("  -> [WARN] No OHLCV data, falling back to 12-col")
+        return X12, y, dates, meta
+
+    # Compute market returns + APT factors
+    mkt_returns = _compute_market_returns(ohlcv, index_info, top_n=100)
+    apt_raw = _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials)
+
+    # Coverage report
+    for j, fname in enumerate(APT_NAMES):
+        valid = np.sum(~np.isnan(apt_raw[:, j]))
+        print(f"     {fname}: {valid:,}/{n:,} ({valid/n*100:.1f}%)")
+
+    apt_z = _zscore_by_date(apt_raw, dates)
+    X = np.column_stack([X12, apt_z])
 
     return X, y, dates, meta
 
@@ -431,6 +673,7 @@ def main():
     train_days = 60
     test_days = 20
     lam = 2.0
+    use_apt = True  # default: 17-col with APT factors
 
     i = 0
     while i < len(args):
@@ -442,6 +685,8 @@ def main():
             test_days = int(args[i + 1]); i += 2
         elif args[i] == "--lambda" and i + 1 < len(args):
             lam = float(args[i + 1]); i += 2
+        elif args[i] == "--12col":
+            use_apt = False; i += 1
         else:
             i += 1
 
@@ -449,15 +694,23 @@ def main():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest first.")
         sys.exit(1)
 
+    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_12
+    mode_label = f"{len(feature_names)}-col" + (" + APT" if use_apt else "")
+
     print("=" * 60)
-    print("Stage B-1: Walk-Forward MRA Residual Extraction")
+    print(f"Stage B-1: Walk-Forward MRA Residual Extraction ({mode_label})")
     print("=" * 60)
     print(f"  horizon={horizon}, train={train_days}d, test={test_days}d, lambda={lam}")
 
     # ── Step 1: Load + Feature Engineering ──
-    print(f"\n[1/4] Loading CSV + engineering 12 features...")
-    X, y, dates, meta = load_and_engineer(horizon)
+    print(f"\n[1/4] Loading CSV + engineering {len(feature_names)} features...")
+    X, y, dates, meta = load_and_engineer(horizon, use_apt=use_apt)
     n, p = X.shape
+    # Update feature_names to match actual dimension (APT may fall back to 12)
+    if p == len(FEATURE_NAMES_12):
+        feature_names = FEATURE_NAMES_12
+    else:
+        feature_names = FEATURE_NAMES
     print(f"  -> {n:,} samples, {p} features, {len(set(dates))} unique dates")
 
     # ── Step 2: Walk-Forward Residual Extraction ──
@@ -505,11 +758,11 @@ def main():
     # ── Step 4: Save Outputs ──
     print(f"\n[4/4] Saving outputs...")
 
-    # CSV: per-sample residuals (without features array for readability; features in separate columns)
+    # CSV: per-sample residuals (features in separate columns)
     csv_header = (
         ["date", "code", "market", "type", "signal",
          "y_pred", "y_actual", "residual", "wf_period", "wf_label"]
-        + FEATURE_NAMES
+        + feature_names
     )
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -521,7 +774,7 @@ def main():
                 r["wf_period"], r["wf_label"],
             ] + [f"{v:.6f}" for v in r["features"]]
             writer.writerow(row)
-    print(f"  -> CSV: {OUT_CSV} ({len(residuals):,} rows)")
+    print(f"  -> CSV: {OUT_CSV} ({len(residuals):,} rows, {len(feature_names)} features)")
 
     # JSON: summary + period stats
     summary = _to_native({
@@ -531,7 +784,8 @@ def main():
             "test_days": test_days,
             "ridge_lambda": lam,
             "n_features": p,
-            "feature_names": FEATURE_NAMES,
+            "feature_names": feature_names,
+            "apt_enabled": use_apt and p > len(FEATURE_NAMES_12),
         },
         "analysis": analysis,
         "period_stats": [{k: v for k, v in ps.items() if k != "beta"} for ps in period_stats],
@@ -540,7 +794,7 @@ def main():
                 "label": ps["label"],
                 "coefficients": {
                     name: round(float(ps["beta"][j]), 6)
-                    for j, name in enumerate(["intercept"] + FEATURE_NAMES)
+                    for j, name in enumerate(["intercept"] + feature_names)
                 },
             }
             for ps in period_stats
