@@ -978,6 +978,7 @@ async function _continueInit() {
           version: _dragVersion,
           source: 'drag',
           learnedWeights: adaptiveWeights,
+          market: currentStock && currentStock.market ? currentStock.market : '',
         });
       } else {
         // 폴백: 메인 스레드 동기 분석
@@ -1390,7 +1391,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=12');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=16');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -1863,6 +1864,7 @@ function _requestWorkerAnalysis() {
     realtimeMode: _realtimeMode,
     version: _workerVersion,
     learnedWeights: adaptiveWeights,
+    market: currentStock && currentStock.market ? currentStock.market : '',
   });
 }
 

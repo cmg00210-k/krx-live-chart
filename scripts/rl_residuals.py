@@ -3,7 +3,7 @@
 """
 rl_residuals.py — Stage B-1: Walk-Forward MRA Residual Extraction Pipeline
 
-Extracts per-sample residuals from the 17-col Ridge MRA using strict walk-forward:
+Extracts per-sample residuals from the 20-col Ridge MRA using strict walk-forward:
   - 60-day train, 20-day test windows (no overlap, no look-ahead)
   - Ridge lambda=2.0 (from Stage A-1 optimal)
   - 12 original features + 5 APT factors (Phase 4-1)
@@ -68,12 +68,13 @@ FEATURE_NAMES_12 = [
     "hw_x_signal", "vw_x_signal", "conf_x_signal",
 ]
 
-# 5 APT factors (Phase 4-1)
+# 5 APT factors (Phase 4-1) + 3 short-term momentum (Phase 5-2)
 APT_NAMES = [
     "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
+    "stock_ret_5d", "market_ret_0d", "market_ret_5d",
 ]
 
-# Full 17 features (default)
+# Full 20 features (default)
 FEATURE_NAMES = FEATURE_NAMES_12 + APT_NAMES
 
 
@@ -176,9 +177,24 @@ def _compute_market_returns(ohlcv, index_info, top_n=100):
 
 
 def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials):
-    """Compute 5 APT factors per sample. Returns np.array (n, 5) with NaN for missing."""
+    """Compute 8 APT factors per sample. Returns np.array (n, 8) with NaN for missing.
+    Cols 0-4: Phase 4-1 original (momentum_60d, beta_60d, value_inv_pbr, log_size, liquidity_20d)
+    Cols 5-7: Phase 5-2 short-term (stock_ret_5d, market_ret_0d, market_ret_5d)
+    """
     n = len(rows)
-    factors = np.full((n, 5), np.nan)
+    factors = np.full((n, 8), np.nan)
+
+    # Pre-compute rolling 5-day market returns
+    mkt_dates_sorted = sorted(mkt_returns.keys())
+    mkt_ret_5d = {}
+    for ki, dt in enumerate(mkt_dates_sorted):
+        if ki >= 5:
+            cum = 1.0
+            for j in range(ki - 4, ki + 1):
+                cum *= (1.0 + mkt_returns.get(mkt_dates_sorted[j], 0))
+            mkt_ret_5d[dt] = (cum - 1.0) * 100
+        else:
+            mkt_ret_5d[dt] = mkt_returns.get(dt, 0) * 100
     date_idx = {}
     for code, series in ohlcv.items():
         date_idx[code] = {s[0]: i for i, s in enumerate(series)}
@@ -234,6 +250,21 @@ def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials):
             if cur_price > 0 and avg_vol > 0:
                 factors[i, 4] = (avg_vol * cur_price) / (mcap * 1e8) * 100
 
+        # stock_ret_5d (Phase 5-2: short-term stock momentum, Jegadeesh & Titman 1993)
+        if idx >= 5:
+            cur = series[idx][1]
+            past5 = series[idx - 5][1]
+            if past5 > 0:
+                factors[i, 5] = (cur / past5 - 1.0) * 100
+
+        # market_ret_0d (Phase 5-2: daily market return, CAPM Sharpe 1964)
+        if date in mkt_returns:
+            factors[i, 6] = mkt_returns[date] * 100
+
+        # market_ret_5d (Phase 5-2: 5-day cumulative market return, Lo 2004 AMH)
+        if date in mkt_ret_5d:
+            factors[i, 7] = mkt_ret_5d[date]
+
     return factors
 
 
@@ -272,8 +303,8 @@ def _zscore_by_date(factors, dates):
 # ──────────────────────────────────────────────
 
 def load_and_engineer(horizon, use_apt=True):
-    """Load CSV, derive features, return X (n x 17 or 12), y (n,), dates[], meta[].
-    When use_apt=True (default), adds 5 APT factors from OHLCV/index/financials.
+    """Load CSV, derive features, return X (n x 20 or 12), y (n,), dates[], meta[].
+    When use_apt=True (default), adds 8 APT factors from OHLCV/index/financials.
     """
     col = f"ret_{horizon}"
     rows = []
@@ -443,6 +474,32 @@ def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=20, lam=2
         X_te, y_te = X[test_idx], y[test_idx]
 
         beta = ridge_fit(X_tr, y_tr, lam)
+
+        # James-Stein per-feature shrinkage (Stein 1961, Phase 5-2)
+        # Shrink toward expanding grand mean of prior betas.
+        # Skip intercept (j=0). Require >= 4 prior periods because:
+        #   - p=21 params with <4 obs → variance estimate unstable (ddof=1 → 2~3 DF)
+        #   - Empirical: >=2 caused over-shrinkage; >=4 balances bias-variance
+        # Bias correction (beta[0] adjustment) is Empirical Bayes re-centering,
+        # not part of canonical Stein 1961 but standard in financial panel applications
+        # (Efron 2012 "Large-Scale Inference", §6.2).
+        if len(period_stats) >= 4:
+            prior_betas = np.array([ps["beta"] for ps in period_stats])
+            beta_mean = prior_betas.mean(axis=0)
+            p_feat = len(beta) - 1  # exclude intercept
+            # Per-feature variance across periods (individual stability measure)
+            beta_var = np.var(prior_betas, axis=0, ddof=1)
+            for j in range(1, len(beta)):  # skip intercept at j=0
+                var_j = beta_var[j]
+                diff_sq_j = (beta[j] - beta_mean[j]) ** 2
+                if diff_sq_j > 1e-12 and var_j > 1e-12:
+                    # Conservative: shrink proportional to feature's own instability
+                    B_j = max(0.0, 1.0 - max(p_feat - 2, 1) * var_j / (p_feat * diff_sq_j))
+                    beta[j] = B_j * beta[j] + (1.0 - B_j) * beta_mean[j]
+            # Bias correction: re-center intercept so training predictions are unbiased
+            y_hat_tr = predict(X_tr, beta)
+            beta[0] -= np.mean(y_hat_tr - y_tr)
+
         y_hat = predict(X_te, beta)
         resid = y_te - y_hat
 
@@ -601,16 +658,83 @@ def analyze_residuals(residuals, period_stats):
             "ic": tier_ic,
         }
 
-    # Residual autocorrelation (lag 1~5) — important for regime detection in B-2
-    autocorr = {}
+    # ── Autocorrelation: corrected 3-type measurement (Petersen 2009) ──
+    # Old pooled AC was artifact: 99.92% of lag-1 pairs are same-date cross-sectional
+    autocorr_pooled = {}
     for lag in [1, 2, 3, 5, 10]:
         if n > lag + 30:
             corr, pval = sp_stats.spearmanr(resid_arr[:-lag], resid_arr[lag:])
             if np.isfinite(corr):
-                autocorr[f"lag_{lag}"] = {
+                autocorr_pooled[f"lag_{lag}"] = {
                     "corr": round(float(corr), 6),
                     "p_value": round(float(pval), 6),
                 }
+
+    # (a) Within-stock AC(1): per-stock time-series AC, then average
+    by_code = defaultdict(list)
+    for r in residuals:
+        by_code[r["code"]].append((r["date"], r["residual"]))
+    within_stock_acs = []
+    for code, series in by_code.items():
+        series.sort(key=lambda x: x[0])
+        if len(series) < 5:
+            continue
+        arr_s = np.array([s[1] for s in series])
+        ac_s, _ = sp_stats.spearmanr(arr_s[:-1], arr_s[1:])
+        if np.isfinite(ac_s):
+            within_stock_acs.append(ac_s)
+    within_stock_ac = {
+        "mean": round(float(np.mean(within_stock_acs)), 6) if within_stock_acs else None,
+        "median": round(float(np.median(within_stock_acs)), 6) if within_stock_acs else None,
+        "std": round(float(np.std(within_stock_acs)), 6) if within_stock_acs else None,
+        "n_stocks": len(within_stock_acs),
+    }
+
+    # (b) Date-level AC(1): AC of daily mean residuals
+    date_resids = defaultdict(list)
+    for r in residuals:
+        date_resids[r["date"]].append(r["residual"])
+    dates_sorted = sorted(date_resids.keys())
+    date_means = np.array([np.mean(date_resids[d]) for d in dates_sorted])
+    date_ac, date_p = (None, None)
+    if len(date_means) > 5:
+        date_ac, date_p = sp_stats.spearmanr(date_means[:-1], date_means[1:])
+        if not np.isfinite(date_ac):
+            date_ac, date_p = None, None
+    date_level_ac = {
+        "corr": round(float(date_ac), 6) if date_ac is not None else None,
+        "p_value": round(float(date_p), 6) if date_p is not None else None,
+        "n_dates": len(dates_sorted),
+    }
+
+    # (c) Demeaned within-stock AC(1): remove date mean, then per-stock AC
+    date_mean_map = {d: np.mean(date_resids[d]) for d in dates_sorted}
+    by_code_dm = defaultdict(list)
+    for r in residuals:
+        dm = r["residual"] - date_mean_map.get(r["date"], 0)
+        by_code_dm[r["code"]].append((r["date"], dm))
+    demeaned_acs = []
+    for code, series in by_code_dm.items():
+        series.sort(key=lambda x: x[0])
+        if len(series) < 5:
+            continue
+        arr_d = np.array([s[1] for s in series])
+        ac_d, _ = sp_stats.spearmanr(arr_d[:-1], arr_d[1:])
+        if np.isfinite(ac_d):
+            demeaned_acs.append(ac_d)
+    demeaned_ac = {
+        "mean": round(float(np.mean(demeaned_acs)), 6) if demeaned_acs else None,
+        "median": round(float(np.median(demeaned_acs)), 6) if demeaned_acs else None,
+        "std": round(float(np.std(demeaned_acs)), 6) if demeaned_acs else None,
+        "n_stocks": len(demeaned_acs),
+    }
+
+    autocorr = autocorr_pooled
+    autocorr_corrected = {
+        "within_stock": within_stock_ac,
+        "date_level": date_level_ac,
+        "demeaned_within_stock": demeaned_ac,
+    }
 
     # Residual sign persistence (consecutive same-sign runs)
     signs = np.sign(resid_arr)
@@ -638,6 +762,7 @@ def analyze_residuals(residuals, period_stats):
         "by_market": by_market,
         "by_tier": by_tier,
         "autocorrelation": autocorr,
+        "autocorrelation_corrected": autocorr_corrected,
         "sign_persistence": sign_persistence,
     }
 
@@ -673,7 +798,7 @@ def main():
     train_days = 60
     test_days = 20
     lam = 2.0
-    use_apt = True  # default: 17-col with APT factors
+    use_apt = True  # default: 20-col with APT + short-term momentum factors
 
     i = 0
     while i < len(args):

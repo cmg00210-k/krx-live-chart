@@ -65,6 +65,7 @@ class PatternBacktester {
     /** LinUCB policy (Stage B) — loaded lazily from rl_policy.json */
     this._rlPolicy = null;
     this._rlPolicyAttempted = false;
+    this._currentMarket = '';  // set by Worker message or main thread
     this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
     this._rlTier3 = new Set(['spinningTop','doji','fallingWedge']);
     this._loadRLPolicy();
@@ -89,7 +90,7 @@ class PatternBacktester {
       .catch(function() { /* silent fallback */ });
   }
 
-  /** Build 10-dim context vector for LinUCB
+  /** Build 7-dim context vector for LinUCB (resid dims removed — runtime N/A)
    *  @param {number} predicted — WLS predicted return
    *  @param {string} signal — 'buy'/'sell'/'neutral'
    *  @param {string} patternType — pattern name
@@ -114,11 +115,12 @@ class PatternBacktester {
       ewmaVol = Math.max(-3, Math.min(3, (rawVol - 0.026541) / 0.017892));
     }
 
-    // Dim 6: market_type (KOSDAQ=1, KOSPI=0)
+    // Dim 3: market_type (KOSDAQ=1, KOSPI=0)
+    // Worker-safe: use _currentMarket (set by Worker message) or fallback to currentStock
     var marketType = 0;
-    if (typeof currentStock !== 'undefined' && currentStock && currentStock.market) {
-      marketType = currentStock.market.toUpperCase() === 'KOSDAQ' ? 1 : 0;
-    }
+    var mkt = this._currentMarket
+      || (typeof currentStock !== 'undefined' && currentStock && currentStock.market ? currentStock.market : '');
+    if (mkt && mkt.toUpperCase() === 'KOSDAQ') marketType = 1;
 
     // Dim 9: raw_hurst (R/S analysis, z-scored) — reuse calcHurst from indicators.js
     var rawHurst = 0;
@@ -133,16 +135,13 @@ class PatternBacktester {
     }
 
     return [
-      0,                                           // 0: resid_sign (runtime N/A)
-      0,                                           // 1: resid_mag_z (runtime N/A)
-      0,                                           // 2: resid_run_len (runtime N/A)
-      ewmaVol,                                     // 3: ewma_vol (z-scored)
-      Math.min(Math.abs(predicted) / 5.0, 3),     // 4: pred_magnitude
-      sigDir,                                       // 5: signal_dir
-      marketType,                                   // 6: market_type
-      tier,                                         // 7: pattern_tier
-      (latest.confidencePred || latest.confidence || 50) / 100, // 8: confidence_norm (Dual)
-      rawHurst                                     // 9: raw_hurst (z-scored)
+      ewmaVol,                                     // 0: ewma_vol (z-scored)
+      Math.min(Math.abs(predicted) / 5.0, 3),     // 1: pred_magnitude
+      sigDir,                                       // 2: signal_dir
+      marketType,                                   // 3: market_type
+      tier,                                         // 4: pattern_tier
+      (latest.confidencePred || latest.confidence || 50) / 100, // 5: confidence_norm (Dual)
+      rawHurst                                     // 6: raw_hurst (z-scored)
     ];
   }
 

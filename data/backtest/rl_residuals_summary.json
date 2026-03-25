@@ -1,0 +1,455 @@
+{
+  "config": {
+    "horizon": 5,
+    "train_days": 60,
+    "test_days": 20,
+    "ridge_lambda": 2.0,
+    "n_features": 20,
+    "feature_names": [
+      "hw",
+      "vw",
+      "mw",
+      "rw",
+      "confidence_norm",
+      "signal_dir",
+      "market_type",
+      "log_confidence",
+      "pattern_tier",
+      "hw_x_signal",
+      "vw_x_signal",
+      "conf_x_signal",
+      "momentum_60d",
+      "beta_60d",
+      "value_inv_pbr",
+      "log_size",
+      "liquidity_20d",
+      "stock_ret_5d",
+      "market_ret_0d",
+      "market_ret_5d"
+    ],
+    "apt_enabled": true
+  },
+  "analysis": {
+    "distribution": {
+      "n": 199135,
+      "mean": 0.228105,
+      "std": 7.970304,
+      "median": -0.593576,
+      "skewness": 4.6134,
+      "kurtosis": 73.6718,
+      "min": -70.6821,
+      "max": 269.4469,
+      "pct_1": -14.925,
+      "pct_5": -8.6577,
+      "pct_25": -3.367,
+      "pct_75": 2.3332,
+      "pct_95": 11.7966,
+      "pct_99": 29.0365
+    },
+    "overall_ic": {
+      "ic": 0.090289,
+      "p_value": 0.0
+    },
+    "walk_forward": {
+      "n_periods": 8,
+      "mean_ic": 0.104522,
+      "std_ic": 0.041361,
+      "t_stat": 7.1477,
+      "ic_positive_pct": 100.0
+    },
+    "by_signal": {
+      "buy": {
+        "n": 38139,
+        "mean_resid": 0.6552,
+        "std_resid": 8.94558,
+        "skewness": 6.222,
+        "kurtosis": 111.1083,
+        "ic": 0.086077
+      },
+      "sell": {
+        "n": 40152,
+        "mean_resid": -0.008787,
+        "std_resid": 8.209789,
+        "skewness": 4.0124,
+        "kurtosis": 49.9822,
+        "ic": 0.069545
+      },
+      "neutral": {
+        "n": 120844,
+        "mean_resid": 0.172022,
+        "std_resid": 7.546742,
+        "skewness": 3.9528,
+        "kurtosis": 58.0212,
+        "ic": 0.102843
+      }
+    },
+    "by_market": {
+      "kospi": {
+        "n": 68455,
+        "mean_resid": 0.207677,
+        "std_resid": 7.059557,
+        "kurtosis": 129.6162
+      },
+      "kosdaq": {
+        "n": 130680,
+        "mean_resid": 0.238806,
+        "std_resid": 8.408111,
+        "kurtosis": 56.8131
+      }
+    },
+    "by_tier": {
+      "tier1": {
+        "n": 5214,
+        "mean_resid": 1.809863,
+        "std_resid": 8.900995,
+        "kurtosis": 15.3476,
+        "ic": -0.148992
+      },
+      "tier2": {
+        "n": 25113,
+        "mean_resid": 0.339214,
+        "std_resid": 8.430769,
+        "kurtosis": 77.7404,
+        "ic": 0.1005
+      },
+      "tier3": {
+        "n": 123923,
+        "mean_resid": 0.194142,
+        "std_resid": 7.681051,
+        "kurtosis": 64.4541,
+        "ic": 0.103382
+      }
+    },
+    "autocorrelation": {
+      "lag_1": {
+        "corr": 0.242377,
+        "p_value": 0.0
+      },
+      "lag_2": {
+        "corr": 0.179112,
+        "p_value": 0.0
+      },
+      "lag_3": {
+        "corr": 0.174076,
+        "p_value": 0.0
+      },
+      "lag_5": {
+        "corr": 0.173355,
+        "p_value": 0.0
+      },
+      "lag_10": {
+        "corr": 0.173642,
+        "p_value": 0.0
+      }
+    },
+    "autocorrelation_corrected": {
+      "within_stock": {
+        "mean": 0.545776,
+        "median": 0.555149,
+        "std": 0.118239,
+        "n_stocks": 2689
+      },
+      "date_level": {
+        "corr": 0.797979,
+        "p_value": 0.0,
+        "n_dates": 160
+      },
+      "demeaned_within_stock": {
+        "mean": 0.531533,
+        "median": 0.544184,
+        "std": 0.114326,
+        "n_stocks": 2689
+      }
+    },
+    "sign_persistence": {
+      "mean_run_length": 2.5489,
+      "max_run_length": 65,
+      "pct_positive": 43.9
+    }
+  },
+  "period_stats": [
+    {
+      "period_id": 0,
+      "label": "2025-06-24~2025-07-21",
+      "n_train": 71242,
+      "n_test": 23506,
+      "ic": 0.18776,
+      "mean_resid": -0.758153,
+      "std_resid": 6.815706
+    },
+    {
+      "period_id": 1,
+      "label": "2025-07-22~2025-08-19",
+      "n_train": 71302,
+      "n_test": 23645,
+      "ic": 0.11732,
+      "mean_resid": -1.935775,
+      "std_resid": 6.03169
+    },
+    {
+      "period_id": 2,
+      "label": "2025-08-20~2025-09-16",
+      "n_train": 71560,
+      "n_test": 23754,
+      "ic": 0.062113,
+      "mean_resid": 1.009405,
+      "std_resid": 6.502139
+    },
+    {
+      "period_id": 3,
+      "label": "2025-09-17~2025-10-21",
+      "n_train": 70905,
+      "n_test": 24518,
+      "ic": 0.061257,
+      "mean_resid": -0.052864,
+      "std_resid": 6.971754
+    },
+    {
+      "period_id": 4,
+      "label": "2025-10-22~2025-11-18",
+      "n_train": 71917,
+      "n_test": 24011,
+      "ic": 0.096943,
+      "mean_resid": -1.140607,
+      "std_resid": 7.280611
+    },
+    {
+      "period_id": 5,
+      "label": "2025-11-19~2025-12-16",
+      "n_train": 72283,
+      "n_test": 24210,
+      "ic": 0.120924,
+      "mean_resid": 0.906454,
+      "std_resid": 8.348304
+    },
+    {
+      "period_id": 6,
+      "label": "2025-12-17~2026-01-16",
+      "n_train": 72739,
+      "n_test": 24452,
+      "ic": 0.0762,
+      "mean_resid": 0.938195,
+      "std_resid": 9.447633
+    },
+    {
+      "period_id": 7,
+      "label": "2026-01-19~2026-02-13",
+      "n_train": 72673,
+      "n_test": 31039,
+      "ic": 0.113661,
+      "mean_resid": 2.217727,
+      "std_resid": 9.860754
+    }
+  ],
+  "period_betas": {
+    "0": {
+      "label": "2025-06-24~2025-07-21",
+      "coefficients": {
+        "intercept": -20.598513,
+        "hw": 17.540661,
+        "vw": 2.097882,
+        "mw": -1.240159,
+        "rw": -0.572867,
+        "confidence_norm": -1.135263,
+        "signal_dir": 5.141252,
+        "market_type": 0.040508,
+        "log_confidence": 0.144533,
+        "pattern_tier": 0.029906,
+        "hw_x_signal": -5.509541,
+        "vw_x_signal": 1.958748,
+        "conf_x_signal": -0.868545,
+        "momentum_60d": -0.9827,
+        "beta_60d": -0.342035,
+        "value_inv_pbr": -0.125913,
+        "log_size": 0.265501,
+        "liquidity_20d": -0.466491,
+        "stock_ret_5d": -0.034658,
+        "market_ret_0d": 0.100118,
+        "market_ret_5d": -0.18445
+      }
+    },
+    "1": {
+      "label": "2025-07-22~2025-08-19",
+      "coefficients": {
+        "intercept": -23.080152,
+        "hw": 18.881479,
+        "vw": 1.139196,
+        "mw": -0.713869,
+        "rw": 0.013161,
+        "confidence_norm": -1.339468,
+        "signal_dir": 3.113209,
+        "market_type": -0.149501,
+        "log_confidence": 0.50415,
+        "pattern_tier": -0.213386,
+        "hw_x_signal": -3.356464,
+        "vw_x_signal": 1.092749,
+        "conf_x_signal": -0.204657,
+        "momentum_60d": -0.537821,
+        "beta_60d": -0.334727,
+        "value_inv_pbr": -0.027824,
+        "log_size": 0.571218,
+        "liquidity_20d": -0.430013,
+        "stock_ret_5d": -0.169258,
+        "market_ret_0d": -0.019024,
+        "market_ret_5d": -0.166793
+      }
+    },
+    "2": {
+      "label": "2025-08-20~2025-09-16",
+      "coefficients": {
+        "intercept": -15.042459,
+        "hw": 11.072298,
+        "vw": 1.502233,
+        "mw": 0.128396,
+        "rw": -0.1669,
+        "confidence_norm": -0.212154,
+        "signal_dir": 1.768465,
+        "market_type": 0.0705,
+        "log_confidence": 0.310169,
+        "pattern_tier": -0.374935,
+        "hw_x_signal": -2.094375,
+        "vw_x_signal": 1.058205,
+        "conf_x_signal": -0.761894,
+        "momentum_60d": -0.469615,
+        "beta_60d": -0.255219,
+        "value_inv_pbr": -0.037686,
+        "log_size": 0.544574,
+        "liquidity_20d": -0.293815,
+        "stock_ret_5d": -0.129417,
+        "market_ret_0d": -0.026236,
+        "market_ret_5d": 0.01429
+      }
+    },
+    "3": {
+      "label": "2025-09-17~2025-10-21",
+      "coefficients": {
+        "intercept": -1.81599,
+        "hw": -0.706844,
+        "vw": 1.233201,
+        "mw": 1.081734,
+        "rw": 0.638135,
+        "confidence_norm": 0.313284,
+        "signal_dir": 2.839972,
+        "market_type": 0.494386,
+        "log_confidence": -0.064056,
+        "pattern_tier": -0.118074,
+        "hw_x_signal": -2.947841,
+        "vw_x_signal": 1.052607,
+        "conf_x_signal": -0.843871,
+        "momentum_60d": -0.181686,
+        "beta_60d": 0.03945,
+        "value_inv_pbr": -0.178863,
+        "log_size": 0.485683,
+        "liquidity_20d": -0.314243,
+        "stock_ret_5d": -0.034628,
+        "market_ret_0d": -0.024954,
+        "market_ret_5d": -0.085573
+      }
+    },
+    "4": {
+      "label": "2025-10-22~2025-11-18",
+      "coefficients": {
+        "intercept": -2.41537,
+        "hw": 2.104053,
+        "vw": 0.699006,
+        "mw": -0.185974,
+        "rw": 0.556421,
+        "confidence_norm": -0.392147,
+        "signal_dir": 3.215725,
+        "market_type": 0.113973,
+        "log_confidence": -0.218506,
+        "pattern_tier": -0.075457,
+        "hw_x_signal": -3.477055,
+        "vw_x_signal": 0.397508,
+        "conf_x_signal": -1.324587,
+        "momentum_60d": -0.284087,
+        "beta_60d": 0.199561,
+        "value_inv_pbr": -0.332981,
+        "log_size": 0.466744,
+        "liquidity_20d": -0.295532,
+        "stock_ret_5d": 0.033281,
+        "market_ret_0d": 0.007476,
+        "market_ret_5d": -0.080912
+      }
+    },
+    "5": {
+      "label": "2025-11-19~2025-12-16",
+      "coefficients": {
+        "intercept": -4.376048,
+        "hw": 3.822775,
+        "vw": 0.405953,
+        "mw": -0.185974,
+        "rw": 1.168115,
+        "confidence_norm": -0.272423,
+        "signal_dir": 2.269217,
+        "market_type": 0.113973,
+        "log_confidence": -0.387695,
+        "pattern_tier": 0.042136,
+        "hw_x_signal": -1.174969,
+        "vw_x_signal": -0.064773,
+        "conf_x_signal": -0.843723,
+        "momentum_60d": -0.181028,
+        "beta_60d": -0.067832,
+        "value_inv_pbr": -0.251365,
+        "log_size": 0.466744,
+        "liquidity_20d": -0.360019,
+        "stock_ret_5d": 0.057089,
+        "market_ret_0d": 0.007476,
+        "market_ret_5d": -0.100688
+      }
+    },
+    "6": {
+      "label": "2025-12-17~2026-01-16",
+      "coefficients": {
+        "intercept": -9.730335,
+        "hw": 7.612123,
+        "vw": 1.179578,
+        "mw": -0.185974,
+        "rw": 2.123172,
+        "confidence_norm": 0.186789,
+        "signal_dir": 4.46209,
+        "market_type": -0.128813,
+        "log_confidence": -0.576418,
+        "pattern_tier": -0.039105,
+        "hw_x_signal": -3.093374,
+        "vw_x_signal": -0.027631,
+        "conf_x_signal": -1.022052,
+        "momentum_60d": -0.11115,
+        "beta_60d": -0.020105,
+        "value_inv_pbr": -0.214781,
+        "log_size": 0.388037,
+        "liquidity_20d": -0.425721,
+        "stock_ret_5d": -0.012831,
+        "market_ret_0d": 0.007476,
+        "market_ret_5d": -0.100688
+      }
+    },
+    "7": {
+      "label": "2026-01-19~2026-02-13",
+      "coefficients": {
+        "intercept": -9.646582,
+        "hw": 8.618078,
+        "vw": -2.91398,
+        "mw": -0.408739,
+        "rw": 6.070018,
+        "confidence_norm": 2.193417,
+        "signal_dir": 3.96915,
+        "market_type": 0.07929,
+        "log_confidence": -0.925289,
+        "pattern_tier": -0.106988,
+        "hw_x_signal": -3.093374,
+        "vw_x_signal": -0.560064,
+        "conf_x_signal": -0.838476,
+        "momentum_60d": -0.228287,
+        "beta_60d": 0.171667,
+        "value_inv_pbr": -0.174253,
+        "log_size": 0.278052,
+        "liquidity_20d": -0.369405,
+        "stock_ret_5d": 0.074779,
+        "market_ret_0d": 0.007476,
+        "market_ret_5d": -0.100688
+      }
+    }
+  },
+  "elapsed_seconds": 141.1
+}

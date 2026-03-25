@@ -53,7 +53,7 @@ try {
     'indicators.js?v=12',
     'patterns.js?v=14',
     'signalEngine.js?v=14',
-    'backtester.js?v=15'
+    'backtester.js?v=16'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -223,6 +223,7 @@ self.onmessage = function (e) {
         };
       }
 
+      backtester._currentMarket = data.market || '';
       const results = backtester.backtestAll(candles);
       _extractLearnedWeights(results);
       // 승률 맵 갱신 (다음 analyze 호출 시 패턴에 자동 부착됨)

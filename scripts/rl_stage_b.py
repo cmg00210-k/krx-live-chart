@@ -58,7 +58,7 @@ TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
          "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
-CONTEXT_DIM = 10  # 12-dim tested (moveATR+D_J): mature IC 0.325→0.309, reverted
+CONTEXT_DIM = 7  # 10→7: removed resid_sign/mag_z/run_len (runtime N/A, Li et al. regret bound)
 MIN_TRAIN_FOR_EVAL = 119000  # minimum samples seen before evaluating IC (Period 5+ stable)
 
 
@@ -74,7 +74,6 @@ def load_data():
     with open(CONTEXT_CSV, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         context_cols = [
-            "resid_sign", "resid_mag_z", "resid_run_len",
             "ewma_vol", "pred_magnitude", "signal_dir",
             "market_type", "pattern_tier", "confidence_norm", "raw_hurst",
         ]
@@ -538,7 +537,6 @@ def main():
     # Policy JSON (for JS integration)
     policy = final_bandit.get_policy_json()
     policy["context_names"] = [
-        "resid_sign", "resid_mag_z", "resid_run_len",
         "ewma_vol", "pred_magnitude", "signal_dir",
         "market_type", "pattern_tier", "confidence_norm", "raw_hurst",
     ]
