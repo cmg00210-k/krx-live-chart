@@ -4,6 +4,7 @@ data/backtest/rl_context.csv
 data/backtest/rl_residuals.csv
 data/backtest/results/
 data/backtest/batch_log.txt
+*_1m.json
 scripts/
 core_data/
 pattern_impl/
