@@ -429,7 +429,7 @@ def _parse_script_order_from_html():
     if not html_path.exists():
         return []
     html = read(html_path)
-    srcs = re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']+\.js)["\']', html)
+    srcs = re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']+\.js)(?:\?[^"\']*)?["\']', html)
     return [s for s in srcs if not s.startswith("http")]
 
 

@@ -5,7 +5,7 @@
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'cheesestock-v12';
+const CACHE_NAME = 'cheesestock-v13';
 
 // 오프라인 시에도 앱 실행에 필요한 정적 자산 목록
 const STATIC_ASSETS = [
@@ -120,8 +120,9 @@ self.addEventListener('fetch', function(event) {
 
   // 정적 자산 (HTML, CSS, JS) — Stale-While-Revalidate
   // 캐시 즉시 반환 + 백그라운드에서 네트워크 갱신 → 다음 방문 시 최신 반영
+  // ignoreSearch: ?v=N 쿼리 무시하여 사전 캐시(/js/x.js)와 실제 요청(/js/x.js?v=12) 매칭
   event.respondWith(
-    caches.match(event.request).then(function(cached) {
+    caches.match(event.request, {ignoreSearch: true}).then(function(cached) {
       var fetchPromise = fetch(event.request).then(function(response) {
         if (response && response.ok) {
           var clone = response.clone();

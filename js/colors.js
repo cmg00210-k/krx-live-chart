@@ -57,6 +57,7 @@ const KRX_COLORS = Object.freeze({
   PTN_SELL:      'rgba(150,220,200,0.65)',    // [통일] 매도도 민트 (라벤더→민트)
   PTN_SELL_FILL: 'rgba(150,220,200,0.12)',    // [통일] 매도 영역도 민트
   PTN_NEUTRAL:   'rgba(200,200,200,0.55)',    // 중립/도지: 실버
+  PTN_NEUTRAL_FILL: function(a) { return 'rgba(200,200,200,' + (a || 0.12) + ')'; },  // 중립 영역 (glow, trendArea)
   PTN_STRUCT:    'rgba(200,200,200,0.45)',    // 구조선 (넥라인 등)
   PTN_STOP:      'rgba(255,107,53,0.55)',     // 손절: 오렌지 (PTN_INVALID 계열 — 목표 민트와 시각 구분)
   PTN_TARGET:    'rgba(150,220,200,0.55)',    // 목표: 민트

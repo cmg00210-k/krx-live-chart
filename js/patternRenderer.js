@@ -232,7 +232,7 @@ const patternRenderer = (() => {
               ctx.lineTo(validPts[i].x, validPts[i].y);
             }
             ctx.closePath();
-            ctx.fillStyle = ta.fill || 'rgba(200,200,200,0.04)';
+            ctx.fillStyle = ta.fill || KRX_COLORS.PTN_NEUTRAL_FILL(0.04);
             ctx.fill();
           });
         }
@@ -705,7 +705,7 @@ const patternRenderer = (() => {
                 ctx.beginPath();
                 _roundRect(ctx, barX + 5, rrY - 7, rrM.width + 8, 14, 3);
                 ctx.fill();
-                ctx.fillStyle = fz.rrRatio >= 1.5 ? KRX_COLORS.PTN_BUY : 'rgba(150,220,200,0.5)';
+                ctx.fillStyle = fz.rrRatio >= 1.5 ? KRX_COLORS.PTN_BUY : KRX_COLORS.PTN_TARGET;
                 ctx.fillText(rrText, barX + 9, rrY);
               }
             }
@@ -900,7 +900,7 @@ const patternRenderer = (() => {
       // 캔들 패턴: 연보라 수직 스트라이프 (채우기 0.12 — 가시성 향상)
       const isNeutral = cfg.direction === 'neutral';
       const fillColor = isNeutral
-        ? 'rgba(200,200,200,0.12)'
+        ? KRX_COLORS.PTN_NEUTRAL_FILL(0.12)
         : KRX_COLORS.PTN_CANDLE_FILL(0.12);
       const borderColor = isNeutral
         ? CANDLE_NEUTRAL
