@@ -316,17 +316,32 @@ def run_walk_forward(contexts, meta, alpha_init=2.0, alpha_exploit=0.5,
 # ──────────────────────────────────────────────
 
 def analyze_results(all_results, min_train_override=None):
-    """Aggregate walk-forward results and check abort criteria."""
+    """Aggregate walk-forward results and check abort criteria.
+
+    Phase 6 fix: report both filtered (trained periods only) and ALL-period stats.
+    Primary metric is t_stat_delta (tests LinUCB improvement), not t_stat_adjusted
+    (which only tests IC != 0, trivially true because Ridge already has IC > 0).
+    """
+    # ALL periods with valid IC (for honest reporting)
+    all_valid = [r for r in all_results
+                 if r["ic_adjusted"] is not None and r["n_trained_before"] > 0]
+
+    # Filtered periods (sufficient training data)
     MIN_TRAIN = min_train_override if min_train_override is not None else MIN_TRAIN_FOR_EVAL
-    valid = [r for r in all_results
-             if r["ic_adjusted"] is not None and r["n_trained_before"] >= MIN_TRAIN]
+    filtered = [r for r in all_results
+                if r["ic_adjusted"] is not None and r["n_trained_before"] >= MIN_TRAIN]
+
+    # Use all_valid for primary reporting (Phase 6: no cherry-picking)
+    valid = all_valid if all_valid else filtered
 
     if not valid:
         return {
             "status": "ABORT", "reason": "No valid periods with training data",
-            "n_valid_periods": 0, "mean_ic_original": 0, "mean_ic_adjusted": 0,
-            "mean_delta_ic": 0, "std_delta_ic": 0, "t_stat_delta": 0,
-            "t_stat_adjusted": 0, "ic_positive_pct": 0, "improvement_pct": 0,
+            "n_all_periods": 0, "n_filtered_periods": 0,
+            "mean_ic_original": 0, "mean_ic_adjusted": 0,
+            "mean_delta_ic": 0, "std_delta_ic": 0,
+            "t_stat_delta": 0, "t_stat_ic_nonzero": 0,
+            "ic_positive_pct": 0, "improvement_pct": 0,
         }
 
     ics_orig = np.array([r["ic_original"] for r in valid])
@@ -339,9 +354,18 @@ def analyze_results(all_results, min_train_override=None):
     std_delta = float(np.std(deltas, ddof=1)) if len(deltas) > 1 else 0
     t_delta = mean_delta / (std_delta / np.sqrt(len(deltas))) if std_delta > 0 else 0
 
-    # IC t-stats
+    # IC != 0 test (secondary — Ridge baseline already ensures this)
     std_adj = float(np.std(ics_adj, ddof=1)) if len(ics_adj) > 1 else 0
-    t_adj = mean_adj / (std_adj / np.sqrt(len(ics_adj))) if std_adj > 0 else 0
+    t_ic_nonzero = mean_adj / (std_adj / np.sqrt(len(ics_adj))) if std_adj > 0 else 0
+
+    # Filtered-only stats for comparison
+    filt_delta_t = 0
+    if filtered:
+        f_orig = np.array([r["ic_original"] for r in filtered])
+        f_adj = np.array([r["ic_adjusted"] for r in filtered])
+        f_d = f_adj - f_orig
+        f_std = float(np.std(f_d, ddof=1)) if len(f_d) > 1 else 0
+        filt_delta_t = float(np.mean(f_d)) / (f_std / np.sqrt(len(f_d))) if f_std > 0 else 0
 
     # Abort criteria
     status = "OK"
@@ -354,38 +378,37 @@ def analyze_results(all_results, min_train_override=None):
                 status = "WARN"
                 reason += f"Period {r['period']}: {a_name} at {pct}%. "
 
-    # Check: IC improvement across valid periods (those with sufficient training)
-    if len(valid) >= 3:
-        adj_mean = np.mean([r["ic_adjusted"] for r in valid])
-        orig_mean = np.mean([r["ic_original"] for r in valid])
-        if adj_mean < orig_mean - 0.005:
-            status = "STOP"
-            reason = f"IC degraded across valid periods: adj={adj_mean:.4f} < orig={orig_mean:.4f}"
+    # Check: delta IC — LinUCB must actually improve over Ridge baseline
+    if len(valid) >= 3 and mean_delta < -0.005:
+        status = "STOP"
+        reason = f"LinUCB degrades IC: delta={mean_delta:.4f} (all periods)"
 
-    # Check: final IC >= 0.060
-    if mean_adj < 0.060:
+    # Check: delta not significant → LinUCB adds no value
+    if abs(t_delta) < 2.0 and mean_delta < 0.005:
         if status == "OK":
-            status = "WARN_LOW_IC"
-            reason = f"Mean IC {mean_adj:.4f} < 0.060 target"
+            status = "NEUTRAL"
+            reason = f"LinUCB delta not significant: t={t_delta:.2f}, delta={mean_delta:.4f}"
 
-    # Overfitting detection: if IC degrades monotonically in late periods
+    # Overfitting detection
     if len(valid) >= 3:
         late_ics = [r["ic_adjusted"] for r in valid[-3:]]
         if all(late_ics[i] < late_ics[i - 1] for i in range(1, len(late_ics))):
             if late_ics[-1] < 0:
                 status = "OVERFIT"
-                reason = f"IC monotonically declining in last 3 valid periods, final IC<0"
+                reason = f"IC monotonically declining in last 3 periods, final IC<0"
 
     return {
         "status": status,
         "reason": reason,
-        "n_valid_periods": len(valid),
+        "n_all_periods": len(valid),
+        "n_filtered_periods": len(filtered),
         "mean_ic_original": round(mean_orig, 6),
         "mean_ic_adjusted": round(mean_adj, 6),
         "mean_delta_ic": round(mean_delta, 6),
         "std_delta_ic": round(std_delta, 6),
         "t_stat_delta": round(t_delta, 4),
-        "t_stat_adjusted": round(t_adj, 4),
+        "t_stat_delta_filtered": round(filt_delta_t, 4),
+        "t_stat_ic_nonzero": round(t_ic_nonzero, 4),
         "ic_positive_pct": round(float(np.mean(ics_adj > 0) * 100), 1),
         "improvement_pct": round(float(np.mean(deltas > 0) * 100), 1),
     }
@@ -477,12 +500,14 @@ def main():
     print(f"  Status:           {summary['status']}")
     if summary.get("reason"):
         print(f"  Reason:           {summary['reason']}")
-    print(f"  Valid periods:    {summary['n_valid_periods']}")
+    print(f"  All periods:      {summary['n_all_periods']}")
+    print(f"  Filtered periods: {summary['n_filtered_periods']}")
     print(f"  IC original:      {summary['mean_ic_original']:.6f}")
     print(f"  IC adjusted:      {summary['mean_ic_adjusted']:.6f}")
-    print(f"  Delta IC:         {summary['mean_delta_ic']:+.6f}")
-    print(f"  Delta t-stat:     {summary['t_stat_delta']:.4f}")
-    print(f"  IC t-stat:        {summary['t_stat_adjusted']:.4f}")
+    print(f"  ** Delta IC:      {summary['mean_delta_ic']:+.6f}  (PRIMARY: LinUCB contribution)")
+    print(f"  ** Delta t-stat:  {summary['t_stat_delta']:.4f}  (PRIMARY: tests improvement)")
+    print(f"     Delta t (filt):{summary['t_stat_delta_filtered']:.4f}  (filtered-only comparison)")
+    print(f"     IC!=0 t-stat:  {summary['t_stat_ic_nonzero']:.4f}  (secondary: Ridge baseline)")
     print(f"  IC positive:      {summary['ic_positive_pct']}%")
     print(f"  Improvement wins: {summary['improvement_pct']}%")
 
@@ -545,7 +570,14 @@ def main():
         "n_periods": len(all_results),
         "mean_ic_adjusted": summary["mean_ic_adjusted"],
         "mean_ic_original": summary["mean_ic_original"],
+        "t_stat_delta": summary["t_stat_delta"],
     }
+    # Load and embed context normalization stats for JS runtime parity
+    ctx_stats_path = BACKTEST_DIR / "rl_context_stats.json"
+    if ctx_stats_path.exists():
+        with open(ctx_stats_path, encoding="utf-8") as f:
+            ctx_stats = json.load(f)
+        policy["normalization"] = ctx_stats.get("normalization", {})
     with open(OUT_POLICY, "w", encoding="utf-8") as f:
         json.dump(_to_native(policy), f, ensure_ascii=False, indent=2)
     print(f"  -> Policy: {OUT_POLICY}")
@@ -573,18 +605,19 @@ def main():
     elapsed = time.time() - t0
     print(f"\n  Total time: {elapsed:.1f}s")
 
-    # Final recommendation
+    # Final recommendation (Phase 6: based on delta t-stat, not IC!=0 t-stat)
     print(f"\n{'=' * 70}")
-    if summary["status"] == "OK" and summary["mean_ic_adjusted"] >= 0.060:
-        print("RECOMMENDATION: Proceed to B-5 (JS integration)")
-    elif summary["status"] in ("WARN_LOW_IC",):
-        print("RECOMMENDATION: Review results, consider B-5 with caution")
-    elif summary["status"] == "STOP":
-        print("RECOMMENDATION: STOP - LinUCB degraded IC")
-    elif summary["status"] == "OVERFIT":
-        print("RECOMMENDATION: STOP - Overfitting detected")
+    delta_t = summary["t_stat_delta"]
+    if summary["status"] in ("STOP", "OVERFIT"):
+        print(f"RECOMMENDATION: STOP - {summary['status']}: {summary.get('reason','')}")
+    elif summary["status"] == "NEUTRAL" or abs(delta_t) < 2.0:
+        print(f"RECOMMENDATION: LinUCB NOT SIGNIFICANT (delta t={delta_t:.2f})")
+        print("  -> Deploy Ridge-only (disable LinUCB layer)")
+    elif delta_t >= 2.0 and summary["mean_delta_ic"] > 0:
+        print(f"RECOMMENDATION: LinUCB SIGNIFICANT (delta t={delta_t:.2f})")
+        print("  -> Proceed to B-5 (JS integration)")
     else:
-        print(f"RECOMMENDATION: Review ({summary['status']})")
+        print(f"RECOMMENDATION: Review ({summary['status']}, delta t={delta_t:.2f})")
     print(f"{'=' * 70}")
 
 

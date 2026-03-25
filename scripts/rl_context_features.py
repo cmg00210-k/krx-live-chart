@@ -407,25 +407,80 @@ def main():
     # ── Step 4: Assemble 10-dim context ──
     print("\n[4/5] Assembling 12-dim context vectors...")
 
-    # Global stats for normalization
+    # Expanding-window normalization stats (Phase 6: look-ahead bias fix)
+    # Instead of computing stats from ALL samples (including future periods),
+    # use expanding window: for each WF period, compute stats from prior periods only.
+    # This ensures context features at test time use only past information.
+    # Group rows by wf_period for expanding-window computation
+    period_indices = defaultdict(list)
+    for i, r in enumerate(rows):
+        period_indices[r["wf_period"]].append(i)
+    sorted_periods = sorted(period_indices.keys())
+
+    # Compute expanding-window stats: for period p, use all data from periods < p
+    # For period 0 (no prior data), use that period's own stats as fallback
+    expanding_stats = {}  # period -> {pred_std, ewma_mean, ewma_std, ...}
+    cumulative_y_pred = []
+    cumulative_ewma = []
+    cumulative_hurst = []
+    cumulative_move_atr = []
+    cumulative_jeff = []
+
+    for pid in sorted_periods:
+        # Stats from all prior periods (expanding window)
+        if cumulative_y_pred:
+            pred_std = float(np.std(cumulative_y_pred))
+        else:
+            # Fallback for period 0: use own data (slight self-contamination, unavoidable)
+            own_preds = [rows[i]["y_pred"] for i in period_indices[pid]]
+            pred_std = float(np.std(own_preds)) if own_preds else 1.0
+        if pred_std < 1e-10:
+            pred_std = 1.0
+
+        ewma_mean = float(np.mean(cumulative_ewma)) if cumulative_ewma else 0.02
+        ewma_std = float(np.std(cumulative_ewma)) if cumulative_ewma else 0.01
+        hurst_mean = float(np.mean(cumulative_hurst)) if cumulative_hurst else 0.5
+        hurst_std = float(np.std(cumulative_hurst)) if cumulative_hurst else 0.1
+        move_atr_mean = float(np.mean(cumulative_move_atr)) if cumulative_move_atr else 1.5
+        move_atr_std = float(np.std(cumulative_move_atr)) if cumulative_move_atr else 1.0
+        jeff_mean = float(np.mean(cumulative_jeff)) if cumulative_jeff else 0.5
+        jeff_std = float(np.std(cumulative_jeff)) if cumulative_jeff else 0.5
+
+        expanding_stats[pid] = {
+            "pred_std": pred_std,
+            "ewma_mean": ewma_mean, "ewma_std": max(ewma_std, 1e-6),
+            "hurst_mean": hurst_mean, "hurst_std": max(hurst_std, 1e-6),
+            "move_atr_mean": move_atr_mean, "move_atr_std": max(move_atr_std, 1e-6),
+            "jeff_mean": jeff_mean, "jeff_std": max(jeff_std, 1e-6),
+        }
+
+        # Add this period's data to cumulative pool for next period
+        for i in period_indices[pid]:
+            cumulative_y_pred.append(rows[i]["y_pred"])
+            of = ohlcv_features[i]
+            if of is not None:
+                cumulative_ewma.append(of[0])
+                cumulative_hurst.append(of[1])
+                if of[2] is not None:
+                    cumulative_move_atr.append(of[2])
+                if of[3] is not None:
+                    cumulative_jeff.append(of[3])
+
+    # Final stats (all data) for export in stats JSON
     all_y_pred = np.array([r["y_pred"] for r in rows])
     pred_std = float(np.std(all_y_pred))
     if pred_std < 1e-10:
         pred_std = 1.0
-
     all_ewma = [ohlcv_features[i][0] for i in range(n_total) if ohlcv_features[i] is not None]
     ewma_mean = float(np.mean(all_ewma)) if all_ewma else 0.02
     ewma_std = float(np.std(all_ewma)) if all_ewma else 0.01
-
     all_hurst = [ohlcv_features[i][1] for i in range(n_total) if ohlcv_features[i] is not None]
     hurst_mean = float(np.mean(all_hurst)) if all_hurst else 0.5
     hurst_std = float(np.std(all_hurst)) if all_hurst else 0.1
-
     all_move_atr = [ohlcv_features[i][2] for i in range(n_total)
                     if ohlcv_features[i] is not None and ohlcv_features[i][2] is not None]
     move_atr_mean = float(np.mean(all_move_atr)) if all_move_atr else 1.5
     move_atr_std = float(np.std(all_move_atr)) if all_move_atr else 1.0
-
     all_jeff = [ohlcv_features[i][3] for i in range(n_total)
                 if ohlcv_features[i] is not None and ohlcv_features[i][3] is not None]
     jeff_mean = float(np.mean(all_jeff)) if all_jeff else 0.5
@@ -437,6 +492,8 @@ def main():
     for i, r in enumerate(rows):
         rf = resid_features[i]
         of = ohlcv_features[i]
+        # Use expanding-window stats for this sample's WF period (Phase 6 fix)
+        es = expanding_stats.get(r["wf_period"], expanding_stats.get(sorted_periods[-1], {}))
 
         # Dim 0-2: Residual history
         if rf is not None:
@@ -445,13 +502,13 @@ def main():
             contexts[i, 2] = rf[2]  # resid_run_len
         # else: 0.0 (default)
 
-        # Dim 3: ewma_vol (z-scored)
+        # Dim 3: ewma_vol (z-scored with expanding-window stats)
         if of is not None:
-            contexts[i, 3] = (of[0] - ewma_mean) / max(ewma_std, 1e-6)
+            contexts[i, 3] = (of[0] - es["ewma_mean"]) / es["ewma_std"]
         # else: 0.0
 
-        # Dim 4: pred_magnitude
-        contexts[i, 4] = abs(r["y_pred"]) / pred_std
+        # Dim 4: pred_magnitude (expanding-window pred_std)
+        contexts[i, 4] = abs(r["y_pred"]) / es["pred_std"]
 
         # Dim 5: signal_dir
         sig = r["signal"]
@@ -471,18 +528,18 @@ def main():
         # Dim 8: confidence_norm (already [0,1])
         contexts[i, 8] = r["confidence_norm"]
 
-        # Dim 9: raw_hurst (z-scored)
+        # Dim 9: raw_hurst (z-scored with expanding-window stats)
         if of is not None:
-            contexts[i, 9] = (of[1] - hurst_mean) / max(hurst_std, 1e-6)
+            contexts[i, 9] = (of[1] - es["hurst_mean"]) / es["hurst_std"]
         # else: 0.0
 
-        # Dim 10: move_atr (z-scored) — |close - MA50| / ATR14
+        # Dim 10: move_atr (z-scored with expanding-window stats)
         if of is not None and of[2] is not None:
-            contexts[i, 10] = (of[2] - move_atr_mean) / max(move_atr_std, 1e-6)
+            contexts[i, 10] = (of[2] - es["move_atr_mean"]) / es["move_atr_std"]
 
-        # Dim 11: jeffrey_div (z-scored) — regime shift measure
+        # Dim 11: jeffrey_div (z-scored with expanding-window stats)
         if of is not None and of[3] is not None:
-            contexts[i, 11] = (of[3] - jeff_mean) / max(jeff_std, 1e-6)
+            contexts[i, 11] = (of[3] - es["jeff_mean"]) / es["jeff_std"]
 
         if rf is not None and of is not None:
             n_complete += 1

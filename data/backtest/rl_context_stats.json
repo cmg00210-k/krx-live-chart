@@ -1,38 +1,38 @@
 {
   "n_samples": 199135,
-  "n_complete": 175136,
+  "n_complete": 193067,
   "features": {
     "resid_sign": {
-      "mean": -0.125212,
-      "std": 0.985294,
+      "mean": -0.126085,
+      "std": 0.985182,
       "min": -1.0,
       "max": 1.0,
       "pct_zero": 1.4
     },
     "resid_mag_z": {
-      "mean": 0.875519,
-      "std": 0.767144,
+      "mean": 0.86208,
+      "std": 0.753625,
       "min": 0.0,
       "max": 3.0,
       "pct_zero": 6.8
     },
     "resid_run_len": {
-      "mean": 0.586142,
-      "std": 0.32338,
+      "mean": 0.580859,
+      "std": 0.322211,
       "min": 0.0,
       "max": 1.0,
       "pct_zero": 1.4
     },
     "ewma_vol": {
-      "mean": -0.015405,
-      "std": 0.867108,
-      "min": -1.4562,
+      "mean": 0.070156,
+      "std": 1.016911,
+      "min": -1.8546,
       "max": 3.0,
-      "pct_zero": 12.1
+      "pct_zero": 3.0
     },
     "pred_magnitude": {
-      "mean": 0.798382,
-      "std": 0.612007,
+      "mean": 0.920857,
+      "std": 0.696834,
       "min": 0.0,
       "max": 3.0,
       "pct_zero": 0.0
@@ -66,99 +66,98 @@
       "pct_zero": 0.0
     },
     "raw_hurst": {
-      "mean": 0.012223,
-      "std": 0.885515,
+      "mean": 0.275397,
+      "std": 1.268374,
       "min": -3.0,
-      "max": 0.7099,
-      "pct_zero": 12.1
+      "max": 3.0,
+      "pct_zero": 3.0
     },
     "move_atr": {
-      "mean": -0.010288,
-      "std": 0.864716,
-      "min": -1.2129,
+      "mean": -0.010158,
+      "std": 0.954872,
+      "min": -1.5,
       "max": 3.0,
-      "pct_zero": 12.1
+      "pct_zero": 3.0
     },
     "jeffrey_div": {
-      "mean": -0.006055,
-      "std": 0.02363,
-      "min": -0.0072,
+      "mean": 0.017827,
+      "std": 0.466931,
+      "min": -0.9999,
       "max": 3.0,
-      "pct_zero": 12.7
+      "pct_zero": 3.2
     }
   },
   "feature_residual_correlation": {
     "resid_sign": {
-      "spearman_r": 0.482239,
+      "spearman_r": 0.474814,
       "p_value": 0.0
     },
     "resid_mag_z": {
-      "spearman_r": -0.000822,
-      "p_value": 0.713869
+      "spearman_r": 0.011263,
+      "p_value": 1e-06
     },
     "resid_run_len": {
-      "spearman_r": -0.100006,
+      "spearman_r": -0.097394,
       "p_value": 0.0
     },
     "ewma_vol": {
-      "spearman_r": -0.036504,
+      "spearman_r": -0.068715,
       "p_value": 0.0
     },
     "pred_magnitude": {
-      "spearman_r": -0.036314,
+      "spearman_r": -0.040486,
       "p_value": 0.0
     },
     "signal_dir": {
-      "spearman_r": 0.038856,
+      "spearman_r": 0.032812,
       "p_value": 0.0
     },
     "market_type": {
-      "spearman_r": -0.024002,
+      "spearman_r": -0.018982,
       "p_value": 0.0
     },
     "pattern_tier": {
-      "spearman_r": -0.005619,
-      "p_value": 0.012155
+      "spearman_r": -0.005466,
+      "p_value": 0.014718
     },
     "confidence_norm": {
-      "spearman_r": 0.017729,
+      "spearman_r": 0.019794,
       "p_value": 0.0
     },
     "raw_hurst": {
-      "spearman_r": 0.00137,
-      "p_value": 0.540839
+      "spearman_r": -0.026133,
+      "p_value": 0.0
     },
     "move_atr": {
-      "spearman_r": -0.007471,
-      "p_value": 0.000857
+      "spearman_r": -0.005718,
+      "p_value": 0.010725
     },
     "jeffrey_div": {
-      "spearman_r": -0.058834,
+      "spearman_r": -0.011359,
       "p_value": 0.0
     }
   },
   "high_correlations": {
-    "resid_mag_z_x_resid_run_len": 0.3125,
     "pattern_tier_x_confidence_norm": 0.3581
   },
   "normalization": {
     "ewma_vol": {
-      "mean": 0.026539,
-      "std": 0.0179
+      "mean": 0.026713,
+      "std": 0.017879
     },
     "raw_hurst": {
-      "mean": 0.946606,
-      "std": 0.075211
+      "mean": 0.947379,
+      "std": 0.074609
     },
-    "pred_std": 1.170495,
+    "pred_std": 0.912305,
     "move_atr": {
-      "mean": 1.730752,
-      "std": 1.426986
+      "mean": 1.749223,
+      "std": 1.433023
     },
     "jeffrey_div": {
-      "mean": 266.971972,
-      "std": 37119.930703
+      "mean": 240.917463,
+      "std": 35252.840889
     }
   },
-  "elapsed_seconds": 189.3
+  "elapsed_seconds": 160.7
 }

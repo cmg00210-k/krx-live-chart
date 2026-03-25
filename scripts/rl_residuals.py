@@ -52,6 +52,7 @@ DATA_DIR = ROOT / "data"
 CSV_PATH = BACKTEST_DIR / "wc_return_pairs.csv"
 INDEX_PATH = DATA_DIR / "index.json"
 FIN_DIR = DATA_DIR / "financials"
+HIST_MCAP_PATH = DATA_DIR / "historical_mcap.json"
 OUT_CSV = BACKTEST_DIR / "rl_residuals.csv"
 OUT_JSON = BACKTEST_DIR / "rl_residuals_summary.json"
 
@@ -90,6 +91,18 @@ def _load_index():
         data = json.load(f)
     return {s["code"]: {"marketCap": s.get("marketCap", 0), "market": s.get("market", "").lower()}
             for s in data["stocks"]}
+
+
+def _load_historical_mcap():
+    """Load historical_mcap.json → {code: {date: mcap_억원}}.
+    Resolves look-ahead bias: uses point-in-time market cap instead of current.
+    Falls back to index.json (current mcap) if file missing.
+    """
+    if not HIST_MCAP_PATH.exists():
+        print("  -> [WARN] historical_mcap.json not found, using current mcap (look-ahead bias)")
+        return {}
+    with open(HIST_MCAP_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _load_financials():
@@ -176,10 +189,13 @@ def _compute_market_returns(ohlcv, index_info, top_n=100):
     return mkt_returns
 
 
-def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials):
+def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_mcap=None):
     """Compute 8 APT factors per sample. Returns np.array (n, 8) with NaN for missing.
     Cols 0-4: Phase 4-1 original (momentum_60d, beta_60d, value_inv_pbr, log_size, liquidity_20d)
     Cols 5-7: Phase 5-2 short-term (stock_ret_5d, market_ret_0d, market_ret_5d)
+
+    hist_mcap: {code: {date: mcap_억원}} — point-in-time market cap (Phase 6 look-ahead fix).
+    Falls back to index_info (current mcap) when hist_mcap unavailable for a date.
     """
     n = len(rows)
     factors = np.full((n, 8), np.nan)
@@ -230,8 +246,15 @@ def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials):
                 if var_m > 1e-12:
                     factors[i, 1] = np.cov(sr, mr, ddof=1)[0, 1] / var_m
 
+        # Point-in-time market cap (Phase 6: look-ahead bias fix)
+        # Priority: hist_mcap[code][date] > index_info[code][marketCap] (fallback)
+        mcap = 0
+        if hist_mcap and code in hist_mcap:
+            mcap = hist_mcap[code].get(date, 0)
+        if mcap == 0:
+            mcap = index_info.get(code, {}).get("marketCap", 0)
+
         # value_inv_pbr
-        mcap = index_info.get(code, {}).get("marketCap", 0)
         equity = financials.get(code)
         if mcap > 0 and equity and equity > 0:
             pbr = (mcap * 1e8) / equity
@@ -386,11 +409,13 @@ def load_and_engineer(horizon, use_apt=True):
         return X12, y, dates, meta
 
     # Load APT auxiliary data
-    print("  -> Loading APT auxiliary data (index, financials, OHLCV)...")
+    print("  -> Loading APT auxiliary data (index, financials, OHLCV, hist_mcap)...")
     index_info = _load_index()
     financials = _load_financials()
     ohlcv = _load_ohlcv_all(index_info)
-    print(f"     Index: {len(index_info)}, Financials: {len(financials)}, OHLCV: {len(ohlcv)}")
+    hist_mcap = _load_historical_mcap()
+    print(f"     Index: {len(index_info)}, Financials: {len(financials)}, "
+          f"OHLCV: {len(ohlcv)}, HistMcap: {len(hist_mcap)}")
 
     if not ohlcv:
         print("  -> [WARN] No OHLCV data, falling back to 12-col")
@@ -398,7 +423,7 @@ def load_and_engineer(horizon, use_apt=True):
 
     # Compute market returns + APT factors
     mkt_returns = _compute_market_returns(ohlcv, index_info, top_n=100)
-    apt_raw = _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials)
+    apt_raw = _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_mcap)
 
     # Coverage report
     for j, fname in enumerate(APT_NAMES):
@@ -475,14 +500,13 @@ def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=20, lam=2
 
         beta = ridge_fit(X_tr, y_tr, lam)
 
-        # James-Stein per-feature shrinkage (Stein 1961, Phase 5-2)
+        # Empirical Bayes per-feature shrinkage (cf. Efron 2010 "Large-Scale Inference")
+        # Inspired by Stein shrinkage but applied per-feature (not vector-norm).
+        # Canonical Stein (1961) uses ||theta-mu||^2; this uses per-coordinate analog.
         # Shrink toward expanding grand mean of prior betas.
-        # Skip intercept (j=0). Require >= 4 prior periods because:
-        #   - p=21 params with <4 obs → variance estimate unstable (ddof=1 → 2~3 DF)
-        #   - Empirical: >=2 caused over-shrinkage; >=4 balances bias-variance
+        # Skip intercept (j=0). Require >= 4 prior periods for stable variance (ddof=1).
         # Bias correction (beta[0] adjustment) is Empirical Bayes re-centering,
-        # not part of canonical Stein 1961 but standard in financial panel applications
-        # (Efron 2012 "Large-Scale Inference", §6.2).
+        # standard in financial panel applications (Efron 2012, §6.2).
         if len(period_stats) >= 4:
             prior_betas = np.array([ps["beta"] for ps in period_stats])
             beta_mean = prior_betas.mean(axis=0)

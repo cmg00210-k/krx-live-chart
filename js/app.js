@@ -1391,7 +1391,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=16');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=17');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -1486,6 +1486,7 @@ function _initAnalysisWorker() {
           _analysisWorker.postMessage({
             type: 'backtest',
             candles: candles,
+            market: currentStock && currentStock.market ? currentStock.market : '',
             version: _workerVersion,
           });
         }

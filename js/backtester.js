@@ -112,7 +112,10 @@ class PatternBacktester {
         varT = i === 1 ? ret * ret : 0.94 * varT + 0.06 * ret * ret;
       }
       var rawVol = Math.sqrt(Math.max(varT, 0));
-      ewmaVol = Math.max(-3, Math.min(3, (rawVol - 0.026541) / 0.017892));
+      var eNorm = this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.ewma_vol;
+      var eMean = eNorm ? eNorm.mean : 0.026541;
+      var eStd = eNorm ? eNorm.std : 0.017892;
+      ewmaVol = Math.max(-3, Math.min(3, (rawVol - eMean) / Math.max(eStd, 1e-6)));
     }
 
     // Dim 3: market_type (KOSDAQ=1, KOSPI=0)
@@ -130,13 +133,16 @@ class PatternBacktester {
       for (var h = hStart; h < candles.length; h++) hCloses.push(candles[h].close);
       var hVal = calcHurst(hCloses);
       if (hVal != null && isFinite(hVal)) {
-        rawHurst = Math.max(-3, Math.min(3, (hVal - 0.946613) / 0.075216));
+        var hNorm = this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.raw_hurst;
+        var hMean = hNorm ? hNorm.mean : 0.946613;
+        var hStd = hNorm ? hNorm.std : 0.075216;
+        rawHurst = Math.max(-3, Math.min(3, (hVal - hMean) / Math.max(hStd, 1e-6)));
       }
     }
 
     return [
       ewmaVol,                                     // 0: ewma_vol (z-scored)
-      Math.min(Math.abs(predicted) / 5.0, 3),     // 1: pred_magnitude
+      Math.min(Math.abs(predicted) / (this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.pred_std ? this._rlPolicy.normalization.pred_std : 1.17), 3), // 1: pred_magnitude (from training stats)
       sigDir,                                       // 2: signal_dir
       marketType,                                   // 3: market_type
       tier,                                         // 4: pattern_tier
@@ -645,13 +651,18 @@ class PatternBacktester {
             stats.expectedReturn = +predicted.toFixed(2);
 
             // ── LinUCB Contextual Bandit 조정 (Stage B) ──
+            // Phase 6 audit: LinUCB delta t=-0.85 (STOP). Only apply if
+            // t_stat_delta >= 2.0 in training summary (statistically significant improvement).
             if (this._rlPolicy) {
-              var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
-              var rlResult = this._applyLinUCB(rlCtx);
-              stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
-              stats.rlAction = rlResult.action;
-              stats.rlFactor = rlResult.factor;
-              predicted = stats.expectedReturn; // CI도 조정된 예측값 기준
+              var deltaT = this._rlPolicy.training_summary && this._rlPolicy.training_summary.t_stat_delta;
+              if (deltaT != null && deltaT >= 2.0) {
+                var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
+                var rlResult = this._applyLinUCB(rlCtx);
+                stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
+                stats.rlAction = rlResult.action;
+                stats.rlFactor = rlResult.factor;
+                predicted = stats.expectedReturn;
+              }
             }
 
             // 95% 신뢰구간: SE = sqrt(sigma^2 * (1 + x' (X'WX)^-1 x))
