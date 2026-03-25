@@ -915,6 +915,35 @@ class IndicatorCache {
     return this.volumes[idx] / vmaArr[idx];
   }
 
+  /**
+   * 거래량 z-score: 로그정규분포 기반 (Ane & Geman 2000)
+   * 종목별 거래량 분포 특성을 반영하여 대형주/소형주 동일 기준 적용
+   * @param {number} idx — 캔들 인덱스
+   * @param {number} n — 관측 기간 (기본 20)
+   * @returns {number|null}
+   */
+  volZScore(idx, n = 20) {
+    const key = `volz_${n}`;
+    if (!(key in this._cache)) {
+      const vols = this.volumes;
+      const result = new Array(vols.length).fill(null);
+      for (let i = n; i < vols.length; i++) {
+        let sumLn = 0, sumLn2 = 0, cnt = 0;
+        for (let j = i - n; j < i; j++) {
+          if (vols[j] > 0) { const lv = Math.log(vols[j]); sumLn += lv; sumLn2 += lv * lv; cnt++; }
+        }
+        if (cnt < 5 || vols[i] <= 0) continue;
+        const meanLn = sumLn / cnt;
+        const stdLn = Math.sqrt(Math.max(0, sumLn2 / cnt - meanLn * meanLn));
+        if (stdLn < 1e-9) continue;
+        result[i] = (Math.log(vols[i]) - meanLn) / stdLn;
+      }
+      this._cache[key] = result;
+    }
+    const arr = this._cache[key];
+    return (idx >= 0 && idx < arr.length) ? arr[idx] : null;
+  }
+
   // ── 캐시 관리 ──────────────────────────────────────
 
   /** 특정 지표 캐시만 무효화 */

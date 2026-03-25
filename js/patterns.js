@@ -91,14 +91,31 @@ class PatternEngine {
   /** ATR fallback: 가격의 2% */
   static ATR_FALLBACK_PCT = 0.02;
 
-  /** 캔들스틱 패턴 목표가 ATR 배수 (Bulkowski 5일 수익률 기반) */
-  static CANDLE_TARGET_ATR = { strong: 1.0, medium: 0.7, weak: 0.5 };
+  /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 302,986건 실측 calibration (calibrated_constants.json D1)
+   *  strong: 1.92 (n=73,734, CI95=[1.90,1.95]), medium: 2.21 (n=28,426, CI95=[2.18,2.24]),
+   *  weak: 1.92 (n=181,925, CI95=[1.91,1.93]), KW p=2.6e-139 */
+  static CANDLE_TARGET_ATR = { strong: 1.92, medium: 2.21, weak: 1.92 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
   static CHART_TARGET_ATR_CAP = 6;
 
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
   static CHART_TARGET_RAW_CAP = 2.0;
+
+  /** Dual Confidence: 패턴별 실측 5일 승률 (pattern_performance.json 기반)
+   *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
+   *  Guo et al. (2017) Temperature Scaling: calibrated = form / T  */
+  static PATTERN_WIN_RATES = Object.freeze({
+    hammer: 47.9, invertedHammer: 52.3, shootingStar: 56.0, hangingMan: 55.2,
+    doji: 42.0, dragonflyDoji: 50.0, gravestoneDoji: 59.1, spinningTop: 43.1,
+    bullishEngulfing: 43.5, bearishEngulfing: 56.4, bullishHarami: 45.9, bearishHarami: 53.7,
+    piercingLine: 37.3, darkCloud: 55.1, tweezerBottom: 42.6, tweezerTop: 54.0,
+    threeWhiteSoldiers: 56.2, threeBlackCrows: 63.6, morningStar: 42.9, eveningStar: 53.3,
+    bullishMarubozu: 42.1, bearishMarubozu: 58.1,
+    doubleBottom: 65.6, doubleTop: 73.0, headAndShoulders: 25.0,
+    inverseHeadAndShoulders: 25.0, ascendingTriangle: 41.7, descendingTriangle: 58.3,
+    symmetricTriangle: 32.3, risingWedge: 64.5, fallingWedge: 35.5,
+  });
 
   /** 전역 학습 가중치 (Worker에서 주입) */
   static _globalLearnedWeights = null;
@@ -315,19 +332,24 @@ class PatternEngine {
     const sr = this.detectSupportResistance(candles, swH, swL, ctx);
     this._applyConfluence(patterns, sr, ctx);
 
-    // Wc 가중치를 패턴 객체에 기록 (Stage 5 백테스트 분석용)
-    // sell 조건부: 추세 지속(hw>1)은 sell에 불리 → hw 반전 (2-hw)
-    // 근거: Phase A IC — buy +0.030(정방향) vs sell +0.041(역방향 MISMATCH)
+    // CZW 가중치를 패턴 객체에 기록
+    // sell hw 반전(2-hw) 제거: R²=0.0008, corr_current=corr_new=0.0286 (calibrated_constants.json D2)
+    // 선형 변환은 상관관계를 변경하지 못함 (단조 변환 불변성)
+    // buy/sell 동일하게 hw 직접 사용, MRA hw_x_signal(-5.303)이 방향 차이를 처리
+    // 향후: czw/simulation/sell_hw_scenarios.md SIM-A(sell 전용 다변수) 검토
     for (var pi = 0; pi < patterns.length; pi++) {
       patterns[pi].hw = hurstWeight;
       patterns[pi].vw = volWeight;
       patterns[pi].mw = meanRevWeight;
       patterns[pi].rw = regimeWeight;
-      var effectiveHw = patterns[pi].signal === 'sell' ? (2 - hurstWeight) : hurstWeight;
-      patterns[pi].wc = +(effectiveHw * meanRevWeight).toFixed(4);
+      patterns[pi].wc = +(hurstWeight * meanRevWeight).toFixed(4);
+      // Dual Confidence: confidencePred = 실측 승률 기반 예측 신뢰도 (모델 입력용)
+      // confidence(형태점수)는 UI 표시용으로 불변 유지
+      var wr = PatternEngine.PATTERN_WIN_RATES[patterns[pi].type];
+      patterns[pi].confidencePred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
     }
 
-    // R:R 검증 게이트 — 전망이론 λ=2.25 기반 (Kahneman & Tversky 1979)
+    // R:R 검증 게이트 — KRX calibration 기반 (calibrated_constants.json C1+D3)
     this._applyRRGate(patterns, candles);
 
     return this._dedup(patterns);
@@ -1923,9 +1945,10 @@ class PatternEngine {
     });
   }
 
-  /** R:R 검증 게이트 — R:R < 1.0이면 confidence 감산
-   *  전망이론 (Kahneman & Tversky 1979): λ=2.25, 투자자는 손실을
-   *  이익의 2.25배로 인지. 켈리 기준: 최소 R:R ≥ 1.5 권장. */
+  /** R:R 검증 게이트 — KRX 302,986건 calibration (calibrated_constants.json C1+D3)
+   *  최적 임계: [2.25, 2.5] (F=323.49, p=6.3e-141)
+   *  페널티: below 2.25 → -12, mid [2.25,2.5) → -25 (Cohen's d=0.83)
+   *  이론: 전망이론 λ=2.25 (Kahneman & Tversky 1979) */
   _applyRRGate(patterns, candles) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
@@ -1937,10 +1960,10 @@ class PatternEngine {
       if (risk <= 0) continue;
       var rr = reward / risk;
       p.riskReward = +rr.toFixed(2);
-      if (rr < 1.0) {
-        p.confidence = Math.max(10, p.confidence - 15);
-      } else if (rr < 1.5) {
-        p.confidence = Math.max(10, p.confidence - 5);
+      if (rr < 2.25) {
+        p.confidence = Math.max(10, p.confidence - 12);
+      } else if (rr < 2.5) {
+        p.confidence = Math.max(10, p.confidence - 25);
       }
     }
   }

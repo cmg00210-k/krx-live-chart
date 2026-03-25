@@ -886,3 +886,177 @@ Rᵦᵢ: 벤치마크의 섹터 i 수익률
 - 1985: Franco Modigliani — 자본구조 이론
 - 1990: Harry Markowitz, Merton Miller, William Sharpe — 포트폴리오 이론, 자본구조, CAPM
 - 2013: Eugene Fama — 효율적 시장 가설 (자산 가격의 실증적 분석)
+
+---
+
+## 8. 투자 점수 배점 체계 (Investment Score System)
+
+> `financials.js`의 `_calcInvestmentScore()` 함수가 산출하는 종합 투자 등급(A~D).
+> 비전공자에게 재무 지표를 하나의 점수로 요약하여 의사결정을 보조한다.
+
+### 8.1 배점 구조 (총 110점 만점, 정규화하여 100점)
+
+```
+수익성 (40점):
+  ROE    15점   — 자기자본이익률
+  OPM    15점   — 영업이익률
+  ROA     5점   — 총자산이익률 (연속, max at ROA >= 10%)
+  NPM     5점   — 순이익률 (연속, max at NPM >= 15%)
+
+밸류에이션 (30점):
+  PER    15점   — 주가수익비율
+  PBR    15점   — 주가순자산비율
+
+성장성 (20점):
+  매출 CAGR  20점  — 연평균 매출 성장률 (최대 4년)
+
+안정성 (20점):
+  부채비율   20점  — 부채총계 / 자본총계 * 100
+```
+
+활성 항목이 2개 미만(maxPossible < 30)이면 점수를 산출하지 않고 "---"을 표시한다.
+정규화: `finalScore = round(score / maxPossible * 100)` (활성 항목 기준)
+
+등급 산출:
+```
+  A: finalScore >= 80
+  B: finalScore >= 60
+  C: finalScore >= 40
+  D: finalScore < 40
+```
+
+### 8.2 각 임계값의 근거
+
+#### ROE 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| >= 15% | 15 (만점) | KOSPI 상위 약 25% 수준 (한국은행 기업경영분석 2023). DuPont 분해에서 높은 ROE는 수익성/효율성/레버리지의 양호한 조합을 의미. |
+| >= 10% | 12 | KOSPI 전체 중위수 근처. 자본비용(Cost of Equity) 8-10%를 상회하므로 가치 창출 기업. |
+| >= 5% | 8 | 자본비용을 약간 하회하나 양(+)의 이익 유지. |
+| >= 0% | 4 | 흑자 유지의 최소 기준. |
+| < 0% | 0 (미배점) | 적자 기업은 수익성 점수 없음. |
+
+학술 근거: DuPont Identity — ROE = (NI/Sales) * (Sales/Assets) * (Assets/Equity)
+실무 기준: 한국은행 기업경영분석, KRX 시장 실무 관행
+
+#### OPM (영업이익률) 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| >= 20% | 15 | 높은 경쟁 우위 (pricing power) 보유 기업. Porter (1985) 경쟁우위 이론. |
+| >= 10% | 12 | KOSPI 제조업 중위수 수준. |
+| >= 5% | 8 | 양호한 원가 관리. |
+| >= 0% | 4 | 영업 흑자 유지. |
+
+#### PER 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| < 10 | 15 (만점) | KOSPI 역사적 중위수 하단 (FnGuide 2015-2023 통계에서 KOSPI PER 중위수 약 10-12배). Graham (1949)의 "10배 미만은 저평가" 기준과 부합. |
+| <= 15 | 12 | 적정 밸류에이션 영역. |
+| <= 25 | 8 | 성장 프리미엄 포함 영역. |
+| <= 40 | 4 | 고평가 영역이나 고성장 기대 반영. |
+| > 40 | 0 | 과도한 프리미엄. |
+
+학술 근거: Graham, B. & Dodd, D. (1934), *Security Analysis*, McGraw-Hill
+— "이익의 10배 이하에서 매수" 원칙의 원전
+
+#### PBR 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| < 0.7 | 15 (만점) | 순자산 가치 대비 30% 할인. Graham (1949), *The Intelligent Investor* — "순유동자산 이하 매수" 전략의 현대적 변형. Fama & French (1992) 가치 프리미엄(value premium) 실증. |
+| <= 1.0 | 12 | 장부가 이하, 전통적 가치주 기준. |
+| <= 2.0 | 8 | 적정 범위. |
+| <= 3.0 | 4 | 성장 프리미엄 포함. |
+| > 3.0 | 0 | 고평가. |
+
+학술 근거:
+- Fama, E.F. & French, K.R. (1992), *The Cross-Section of Expected Stock Returns*,
+  Journal of Finance, 47(2), 427-465 — 낮은 PBR(Book-to-Market)이 초과수익과 연관
+- Lakonishok, J., Shleifer, A. & Vishny, R.W. (1994), *Contrarian Investment,
+  Extrapolation, and Risk*, Journal of Finance, 49(5), 1541-1578
+
+#### 매출 CAGR 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| >= 20% | 20 (만점) | 고성장 기업. |
+| >= 10% | 16 | 양호한 성장. |
+| >= 5% | 12 | GDP 성장률 상회. |
+| >= 0% | 6 | 매출 유지. |
+| < 0% | 0 | 매출 역성장. |
+
+CAGR 계산: `CAGR = (Rev_end / Rev_start)^(1/years) - 1`
+임계값은 KRX 시장 실무 관행에 기반한다. 20% 이상 매출 성장은
+"고성장주"로 분류되는 업계 관행(증권사 리서치 보고서 분류 기준)이다.
+
+#### 부채비율 임계값
+
+| 구간 | 점수 | 근거 |
+|------|------|------|
+| < 50% | 20 (만점) | 재무 건전성 우량. 신용평가사 관행에서 AA급 이상 기업의 일반적 수준. |
+| <= 100% | 16 | 양호한 재무구조. |
+| <= 200% | 10 | 업종 평균 수준 (제조업 기준). |
+| <= 300% | 4 | 재무 레버리지 과다 경고 구간. |
+| > 300% | 0 | 재무 위험 높음. |
+
+학술 근거:
+- MM Proposition (§3.1 참조) — 이론적으로 자본구조는 무관하나,
+  현실에서는 파산비용과 대리인비용으로 인해 최적 부채비율이 존재
+- Trade-off Theory (§3.3 참조) — 세금 절감 효과와 재무적 곤경 비용의 균형
+- 한국 신용평가 3사(한신평/한기평/나이스) 관행: 부채비율 50% 미만을 재무 건전성 우량으로 분류
+
+### 8.3 관련 학술 체계
+
+#### Piotroski (2000) F-Score
+
+Joseph D. Piotroski (2000), *Value Investing: The Use of Historical Financial
+Statement Information to Separate Winners from Losers*,
+Journal of Accounting Research, 38(Supplement), 1-41
+
+```
+F-Score (0~9점): 9개 이진 변수의 합
+  수익성 (4점): ROA > 0, CFO > 0, delta_ROA > 0, Accrual < 0
+  레버리지/유동성 (3점): delta_Leverage < 0, delta_Liquidity > 0, EQ_OFFER = 0
+  운영효율 (2점): delta_Margin > 0, delta_Turnover > 0
+
+비교: F-Score는 이진(0/1) 변수만 사용하여 단순명료
+      본 시스템은 연속적 임계값 구간으로 세분화된 점수 부여
+```
+
+#### Greenblatt (2006) Magic Formula
+
+Joel Greenblatt (2006), *The Little Book That Beats the Market*,
+John Wiley & Sons
+
+```
+Magic Formula 순위:
+  1) 이익수익률 (Earnings Yield = EBIT / EV) 순위
+  2) 투하자본수익률 (ROIC = EBIT / (Net Working Capital + Net Fixed Assets)) 순위
+  3) 두 순위의 합이 가장 낮은 기업 = 최우선 투자 대상
+
+비교: Magic Formula는 2개 지표의 순위 합산
+      본 시스템은 6개 범주의 가중 합산으로 더 포괄적
+```
+
+### 8.4 임계값의 한계와 정직한 고백
+
+배점 체계의 각 임계값(ROE 15%, PER 10, PBR 0.7 등)은 단일 논문에서
+엄밀히 최적화된 값이 아니다. 이들은 다음의 조합에서 도출되었다:
+
+```
+1) 학술 원칙: Graham-Dodd 가치 투자 철학, Fama-French 가치 프리미엄
+2) 시장 통계: KOSPI 장기 분포 (FnGuide, 한국은행 기업경영분석)
+3) 업계 관행: 증권사 리서치, 신용평가사 기준
+4) 경험적 조정: KRX 시장 특성에 맞춘 미세 조정
+```
+
+구간 경계(예: ROE 5/10/15, PER 10/15/25/40)의 정확한 수치는
+D등급(학술적 최적화 부재)에 가깝다. 다만 Graham (1949), Fama & French (1992),
+Piotroski (2000) 등의 방향성(저PER/저PBR/고ROE 선호)은 학술적으로 확립된 원칙이다.
+
+코드 매핑: `js/financials.js:536-646` (`_calcInvestmentScore()`)
+엔진 적용 효과: 비전공자에게 종합 투자 등급(A~D)을 제공하여 의사결정 보조.
+6개 재무 지표를 하나의 점수로 집약함으로써 정보 과부하(information overload)를 해소.

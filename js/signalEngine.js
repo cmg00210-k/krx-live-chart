@@ -368,9 +368,23 @@ class SignalEngine {
   _detectRSISignals(candles, cache) {
     const signals = [];
     const rsi = cache.rsi(14);
+    // C-5 CZW: Hurst 레짐 연동 RSI confidence
+    // H>0.6(추세): RSI 역행 위험 → confidence 하향
+    // H<0.4(반지속): RSI 반전 유효 → confidence 상향
+    const H = cache.hurst();
+    const hBase = (H !== null && H !== undefined)
+      ? Math.round(65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2)))
+      : 55;  // H 없으면 기본 55
+    // hBase: H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
+    const entryConf = Math.max(40, hBase - 10);  // 진입은 탈출보다 10 낮음
+    const exitBuyConf = Math.max(50, hBase);
+    const exitSellConf = Math.max(48, hBase - 2);
 
     for (let i = 1; i < candles.length; i++) {
       if (rsi[i] === null || rsi[i - 1] === null) continue;
+
+      // RSI 극단도 보너스: |RSI-50|가 클수록 가산
+      const extremeBonus = Math.floor(Math.abs(rsi[i] - 50) / 10) * 2;
 
       // RSI 30 하향 돌파 → 과매도 진입
       if (rsi[i - 1] >= 30 && rsi[i] < 30) {
@@ -378,9 +392,9 @@ class SignalEngine {
           type: 'rsiOversold',
           source: 'indicator',
           nameShort: 'RSI 과매도 진입',
-          signal: 'neutral',   // 진입 시점은 아직 매수 아님
+          signal: 'neutral',
           strength: 'medium',
-          confidence: 55,
+          confidence: Math.min(75, entryConf + extremeBonus),
           index: i,
           time: candles[i].time,
           description: `RSI(${rsi[i].toFixed(1)})가 30 하향 돌파 — 과매도 영역 진입`,
@@ -395,7 +409,7 @@ class SignalEngine {
           nameShort: 'RSI 과매도 탈출',
           signal: 'buy',
           strength: 'medium',
-          confidence: 65,
+          confidence: Math.min(80, exitBuyConf + extremeBonus),
           index: i,
           time: candles[i].time,
           description: `RSI(${rsi[i].toFixed(1)})가 30 상향 돌파 — 과매도 탈출, 반등 기대`,
@@ -410,7 +424,7 @@ class SignalEngine {
           nameShort: 'RSI 과매수 진입',
           signal: 'neutral',
           strength: 'medium',
-          confidence: 55,
+          confidence: Math.min(75, entryConf + extremeBonus),
           index: i,
           time: candles[i].time,
           description: `RSI(${rsi[i].toFixed(1)})가 70 상향 돌파 — 과매수 영역 진입`,
@@ -425,7 +439,7 @@ class SignalEngine {
           nameShort: 'RSI 과매수 탈출',
           signal: 'sell',
           strength: 'medium',
-          confidence: 63,
+          confidence: Math.min(78, exitSellConf + extremeBonus),
           index: i,
           time: candles[i].time,
           description: `RSI(${rsi[i].toFixed(1)})가 70 하향 돌파 — 과매수 탈출, 조정 가능`,
@@ -552,42 +566,50 @@ class SignalEngine {
 
   _detectVolumeSignals(candles, cache) {
     const signals = [];
-    const volRatioThreshold = 2.0;  // VMA 대비 2배 이상
+    // C-6 CZW: z-score 기반 동적 임계 (Ane & Geman 2000, 로그정규분포)
+    // 대형주/소형주 거래량 분포 차이를 자동 보정
+    const zThreshold = 2.0;  // z >= 2.0 = 상위 2.28% (정규분포)
 
     for (let i = 0; i < candles.length; i++) {
-      const ratio = cache.volRatio(i, 20);
-      if (ratio === null) continue;
+      const zVol = cache.volZScore(i, 20);
+      const ratio = cache.volRatio(i, 20);  // 설명 텍스트용 유지
+      if (zVol === null || ratio === null) continue;
 
       const c = candles[i];
       const priceUp = c.close > c.open;
 
+      // C-7 CZW: z-score 기반 confidence (로그 함수, 정보이론 정합)
+      // z=2.0→65, z=3.0→73, z=4.0→78, z=5.0→80(cap)
+      const buyConf = Math.min(80, Math.round(50 + 15 * Math.log(Math.max(zVol, 1))));
+      const sellConf = Math.min(78, Math.round(48 + 15 * Math.log(Math.max(zVol, 1))));
+
       // 거래량 급증 + 가격 상승 = 돌파 확인
-      if (ratio >= volRatioThreshold && priceUp) {
+      if (zVol >= zThreshold && priceUp) {
         signals.push({
           type: 'volumeBreakout',
           source: 'indicator',
           nameShort: '거래량 돌파 확인',
           signal: 'buy',
-          strength: ratio >= 3.0 ? 'strong' : 'medium',
-          confidence: Math.min(75, 55 + Math.floor(ratio * 5)),
+          strength: zVol >= 3.0 ? 'strong' : 'medium',
+          confidence: buyConf,
           index: i,
           time: c.time,
-          description: `거래량 ${ratio.toFixed(1)}배 급증 + 양봉 — 매수세 유입 확인`,
+          description: `거래량 ${ratio.toFixed(1)}배(z=${zVol.toFixed(1)}) 급증 + 양봉 — 매수세 유입 확인`,
         });
       }
 
       // 거래량 급증 + 가격 하락 = 투매
-      if (ratio >= volRatioThreshold && !priceUp) {
+      if (zVol >= zThreshold && !priceUp) {
         signals.push({
           type: 'volumeSelloff',
           source: 'indicator',
           nameShort: '투매 거래량',
           signal: 'sell',
-          strength: ratio >= 3.0 ? 'strong' : 'medium',
-          confidence: Math.min(73, 53 + Math.floor(ratio * 5)),
+          strength: zVol >= 3.0 ? 'strong' : 'medium',
+          confidence: sellConf,
           index: i,
           time: c.time,
-          description: `거래량 ${ratio.toFixed(1)}배 급증 + 음봉 — 매도세 투매 경고`,
+          description: `거래량 ${ratio.toFixed(1)}배(z=${zVol.toFixed(1)}) 급증 + 음봉 — 매도세 투매 경고`,
         });
       }
     }
@@ -1013,6 +1035,14 @@ class SignalEngine {
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
         );
+        // Dual Confidence: confidencePred = calibration 기반 예측 승률 (모델 입력용)
+        // czw/data/composite_calibration.json 교정값 참조
+        var _predMap = { strongBuy_hammerRsiVolume: 61, strongSell_shootingMacdVol: 69,
+          buy_goldenCrossRsi: 58, sell_deadCrossMacd: 58,
+          buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55 };
+        var confidencePred = _predMap[def.id] != null
+          ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
+          : confidence;
 
         // 기준 인덱스 = 윈도우 내 가장 마지막 시그널
         const refIdx = Math.min(baseIdx + def.window, candles.length - 1);
@@ -1033,6 +1063,7 @@ class SignalEngine {
           signal: def.signal,
           strength: def.strength,
           confidence,
+          confidencePred,
           tier: def.tier,
           index: actualIdx,
           time: candles[actualIdx].time,

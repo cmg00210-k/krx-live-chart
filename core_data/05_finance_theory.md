@@ -302,3 +302,105 @@ MDD = max_t [max_{s≤t} P(s) - P(t)] / max_{s≤t} P(s)
 | MPT (분산 투자) | 보완적 (타이밍 도구) | 포트폴리오 + 타이밍 |
 | Black-Scholes (σ) | 활용 (내재변동성 분석) | IV/HV 비교 전략 |
 | 행동금융학 | 지지 (비합리적 패턴 존재) | 심리적 패턴 = 기술적 패턴 |
+
+---
+
+## §8. EWMA 변동성 및 RiskMetrics 모형
+
+> 코드 매핑: backtester.js:100-112 (_buildRLContext dim 3), scripts/rl_context_features.py:134-146
+
+### §8.1 학술 기반
+
+J.P. Morgan / Reuters (1996). "RiskMetrics — Technical Document", 4th Edition.
+  New York: Morgan Guaranty Trust Company. Freely available from RiskMetrics Group.
+
+이 문서는 금융 기관의 시장 위험 측정 표준을 정립한 실무 문서로,
+EWMA(Exponentially Weighted Moving Average) 변동성 추정을 산업 표준으로 확립했다.
+
+### §8.2 EWMA 변동성 공식
+
+```
+sigma_t^2 = lambda * sigma_{t-1}^2  +  (1 - lambda) * r_t^2
+
+sigma_t^2 : 시점 t의 조건부 분산 추정치
+r_t       : 시점 t의 수익률 = (C_t - C_{t-1}) / C_{t-1}
+lambda    : 감쇠 인자 (decay factor), 0 < lambda < 1
+```
+
+재귀 전개하면:
+```
+sigma_t^2 = (1 - lambda) * SUM_{k=0}^{inf} lambda^k * r_{t-k}^2
+```
+
+즉, 과거 수익률 제곱의 지수 가중 평균. 최신 관측에 더 높은 가중치.
+
+### §8.3 lambda=0.94 선택 근거
+
+RiskMetrics(1996)는 일별 수익률에 대해 lambda=0.94를 권장한다.
+
+**반감기 해석:**
+```
+반감기 h = ln(0.5) / ln(lambda) = ln(0.5) / ln(0.94) = 11.2 거래일
+
+즉, 11.2 거래일 전 충격의 가중치 = 현재 충격 가중치의 50%
+→ 약 2주 전 변동성이 현재 추정에 절반 수준의 영향
+```
+
+**실용적 해석:**
+- lambda → 1.0: 장기 무조건 분산에 수렴 (변화에 둔감)
+- lambda → 0.0: 가장 최근 수익률 제곱에만 의존 (노이즈 과민)
+- lambda = 0.94: KRX 일봉 데이터에서 단기 변동성 체제를 적시 반영
+
+**GARCH(1,1)과의 관계 (Bollerslev 1986):**
+
+EWMA는 GARCH(1,1)의 특수 경우로 볼 수 있다:
+```
+GARCH(1,1): sigma_t^2 = omega + alpha * r_{t-1}^2 + beta * sigma_{t-1}^2
+
+EWMA는 omega=0, alpha=(1-lambda), beta=lambda 인 경우
+→ 장기 평균 분산(omega)으로의 회귀를 포기하고 적응성에 집중
+```
+
+Bollerslev, T. (1986). "Generalized Autoregressive Conditional Heteroskedasticity."
+  Journal of Econometrics, 31(3), 307-327.
+
+### §8.4 z-score 정규화 상수 (KRX 실측치)
+
+CheeseStock 엔진에서 EWMA 변동성은 LinUCB 컨텍스트(dim 3)로 입력되기 전에
+z-score 정규화된다:
+
+```javascript
+ewmaVol = (rawVol - 0.026541) / 0.017892
+// z-score: (관측값 - 평균) / 표준편차
+// clamp: max(-3, min(3, z))
+```
+
+**파라미터 출처: KRX 2,704종목 302,986개 관측치에서 산출한 경험적 통계**
+
+```
+ewma_mean = 0.026541  (KRX 평균 일별 EWMA 변동성 ≈ 2.65%)
+ewma_std  = 0.017892  (표준편차 ≈ 1.79%)
+```
+
+중요: 이 상수들은 **학술적 불변 상수가 아닌 데이터 종속 파라미터**이다.
+- 데이터셋 범위(2,704종목, 1년) 변경 시 재계산 필요
+- scripts/rl_context_features.py Step 4의 normalization 섹션에서 출력됨
+- rl_context_stats.json의 "normalization" 키에 최신값 기록됨
+
+Hurst 지수 정규화도 동일한 방식:
+```
+raw_hurst_mean = 0.946613  (KRX 평균 Hurst 지수)
+raw_hurst_std  = 0.075216
+```
+KRX 종목의 Hurst 지수 평균이 0.94로 높은 것은 한국 시장의 강한 추세 지속성을 반영한다.
+
+### §8.5 엔진 적용 효과
+
+EWMA 변동성은 LinUCB dim 3으로 진입하여:
+- 고변동성 체제(z-score > 1.0): strong_dampen(factor=0.3) 선택 확률 증가
+  → 변동성 급등 시 MRA 예측의 과신 자동 억제
+- 저변동성 체제(z-score < -0.5): trust_mra 또는 slight_boost 선택
+  → 안정적 체제에서 예측 신뢰도 유지
+
+이는 변동성 클러스터링(volatility clustering) 특성 — 큰 변동 후 큰 변동이 지속 —
+에 대한 적응적 대응이다.

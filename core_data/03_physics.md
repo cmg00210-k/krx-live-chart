@@ -253,3 +253,76 @@ John Holland, *Hidden Order: How Adaptation Builds Complexity* (1995)
 5. **멱법칙 분포** (극단적 사건의 빈번한 발생)
 
 기술적 분석은 이 복잡 시스템의 창발적 패턴을 탐지하는 도구이다.
+
+---
+
+## 8. vw = 1/sqrt(ATR14/ATR50) 반증 기록
+
+### 8.1 원래 의도와 이론적 배경
+
+vw(변동성 가중치)는 "시장 온도"(§2.1) 비유에 기반한다.
+단기 변동성(ATR14)과 장기 변동성(ATR50)의 비율로 변동성 레짐을 포착하여
+패턴 신뢰도에 반영하고자 했다.
+
+```
+vw = clamp(1 / sqrt(ATR14 / ATR50), 0.7, 1.4)
+
+의도:
+  ATR14 < ATR50 (저변동 레짐): vw > 1 → 패턴 신뢰도 상향
+  ATR14 > ATR50 (고변동 레짐): vw < 1 → 패턴 신뢰도 하향
+  ATR14 = ATR50 (중립):        vw = 1 → 보정 없음
+```
+
+이론적 뿌리:
+- Engle (1982), *Autoregressive Conditional Heteroskedasticity with Estimates
+  of the Variance of United Kingdom Inflation*, Econometrica, 50(4), 987-1007
+  -- ARCH 모형: 변동성이 과거 오차항의 크기에 의존 (변동성 클러스터링)
+- Bollerslev (1986), *Generalized Autoregressive Conditional Heteroskedasticity*,
+  Journal of Econometrics, 31(3), 307-327
+  -- GARCH(1,1): sigma_t^2 = omega + alpha * epsilon_{t-1}^2 + beta * sigma_{t-1}^2
+  -- 단기/장기 변동성 비율이 레짐 정보를 담고 있다는 실증적 근거
+
+### 8.2 1/sqrt(x) 함수 선택의 문제
+
+1/sqrt(x)는 경험적 선택이며, 이론적 도출이 없었다.
+
+```
+후보 함수들 비교 (x = ATR14/ATR50):
+  1/x       — 과격한 역수 (x=2이면 0.5, 극단적)
+  1/sqrt(x) — 중간 강도의 역수 (x=2이면 0.707)
+  1/log(x)  — 완만한 역수
+  exp(-x)   — 지수 감쇠
+```
+
+1/sqrt(x)를 선택한 이유는 "중간 강도"라는 직관뿐이었으며,
+멱법칙 지수 -0.5의 물리학적/통계학적 최적성은 입증되지 않았다.
+이는 D등급(학술 근거 없는 매직넘버)에 해당한다.
+
+### 8.3 KRX 실증 결과 — 반증
+
+Stage A-1 (2704종목 2026년 실증):
+```
+  IC(vw) = -0.083  (음의 정보계수)
+
+  해석:
+    vw를 곱하면 예측 정확도가 오히려 악화
+    vw = 1 (미적용)보다 vw를 적용한 경우가 더 나쁨
+    → 가설 기각: ATR14/ATR50 비율의 역제곱근은 패턴 신뢰도와 무관하거나 역방향
+```
+
+원인 분석:
+- ATR14/ATR50 비율이 높은 구간(고변동 진입)에서 vw가 과도하게 감쇠시킴
+- KRX 시장의 변동성 돌파(breakout) 패턴에서는 고변동 = 유효 신호인 경우가 많음
+- 변동성 클러스터링 자체는 실재하나(GARCH 이론 유효),
+  이를 패턴 가중치로 변환하는 함수 형태가 부적절했음
+
+### 8.4 현재 상태
+
+vw는 Stage A-1 상수 감사(Constant Audit)에서 **E등급 Deprecated**로 분류되었다.
+
+- 코드에서 계산은 유지됨 (patterns.js:243), 그러나 Wc 가중합에 포함되지 않음
+- ctx.volWeight에 저장되나 이후 Wc 산출 경로에서 참조되지 않음
+- 제거하지 않는 이유: 차후 대안 함수(예: GARCH 기반 조건부 분산 비율) 실험을 위한 플레이스홀더
+
+코드 매핑: `js/patterns.js:238-243` (calcATR 호출 + volWeight 계산)
+엔진 적용 효과: 제외함으로써 IC +0.083 상당의 노이즈 제거, 전체 Wc 예측력 개선

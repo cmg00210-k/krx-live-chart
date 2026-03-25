@@ -15,8 +15,11 @@ class PatternBacktester {
     /** 기본 분석 기간(N일 후) */
     this.HORIZONS = [1, 3, 5, 10, 20];
 
-    /** KRX 왕복 거래비용 (%) — 수수료(0.015%×2) + 거래세(0.18%) + 농특세(0.15%) */
-    this.KRX_COST = 0.36;
+    /** KRX 왕복 비용 구성 (%) — calibrated_constants.json 기준 */
+    this.KRX_COMMISSION = 0.03;   // 수수료 편도 0.015% × 2
+    this.KRX_TAX = 0.33;          // 증권거래세 0.18% + 농특세 0.15% (2025 KOSPI)
+    this.KRX_SLIPPAGE = 0.10;     // 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
+    this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.46%
 
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
     this._META = {
@@ -138,7 +141,7 @@ class PatternBacktester {
       sigDir,                                       // 5: signal_dir
       marketType,                                   // 6: market_type
       tier,                                         // 7: pattern_tier
-      (latest.confidence || 50) / 100,             // 8: confidence_norm
+      (latest.confidencePred || latest.confidence || 50) / 100, // 8: confidence_norm (Dual)
       rawHurst                                     // 9: raw_hurst (z-scored)
     ];
   }
@@ -421,8 +424,9 @@ class PatternBacktester {
       var idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;
       if (idx === undefined) continue;
 
-      // 패턴 특성 추출 (WLS 회귀용)
-      var confidence = (p.confidence != null) ? p.confidence : 50;
+      // 패턴 특성 추출 (WLS 회귀용) — Dual Confidence: confidencePred 우선 사용
+      var confidence = (p.confidencePred != null) ? p.confidencePred
+                     : (p.confidence != null) ? p.confidence : 50;
 
       // 추세 강도: patternEngine._detectTrend 직접 호출 대신, 간단 회귀로 추정
       var trendStrength = 0;
@@ -576,7 +580,7 @@ class PatternBacktester {
       if (returns.length >= 20) {
         var sx = 0, sy = 0, sxy = 0, sx2 = 0;
         for (var ri = 0; ri < returns.length; ri++) {
-          var xi = (validOccs[ri].confidence || 50) / 100;
+          var xi = (validOccs[ri].confidencePred || validOccs[ri].confidence || 50) / 100;
           var yi = returns[ri];
           sx += xi; sy += yi; sxy += xi * yi; sx2 += xi * xi;
         }
@@ -595,7 +599,7 @@ class PatternBacktester {
           var occ = validOccs[ri];
           X.push([
             1,                                             // 절편
-            (occ.confidence || 50) / 100,                  // 신뢰도 (0-1)
+            (occ.confidencePred || occ.confidence || 50) / 100,  // 신뢰도 (0-1, Dual Confidence)
             occ.trendStrength || 0,                        // 추세 강도
             Math.log(Math.max(occ.volumeRatio || 1, 0.1)), // ln(거래량비)
             occ.atrNorm || 0.02,                           // ATR / 종가
@@ -619,7 +623,7 @@ class PatternBacktester {
             var latest = validOccs[validOccs.length - 1];
             var xNew = [
               1,
-              (latest.confidence || 50) / 100,
+              (latest.confidencePred || latest.confidence || 50) / 100,
               latest.trendStrength || 0,
               Math.log(Math.max(latest.volumeRatio || 1, 0.1)),
               latest.atrNorm || 0.02,

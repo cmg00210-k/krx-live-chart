@@ -727,6 +727,102 @@ Fisher 변환을 통한 개선:
 - Rao, C.R. (1945), *Information and the Accuracy Attainable in the Estimation of Statistical Parameters*, Bulletin of the Calcutta Mathematical Society, 37, 81-91
 - Fisher, R.A. (1922), *On the Mathematical Foundations of Theoretical Statistics*, Philosophical Transactions of the Royal Society A, 222, 309-368
 
+---
+
+## 부록: Jeffrey 발산 0.15 감쇠 계수 반증 기록 (§4.3 보강)
+
+### A.1 코드 구현과 0.15의 의미
+
+§4.3에서 정의한 정규분포 간 Jeffrey 발산 공식이 `patterns.js:252-270`에 구현되어 있다.
+rw(레짐 가중치)는 D_J를 기반으로 패턴 신뢰도를 감쇠시키는 보정 인자이다.
+
+```
+구현 (patterns.js:270):
+  regimeWeight = clamp(1 - D_J * 0.15, 0.7, 1.0)
+
+윈도우 설계:
+  P = 수익률 분포 (60일 윈도우: closes[t-80] ~ closes[t-20])
+  Q = 수익률 분포 (20일 윈도우: closes[t-20] ~ closes[t-1])
+  → 최근 20일과 과거 60일의 분포 차이로 레짐 변화 탐지
+
+D_J와 regimeWeight의 관계:
+  D_J = 0:    rw = 1.0   (레짐 변화 없음, 감쇠 없음)
+  D_J = 1:    rw = 0.85  (약한 레짐 변화)
+  D_J = 2:    rw = 0.70  (최대 감쇠, 하한 도달)
+  D_J >= 2:   rw = 0.70  (하한 클램프)
+```
+
+### A.2 0.15 감쇠 계수의 근거
+
+0.15는 D_J = 6.67에서 rw = 0이 되는 비율(1/6.67 = 0.15)에서 역산한 값이다.
+하한 클램프(0.7)가 있으므로 실질적으로 D_J >= 2에서 최대 감쇠가 적용된다.
+
+```
+이론적 최적화 부재:
+  - 0.15는 "D_J = 2 정도에서 30% 감쇠"라는 직관적 설정
+  - 교차 검증이나 최적화를 통해 도출된 값이 아님
+  - D등급 매직넘버에 해당
+```
+
+학술적으로 Jeffrey 발산의 감쇠 함수 변환에 대한 표준은 없다.
+Kullback (1959), *Information Theory and Statistics*에서 KL 발산의
+통계적 검정 이론을 제시하지만, 가중치 감쇠 비율에 대한 처방은 없다.
+
+### A.3 KRX 실증 결과 — 반증
+
+Stage A-1 (2704종목 2026년 실증):
+```
+  IC(rw) = -0.010  (거의 무상관, 약한 음수)
+
+  해석:
+    레짐 변화 탐지 자체는 유효할 수 있으나
+    0.15 선형 감쇠로 패턴 가중치에 변환하는 과정에서 정보가 손실
+    → 노이즈와 구별 불가
+```
+
+### A.4 현재 상태
+
+rw는 Stage A-1 상수 감사에서 **E등급 Deprecated**로 분류되었다.
+
+- 코드에서 계산은 유지됨 (patterns.js:252-271), Wc 가중합에 미포함
+- ctx.regimeWeight에 저장되나 이후 Wc 산출 경로에서 참조되지 않음
+- Jeffrey 발산 자체의 레짐 탐지 유효성은 부정되지 않았음 (IC가 거의 0)
+- 감쇠 함수의 비선형 대안(예: sigmoid(D_J - threshold)) 실험 여지가 있음
+
+코드 매핑: `js/patterns.js:252-271` (returns60/20 윈도우 + D_J 계산 + regimeWeight)
+엔진 적용 효과: 제외함으로써 미미한 노이즈 제거 (IC 개선폭 0.010)
+
+### A.5 Phase 3 M18 Calibration 검증 (2026-03-25)
+
+**대상**: `patterns.js:270` `regimeWeight = Math.max(0.7, Math.min(1.0, 1 - dj * 0.15))`
+**파라미터**: 감쇠 계수 0.15 + 하한 클램프 0.7
+
+**Calibration 상태**: 미검증 (교정 불필요 — 비활성 상태)
+
+**데이터 근거**: 없음.
+- `calibrated_constants.json` 5개 항목(C-1, C-2, D-1, D-2, D-3) 중 rw 관련 항목 없음.
+- `mra_coefficients.json`에서 rw 계수 = +3.039이나, 이는 rw가 Wc에 포함된
+  경우의 회귀 결과이며 현재 rw는 Wc 곱셈에서 제외된 상태임.
+- rw가 Wc에 미포함이므로 0.15 감쇠나 [0.7, 1.0] 경계의 실증적 최적화 실익 없음.
+
+**현재 등급**: E등급 (비활성, Wc 곱셈에서 제외)
+
+```
+비활성 확인 경로 (patterns.js):
+  Line 274: ctx = { ..., regimeWeight }   ← ctx에는 저장됨
+  Line 320: wc = effectiveHw * mw          ← rw 미포함 (hw×mw만)
+
+mra_coefficients.json rw 계수 해석 주의:
+  rw 계수 = +3.040은 12열 MRA에서 rw를 독립변수로 포함한 회귀 결과.
+  현행 Wc = hw × mw이며 rw는 Wc 산출에 참여하지 않음.
+  계수의 양수 부호는 rw가 활성화될 경우 수익률 예측에 기여할 수 있음을
+  시사하나, IC = -0.010으로 실증 유효성은 확인되지 않음.
+```
+
+**권장 조치**: 반증 기록 유지. 재활성화 조건:
+- 비선형 변환(sigmoid, tanh) 후 IC 재측정에서 |IC| > 0.03 달성 시
+- 레짐 탐지 윈도우 최적화(현재 60/20일 → 다른 비율) 실험 후 성과 개선 시
+
 ### 금융 적용 관련
 
 - Kullback, S. & Leibler, R.A. (1951), *On Information and Sufficiency*, Annals of Mathematical Statistics, 22(1), 79-86

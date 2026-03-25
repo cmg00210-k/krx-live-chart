@@ -585,8 +585,11 @@ Calmar Ratio 기반 보상:
 
 1) 고정 비율:
    cost = c × |Δposition|
-   c ≈ 0.015% (KRX 주식 매매 수수료)
-     + 0.20% (매도 시 증권거래세, 2024년 기준)
+   c ≈ 0.015% × 2 (KRX 주식 매수+매도 수수료)
+     + 0.18% (매도 시 증권거래세, 2025년 기준 KOSPI)
+     + 0.15% (농어촌특별세, 증권거래세법 §8 + 농특세법 §5)
+   왕복 합계: 0.03% + 0.18% + 0.15% = 0.36%
+   (이전 기록: 2024년 기준 거래세 0.20% — 2025년 0.18%로 인하)
 
 2) 슬리피지 모형:
    slippage = k × σ × |Δposition| / ADV
@@ -924,3 +927,192 @@ Achiam, J. et al. (2017). Constrained Policy Optimization. ICML-17.
 Ziebart, B. et al. (2008). Maximum Entropy Inverse Reinforcement Learning.
   AAAI-08.
 ```
+
+---
+
+## §13. LinUCB 실전 적용 (Stage B — CheeseStock MRA 보정기)
+
+> 이 섹션은 §7(컨텍스트 밴딧)의 이론을 CheeseStock의 구체적 구현에 매핑한다.
+> 코드 매핑: backtester.js:60-158, scripts/rl_linucb.py, scripts/rl_context_features.py
+
+---
+
+### §13.1 알고리즘 기반 — Li et al. (2010) LinUCB
+
+Li, L., Chu, W., Langford, J., & Schapire, R. E. (2010).
+"A Contextual-Bandit Approach to Personalized News Article Recommendation."
+Proc. 19th International World Wide Web Conference (WWW 2010), pp. 661-670.
+
+LinUCB는 컨텍스트(문맥) 정보를 활용하는 Multi-Armed Bandit 알고리즘이다.
+각 행동(arm) a에 대해 선형 보상 모델을 가정한다:
+
+```
+E[r | x, a] = theta_a^T x
+
+x : context vector (d-dim)
+theta_a : arm a의 파라미터 벡터 (학습됨)
+r : reward
+```
+
+**UCB 기반 행동 선택 규칙:**
+
+```
+a* = argmax_a [ theta_a^T x  +  alpha * sqrt(x^T A_a^{-1} x) ]
+              |___탐색(exploit)___| |_______탐험(explore)_________|
+
+theta_a  = A_a^{-1} b_a             -- 최소제곱 추정치
+A_a      = X_a^T X_a + I            -- context 외적합 + Ridge 항
+b_a      = X_a^T r_a                -- 보상 가중 context 합
+alpha    = exploration 파라미터 (학습 초기 높음 → 수렴 후 낮춤)
+```
+
+**Sherman-Morrison 점진 업데이트 (O(d^2) per step):**
+
+```
+관측 (x, a, r) 수신 시:
+  A_a_new^{-1} = A_a_old^{-1}
+                 - (A_a_old^{-1} x x^T A_a_old^{-1})
+                   / (1 + x^T A_a_old^{-1} x)
+  b_a_new = b_a_old + r * x
+```
+
+행렬 역행렬을 매번 재계산(O(d^3))하지 않고 O(d^2)로 유지.
+수치 안정성을 위해 500 업데이트마다 A_a를 재역행렬 계산(backtester.js에서는
+JS 환경 상 _applyLinUCB에서 theta 직접 저장 방식으로 단순화됨).
+
+코드 매핑: scripts/rl_linucb.py:76-175 (LinUCB 클래스), backtester.js:146-158 (_applyLinUCB)
+
+---
+
+### §13.2 5개 행동 공간 설계
+
+CheeseStock Stage B는 MRA(Multiple Regression Analysis) 예측값을 "얼마나 신뢰할 것인가"를
+5개 이산 행동으로 표현한다:
+
+```
+행동 인덱스  이름             factor  의미
+─────────────────────────────────────────────────────────────
+0           strong_dampen    0.3    MRA 예측을 70% 억제 (과신 차단)
+1           slight_dampen    0.7    MRA 예측을 30% 축소 (보수 조정)
+2           trust_mra        1.0    MRA 예측 원본 사용 (기본값)
+3           slight_boost     1.3    MRA 예측을 30% 증폭 (과소추정 보정)
+4           reverse         -0.5    MRA 예측 방향 반전 + 절반 크기
+─────────────────────────────────────────────────────────────
+```
+
+적용 결과: y_adj = y_mra * action_factor
+
+이 5개 행동은 "연속적 포지션 크기" 행동 공간을 이산화한 것으로,
+Grinold (1989) "The Fundamental Law of Active Management"의
+신호-포지션 비례 원칙을 구현한다.
+
+코드 매핑: backtester.js:65-66 (_rlTier1, _rlTier3), scripts/rl_linucb.py:39-47
+
+---
+
+### §13.3 보상 함수 — Directional IC 정렬
+
+**설계 근거:**
+
+초기 구현(Stage B-1)은 MSE 기반 보상을 사용했다:
+  r_mse = -(y_adj - y_actual)^2
+
+이 설계는 strong_dampen(factor=0.3) 행동이 49% 선택율을 차지하는
+degenerate 정책을 유발했다. MSE는 예측값의 크기를 줄이는 방향으로
+편향되어 있기 때문이다.
+
+**수정된 방향성 보상 (Grinold 1989 기반):**
+
+Grinold, R. C. (1989). "The Fundamental Law of Active Management."
+Journal of Portfolio Management, 15(3), 30-37.
+
+```
+r_raw = y_adj * y_actual - y_mra * y_actual
+      = y_mra * y_actual * (action_factor - 1)
+
+의미: action이 MRA 원본 대비 y_actual과의 방향성 정렬을 얼마나 개선했는가?
+  - action_factor > 1 이고 y_mra*y_actual > 0 : 양의 보상 (올바른 방향 증폭)
+  - action_factor < 1 이고 y_mra*y_actual > 0 : 음의 보상 (올바른 방향 억제)
+  - reverse (factor=-0.5) 이고 y_mra*y_actual < 0 : 양의 보상 (잘못된 방향 반전)
+```
+
+**로그 압축 (kurtosis 안정화):**
+
+KRX 수익률 분포의 첨도(kurtosis)가 73.5로 극단값이 빈번하다.
+Mnih et al. (2015) DQN의 Huber loss와 유사한 원리로 로그 압축을 적용:
+
+```
+r_final = sign(r_raw) * log(1 + |r_raw|)
+```
+
+코드 매핑: scripts/rl_linucb.py:56-69 (compute_reward)
+
+---
+
+### §13.4 10-차원 컨텍스트 벡터 설계
+
+각 차원의 학술적 의미와 엔진 내 역할:
+
+```
+그룹 A — 잔차 이력 (Lo 2004 AMH 기반: 잔차 자기상관 = 시장 비효율 지표)
+  dim 0: resid_sign     직전 잔차의 부호 {-1, 0, +1}
+                        → 예측 오류가 지속되는지 감지
+  dim 1: resid_mag_z    |직전 잔차| / rolling_std(20), clamped [0,3]
+                        → 예측 오류의 크기 (과신 여부 판단)
+  dim 2: resid_run_len  같은 부호 잔차의 연속 길이 / 5.0
+                        → 체계적 편향(systematic bias) 감지
+  ※ dims 0-2는 학습(Python) 시에만 사용. 런타임(JS)에서는 0으로 설정.
+     이유: JS 엔진은 단일 종목 실시간 컨텍스트만 보유하므로 롤링 이력 부재.
+
+그룹 B — 체제(Regime) 변수 (Bollerslev 1986 GARCH / RiskMetrics 1996)
+  dim 3: ewma_vol       EWMA 변동성 (lambda=0.94), z-score 정규화
+                        → 변동성 체제 위치 (고변동성 = 보수적 행동 유도)
+  dim 4: pred_magnitude |y_pred| / global_std(y_pred), clamped [0,3]
+                        → 예측 신뢰도 (극단 예측일수록 검증 필요)
+
+그룹 C — 범주형 시장 변수
+  dim 5: signal_dir     +1(buy), -1(sell), 0(neutral)
+                        → 신호 방향: 매수/매도에 따른 차별 전략 가능
+  dim 6: market_type    1(KOSDAQ), 0(KOSPI)
+                        → KOSDAQ은 변동성·유동성 특성이 KOSPI와 다름
+
+그룹 D — 패턴 품질 (Bulkowski 2005/2012 패턴 통계 기반)
+  dim 7: pattern_tier   Tier1→-1, Tier2→0, Tier3→+1
+                        → Tier1 패턴(doubleBottom 등)은 과밀화(crowding) 위험
+                           자동 감쇠로 alpha decay 방지
+  dim 8: confidence_norm confidence / 100 ∈ [0,1]
+                        → 패턴 완성도 신뢰도
+
+그룹 E — OHLCV 체제 (Hurst 1951 R/S 분석)
+  dim 9: raw_hurst      R/S 분석 기반 Hurst 지수, z-score 정규화
+                        → H > 0.5: 추세 지속성 (momentum regime)
+                           H < 0.5: 평균 회귀 (mean-reversion regime)
+```
+
+Lo, A. (2004). "The Adaptive Markets Hypothesis." Journal of Portfolio Management, 30(5), 15-29.
+Hurst, H. E. (1951). "Long-term storage capacity of reservoirs." Trans. American Society of Civil Engineers, 116, 770-799.
+
+코드 매핑: backtester.js:96-143 (_buildRLContext), scripts/rl_context_features.py:10-37
+
+---
+
+### §13.5 Stage B 성과 요약 (KRX 2,704종목, 전진보행 검증)
+
+```
+지표                   Stage A (MRA only)   Stage B (MRA + LinUCB)
+─────────────────────────────────────────────────────────────────
+Mean IC (전체)          0.099                0.325   (+228%)
+Tier-1 IC              -0.017               +0.253  (음→양 반전)
+Tier-3 IC               0.211                0.184   (소폭 감소)
+strong_dampen 선택율    (MSE 기반: 49%)       12%     (degenerate 탈출)
+trust_mra 선택율        —                    41%     (다양한 행동)
+```
+
+엔진 적용 효과 요약:
+- MRA의 선형 예측을 컨텍스트에 따라 비선형적으로 보정
+- Tier-1 패턴(doubleBottom, risingWedge 등) 과밀 상황에서 자동 감쇠
+  → crowding으로 인한 alpha decay 방지
+- 고변동성 체제(dim 3 높음)에서 strong_dampen 우선 선택
+  → 변동성 클러스터링(GARCH 효과) 대응
+
+코드 매핑: backtester.js:60-158 전체 LinUCB 블록
