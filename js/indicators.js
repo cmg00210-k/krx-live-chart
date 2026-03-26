@@ -799,6 +799,59 @@ function calcAwesomeOscillator(candles, shortPeriod = 5, longPeriod = 34) {
 }
 
 // ══════════════════════════════════════════════════════
+//  RSI Fisher Transform — Amari (1985), core_data/13 §7.3
+//  RSI를 정규분포에 가까운 공간으로 변환, 극단값 거짓 신호 감소
+//  rsi_fisher = 0.5 * ln((1+r)/(1-r)), r = 2*(RSI/100) - 1
+// ══════════════════════════════════════════════════════
+
+function calcRSIFisher(rsiArray) {
+  return rsiArray.map(function(v) {
+    if (v === null || v === undefined) return null;
+    var r = Math.max(-0.999, Math.min(0.999, 2 * (v / 100) - 1));
+    return 0.5 * Math.log((1 + r) / (1 - r));
+  });
+}
+
+
+// ══════════════════════════════════════════════════════
+//  Theil-Sen Robust Trendline — Theil (1950), Sen (1968)
+//  core_data/07 §2.3: 이상치 저항 기울기 추정
+//  b = median{(yj-yi)/(xj-xi) for all i<j}
+//  a = median{yi - b*xi}
+// ══════════════════════════════════════════════════════
+
+function calcTheilSen(xValues, yValues) {
+  var n = Math.min(xValues.length, yValues.length);
+  if (n < 2) return null;
+  if (n === 2) {
+    var dx = xValues[1] - xValues[0];
+    if (dx === 0) return null;
+    var slope = (yValues[1] - yValues[0]) / dx;
+    return { slope: slope, intercept: yValues[0] - slope * xValues[0] };
+  }
+  // All-pairs slopes
+  var slopes = [];
+  for (var i = 0; i < n; i++) {
+    for (var j = i + 1; j < n; j++) {
+      var d = xValues[j] - xValues[i];
+      if (d !== 0) slopes.push((yValues[j] - yValues[i]) / d);
+    }
+  }
+  if (slopes.length === 0) return null;
+  slopes.sort(function(a, b) { return a - b; });
+  var medSlope = slopes[Math.floor(slopes.length / 2)];
+  // Median intercept
+  var intercepts = [];
+  for (var k = 0; k < n; k++) {
+    intercepts.push(yValues[k] - medSlope * xValues[k]);
+  }
+  intercepts.sort(function(a, b) { return a - b; });
+  var medIntercept = intercepts[Math.floor(intercepts.length / 2)];
+  return { slope: medSlope, intercept: medIntercept };
+}
+
+
+// ══════════════════════════════════════════════════════
 //  IndicatorCache — Lazy Evaluation 지표 캐시
 //  필요한 지표만 최초 접근 시 계산, 캔들 변경 시 invalidate
 // ══════════════════════════════════════════════════════
@@ -867,11 +920,36 @@ class IndicatorCache {
     return this._cache[key];
   }
 
+  /** EVT-aware 볼린저 밴드 — Hill alpha < 4 시 자동 확대 (core_data/12 §7.1)
+   *  Gopikrishnan (1999): 금융 수익률 α≈3 → ±2σ 과소추정
+   *  확대 공식: mult * (1 + 0.15 * max(0, 4 - α)) */
+  bbEVT(n = 20, baseMult = 2) {
+    const key = `bbEVT_${n}_${baseMult}`;
+    if (!(key in this._cache)) {
+      var hillResult = this.hill();
+      var evtMult = baseMult;
+      if (hillResult && hillResult.alpha > 0 && hillResult.alpha < 4) {
+        evtMult = baseMult * (1 + 0.15 * (4 - hillResult.alpha));
+      }
+      this._cache[key] = calcBB(this.closes, n, evtMult);
+    }
+    return this._cache[key];
+  }
+
   /** RSI (period) */
   rsi(period = 14) {
     const key = `rsi_${period}`;
     if (!(key in this._cache)) {
       this._cache[key] = calcRSI(this.closes, period);
+    }
+    return this._cache[key];
+  }
+
+  /** RSI Fisher Transform — Amari (1985), core_data/13 §7.3 */
+  rsiFisher(period = 14) {
+    const key = `rsiFisher_${period}`;
+    if (!(key in this._cache)) {
+      this._cache[key] = calcRSIFisher(this.rsi(period));
     }
     return this._cache[key];
   }

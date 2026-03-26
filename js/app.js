@@ -1966,6 +1966,10 @@ function _analyzeOnMainThread() {
   detectedPatterns = patternEngine.analyze(analyzeCandles);
   const result = signalEngine.analyze(analyzeCandles, detectedPatterns);
   detectedSignals = result.signals;
+  // [Phase I] Prospect theory loss aversion boost — Kahneman & Tversky (1979)
+  if (detectedPatterns._srLevels && typeof signalEngine.applyProspectBoost === 'function') {
+    signalEngine.applyProspectBoost(detectedSignals, analyzeCandles, detectedPatterns._srLevels, result.cache);
+  }
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;
 

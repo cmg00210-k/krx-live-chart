@@ -1,0 +1,1289 @@
+{
+  "model": "2-state Gaussian HMM (Hamilton 1989)",
+  "parameters": {
+    "mu_bull_pct": 0.166,
+    "mu_bear_pct": 0.1111,
+    "sigma_bull_pct": 3.4029,
+    "sigma_bear_pct": 1.1451,
+    "transition_matrix": [
+      [
+        0.9519,
+        0.0481
+      ],
+      [
+        0.0047,
+        0.9953
+      ]
+    ],
+    "bull_avg_duration_days": 20.8,
+    "bear_avg_duration_days": 211.0
+  },
+  "summary": {
+    "total_days": 1223,
+    "bull_days": 86,
+    "bear_days": 1137,
+    "bull_pct": 7.0
+  },
+  "daily": [
+    {
+      "date": "2025-03-14",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-17",
+      "bull_prob": 0.0016,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-18",
+      "bull_prob": 0.0015,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-19",
+      "bull_prob": 0.0025,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-20",
+      "bull_prob": 0.0052,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-21",
+      "bull_prob": 0.0123,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-24",
+      "bull_prob": 0.0317,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-25",
+      "bull_prob": 0.0816,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-26",
+      "bull_prob": 0.1999,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-27",
+      "bull_prob": 0.4048,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-03-28",
+      "bull_prob": 0.6861,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-03-31",
+      "bull_prob": 0.8163,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-01",
+      "bull_prob": 0.823,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-02",
+      "bull_prob": 0.832,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-03",
+      "bull_prob": 0.8648,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-04",
+      "bull_prob": 0.9304,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-07",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-08",
+      "bull_prob": 0.9987,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-09",
+      "bull_prob": 0.9991,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-10",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-04-11",
+      "bull_prob": 0.4252,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-14",
+      "bull_prob": 0.1985,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-15",
+      "bull_prob": 0.107,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-16",
+      "bull_prob": 0.0699,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-17",
+      "bull_prob": 0.0274,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-18",
+      "bull_prob": 0.0101,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-21",
+      "bull_prob": 0.004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-22",
+      "bull_prob": 0.0021,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-23",
+      "bull_prob": 0.0017,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-24",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-25",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-28",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-29",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-04-30",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-02",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-07",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-08",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-09",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-12",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-13",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-14",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-15",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-16",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-19",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-20",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-21",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-22",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-23",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-26",
+      "bull_prob": 0.0012,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-27",
+      "bull_prob": 0.0015,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-28",
+      "bull_prob": 0.0027,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-29",
+      "bull_prob": 0.0036,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-05-30",
+      "bull_prob": 0.0038,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-02",
+      "bull_prob": 0.005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-04",
+      "bull_prob": 0.0096,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-05",
+      "bull_prob": 0.0072,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-09",
+      "bull_prob": 0.0041,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-10",
+      "bull_prob": 0.002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-11",
+      "bull_prob": 0.0014,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-12",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-13",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-16",
+      "bull_prob": 0.0009,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-17",
+      "bull_prob": 0.0007,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-18",
+      "bull_prob": 0.0009,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-19",
+      "bull_prob": 0.0017,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-20",
+      "bull_prob": 0.0042,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-23",
+      "bull_prob": 0.0082,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-24",
+      "bull_prob": 0.0193,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-25",
+      "bull_prob": 0.0076,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-26",
+      "bull_prob": 0.0032,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-27",
+      "bull_prob": 0.0014,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-06-30",
+      "bull_prob": 0.0007,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-01",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-02",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-03",
+      "bull_prob": 0.0012,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-04",
+      "bull_prob": 0.0016,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-07",
+      "bull_prob": 0.001,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-08",
+      "bull_prob": 0.001,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-09",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-10",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-11",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-14",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-15",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-16",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-17",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-18",
+      "bull_prob": 0.0002,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-21",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-22",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-23",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-24",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-25",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-28",
+      "bull_prob": 0.0019,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-29",
+      "bull_prob": 0.0041,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-30",
+      "bull_prob": 0.0106,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-07-31",
+      "bull_prob": 0.025,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-01",
+      "bull_prob": 0.0696,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-04",
+      "bull_prob": 0.0315,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-05",
+      "bull_prob": 0.0162,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-06",
+      "bull_prob": 0.0061,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-07",
+      "bull_prob": 0.0027,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-08",
+      "bull_prob": 0.0011,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-11",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-12",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-13",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-14",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-18",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-19",
+      "bull_prob": 0.0005,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-20",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-21",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-22",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-25",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-26",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-27",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-28",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-08-29",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-01",
+      "bull_prob": 0.0009,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-02",
+      "bull_prob": 0.0006,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-03",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-04",
+      "bull_prob": 0.0003,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-05",
+      "bull_prob": 0.0004,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-08",
+      "bull_prob": 0.0008,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-09",
+      "bull_prob": 0.0019,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-10",
+      "bull_prob": 0.0028,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-11",
+      "bull_prob": 0.0028,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-12",
+      "bull_prob": 0.0037,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-15",
+      "bull_prob": 0.0035,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-16",
+      "bull_prob": 0.0048,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-17",
+      "bull_prob": 0.0055,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-18",
+      "bull_prob": 0.0067,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-19",
+      "bull_prob": 0.0072,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-22",
+      "bull_prob": 0.0106,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-23",
+      "bull_prob": 0.0182,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-24",
+      "bull_prob": 0.0386,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-25",
+      "bull_prob": 0.0983,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-26",
+      "bull_prob": 0.2827,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-29",
+      "bull_prob": 0.3126,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-09-30",
+      "bull_prob": 0.3619,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-10-01",
+      "bull_prob": 0.5141,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-02",
+      "bull_prob": 0.797,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-10",
+      "bull_prob": 0.8128,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-13",
+      "bull_prob": 0.8075,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-14",
+      "bull_prob": 0.813,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-15",
+      "bull_prob": 0.8347,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-16",
+      "bull_prob": 0.8348,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-17",
+      "bull_prob": 0.81,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-20",
+      "bull_prob": 0.8062,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-21",
+      "bull_prob": 0.8023,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-22",
+      "bull_prob": 0.814,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-23",
+      "bull_prob": 0.8384,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-24",
+      "bull_prob": 0.8919,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-27",
+      "bull_prob": 0.9076,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-28",
+      "bull_prob": 0.9078,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-29",
+      "bull_prob": 0.9145,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-30",
+      "bull_prob": 0.9194,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-10-31",
+      "bull_prob": 0.9387,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-03",
+      "bull_prob": 0.9917,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-04",
+      "bull_prob": 0.997,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-05",
+      "bull_prob": 0.9976,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-06",
+      "bull_prob": 0.9943,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-07",
+      "bull_prob": 0.9945,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-10",
+      "bull_prob": 0.9949,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-11",
+      "bull_prob": 0.9895,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-12",
+      "bull_prob": 0.9882,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-13",
+      "bull_prob": 0.9904,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-14",
+      "bull_prob": 0.9999,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-17",
+      "bull_prob": 0.9997,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-18",
+      "bull_prob": 0.9996,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-19",
+      "bull_prob": 0.9936,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-20",
+      "bull_prob": 0.9922,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-21",
+      "bull_prob": 0.9904,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-24",
+      "bull_prob": 0.533,
+      "regime": "bull"
+    },
+    {
+      "date": "2025-11-25",
+      "bull_prob": 0.3861,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-11-26",
+      "bull_prob": 0.3333,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-11-27",
+      "bull_prob": 0.1728,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-11-28",
+      "bull_prob": 0.111,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-01",
+      "bull_prob": 0.0588,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-02",
+      "bull_prob": 0.0422,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-03",
+      "bull_prob": 0.0203,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-04",
+      "bull_prob": 0.011,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-05",
+      "bull_prob": 0.0085,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-08",
+      "bull_prob": 0.0054,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-09",
+      "bull_prob": 0.0034,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-10",
+      "bull_prob": 0.0032,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-11",
+      "bull_prob": 0.0047,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-12",
+      "bull_prob": 0.0087,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-15",
+      "bull_prob": 0.0146,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-16",
+      "bull_prob": 0.0169,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-17",
+      "bull_prob": 0.0156,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-18",
+      "bull_prob": 0.0138,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-19",
+      "bull_prob": 0.0136,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-22",
+      "bull_prob": 0.0172,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-23",
+      "bull_prob": 0.0165,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-24",
+      "bull_prob": 0.0202,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-26",
+      "bull_prob": 0.0334,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-29",
+      "bull_prob": 0.0658,
+      "regime": "bear"
+    },
+    {
+      "date": "2025-12-30",
+      "bull_prob": 0.0813,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-02",
+      "bull_prob": 0.1311,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-05",
+      "bull_prob": 0.1441,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-06",
+      "bull_prob": 0.0745,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-07",
+      "bull_prob": 0.0273,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-08",
+      "bull_prob": 0.01,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-09",
+      "bull_prob": 0.0045,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-12",
+      "bull_prob": 0.0025,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-13",
+      "bull_prob": 0.0018,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-14",
+      "bull_prob": 0.0016,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-15",
+      "bull_prob": 0.002,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-16",
+      "bull_prob": 0.0024,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-19",
+      "bull_prob": 0.0036,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-20",
+      "bull_prob": 0.006,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-21",
+      "bull_prob": 0.0128,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-22",
+      "bull_prob": 0.0323,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-23",
+      "bull_prob": 0.0763,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-26",
+      "bull_prob": 0.1893,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-27",
+      "bull_prob": 0.4426,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-28",
+      "bull_prob": 0.4848,
+      "regime": "bear"
+    },
+    {
+      "date": "2026-01-29",
+      "bull_prob": 0.5324,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-01-30",
+      "bull_prob": 0.6462,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-02",
+      "bull_prob": 0.9999,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-03",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-04",
+      "bull_prob": 0.9996,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-05",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-06",
+      "bull_prob": 0.9996,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-09",
+      "bull_prob": 0.9999,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-10",
+      "bull_prob": 0.9964,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-11",
+      "bull_prob": 0.9963,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-12",
+      "bull_prob": 0.9985,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-13",
+      "bull_prob": 0.9976,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-19",
+      "bull_prob": 0.999,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-20",
+      "bull_prob": 0.9983,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-23",
+      "bull_prob": 0.997,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-24",
+      "bull_prob": 0.9979,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-25",
+      "bull_prob": 0.9986,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-26",
+      "bull_prob": 0.9998,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-02-27",
+      "bull_prob": 0.9994,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-03",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-04",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-05",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-06",
+      "bull_prob": 0.9993,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-09",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-10",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-11",
+      "bull_prob": 0.9919,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-12",
+      "bull_prob": 0.9876,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-13",
+      "bull_prob": 0.9878,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-16",
+      "bull_prob": 0.9888,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-17",
+      "bull_prob": 0.9932,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-18",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-19",
+      "bull_prob": 0.9998,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-20",
+      "bull_prob": 0.9991,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-23",
+      "bull_prob": 1.0,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-24",
+      "bull_prob": 0.9984,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-25",
+      "bull_prob": 0.9929,
+      "regime": "bull"
+    },
+    {
+      "date": "2026-03-26",
+      "bull_prob": 0.9895,
+      "regime": "bull"
+    }
+  ]
+}

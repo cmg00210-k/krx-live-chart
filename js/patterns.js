@@ -401,8 +401,20 @@ class PatternEngine {
     const meanRevWeight = Math.max(0.6, Math.min(Math.exp(-0.1386 * excess), 1.0));
 
     // r(regime): Jeffrey 발산 기반 레짐 변화 보정 — 대칭 KL (core_data/13_information_geometry.md §4.3)
+    // [Phase I-L2] HMM regime override — Hamilton (1989), core_data/21 §2
+    // HMM 고변동 레짐(bull_prob > 0.5, σ=3.4%) → regimeWeight 감산
+    // Fallback: Mahalanobis 거리 (core_data/13 §6.4)
     let regimeWeight = 1.0;
-    if (closes.length >= 80) {
+    var _hmmData = (typeof backtester !== 'undefined' && backtester._behavioralData
+      && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
+    if (_hmmData && _hmmData.daily && _hmmData.daily.length > 0) {
+      // Use most recent regime assignment
+      var lastRegime = _hmmData.daily[_hmmData.daily.length - 1];
+      if (lastRegime && lastRegime.bull_prob > 0.5) {
+        // High-volatility episode (KRX "bull" = high-vol, σ=3.4x normal)
+        regimeWeight = 0.7 + 0.3 * (1 - lastRegime.bull_prob);
+      }
+    } else if (closes.length >= 80) {
       const returns60 = [], returns20 = [];
       for (let ri = closes.length - 80; ri < closes.length - 20; ri++) {
         if (closes[ri] > 0) returns60.push((closes[ri + 1] - closes[ri]) / closes[ri]);
@@ -415,10 +427,13 @@ class PatternEngine {
         const mu2 = returns20.reduce((s, v) => s + v, 0) / returns20.length;
         const s1sq = returns60.reduce((s, v) => s + (v - mu1) ** 2, 0) / returns60.length || 1e-10;
         const s2sq = returns20.reduce((s, v) => s + (v - mu2) ** 2, 0) / returns20.length || 1e-10;
-        // Jeffrey divergence (symmetric KL) — 방향 편향 제거
-        const dj = 0.5 * (s1sq / s2sq + s2sq / s1sq - 2)
-                 + 0.5 * (mu1 - mu2) * (mu1 - mu2) * (1 / s1sq + 1 / s2sq);
-        regimeWeight = Math.max(0.7, Math.min(1.0, 1 - dj * 0.15));
+        // [Phase I] Fisher anomaly score — Amari (1985), core_data/13 §6.4
+        // Jeffrey divergence (dj*0.15) → Mahalanobis 거리 + sigmoid 대체
+        var dMaha = Math.sqrt(
+          (mu1 - mu2) * (mu1 - mu2) / Math.max(s1sq, 1e-10) +
+          2 * Math.pow(Math.sqrt(s1sq) / Math.max(Math.sqrt(s2sq), 1e-5) - 1, 2)
+        );
+        regimeWeight = 0.7 + 0.3 / (1 + Math.exp(dMaha - 2));
       }
     }
 
@@ -531,7 +546,15 @@ class PatternEngine {
       var wr = (PatternEngine.PATTERN_WIN_RATES_LIVE && PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type] != null)
         ? PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type]
         : PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
-      var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
+      // [CRITICAL FIX] Direction-aware confidencePred — Lo (2004) AMH
+      // WR = P(price UP). Buy: confidencePred = WR. Sell: confidencePred = 100 - WR.
+      // 5년 실증: sell 16종 WR=58.6% (상승 예측) — 레이블 역전 수정
+      // 근거: confidencePred는 "방향 정확도"여야 함, "상승 확률"이 아님
+      var dirWr = (wr != null) ? wr : patterns[pi].confidence;
+      if (patterns[pi].signal === 'sell' && wr != null) {
+        dirWr = 100 - wr;
+      }
+      var pred = Math.round(dirWr);
       // 형태 품질 반영 — Kirkpatrick & Dahlquist (2011): body ratio + ATR 비율 → 신뢰도 조정
       // scaling = confidence/50, clamp [0.88, 1.12] (±12%, Caginalp 1998 실증 3~7%p 정합)
       // [E-2] 0.85/1.15→0.88/1.12: WR>55% 패턴에서 Caginalp 7%p 상한 준수 (fin-theory 교차검증)
@@ -552,21 +575,30 @@ class PatternEngine {
     // R:R 검증 게이트 — KRX calibration 기반 (calibrated_constants.json C1+D3)
     this._applyRRGate(patterns, candles);
 
-    // [Phase0-D] R:R 게이트 → confidencePred 직접 반영
-    // 기존: confidence(UI)만 감산, confidencePred(모델입력) 무영향 — 0-D 결함
-    // 수정: R:R 페널티를 confidencePred에도 직접 적용
-    // 근거: poor R:R 패턴이 동일 confidencePred를 받으면 WLS/LinUCB/Ridge 예측 왜곡
+    // [P2-RR] Bayesian sigmoid R:R → confidencePred 연속 감산
+    // Phase0-D 고정 -15/-7 → sigmoid 연속 함수로 불연속 점프 제거
+    // penalty = max_pen * sigmoid(-k*(rr - rr_mid))  [rr↑ → penalty↓, 단조]
+    // rl_policy.rr_bayesian 있으면 데이터 기반, 없으면 이론 기본값
+    // 근거: Gelman et al. (2013) BDA3, smooth prior → posterior transition
+    var rrParams = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.rr_bayesian)
+      ? backtester._rlPolicy.rr_bayesian : null;
+    var rrMaxPen = rrParams ? rrParams.max_pen : 15;
+    var rrK      = rrParams ? rrParams.k       : 8;
+    var rrMid    = rrParams ? rrParams.rr_mid   : 2.375;
     for (var ri = 0; ri < patterns.length; ri++) {
       var rp = patterns[ri];
       if (rp.riskReward == null || rp.confidencePred == null) continue;
-      if (rp.riskReward < 2.25) {
-        rp.confidencePred = Math.max(10, rp.confidencePred - 15);
-      } else if (rp.riskReward < 2.5) {
-        rp.confidencePred = Math.max(10, rp.confidencePred - 7);
+      // sigmoid: rr < rr_mid → penalty > max_pen/2, rr > rr_mid → penalty < max_pen/2
+      var rrPen = Math.round(rrMaxPen / (1 + Math.exp(rrK * (rp.riskReward - rrMid))));
+      if (rrPen > 0) {
+        rp.confidencePred = Math.max(10, rp.confidencePred - rrPen);
       }
     }
 
-    return this._dedup(patterns);
+    var deduped = this._dedup(patterns);
+    // [Phase I] S/R levels 첨부 — applyProspectBoost 등 후처리에서 활용
+    deduped._srLevels = sr;
+    return deduped;
   }
 
   // ══════════════════════════════════════════════════
@@ -1888,10 +1920,11 @@ class PatternEngine {
         .sort((a, b) => a.index - b.index);
       if (relevantLows.length < 2) continue;
 
-      // [Phase1-C] strictly monotonic → net ascending (2-point)
-      // 기존: 모든 저점이 엄격히 상승 필요 → n=12. symmetric triangle(n=1252)는 2-point 비교
-      // 수정: 첫 저점 < 마지막 저점이면 net ascending으로 인정
-      const ascending = relevantLows[relevantLows.length - 1].price > relevantLows[0].price;
+      // [Phase1-C → Phase I] net ascending: Theil-Sen slope > 0 (3+점), 2-point fallback
+      var _tsAsc = (relevantLows.length >= 3 && typeof calcTheilSen === 'function')
+        ? calcTheilSen(relevantLows.map(p => p.index), relevantLows.map(p => p.price)) : null;
+      const ascending = _tsAsc ? _tsAsc.slope > 0
+        : relevantLows[relevantLows.length - 1].price > relevantLows[0].price;
       if (!ascending) continue;
 
       const resistanceLevel = (h1.price + h2.price) / 2;
@@ -1949,8 +1982,11 @@ class PatternEngine {
         .sort((a, b) => a.index - b.index);
       if (relevantHighs.length < 2) continue;
 
-      // [Phase1-C] strictly monotonic → net descending (2-point)
-      const descending = relevantHighs[relevantHighs.length - 1].price < relevantHighs[0].price;
+      // [Phase1-C → Phase I] net descending: Theil-Sen slope < 0 (3+점), 2-point fallback
+      var _tsDesc = (relevantHighs.length >= 3 && typeof calcTheilSen === 'function')
+        ? calcTheilSen(relevantHighs.map(p => p.index), relevantHighs.map(p => p.price)) : null;
+      const descending = _tsDesc ? _tsDesc.slope < 0
+        : relevantHighs[relevantHighs.length - 1].price < relevantHighs[0].price;
       if (!descending) continue;
 
       const supportLevel = (l1.price + l2.price) / 2;
@@ -2001,6 +2037,12 @@ class PatternEngine {
     const sortedHighs = [...recentHighs].sort((a, b) => a.index - b.index);
     const sortedLows = [...recentLows].sort((a, b) => a.index - b.index);
 
+    // [Phase I] Theil-Sen hoisted — loop-invariant, O(n²) 중복 방지
+    var _tsHRW = (sortedHighs.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedHighs.map(p => p.index), sortedHighs.map(p => p.price)) : null;
+    var _tsLRW = (sortedLows.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedLows.map(p => p.index), sortedLows.map(p => p.price)) : null;
+
     for (let hi = 0; hi < sortedHighs.length - 1; hi++) {
       for (let li = 0; li < sortedLows.length - 1; li++) {
         const h1 = sortedHighs[hi], h2 = sortedHighs[hi + 1];
@@ -2008,8 +2050,8 @@ class PatternEngine {
         if (h2.price <= h1.price || l2.price <= l1.price) continue;
 
         const a = this._atr(atr, h2.index, candles);
-        const highSlope = (h2.price - h1.price) / (h2.index - h1.index) / a;
-        const lowSlope = (l2.price - l1.price) / (l2.index - l1.index) / a;
+        const highSlope = (_tsHRW ? _tsHRW.slope : (h2.price - h1.price) / (h2.index - h1.index)) / a;
+        const lowSlope = (_tsLRW ? _tsLRW.slope : (l2.price - l1.price) / (l2.index - l1.index)) / a;
         if (highSlope >= lowSlope) continue;
 
         // 쐐기 수렴 검증: 끝 높이가 시작 높이보다 좁아야 함
@@ -2067,6 +2109,12 @@ class PatternEngine {
     const sortedHighs = [...recentHighs].sort((a, b) => a.index - b.index);
     const sortedLows = [...recentLows].sort((a, b) => a.index - b.index);
 
+    // [Phase I] Theil-Sen hoisted — loop-invariant
+    var _tsHFW = (sortedHighs.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedHighs.map(p => p.index), sortedHighs.map(p => p.price)) : null;
+    var _tsLFW = (sortedLows.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedLows.map(p => p.index), sortedLows.map(p => p.price)) : null;
+
     for (let hi = 0; hi < sortedHighs.length - 1; hi++) {
       for (let li = 0; li < sortedLows.length - 1; li++) {
         const h1 = sortedHighs[hi], h2 = sortedHighs[hi + 1];
@@ -2074,8 +2122,8 @@ class PatternEngine {
         if (h2.price >= h1.price || l2.price >= l1.price) continue;
 
         const a = this._atr(atr, h2.index, candles);
-        const highSlope = Math.abs(h2.price - h1.price) / (h2.index - h1.index) / a;
-        const lowSlope = Math.abs(l2.price - l1.price) / (l2.index - l1.index) / a;
+        const highSlope = Math.abs(_tsHFW ? _tsHFW.slope : (h2.price - h1.price) / (h2.index - h1.index)) / a;
+        const lowSlope = Math.abs(_tsLFW ? _tsLFW.slope : (l2.price - l1.price) / (l2.index - l1.index)) / a;
         if (lowSlope >= highSlope) continue;
 
         const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
@@ -2133,20 +2181,24 @@ class PatternEngine {
     const sortedHighs = [...recentHighs].sort((a, b) => a.index - b.index);
     const sortedLows = [...recentLows].sort((a, b) => a.index - b.index);
 
+    // [Phase I] Theil-Sen hoisted — loop-invariant
+    var _tsHST = (sortedHighs.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedHighs.map(p => p.index), sortedHighs.map(p => p.price)) : null;
+    var _tsLST = (sortedLows.length >= 3 && typeof calcTheilSen === 'function')
+      ? calcTheilSen(sortedLows.map(p => p.index), sortedLows.map(p => p.price)) : null;
+
     for (let hi = 0; hi < sortedHighs.length - 1; hi++) {
       for (let li = 0; li < sortedLows.length - 1; li++) {
         const h1 = sortedHighs[hi], h2 = sortedHighs[hi + 1];
         const l1 = sortedLows[li], l2 = sortedLows[li + 1];
 
         // 핵심 조건: 고점 하락(저항선 하향) + 저점 상승(지지선 상향)
-        if (h2.price >= h1.price) continue;  // 고점이 낮아져야 함
-        if (l2.price <= l1.price) continue;  // 저점이 높아져야 함
+        if (h2.price >= h1.price) continue;
+        if (l2.price <= l1.price) continue;
 
         const a = this._atr(atr, h2.index, candles);
-
-        // ATR 정규화 기울기 계산
-        const highSlope = (h2.price - h1.price) / (h2.index - h1.index) / a;   // 음수 (하향)
-        const lowSlope = (l2.price - l1.price) / (l2.index - l1.index) / a;    // 양수 (상향)
+        const highSlope = (_tsHST ? _tsHST.slope : (h2.price - h1.price) / (h2.index - h1.index)) / a;
+        const lowSlope = (_tsLST ? _tsLST.slope : (l2.price - l1.price) / (l2.index - l1.index)) / a;
 
         // 기울기 의미 유효성: 너무 완만하면 횡보, 삼각형이 아님
         if (Math.abs(highSlope) < 0.01 || Math.abs(lowSlope) < 0.01) continue;

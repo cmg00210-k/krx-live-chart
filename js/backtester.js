@@ -21,6 +21,22 @@ class PatternBacktester {
     this.KRX_SLIPPAGE = 0.10;     // 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
     this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
 
+    /** [Phase I-L2] 적응형 슬리피지 — Amihud (2002), core_data/18 §3
+     *  ILLIQ 기반 종목별 슬리피지 조정. KOSDAQ 소형주 2-5x 상향.
+     *  _behavioralData.illiq_spread 로드 후 사용 가능 */
+    this._getAdaptiveSlippage = function(code) {
+      if (!this._behavioralData || !this._behavioralData['illiq_spread']) return this.KRX_SLIPPAGE;
+      var stockData = this._behavioralData['illiq_spread'].stocks;
+      if (!stockData || !stockData[code]) return this.KRX_SLIPPAGE;
+      var seg = stockData[code].segment;
+      // Segment-based slippage: doc 18 table validated by compute_illiq_spread.py
+      if (seg === 'kospi_large') return 0.04;
+      if (seg === 'kospi_mid') return 0.10;
+      if (seg === 'kosdaq_large') return 0.15;
+      if (seg === 'kosdaq_small') return 0.25;
+      return this.KRX_SLIPPAGE;
+    };
+
     /** [Phase0-E] 보유기간별 거래비용 — Kyle (1985): 왕복 비용은 1회 발생, 장기 보유 시 분산 대비 감소
      *  h=1: 0.31% (σ의 12-16%), h=5: 0.14%, h=20: 0.07%
      *  sqrt(h) 정규화: Sharpe-ratio 관점에서 비용의 σ 대비 영향도 일관화 */
@@ -84,6 +100,25 @@ class PatternBacktester {
     this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
     this._rlTier3 = new Set(['spinningTop','doji','fallingWedge']);
     this._loadRLPolicy();
+    this._loadBehavioralData();
+  }
+
+  /** [Phase I-L2] Behavioral data JSONs — core_data 18-21 quantification outputs */
+  _behavioralData = null;
+  _loadBehavioralData() {
+    var that = this;
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var prefix = isWorker ? '../data/backtest/' : 'data/backtest/';
+    var files = ['illiq_spread', 'hmm_regimes', 'disposition_proxy'];
+    var loaded = {};
+    files.forEach(function(name) {
+      fetch(prefix + name + '.json')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) { if (data) loaded[name] = data; })
+        .catch(function() {});
+    });
+    // Store reference (async — available after first analysis cycle)
+    setTimeout(function() { that._behavioralData = loaded; }, 3000);
   }
 
   /** Load LinUCB policy JSON (graceful: missing file = no-op) */
@@ -682,6 +717,28 @@ class PatternBacktester {
       }
       const winRate = (wins / n) * 100;
 
+      // [Phase I] Bootstrap CI for win rate — Efron (1979), core_data/15 §6.4
+      // B=500 percentile method, Worker-safe 성능 (~50ms)
+      var winRateCI = null;
+      if (n >= 10) {
+        var B = 500, bootWR = [];
+        for (var bi = 0; bi < B; bi++) {
+          var wins_b = 0;
+          for (var si = 0; si < n; si++) {
+            var idx = Math.floor(Math.random() * n);
+            if ((patternSignal === 'buy' && returns[idx] > 0) ||
+                (patternSignal === 'sell' && returns[idx] < 0) ||
+                (patternSignal === 'neutral' && returns[idx] > 0)) wins_b++;
+          }
+          bootWR.push(wins_b / n * 100);
+        }
+        bootWR.sort(function(a, b2) { return a - b2; });
+        winRateCI = [
+          +bootWR[Math.floor(B * 0.025)].toFixed(1),
+          +bootWR[Math.floor(B * 0.975)].toFixed(1)
+        ];
+      }
+
       // 최대 손실/이익
       const maxLoss = sorted[0];
       const maxGain = sorted[n - 1];
@@ -711,6 +768,7 @@ class PatternBacktester {
         median: +median.toFixed(2),
         stdDev: +stdDev.toFixed(2),
         winRate: +winRate.toFixed(1),
+        winRateCI: winRateCI,
         maxLoss: +maxLoss.toFixed(2),
         maxGain: +maxGain.toFixed(2),
         avgWin: +avgWin.toFixed(2),

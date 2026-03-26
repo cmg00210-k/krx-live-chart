@@ -393,7 +393,53 @@ class SignalEngine {
       }
     }
 
+    // [Phase I-L2] 고변동 레짐 감산 — Hamilton (1989), core_data/21 §2
+    // HMM bull_prob > 0.5 (고변동 에피소드) → 전체 신호 신뢰도 감산
+    // KRX 실측: 고변동 σ=3.4% vs 저변동 σ=1.15% (3.0x 비율)
+    var _hmmBeh = (typeof backtester !== 'undefined' && backtester._behavioralData
+      && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
+    if (_hmmBeh && _hmmBeh.daily && _hmmBeh.daily.length > 0) {
+      var _lastR = _hmmBeh.daily[_hmmBeh.daily.length - 1];
+      if (_lastR && _lastR.bull_prob > 0.5) {
+        var volScale = 0.85 + 0.15 * (1 - _lastR.bull_prob); // bull_prob=1→0.85, 0.5→0.925
+        for (var vi = 0; vi < signals.length; vi++) {
+          if (signals[vi].confidence) {
+            signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * volScale));
+          }
+        }
+      }
+    }
+
     return { signals, cache, stats };
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  Prospect Theory Loss Aversion Boost — Kahneman & Tversky (1979)
+  //  core_data/04 §1: λ=2.25 → 지지선 근처 반전(buy) 시그널 강화
+  //  손실회피 비대칭: 지지선 이탈 공포 > 저항선 돌파 기대
+  //  호출: app.js에서 S/R 가용 시 선택적 적용 (analyze 시그니처 불변)
+  // ══════════════════════════════════════════════════════
+
+  applyProspectBoost(signals, candles, srLevels, cache) {
+    if (!srLevels || srLevels.length === 0 || !cache) return;
+    var atrArr = cache.atr(14);
+    var lastATR = atrArr && atrArr.length > 0 ? atrArr[atrArr.length - 1] : null;
+    if (!lastATR || lastATR <= 0) return;
+    for (var pi = 0; pi < signals.length; pi++) {
+      var sig = signals[pi];
+      if (sig.signal !== 'buy' || sig.index >= candles.length) continue;
+      var sigPrice = candles[sig.index].close;
+      for (var si = 0; si < srLevels.length; si++) {
+        var sr = srLevels[si];
+        if (sr.type !== 'support') continue;
+        var dist = Math.abs(sigPrice - sr.price) / lastATR;
+        if (dist < 1.0) {
+          var boost = Math.round(8 * Math.max(0, 1 - dist) * Math.min(sr.strength || 1, 2) / 2);
+          sig.confidence = Math.min(90, sig.confidence + boost);
+          break;
+        }
+      }
+    }
   }
 
 
@@ -684,7 +730,9 @@ class SignalEngine {
 
   _detectBBSignals(candles, cache) {
     const signals = [];
-    const bb = cache.bb(20, 2);
+    // [Phase I] EVT-aware BB — Gopikrishnan (1999), core_data/12 §7.1
+    // Hill alpha < 4 (heavy tail) → BB 밴드 자동 확대, 거짓 돌파 감소
+    const bb = (typeof cache.bbEVT === 'function') ? cache.bbEVT(20, 2) : cache.bb(20, 2);
 
     for (let i = 1; i < candles.length; i++) {
       if (bb[i].upper === null || bb[i - 1].upper === null) continue;
@@ -1128,9 +1176,34 @@ class SignalEngine {
     'ichimokuCloudBreakout', 'ichimokuCloudBreakdown',
   ]);
 
+  // [P2-ADX] Isotonic piecewise-linear interpolation — Barlow et al. (1972)
+  // Wilder (1978) 5단계 계단함수 → 연속 보간으로 불연속 점프 제거
+  // rl_policy.adx_isotonic 있으면 데이터 기반 breakpoints 사용, 없으면 이론 기본값
+  static _ADX_ISOTONIC_DEFAULT = [
+    [10, -10], [15, -5], [20, 0], [25, 5], [30, 7], [40, 10], [50, 10]
+  ];
+
+  static _interpIsotonic(val, breakpoints) {
+    if (!breakpoints || breakpoints.length < 2) return 0;  // degenerate → neutral
+    if (val <= breakpoints[0][0]) return breakpoints[0][1];
+    if (val >= breakpoints[breakpoints.length - 1][0]) return breakpoints[breakpoints.length - 1][1];
+    for (var i = 1; i < breakpoints.length; i++) {
+      if (val <= breakpoints[i][0]) {
+        var x0 = breakpoints[i - 1][0], y0 = breakpoints[i - 1][1];
+        var x1 = breakpoints[i][0], y1 = breakpoints[i][1];
+        if (x1 === x0) return y1;  // duplicate x → use right value
+        return y0 + (y1 - y0) * (val - x0) / (x1 - x0);
+      }
+    }
+    return breakpoints[breakpoints.length - 1][1];
+  }
+
   _applyADXFilter(signals, cache) {
     const { adx } = cache.adx(14);
     if (!adx) return;
+
+    var bp = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.adx_isotonic)
+      ? backtester._rlPolicy.adx_isotonic : SignalEngine._ADX_ISOTONIC_DEFAULT;
 
     for (const sig of signals) {
       // 트렌드 추종 시그널만 대상 (평균회귀 시그널 제외)
@@ -1139,14 +1212,7 @@ class SignalEngine {
       const adxVal = adx[sig.index];
       if (adxVal === null || adxVal === undefined) continue;
 
-      // Wilder (1978) 임계치 기반 세분화
-      let adj = 0;
-      if (adxVal >= 40)      adj = 10;   // 강한 추세
-      else if (adxVal >= 25) adj = 5;    // 건강한 추세
-      else if (adxVal >= 20) adj = 0;    // 전환 구간: 무조정
-      else if (adxVal >= 15) adj = -5;   // 약한 횡보
-      else                   adj = -10;  // 강한 횡보
-
+      var adj = SignalEngine._interpIsotonic(adxVal, bp);
       sig.confidence = Math.max(30, Math.min(90, sig.confidence + adj));
     }
   }
@@ -1159,9 +1225,18 @@ class SignalEngine {
   //  KRX 임계값: 150/75 (표준 100/50 대비 상향, 높은 변동성 보상)
   // ══════════════════════════════════════════════════════
 
+  // [P2-CCI] Isotonic piecewise-linear — Lambert (1980), KRX-adjusted
+  // 4단계 계단함수 → 연속 보간. |CCI| 기반 (방향 불문, 이탈도만 사용)
+  static _CCI_ISOTONIC_DEFAULT = [
+    [40, -3], [75, 0], [100, 0], [150, 2], [200, 3], [300, 3]
+  ];
+
   _applyCCIFilter(signals, cache) {
     var cciArr = cache.cci(20);
     if (!cciArr) return;
+
+    var bp = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.cci_isotonic)
+      ? backtester._rlPolicy.cci_isotonic : SignalEngine._CCI_ISOTONIC_DEFAULT;
 
     for (var i = 0; i < signals.length; i++) {
       var sig = signals[i];
@@ -1171,12 +1246,7 @@ class SignalEngine {
       if (cciVal === null || cciVal === undefined) continue;
 
       var absCCI = Math.abs(cciVal);
-      var adj = 0;
-      if (absCCI >= 200)      adj = 3;   // 극한 추세 (KRX 조정)
-      else if (absCCI >= 150) adj = 2;   // 강한 추세
-      else if (absCCI >= 75)  adj = 0;   // 전환 구간
-      else                    adj = -3;  // 횡보 (추세 추종 시그널 약화)
-
+      var adj = SignalEngine._interpIsotonic(absCCI, bp);
       sig.confidence = Math.max(30, Math.min(90, sig.confidence + adj));
     }
   }
@@ -1400,7 +1470,16 @@ class SignalEngine {
       }
     }
 
+    // [P2-CW] Per-signal composite window — rl_policy.composite_windows override
+    // 고정 window=5 → 시그널 속도 특성별 최적 윈도우 적용
+    // 빠른 시그널(volume) → 3~4, 느린 시그널(ichimoku, MA) → 6~7
+    var cwOverride = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.composite_windows)
+      ? backtester._rlPolicy.composite_windows : null;
+
     for (const def of COMPOSITE_SIGNAL_DEFS) {
+      // per-signal window: rl_policy override → def.window fallback
+      var effectiveWindow = Math.max(1, (cwOverride && cwOverride[def.id] != null) ? cwOverride[def.id] : def.window);
+
       // required 시그널 각각의 발생 인덱스 목록
       const requiredIndices = def.required.map(type => allMap.get(type) || []);
 
@@ -1409,8 +1488,8 @@ class SignalEngine {
 
       // 첫 번째 required의 각 인덱스를 기준점으로 윈도우 탐색
       for (const baseIdx of requiredIndices[0]) {
-        const windowStart = baseIdx - def.window;
-        const windowEnd   = baseIdx + def.window;
+        const windowStart = baseIdx - effectiveWindow;
+        const windowEnd   = baseIdx + effectiveWindow;
 
         // 나머지 required 시그널이 윈도우 내 존재하는지
         let allRequired = true;
@@ -1440,6 +1519,11 @@ class SignalEngine {
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
           : confidence;
+        // [CRITICAL FIX] Direction-aware composite confidencePred
+        // _predMap values are P(price UP). For sell composites, invert to P(price DOWN).
+        if (def.signal === 'sell' && _predMap[def.id] != null) {
+          confidencePred = Math.max(10, Math.min(90, 100 - confidencePred));
+        }
         // G-3: Platt calibration — Platt (1999), P = 1/(1+exp(-(a*x+b)))
         var _plattP = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.platt_params)
           ? backtester._rlPolicy.platt_params[def.id] : null;
@@ -1449,13 +1533,13 @@ class SignalEngine {
         }
 
         // 기준 인덱스 = 윈도우 내 가장 마지막 시그널
-        const refIdx = Math.min(baseIdx + def.window, candles.length - 1);
+        const refIdx = Math.min(baseIdx + effectiveWindow, candles.length - 1);
         const actualIdx = Math.min(refIdx, candles.length - 1);
 
         // 중복 방지: 동일 compositeId가 ±window 범위에 이미 있으면 스킵
         const alreadyExists = composites.some(
           cs => cs.compositeId === def.id &&
-                Math.abs(cs.index - actualIdx) <= def.window
+                Math.abs(cs.index - actualIdx) <= effectiveWindow
         );
         if (alreadyExists) continue;
 

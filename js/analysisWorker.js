@@ -50,10 +50,10 @@ function _makeCacheKey(candles) {
 try {
   importScripts(
     'colors.js?v=12',
-    'indicators.js?v=14',
-    'patterns.js?v=23',
-    'signalEngine.js?v=20',
-    'backtester.js?v=23'
+    'indicators.js?v=15',
+    'patterns.js?v=27',
+    'signalEngine.js?v=24',
+    'backtester.js?v=25'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -173,6 +173,11 @@ self.onmessage = function (e) {
         const result = signalEngine.analyze(analyzeCandles, patterns);
         signals = result.signals;
         stats = result.stats;
+
+        // [Phase I] Prospect theory loss aversion boost — Kahneman & Tversky (1979)
+        if (patterns._srLevels && typeof signalEngine.applyProspectBoost === 'function') {
+          signalEngine.applyProspectBoost(signals, analyzeCandles, patterns._srLevels, result.cache);
+        }
 
         // 캐시 갱신
         _analyzeCache = { key: cacheKey, patterns: patterns, signals: signals, stats: stats };
