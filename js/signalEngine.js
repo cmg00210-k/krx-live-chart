@@ -1411,10 +1411,17 @@ class SignalEngine {
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
         );
-        // czw/data/composite_calibration.json 교정값 참조
+        // Dual Confidence: calibration 기반 예측 승률
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
           : confidence;
+        // G-3: Platt calibration — Platt (1999), P = 1/(1+exp(-(a*x+b)))
+        var _plattP = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.platt_params)
+          ? backtester._rlPolicy.platt_params[def.id] : null;
+        if (_plattP) {
+          var _pz = _plattP[0] * (confidencePred / 100) + _plattP[1];
+          confidencePred = Math.max(10, Math.min(90, Math.round(100 / (1 + Math.exp(-_pz)))));
+        }
 
         // 기준 인덱스 = 윈도우 내 가장 마지막 시그널
         const refIdx = Math.min(baseIdx + def.window, candles.length - 1);

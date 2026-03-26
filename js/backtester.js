@@ -94,6 +94,17 @@ class PatternBacktester {
         if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
           that._rlPolicy = data;
         }
+        // G-2: Beta-Binomial posterior mean → PatternEngine 주입
+        if (data && data.win_rates_live && typeof PatternEngine !== 'undefined') {
+          var liveWR = {};
+          for (var pKey in data.win_rates_live) {
+            var ab = data.win_rates_live[pKey];
+            if (ab && ab.alpha > 0 && ab.beta > 0) {
+              liveWR[pKey] = +(ab.alpha / (ab.alpha + ab.beta) * 100).toFixed(1);
+            }
+          }
+          PatternEngine.PATTERN_WIN_RATES_LIVE = liveWR;
+        }
       })
       .catch(function() { /* silent fallback */ });
   }
@@ -256,12 +267,12 @@ class PatternBacktester {
       }
     }
 
-    // ── Holm-Bonferroni 다중비교 보정 ──────────────────
-    // 문제: m개 동시 검정 시 alpha=0.05에서 ~m×0.05건이 우연히 유의.
-    // Holm step-down: |t|가 큰 순으로 정렬 후 rank k에서
-    //   adjusted alpha_k = 0.05 / (m - k + 1)
-    // 해당 검정이 adjusted alpha를 통과하지 못하면 이후 모든 검정도 기각 불가.
-    this._applyHolmBonferroni(results);
+    // ── Benjamini-Hochberg FDR 다중비교 보정 ──────────────
+    // Holm step-down(FWER) → BH step-up(FDR) 전환: Phase G-1
+    // FDR q=0.05: 기각된 검정 중 거짓 양성 비율 ≤5% 통제
+    // 탐색적 패턴 분석에서 Holm은 과도하게 보수적 — BH가 검정력 우위
+    // Benjamini & Hochberg (1995), JRSS-B 57(1):289-300
+    this._applyBHFDR(results);
 
     return results;
   }
@@ -368,7 +379,7 @@ class PatternBacktester {
    *
    * @param {Object} results — { [patternType]: { horizons: { [h]: stats } } }
    */
-  _applyHolmBonferroni(results) {
+  _applyBHFDR(results) {
     const ALPHA = 0.05;
 
     // Step 1: 모든 검정 수집
@@ -396,37 +407,26 @@ class PatternBacktester {
     const m = tests.length;
     if (m === 0) return;
 
-    // Step 2: p-value 근사 후 오름차순 정렬 — Holm (1979) 원문: p-value 정렬 필수
-    // |t-stat| 정렬은 df 동일할 때만 유효; df 상이하면 p-value 불일치 (Bailey & Lopez de Prado 2014)
+    // Step 2: p-value 근사 후 오름차순 정렬
+    // Bailey & Lopez de Prado (2014): df 상이 시 p-value 정렬 필수
     for (var ti = 0; ti < m; ti++) {
       tests[ti].pValue = this._approxPValue(tests[ti].absTStat, tests[ti].df);
     }
     tests.sort(function(a, b) { return a.pValue - b.pValue; });
 
-    // Step 3: Holm step-down 절차
-    // t-분포 임계값 lookup: alpha → t-critical (양측)
-    // 각 rank k에서 adjusted alpha = ALPHA / (m - k + 1)
-    // 해당 df에서 adjusted alpha에 대응하는 t-critical을 구해 비교.
-    //
-    // 정확한 t-분포 역함수 대신, 보수적 근사 사용:
-    // Holm-Bonferroni에서는 Bonferroni보다 덜 보수적이므로,
-    // 각 단계별 adjusted alpha에 대한 t-critical을 _tCritical()로 계산.
-    let rejected = true;  // step-down: 이전 단계가 기각되어야 다음 단계도 검정 가능
-    for (let k = 0; k < m; k++) {
-      const test = tests[k];
-      const adjustedAlpha = ALPHA / (m - k);  // 0-indexed: m - k = (m - (k+1) + 1)
-      if (rejected) {
-        const tCrit = this._tCriticalForAlpha(adjustedAlpha, test.stats.n - 1);
-        if (test.absTStat > tCrit) {
-          test.stats.adjustedSignificant = true;
-        } else {
-          // 이 단계에서 기각 실패 → 이후 모든 검정도 비유의 처리
-          test.stats.adjustedSignificant = false;
-          rejected = false;
-        }
-      } else {
-        test.stats.adjustedSignificant = false;
+    // Step 3: BH step-up — Benjamini & Hochberg (1995)
+    // 가장 큰 k를 찾되 p_(k) <= (k+1) * q / m (0-indexed)
+    // rank <= k 인 모든 검정을 기각 (FDR ≤ q 보장)
+    var Q = ALPHA; // FDR level q=0.05
+    var maxK = -1;
+    for (var k = m - 1; k >= 0; k--) {
+      if (tests[k].pValue <= (k + 1) * Q / m) {
+        maxK = k;
+        break;
       }
+    }
+    for (var k = 0; k < m; k++) {
+      tests[k].stats.adjustedSignificant = (k <= maxK);
     }
   }
 

@@ -109,5 +109,237 @@
       "mean": 240.917463,
       "std": 35252.840889
     }
+  },
+  "win_rates_live": {
+    "hammer": {
+      "alpha": 182.0,
+      "beta": 198.0
+    },
+    "invertedHammer": {
+      "alpha": 263.1,
+      "beta": 239.9
+    },
+    "shootingStar": {
+      "alpha": 205.0,
+      "beta": 161.0
+    },
+    "hangingMan": {
+      "alpha": 443.3,
+      "beta": 359.7
+    },
+    "doji": {
+      "alpha": 17653.0,
+      "beta": 24378.0
+    },
+    "dragonflyDoji": {
+      "alpha": 10.0,
+      "beta": 10.0
+    },
+    "gravestoneDoji": {
+      "alpha": 13.0,
+      "beta": 9.0
+    },
+    "spinningTop": {
+      "alpha": 59153.0,
+      "beta": 78093.0
+    },
+    "bullishEngulfing": {
+      "alpha": 8900.5,
+      "beta": 11560.5
+    },
+    "bearishEngulfing": {
+      "alpha": 13839.4,
+      "beta": 10698.6
+    },
+    "bullishHarami": {
+      "alpha": 5726.5,
+      "beta": 6749.5
+    },
+    "bearishHarami": {
+      "alpha": 4645.1,
+      "beta": 4004.9
+    },
+    "piercingLine": {
+      "alpha": 38.0,
+      "beta": 64.0
+    },
+    "darkCloud": {
+      "alpha": 187.9,
+      "beta": 153.1
+    },
+    "tweezerBottom": {
+      "alpha": 281.2,
+      "beta": 378.8
+    },
+    "tweezerTop": {
+      "alpha": 422.8,
+      "beta": 360.2
+    },
+    "threeWhiteSoldiers": {
+      "alpha": 355.7,
+      "beta": 277.3
+    },
+    "threeBlackCrows": {
+      "alpha": 342.8,
+      "beta": 196.2
+    },
+    "morningStar": {
+      "alpha": 2275.4,
+      "beta": 3028.6
+    },
+    "eveningStar": {
+      "alpha": 2464.1,
+      "beta": 2158.9
+    },
+    "bullishMarubozu": {
+      "alpha": 2472.5,
+      "beta": 3400.5
+    },
+    "bearishMarubozu": {
+      "alpha": 4580.0,
+      "beta": 3303.0
+    },
+    "bullishBeltHold": {
+      "alpha": 1760.0,
+      "beta": 1440.0
+    },
+    "bearishBeltHold": {
+      "alpha": 1624.0,
+      "beta": 1176.0
+    },
+    "threeInsideUp": {
+      "alpha": 532.0,
+      "beta": 418.0
+    },
+    "threeInsideDown": {
+      "alpha": 396.0,
+      "beta": 324.0
+    },
+    "abandonedBabyBullish": {
+      "alpha": 6.4,
+      "beta": 5.6
+    },
+    "abandonedBabyBearish": {
+      "alpha": 5.3,
+      "beta": 4.7
+    },
+    "longLeggedDoji": {
+      "alpha": 3825.0,
+      "beta": 4675.0
+    },
+    "channel": {
+      "alpha": 870.0,
+      "beta": 630.0
+    },
+    "doubleBottom": {
+      "alpha": 1922.1,
+      "beta": 1007.9
+    },
+    "doubleTop": {
+      "alpha": 1240.3,
+      "beta": 458.7
+    },
+    "headAndShoulders": {
+      "alpha": 2.0,
+      "beta": 2.0
+    },
+    "inverseHeadAndShoulders": {
+      "alpha": 2.0,
+      "beta": 2.0
+    },
+    "ascendingTriangle": {
+      "alpha": 5.0,
+      "beta": 7.0
+    },
+    "descendingTriangle": {
+      "alpha": 7.0,
+      "beta": 5.0
+    },
+    "symmetricTriangle": {
+      "alpha": 404.4,
+      "beta": 847.6
+    },
+    "risingWedge": {
+      "alpha": 392.8,
+      "beta": 216.2
+    },
+    "fallingWedge": {
+      "alpha": 504.1,
+      "beta": 915.9
+    }
+  },
+  "platt_params": {
+    "strongBuy_hammerRsiVolume": [
+      4.0,
+      -2.0
+    ],
+    "strongSell_shootingMacdVol": [
+      4.0,
+      -2.0
+    ],
+    "buy_goldenCrossRsi": [
+      4.0,
+      -2.0
+    ],
+    "sell_deadCrossMacd": [
+      4.0,
+      -2.0
+    ],
+    "buy_bbBounceRsi": [
+      4.0,
+      -2.0
+    ],
+    "sell_bbBreakoutRsi": [
+      4.0,
+      -2.0
+    ],
+    "buy_hammerBBVol": [
+      4.0,
+      -2.0
+    ],
+    "sell_shootingStarBBVol": [
+      4.0,
+      -2.0
+    ],
+    "buy_morningStarRsiVol": [
+      4.0,
+      -2.0
+    ],
+    "sell_eveningStarRsiVol": [
+      4.0,
+      -2.0
+    ],
+    "buy_engulfingMacdAlign": [
+      4.0,
+      -2.0
+    ],
+    "sell_engulfingMacdAlign": [
+      4.0,
+      -2.0
+    ],
+    "buy_doubleBottomNeckVol": [
+      4.0,
+      -2.0
+    ],
+    "sell_doubleTopNeckVol": [
+      4.0,
+      -2.0
+    ],
+    "buy_ichimokuTriple": [
+      4.0,
+      -2.0
+    ],
+    "sell_ichimokuTriple": [
+      4.0,
+      -2.0
+    ],
+    "buy_goldenMarubozuVol": [
+      4.0,
+      -2.0
+    ],
+    "sell_deadMarubozuVol": [
+      4.0,
+      -2.0
+    ]
   }
 }

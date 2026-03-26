@@ -237,6 +237,11 @@ class PatternEngine {
     return Object.freeze(shrunk);
   })();
 
+  /** Beta-Binomial 사후 승률 — rl_policy.json win_rates_live에서 로드
+   *  null이면 PATTERN_WIN_RATES_SHRUNK 폴백 (기존 James-Stein)
+   *  Phase G-2: conjugate prior → posterior mean = alpha/(alpha+beta) */
+  static PATTERN_WIN_RATES_LIVE = null;
+
   /** 전역 학습 가중치 (Worker에서 주입) */
   static _globalLearnedWeights = null;
 
@@ -514,7 +519,9 @@ class PatternEngine {
       patterns[pi].wc = +(hurstWeight * meanRevWeight).toFixed(4);
       // Dual Confidence: confidencePred = James-Stein shrinkage 적용 승률 (모델 입력용)
       // confidence(형태점수)는 UI 표시용으로 불변 유지
-      var wr = PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
+      var wr = (PatternEngine.PATTERN_WIN_RATES_LIVE && PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type] != null)
+        ? PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type]
+        : PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
       var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
       // 형태 품질 반영 — Kirkpatrick & Dahlquist (2011): body ratio + ATR 비율 → 신뢰도 조정
       // scaling = confidence/50, clamp [0.88, 1.12] (±12%, Caginalp 1998 실증 3~7%p 정합)

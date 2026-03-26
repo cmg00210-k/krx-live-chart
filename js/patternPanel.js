@@ -773,8 +773,8 @@ function updatePatternHistoryTable(patterns) {
     _demoRowWarn = '<tr><td colspan="10" style="text-align:center;font-size:9px;color:rgba(255,152,0,0.65);padding:3px 6px;background:rgba(255,152,0,0.06);">\u26A0 시뮬레이션 데이터 기반 통계 \u2014 실제 시장 수익률이 아닙니다</td></tr>';
   }
 
-  // Holm-Bonferroni 다중비교 보정 안내 행
-  var _holmNote = '<tr><td colspan="10" style="text-align:right;font-size:9px;color:var(--text-muted);padding:2px 6px;border-top:1px solid rgba(255,255,255,0.05);">\u203B Holm-Bonferroni \uB2E4\uC911\uBE44\uAD50 \uBCF4\uC815 \uC801\uC6A9</td></tr>';
+  // BH-FDR 다중비교 보정 안내 행 (Phase G-1: Holm→BH 전환)
+  var _holmNote = '<tr><td colspan="10" style="text-align:right;font-size:9px;color:var(--text-muted);padding:2px 6px;border-top:1px solid rgba(255,255,255,0.05);">\u203B Benjamini-Hochberg FDR \uB2E4\uC911\uBE44\uAD50 \uBCF4\uC815 \uC801\uC6A9</td></tr>';
 
   tbody.innerHTML = _demoRowWarn + rows.join('') + _holmNote;
 
