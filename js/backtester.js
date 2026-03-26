@@ -61,6 +61,7 @@ class PatternBacktester {
       threeInsideDown:        { name: '하락삼내형', signal: 'sell' },
       abandonedBabyBullish:   { name: '강세버림받은아기', signal: 'buy'  },
       abandonedBabyBearish:   { name: '약세버림받은아기', signal: 'sell' },
+      channel:                { name: '채널',           signal: 'neutral' },
     };
 
     /** 캐시 키 (종목코드 + 캔들길이) → 결과 */
@@ -263,6 +264,97 @@ class PatternBacktester {
     this._applyHolmBonferroni(results);
 
     return results;
+  }
+
+  /** Walk-Forward 검증 — Pardo (2008), Bailey & Lopez de Prado (2014)
+   *  WFE = OOS_meanReturn / IS_meanReturn
+   *  WFE >= 50%: robust, 30-50%: marginal, < 30%: overfit 의심
+   *
+   *  구조: expanding window, 4 folds, purging H=5 bars
+   *  cross-sectional pooling은 backtestAll()이 개별 종목에서 수행하므로
+   *  여기서는 단일 종목 시계열 기준 Walk-Forward를 구현
+   *
+   *  @param {Array} candles — OHLCV 캔들 배열
+   *  @param {string} pType — 패턴 타입
+   *  @param {Object} [opts] — { folds: 4, horizon: 5, minTrain: 60 }
+   *  @returns {{ wfe, foldResults[], isRobust, label }} 또는 null
+   */
+  walkForwardTest(candles, pType, opts) {
+    if (!candles || candles.length < 100) return null;
+    const folds = (opts && opts.folds) || 4;
+    const horizon = (opts && opts.horizon) || 5;
+    const minTrain = (opts && opts.minTrain) || 60;
+    const purge = horizon; // purging window = forecast horizon
+    const len = candles.length;
+
+    // OOS 블록 크기: 전체의 ~20%를 folds개로 분배
+    const oosSize = Math.max(15, Math.floor(len * 0.20 / folds));
+    const totalOos = oosSize * folds;
+    if (len - totalOos < minTrain) return null;
+
+    const foldResults = [];
+    let sumIS = 0, sumOOS = 0, validFolds = 0;
+
+    for (let f = 0; f < folds; f++) {
+      // Expanding window: train [0, trainEnd], test [testStart, testEnd]
+      const testEnd = len - 1 - (folds - 1 - f) * oosSize;
+      const testStart = testEnd - oosSize + 1;
+      const trainEnd = testStart - purge - 1; // purging gap
+      if (trainEnd < minTrain || testStart < 0 || testEnd >= len) continue;
+
+      const trainCandles = candles.slice(0, trainEnd + 1);
+      const testCandles = candles.slice(testStart, testEnd + 1);
+
+      if (trainCandles.length < minTrain || testCandles.length < 5) continue;
+
+      // IS: backtest on training set
+      const isResult = this.backtest(trainCandles, pType);
+      // OOS: backtest on test set
+      const oosResult = this.backtest(testCandles, pType);
+
+      const isReturn = (isResult.horizons && isResult.horizons[horizon])
+        ? isResult.horizons[horizon].mean || 0 : 0;
+      const oosReturn = (oosResult.horizons && oosResult.horizons[horizon])
+        ? oosResult.horizons[horizon].mean || 0 : 0;
+
+      foldResults.push({
+        fold: f + 1,
+        trainSize: trainCandles.length,
+        testSize: testCandles.length,
+        isSamples: isResult.sampleSize || 0,
+        oosSamples: oosResult.sampleSize || 0,
+        isReturn: +isReturn.toFixed(4),
+        oosReturn: +oosReturn.toFixed(4),
+      });
+
+      if (isResult.sampleSize > 0 && oosResult.sampleSize > 0) {
+        sumIS += isReturn;
+        sumOOS += oosReturn;
+        validFolds++;
+      }
+    }
+
+    if (validFolds < 2) return null;
+
+    const avgIS = sumIS / validFolds;
+    const avgOOS = sumOOS / validFolds;
+    // WFE: avoid division by zero, sign-aware (both negative = not robust)
+    const wfe = Math.abs(avgIS) > 0.0001
+      ? Math.round((avgOOS / avgIS) * 100) : 0;
+    // Both-negative: WFE numerically correct but strategically useless
+    const bothNegative = avgIS < 0 && avgOOS < 0;
+
+    const label = bothNegative ? 'negative' : wfe >= 50 ? 'robust' : wfe >= 30 ? 'marginal' : 'overfit';
+
+    return {
+      wfe,
+      avgIS: +avgIS.toFixed(4),
+      avgOOS: +avgOOS.toFixed(4),
+      validFolds,
+      foldResults,
+      isRobust: wfe >= 50 && !bothNegative,
+      label,
+    };
   }
 
   /**

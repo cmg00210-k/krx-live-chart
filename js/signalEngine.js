@@ -1378,7 +1378,13 @@ class SignalEngine {
         // czw/data/composite_calibration.json 교정값 참조
         var _predMap = { strongBuy_hammerRsiVolume: 61, strongSell_shootingMacdVol: 69,
           buy_goldenCrossRsi: 58, sell_deadCrossMacd: 58,
-          buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55 };
+          buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55,
+          buy_hammerBBVol: 63, sell_shootingStarBBVol: 69,
+          buy_morningStarRsiVol: 58, sell_eveningStarRsiVol: 65,
+          buy_engulfingMacdAlign: 60, sell_engulfingMacdAlign: 66,
+          buy_doubleBottomNeckVol: 72, sell_doubleTopNeckVol: 75,
+          buy_ichimokuTriple: 70, sell_ichimokuTriple: 70,
+          buy_goldenMarubozuVol: 65, sell_deadMarubozuVol: 68 };
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
           : confidence;
@@ -1489,6 +1495,26 @@ class SignalEngine {
     const sentiment = totalWeight === 0 ? 0 :
       Math.round(((buyWeight - sellWeight) / totalWeight) * 100);
 
+    // Shannon entropy — 시그널 다양성 측정
+    // H = -Σ(p_i · log2(p_i)), 범위 [0, log2(categories)]
+    // H 낮음 = 소수 카테고리 집중 (중복 시그널) → confidence 감쇄 근거
+    const catValues = Object.values(categoryCounts);
+    const catTotal = catValues.reduce((a, b) => a + b, 0);
+    let entropy = 0;
+    let maxEntropy = 0;
+    if (catTotal > 0) {
+      const activeCats = catValues.filter(v => v > 0).length;
+      maxEntropy = activeCats > 1 ? Math.log2(activeCats) : 1;
+      for (const v of catValues) {
+        if (v > 0) {
+          const p = v / catTotal;
+          entropy -= p * Math.log2(p);
+        }
+      }
+    }
+    // 정규화: 0~1 (1 = 완전 분산, 0 = 단일 카테고리)
+    const entropyNorm = maxEntropy > 0 ? +(entropy / maxEntropy).toFixed(3) : 0;
+
     return {
       sentiment: Math.max(-100, Math.min(100, sentiment)),
       sentimentLabel: this._sentimentLabel(sentiment),
@@ -1497,6 +1523,8 @@ class SignalEngine {
       recentSell: sellCount,
       recentNeutral: neutralCount,
       categoryCounts,
+      entropy: +entropy.toFixed(3),
+      entropyNorm,
     };
   }
 
@@ -1538,7 +1566,9 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, composite: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, composite: 0 },
+      entropy: 0,
+      entropyNorm: 0,
     };
   }
 }

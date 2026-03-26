@@ -67,7 +67,7 @@ var _VIZ_CANDLE_TYPES = new Set([
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([
   'ascendingTriangle','descendingTriangle','symmetricTriangle','risingWedge','fallingWedge',
-  'doubleBottom','doubleTop','headAndShoulders','inverseHeadAndShoulders'
+  'doubleBottom','doubleTop','headAndShoulders','inverseHeadAndShoulders','channel'
 ]);
 
 /** 시각화 토글에 따라 패턴 배열 필터링 */

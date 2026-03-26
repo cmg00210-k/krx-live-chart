@@ -295,6 +295,16 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '수렴 이탈 없이 삼각형 꼭짓점(apex)을 초과하면 패턴 소멸. 거짓 돌파(throwback) 37% 발생.'
   },
 
+  channel: {
+    nameKo: '채널',
+    category: '차트패턴 (추세)',
+    candles: 15,
+    academicDesc: '평행한 상단·하단 추세선 사이에서 가격이 규칙적으로 왕복하는 구조. Murphy (1999): 추세 채널은 지지·저항 수준을 동시에 제공하며, 채널 폭은 변동성을 반영.',
+    psychology: '트레이더들이 반복된 가격 수준에서 매수·매도 결정을 내리면서 자기실현적 지지·저항이 형성. 채널 이탈 시 포지션 청산이 집중되어 급등·급락 유발.',
+    bulkowskiWinRate: 58,
+    invalidation: '가격이 채널 상단/하단을 ATR×1.5 이상 이탈하면 채널 패턴 소멸. 채널 폭이 ATR×1.5 미만으로 좁아지면 수렴 패턴(삼각형)으로 전환.'
+  },
+
   doubleBottom: {
     nameKo: '이중바닥',
     category: '차트패턴 (반전)',

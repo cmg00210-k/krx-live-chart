@@ -183,6 +183,48 @@ function calcHurst(closes, minWindow = 10) {
   return (n * sxy - sx * sy) / (n * sx2 - sx * sx);
 }
 
+/** Hill 꼬리 지수 추정량 — Hill (1975)
+ *  α = k / Σ_{i=1}^{k} [ln(X_(i)) - ln(X_(k+1))]
+ *  α < 4: 두꺼운 꼬리 (fat tail), α >= 4: 정규 근사 가능
+ *  k 자동 선택: floor(sqrt(n)) — Drees & Kaufmann (1998)
+ *
+ *  @param {number[]} returns - 수익률 배열 (양수/음수 모두)
+ *  @param {number} [k] - 상위 k개 순서 통계량 (미지정 시 자동)
+ *  @returns {{ alpha: number, se: number, isHeavyTail: boolean, k: number }} 또는 null
+ */
+function calcHillEstimator(returns, k) {
+  if (!returns || returns.length < 10) return null;
+  // 절대값 정렬 (내림차순)
+  var absRet = [];
+  for (var i = 0; i < returns.length; i++) {
+    if (returns[i] !== 0) absRet.push(Math.abs(returns[i]));
+  }
+  absRet.sort(function(a, b) { return b - a; });
+  var n = absRet.length;
+  if (n < 10) return null;
+
+  if (!k || k < 2) k = Math.max(2, Math.floor(Math.sqrt(n)));
+  if (k >= n) k = n - 1;
+
+  // Hill 추정: α = k / Σ[ln(X_i) - ln(X_{k+1})]
+  var logThreshold = Math.log(absRet[k]); // X_(k+1) in 0-indexed = absRet[k]
+  if (!isFinite(logThreshold) || absRet[k] <= 0) return null;
+
+  var sumLog = 0;
+  for (var i = 0; i < k; i++) {
+    var lnXi = Math.log(absRet[i]);
+    if (!isFinite(lnXi)) continue;
+    sumLog += lnXi - logThreshold;
+  }
+  if (sumLog <= 0) return null;
+
+  var alpha = k / sumLog;
+  // 점근 표준오차: se = α / sqrt(k) — Hill (1975)
+  var se = alpha / Math.sqrt(k);
+
+  return { alpha: alpha, se: se, isHeavyTail: alpha < 4, k: k };
+}
+
 /**
  * 가중 다중 선형 회귀 (WLS — Weighted Least Squares)
  *
@@ -321,6 +363,48 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     fitted: fitted,
     sigmaHat2: sigmaHat2,
     invXtWX: inv,
+  };
+}
+
+/** OLS 추세선 — calcWLSRegression wrapper (uniform weights, λ=0)
+ *  Lo & MacKinlay (1999): 가격 수준 R² > 0.15 = 추세 존재, > 0.50 = 강한 추세
+ *  slope는 ATR(14)로 정규화하여 가격대 무관 비교 가능
+ *
+ *  @param {number[]} closes - 종가 배열
+ *  @param {number} [window=20] - 회귀 윈도우 크기
+ *  @param {number} [atr14Last] - 최근 ATR(14), 미지정 시 close*0.02 fallback
+ *  @returns {{ slope: number, slopeNorm: number, intercept: number, r2: number,
+ *             direction: string, tStat: number }} 또는 null
+ */
+function calcOLSTrend(closes, window, atr14Last) {
+  if (!window) window = 20;
+  if (!closes || closes.length < window) return null;
+
+  // 최근 window개 종가 추출
+  var seg = closes.slice(closes.length - window);
+  var atr = atr14Last && atr14Last > 0 ? atr14Last : seg[seg.length - 1] * 0.02;
+
+  // 설계 행렬 [[1, 0], [1, 1], ..., [1, window-1]]
+  var X = [];
+  for (var i = 0; i < window; i++) {
+    X.push([1, i]);
+  }
+
+  var reg = calcWLSRegression(X, seg, null, 0);
+  if (!reg) return null;
+
+  var slope = reg.coeffs[1];
+  var slopeNorm = atr > 0 ? slope / atr : 0;
+  var direction = Math.abs(slopeNorm) < 0.05 ? 'flat'
+    : slopeNorm > 0 ? 'up' : 'down';
+
+  return {
+    slope: slope,
+    slopeNorm: slopeNorm,
+    intercept: reg.coeffs[0],
+    r2: reg.rSquared,
+    direction: direction,
+    tStat: reg.tStats[1]
   };
 }
 
@@ -820,6 +904,34 @@ class IndicatorCache {
     const key = `hurst_${minWindow}`;
     if (!(key in this._cache)) {
       this._cache[key] = calcHurst(this.closes, minWindow);
+    }
+    return this._cache[key];
+  }
+
+  /** OLS 추세선 (window) — slope/r2/direction */
+  olsTrend(window = 20) {
+    const key = `olsTrend_${window}`;
+    if (!(key in this._cache)) {
+      const atrArr = this.atr(14);
+      const lastATR = atrArr && atrArr.length > 0 ? atrArr[atrArr.length - 1] : null;
+      this._cache[key] = calcOLSTrend(this.closes, window, lastATR);
+    }
+    return this._cache[key];
+  }
+
+  /** Hill 꼬리 지수 — 수익률 분포 tail thickness */
+  hill(k) {
+    const key = `hill_${k || 'auto'}`;
+    if (!(key in this._cache)) {
+      const cl = this.closes;
+      if (cl.length < 11) { this._cache[key] = null; }
+      else {
+        const rets = [];
+        for (let i = 1; i < cl.length; i++) {
+          if (cl[i - 1] > 0) rets.push((cl[i] - cl[i - 1]) / cl[i - 1]);
+        }
+        this._cache[key] = calcHillEstimator(rets, k);
+      }
     }
     return this._cache[key];
   }

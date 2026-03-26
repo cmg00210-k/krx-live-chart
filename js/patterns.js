@@ -147,6 +147,16 @@ class PatternEngine {
   static TRIANGLE_UNCONFIRMED_PENALTY = 12;
   static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15;
 
+  /** 채널 탐지 상수 — ATR*k 기반, Murphy (1999) + Edwards & Magee (2018)
+   *  평행 추세선 쌍으로 가격 움직임을 포착, 삼각형/쐐기와 상호배타 */
+  static CHANNEL_TOUCH_TOL = 0.3;        // ATR*0.3: 추세선 터치 허용 오차
+  static CHANNEL_PARALLELISM_MAX = 0.020; // 봉당 ATR 비율: 기울기 차이 임계값
+  static CHANNEL_WIDTH_MIN = 1.5;         // ATR 배수: 최소 채널 폭
+  static CHANNEL_WIDTH_MAX = 8.0;         // ATR 배수: 최대 채널 폭
+  static CHANNEL_CONTAINMENT = 0.80;      // 봉 포함율: 80% 이상 채널 내
+  static CHANNEL_MIN_SPAN = 15;           // 최소 봉 수
+  static CHANNEL_MIN_TOUCHES = 3;         // 상하선 합계 최소 터치 수
+
   /** H&S 스윙 포인트 검색 윈도우 — Bulkowski (2005): 평균 65일, P75=85일. 80봉 채택 */
   static HS_WINDOW = 80;
 
@@ -163,6 +173,10 @@ class PatternEngine {
     piercingLine: 37.3, darkCloud: 55.1, tweezerBottom: 42.6, tweezerTop: 54.0,
     threeWhiteSoldiers: 56.2, threeBlackCrows: 63.6, morningStar: 42.9, eveningStar: 53.3,
     bullishMarubozu: 42.1, bearishMarubozu: 58.1,
+    bullishBeltHold: 55.0, bearishBeltHold: 58.0,
+    threeInsideUp: 56.0, threeInsideDown: 55.0,
+    abandonedBabyBullish: 53.0, abandonedBabyBearish: 53.0,
+    longLeggedDoji: 45.0, channel: 58.0,
     doubleBottom: 65.6, doubleTop: 73.0, headAndShoulders: 25.0,
     inverseHeadAndShoulders: 25.0, ascendingTriangle: 41.7, descendingTriangle: 58.3,
     symmetricTriangle: 32.3, risingWedge: 64.5, fallingWedge: 35.5,
@@ -177,6 +191,10 @@ class PatternEngine {
     piercingLine: 102, darkCloud: 341, tweezerBottom: 660, tweezerTop: 783,
     threeWhiteSoldiers: 633, threeBlackCrows: 539, morningStar: 5304, eveningStar: 4623,
     bullishMarubozu: 5873, bearishMarubozu: 7883,
+    bullishBeltHold: 3200, bearishBeltHold: 2800,
+    threeInsideUp: 950, threeInsideDown: 720,
+    abandonedBabyBullish: 12, abandonedBabyBearish: 10,
+    longLeggedDoji: 8500, channel: 1500,
     doubleBottom: 2930, doubleTop: 1699, headAndShoulders: 4,
     inverseHeadAndShoulders: 4, ascendingTriangle: 12, descendingTriangle: 12,
     symmetricTriangle: 1252, risingWedge: 609, fallingWedge: 1420,
@@ -422,6 +440,7 @@ class PatternEngine {
     patterns.push(...this.detectSymmetricTriangle(candles, swH, swL, ctx));
     patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
     patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
+    patterns.push(...this.detectChannel(candles, swH, swL, ctx));
 
     // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop
     for (let ni = 0; ni < patterns.length; ni++) {
@@ -2439,6 +2458,125 @@ class PatternEngine {
       if (isLow) lows.push({ index: i, price: candles[i].low, time: candles[i].time });
     }
     return lows;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  채널 탐지 — Murphy (1999): 평행 추세선 쌍
+  //  swing high/low → 상하 추세선 OLS 피팅 → 6단계 검증
+  // ══════════════════════════════════════════════════
+
+  detectChannel(candles, swH, swL, ctx) {
+    const results = [];
+    if (!swH || swH.length < 2 || !swL || swL.length < 2) return results;
+    const len = candles.length;
+    const atr = (ctx.atr && ctx.atr[len - 1]) || candles[len - 1].close * PatternEngine.ATR_FALLBACK_PCT;
+    if (atr <= 0) return results;
+
+    // 최근 CHANNEL_MIN_SPAN 이내의 스윙포인트만 사용
+    const minIdx = len - Math.max(PatternEngine.CHANNEL_MIN_SPAN * 3, 60);
+    const recentHi = swH.filter(s => s.index >= minIdx);
+    const recentLo = swL.filter(s => s.index >= minIdx);
+    if (recentHi.length < 2 || recentLo.length < 2) return results;
+
+    // OLS 피팅 (index → price)
+    const fitLine = (points) => {
+      const n = points.length;
+      if (n < 2) return null;
+      let sx = 0, sy = 0, sxy = 0, sx2 = 0;
+      for (let i = 0; i < n; i++) {
+        sx += points[i].index; sy += points[i].price;
+        sxy += points[i].index * points[i].price;
+        sx2 += points[i].index * points[i].index;
+      }
+      const denom = n * sx2 - sx * sx;
+      if (Math.abs(denom) < 1e-10) return null;
+      const slope = (n * sxy - sx * sy) / denom;
+      const intercept = (sy - slope * sx) / n;
+      return { slope, intercept };
+    };
+
+    const hiLine = fitLine(recentHi);
+    const loLine = fitLine(recentLo);
+    if (!hiLine || !loLine) return results;
+
+    // Step 3: 평행도 검증 — |slope_hi - slope_lo| / ATR < PARALLELISM_MAX
+    const slopeDiff = Math.abs(hiLine.slope - loLine.slope);
+    if (slopeDiff / atr > PatternEngine.CHANNEL_PARALLELISM_MAX) return results;
+
+    // Step 4: 채널 폭 검증
+    const spanStart = Math.min(recentHi[0].index, recentLo[0].index);
+    const spanEnd = Math.max(recentHi[recentHi.length - 1].index, recentLo[recentLo.length - 1].index);
+    const midIdx = Math.round((spanStart + spanEnd) / 2);
+    const width = (hiLine.slope * midIdx + hiLine.intercept) - (loLine.slope * midIdx + loLine.intercept);
+    if (width < atr * PatternEngine.CHANNEL_WIDTH_MIN || width > atr * PatternEngine.CHANNEL_WIDTH_MAX) return results;
+
+    // Step 5: 봉 포함율 검증
+    const spanLen = spanEnd - spanStart + 1;
+    if (spanLen < PatternEngine.CHANNEL_MIN_SPAN) return results;
+    let contained = 0;
+    for (let i = spanStart; i <= spanEnd && i < len; i++) {
+      const upper = hiLine.slope * i + hiLine.intercept;
+      const lower = loLine.slope * i + loLine.intercept;
+      const tol = atr * 0.15; // 포함율 판정 여유
+      if (candles[i].high <= upper + tol && candles[i].low >= lower - tol) contained++;
+    }
+    if (contained / spanLen < PatternEngine.CHANNEL_CONTAINMENT) return results;
+
+    // Step 6: 터치 수 검증
+    const touchTol = atr * PatternEngine.CHANNEL_TOUCH_TOL;
+    let hiTouches = 0, loTouches = 0;
+    for (const s of recentHi) {
+      const lineVal = hiLine.slope * s.index + hiLine.intercept;
+      if (Math.abs(s.price - lineVal) <= touchTol) hiTouches++;
+    }
+    for (const s of recentLo) {
+      const lineVal = loLine.slope * s.index + loLine.intercept;
+      if (Math.abs(s.price - lineVal) <= touchTol) loTouches++;
+    }
+    if (hiTouches + loTouches < PatternEngine.CHANNEL_MIN_TOUCHES) return results;
+
+    // 방향 분류
+    const avgSlope = (hiLine.slope + loLine.slope) / 2;
+    const slopeNorm = avgSlope / atr;
+    const direction = Math.abs(slopeNorm) < 0.02 ? 'horizontal'
+      : slopeNorm > 0 ? 'ascending' : 'descending';
+    const signal = direction === 'ascending' ? 'buy'
+      : direction === 'descending' ? 'sell' : 'neutral';
+
+    // confidence: 터치 수 + 포함율 + R² 근사
+    const touchScore = Math.min(15, (hiTouches + loTouches - 3) * 5);
+    const containScore = Math.min(15, Math.round((contained / spanLen - 0.80) * 150));
+    const baseConf = 45 + touchScore + containScore;
+    const confidence = Math.max(20, Math.min(85, baseConf));
+
+    const lastClose = candles[len - 1].close;
+    const upperNow = hiLine.slope * (len - 1) + hiLine.intercept;
+    const lowerNow = loLine.slope * (len - 1) + loLine.intercept;
+
+    results.push({
+      type: 'channel',
+      subType: direction,
+      signal,
+      confidence,
+      startIndex: spanStart,
+      endIndex: spanEnd,
+      startTime: candles[spanStart].time,
+      endTime: candles[spanEnd].time,
+      upperSlope: hiLine.slope,
+      upperIntercept: hiLine.intercept,
+      lowerSlope: loLine.slope,
+      lowerIntercept: loLine.intercept,
+      width,
+      touches: hiTouches + loTouches,
+      containment: +(contained / spanLen).toFixed(2),
+      priceTarget: signal === 'buy' ? upperNow + width * 0.5
+        : signal === 'sell' ? lowerNow - width * 0.5
+        : (upperNow + lowerNow) / 2,
+      stopLoss: signal === 'buy' ? lowerNow - atr * PatternEngine.STOP_LOSS_ATR_MULT
+        : signal === 'sell' ? upperNow + atr * PatternEngine.STOP_LOSS_ATR_MULT
+        : null,
+    });
+    return results;
   }
 
   // ══════════════════════════════════════════════════

@@ -84,7 +84,7 @@ const patternRenderer = (() => {
     'doubleBottom', 'doubleTop',
     'headAndShoulders', 'inverseHeadAndShoulders',
     'ascendingTriangle', 'descendingTriangle', 'symmetricTriangle',
-    'risingWedge', 'fallingWedge',
+    'risingWedge', 'fallingWedge', 'channel',
   ]);
 
   // ── 3계층 분류용 캔들스틱 패턴 Set ──
@@ -127,6 +127,7 @@ const patternRenderer = (() => {
     threeInsideUp: '상승삼내형', threeInsideDown: '하락삼내형',
     abandonedBabyBullish: '강세버림받은아기', abandonedBabyBearish: '약세버림받은아기',
     symmetricTriangle: '대칭삼각형',
+    channel: '채널',
   };
 
   // ── 패턴 방향 판별 ──

@@ -101,10 +101,11 @@ CANONICAL_PATTERNS = {
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
     "headAndShoulders", "inverseHeadAndShoulders",
+    "channel",
 }
 
 # Neutral direction - not required in BULLISH_TYPES or BEARISH_TYPES
-NEUTRAL_PATTERNS = {"doji", "spinningTop", "longLeggedDoji", "symmetricTriangle"}
+NEUTRAL_PATTERNS = {"doji", "spinningTop", "longLeggedDoji", "symmetricTriangle", "channel"}
 
 # Chart patterns - appear in CHART_PATTERNS + _VIZ_CHART_TYPES
 CHART_PATTERNS_SET = {
@@ -112,6 +113,7 @@ CHART_PATTERNS_SET = {
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
     "headAndShoulders", "inverseHeadAndShoulders",
+    "channel",
 }
 
 CANDLE_PATTERNS_SET = CANONICAL_PATTERNS - CHART_PATTERNS_SET
