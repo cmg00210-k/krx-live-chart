@@ -1321,6 +1321,17 @@ class SignalEngine {
   _matchComposites(candles, indicatorSignals, candleSignalMap) {
     const composites = [];
 
+    // Dual Confidence: confidencePred = calibration 기반 예측 승률 (모델 입력용)
+    const _predMap = { strongBuy_hammerRsiVolume: 61, strongSell_shootingMacdVol: 69,
+      buy_goldenCrossRsi: 58, sell_deadCrossMacd: 58,
+      buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55,
+      buy_hammerBBVol: 63, sell_shootingStarBBVol: 69,
+      buy_morningStarRsiVol: 58, sell_eveningStarRsiVol: 65,
+      buy_engulfingMacdAlign: 60, sell_engulfingMacdAlign: 66,
+      buy_doubleBottomNeckVol: 72, sell_doubleTopNeckVol: 75,
+      buy_ichimokuTriple: 70, sell_ichimokuTriple: 70,
+      buy_goldenMarubozuVol: 65, sell_deadMarubozuVol: 68 };
+
     // 지표 시그널 → type별 인덱스 맵
     const indMap = new Map();
     for (const s of indicatorSignals) {
@@ -1374,17 +1385,7 @@ class SignalEngine {
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
         );
-        // Dual Confidence: confidencePred = calibration 기반 예측 승률 (모델 입력용)
         // czw/data/composite_calibration.json 교정값 참조
-        var _predMap = { strongBuy_hammerRsiVolume: 61, strongSell_shootingMacdVol: 69,
-          buy_goldenCrossRsi: 58, sell_deadCrossMacd: 58,
-          buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55,
-          buy_hammerBBVol: 63, sell_shootingStarBBVol: 69,
-          buy_morningStarRsiVol: 58, sell_eveningStarRsiVol: 65,
-          buy_engulfingMacdAlign: 60, sell_engulfingMacdAlign: 66,
-          buy_doubleBottomNeckVol: 72, sell_doubleTopNeckVol: 75,
-          buy_ichimokuTriple: 70, sell_ichimokuTriple: 70,
-          buy_goldenMarubozuVol: 65, sell_deadMarubozuVol: 68 };
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
           : confidence;

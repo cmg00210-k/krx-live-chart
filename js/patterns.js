@@ -2421,9 +2421,9 @@ class PatternEngine {
       var rr = reward / risk;
       p.riskReward = +rr.toFixed(2);
       if (rr < 2.25) {
-        p.confidence = Math.max(10, p.confidence - 12);
-      } else if (rr < 2.5) {
         p.confidence = Math.max(10, p.confidence - 25);
+      } else if (rr < 2.5) {
+        p.confidence = Math.max(10, p.confidence - 12);
       }
     }
   }

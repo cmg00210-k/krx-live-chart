@@ -83,7 +83,7 @@ class PatternBacktester {
   _loadRLPolicy() {
     if (this._rlPolicyAttempted) return;
     this._rlPolicyAttempted = true;
-    var self = this;
+    var that = this;
     var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
     var policyUrl = isWorker
       ? '../data/backtest/rl_policy.json'
@@ -92,7 +92,7 @@ class PatternBacktester {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
-          self._rlPolicy = data;
+          that._rlPolicy = data;
         }
       })
       .catch(function() { /* silent fallback */ });

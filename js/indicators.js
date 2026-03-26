@@ -7,6 +7,7 @@
 
 /** 단순 이동평균 (SMA) */
 function calcMA(data, n) {
+  if (!data || !data.length || n <= 0) return [];
   return data.map((_, i) => {
     if (i < n - 1) return null;
     let sum = 0;
@@ -169,6 +170,7 @@ function calcHurst(closes, minWindow = 10) {
       const S = Math.sqrt(devs.reduce((a, d) => a + d * d, 0) / w);
       if (S > 0) rsSum += R / S;
     }
+    if (rsSum <= 0) continue; // flat-price stocks: S=0 → log(-Inf) 방지
     logRS.push(Math.log(rsSum / numBlocks));
     logN.push(Math.log(w));
   }
