@@ -122,6 +122,12 @@ class PatternEngine {
   static TRIANGLE_UNCONFIRMED_PENALTY = 12;
   static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15;
 
+  /** H&S 스윙 포인트 검색 윈도우 — Bulkowski (2005): 평균 65일, P75=85일. 80봉 채택 */
+  static HS_WINDOW = 80;
+
+  /** H&S 어깨 대칭 허용 — Bulkowski: 유효 H&S 중 40%가 >5% 비대칭. Murphy: 완벽 대칭은 이론적 이상 */
+  static HS_SHOULDER_TOLERANCE = 0.10;
+
   /** Dual Confidence: 패턴별 실측 5일 승률 (pattern_performance.json 기반)
    *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
    *  소표본 패턴(n<50)은 전체 평균 방향으로 수축 권장 — Efron & Morris (1975) James-Stein */
@@ -136,6 +142,45 @@ class PatternEngine {
     inverseHeadAndShoulders: 25.0, ascendingTriangle: 41.7, descendingTriangle: 58.3,
     symmetricTriangle: 32.3, risingWedge: 64.5, fallingWedge: 35.5,
   });
+
+  /** 패턴별 실측 표본 크기 (pattern_performance.json h=5 기준, 302,986건 전체)
+   *  James-Stein shrinkage 계산에 필요 — Efron & Morris (1975) */
+  static PATTERN_SAMPLE_SIZES = Object.freeze({
+    hammer: 380, invertedHammer: 503, shootingStar: 366, hangingMan: 803,
+    doji: 42031, dragonflyDoji: 20, gravestoneDoji: 22, spinningTop: 137246,
+    bullishEngulfing: 20461, bearishEngulfing: 24538, bullishHarami: 12476, bearishHarami: 8650,
+    piercingLine: 102, darkCloud: 341, tweezerBottom: 660, tweezerTop: 783,
+    threeWhiteSoldiers: 633, threeBlackCrows: 539, morningStar: 5304, eveningStar: 4623,
+    bullishMarubozu: 5873, bearishMarubozu: 7883,
+    doubleBottom: 2930, doubleTop: 1699, headAndShoulders: 4,
+    inverseHeadAndShoulders: 4, ascendingTriangle: 12, descendingTriangle: 12,
+    symmetricTriangle: 1252, risingWedge: 609, fallingWedge: 1420,
+  });
+
+  /** James-Stein shrinkage 적용 WR — 소표본(n<50) → 전체 가중평균 방향 수축
+   *  Efron & Morris (1975): θ_shrunk = (n·θ + n0·θ_grand) / (n + n0), n0=50
+   *  대표본(n>5000): 왜곡 <0.1%p, 소표본(H&S n=4): 25%→~47% 수렴 */
+  static PATTERN_WIN_RATES_SHRUNK = (() => {
+    const raw = PatternEngine.PATTERN_WIN_RATES;
+    const sizes = PatternEngine.PATTERN_SAMPLE_SIZES;
+    const N0 = 50; // prior equivalent sample size
+
+    // 전체 가중 평균 (각 패턴의 n × WR 합 / 전체 n)
+    let sumWN = 0, sumN = 0;
+    for (const k in raw) {
+      const n = sizes[k] || 1;
+      sumWN += raw[k] * n;
+      sumN += n;
+    }
+    const grandMean = sumWN / sumN;
+
+    const shrunk = {};
+    for (const k in raw) {
+      const n = sizes[k] || 1;
+      shrunk[k] = +((n * raw[k] + N0 * grandMean) / (n + N0)).toFixed(1);
+    }
+    return Object.freeze(shrunk);
+  })();
 
   /** 전역 학습 가중치 (Worker에서 주입) */
   static _globalLearnedWeights = null;
@@ -394,9 +439,9 @@ class PatternEngine {
       patterns[pi].mw = meanRevWeight;
       patterns[pi].rw = regimeWeight;
       patterns[pi].wc = +(hurstWeight * meanRevWeight).toFixed(4);
-      // Dual Confidence: confidencePred = 실측 승률 기반 예측 신뢰도 (모델 입력용)
+      // Dual Confidence: confidencePred = James-Stein shrinkage 적용 승률 (모델 입력용)
       // confidence(형태점수)는 UI 표시용으로 불변 유지
-      var wr = PatternEngine.PATTERN_WIN_RATES[patterns[pi].type];
+      var wr = PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
       var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
       // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
       if (patterns[pi].necklineBreakConfirmed === false) {
@@ -1835,13 +1880,15 @@ class PatternEngine {
     if (swingHighs.length < 3 || swingLows.length < 2) return results;
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
-    const rH = swingHighs.filter(h => h.index >= candles.length - 60);
-    const rL = swingLows.filter(l => l.index >= candles.length - 60);
+    const hsW = PatternEngine.HS_WINDOW;
+    const rH = swingHighs.filter(h => h.index >= candles.length - hsW);
+    const rL = swingLows.filter(l => l.index >= candles.length - hsW);
 
     for (let i = 0; i < rH.length - 2; i++) {
       const ls = rH[i], head = rH[i + 1], rs = rH[i + 2];
       if (head.price <= ls.price || head.price <= rs.price) continue;
-      if (Math.abs(ls.price - rs.price) / head.price > 0.05) continue;
+      const shoulderAsym = Math.abs(ls.price - rs.price) / head.price;
+      if (shoulderAsym > PatternEngine.HS_SHOULDER_TOLERANCE) continue;
 
       const t1 = rL.find(l => l.index > ls.index && l.index < head.index);
       const t2 = rL.find(l => l.index > head.index && l.index < rs.index);
@@ -1859,9 +1906,10 @@ class PatternEngine {
       const raw = head.price - (t1.price + t2.price) / 2;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(neckAtEnd - patternHeight).toFixed(0);
-      const symmetry = 1 - Math.abs(ls.price - rs.price) / head.price * 10;
+      // 비대칭 → symmetry 점수: 0%→1.0, 5%→0.5, 10%→0.0 (선형 감산)
+      const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: Math.max(symmetry, 0) });
+      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: symmetry });
 
       results.push({
         type: 'headAndShoulders', name: '머리어깨형 (Head & Shoulders)', nameShort: 'H&S',
@@ -1889,13 +1937,15 @@ class PatternEngine {
     if (swingLows.length < 3 || swingHighs.length < 2) return results;
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
-    const rL = swingLows.filter(l => l.index >= candles.length - 60);
-    const rH = swingHighs.filter(h => h.index >= candles.length - 60);
+    const hsW = PatternEngine.HS_WINDOW;
+    const rL = swingLows.filter(l => l.index >= candles.length - hsW);
+    const rH = swingHighs.filter(h => h.index >= candles.length - hsW);
 
     for (let i = 0; i < rL.length - 2; i++) {
       const ls = rL[i], head = rL[i + 1], rs = rL[i + 2];
       if (head.price >= ls.price || head.price >= rs.price) continue;
-      if (Math.abs(ls.price - rs.price) / ls.price > 0.05) continue;
+      const shoulderAsym = Math.abs(ls.price - rs.price) / ls.price;
+      if (shoulderAsym > PatternEngine.HS_SHOULDER_TOLERANCE) continue;
 
       const t1 = rH.find(h => h.index > ls.index && h.index < head.index);
       const t2 = rH.find(h => h.index > head.index && h.index < rs.index);
@@ -1911,9 +1961,10 @@ class PatternEngine {
       const raw = (t1.price + t2.price) / 2 - head.price;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * PatternEngine.CHART_TARGET_ATR_CAP);
       const priceTarget = +(neckAtEnd + patternHeight).toFixed(0);
-      const symmetry = 1 - Math.abs(ls.price - rs.price) / ls.price * 10;
+      // 비대칭 → symmetry 점수: 0%→1.0, 5%→0.5, 10%→0.0 (선형 감산)
+      const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: Math.max(symmetry, 0) });
+      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: symmetry });
 
       results.push({
         type: 'inverseHeadAndShoulders', name: '역머리어깨형 (Inverse H&S)', nameShort: '역H&S',

@@ -117,6 +117,8 @@ class SignalEngine {
       // 일목균형표
       ichimokuBullishCross: 2.5, ichimokuBearishCross: -2.5,
       ichimokuCloudBreakout: 3, ichimokuCloudBreakdown: -3,
+      // StochRSI (RSI 중립대 보조 — Chande & Kroll 1994)
+      stochRsiOversold: 1.0, stochRsiOverbought: -1.0,
       // 허스트 지수 (레짐 필터 — 방향 중립)
       hurstTrending: 0, hurstMeanReverting: 0,
       // 거래량
@@ -153,6 +155,7 @@ class SignalEngine {
     indicatorSignals.push(...this._detectVolumeSignals(candles, cache));
     indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
     indicatorSignals.push(...this._detectHurstSignal(candles, cache));
+    indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
 
     // 캔들 패턴 → 시그널 타입 맵 (복합 매칭용)
     const candleSignalMap = this._buildCandleSignalMap(candlePatterns);
@@ -164,6 +167,9 @@ class SignalEngine {
 
     // 전체 시그널 병합 (지표 + 복합, 캔들 패턴은 이미 patterns.js에서 관리)
     const signals = [...indicatorSignals, ...compositeSignals];
+
+    // ADX 트렌드 필터 — Wilder (1978): 트렌드 추종 시그널 confidence 후조정
+    this._applyADXFilter(signals, cache);
 
     // 시간순 정렬
     signals.sort((a, b) => a.index - b.index);
@@ -831,6 +837,106 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
+  //  8. StochRSI 시그널 (RSI 중립대 보조)
+  //  Chande & Kroll (1994): RSI 30-70 밖에서는 RSI 자체가 시그널,
+  //  40-60 중립대에서 StochRSI 극값이 미세 모멘텀 포착
+  // ══════════════════════════════════════════════════════
+
+  _detectStochRSISignals(candles, cache) {
+    const signals = [];
+    const rsi = cache.rsi(14);
+    const { k: stochK } = cache.stochRsi(14, 3, 3, 14);
+    if (!stochK) return signals;
+
+    const COOLDOWN = 5; // 동일 방향 최소 간격 (whipsaw 방지)
+    let lastBuyIdx = -COOLDOWN;
+    let lastSellIdx = -COOLDOWN;
+
+    for (let i = 1; i < candles.length; i++) {
+      if (rsi[i] === null || stochK[i] === null) continue;
+
+      // RSI 40-60 중립대 조건 — RSI가 이미 시그널을 내는 구간은 제외 (이중 카운트 방지)
+      if (rsi[i] < 40 || rsi[i] > 60) continue;
+
+      // StochRSI K < 10 → 과매도 (매수 보조)
+      if (stochK[i] < 10 && (i - lastBuyIdx) >= COOLDOWN) {
+        const extremeBonus = Math.floor(Math.max(0, 10 - stochK[i]) / 2); // 0~5
+        signals.push({
+          type: 'stochRsiOversold',
+          source: 'indicator',
+          nameShort: 'StochRSI 과매도',
+          signal: 'buy',
+          strength: 'weak',
+          confidence: Math.min(55, 48 + extremeBonus),
+          index: i,
+          time: candles[i].time,
+          description: `RSI(${rsi[i].toFixed(1)}) 중립대에서 StochRSI K(${stochK[i].toFixed(1)}) 극저 — 단기 반등 가능`,
+        });
+        lastBuyIdx = i;
+      }
+
+      // StochRSI K > 90 → 과매수 (매도 보조)
+      if (stochK[i] > 90 && (i - lastSellIdx) >= COOLDOWN) {
+        const extremeBonus = Math.floor(Math.max(0, stochK[i] - 90) / 2); // 0~5
+        signals.push({
+          type: 'stochRsiOverbought',
+          source: 'indicator',
+          nameShort: 'StochRSI 과매수',
+          signal: 'sell',
+          strength: 'weak',
+          confidence: Math.min(55, 48 + extremeBonus),
+          index: i,
+          time: candles[i].time,
+          description: `RSI(${rsi[i].toFixed(1)}) 중립대에서 StochRSI K(${stochK[i].toFixed(1)}) 극고 — 단기 조정 가능`,
+        });
+        lastSellIdx = i;
+      }
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  ADX 트렌드 필터 (모듈레이터)
+  //  Wilder (1978): ADX는 독립 시그널이 아닌 기존 시그널의 품질 필터
+  //  트렌드 추종 시그널만 적용, 평균회귀 시그널은 미적용
+  // ══════════════════════════════════════════════════════
+
+  /** 트렌드 추종 시그널 타입 — ADX 정방향 조정 대상 */
+  static _ADX_TREND_TYPES = new Set([
+    'goldenCross', 'deadCross',
+    'maAlignment_bull', 'maAlignment_bear',
+    'macdBullishCross', 'macdBearishCross',
+    'ichimokuBullishCross', 'ichimokuBearishCross',
+    'ichimokuCloudBreakout', 'ichimokuCloudBreakdown',
+  ]);
+
+  _applyADXFilter(signals, cache) {
+    const { adx } = cache.adx(14);
+    if (!adx) return;
+
+    for (const sig of signals) {
+      // 트렌드 추종 시그널만 대상 (평균회귀 시그널 제외)
+      if (!SignalEngine._ADX_TREND_TYPES.has(sig.type)) continue;
+
+      const adxVal = adx[sig.index];
+      if (adxVal === null || adxVal === undefined) continue;
+
+      // Wilder (1978) 임계치 기반 세분화
+      let adj = 0;
+      if (adxVal >= 40)      adj = 10;   // 강한 추세
+      else if (adxVal >= 25) adj = 5;    // 건강한 추세
+      else if (adxVal >= 20) adj = 0;    // 전환 구간: 무조정
+      else if (adxVal >= 15) adj = -5;   // 약한 횡보
+      else                   adj = -10;  // 강한 횡보
+
+      sig.confidence = Math.max(30, Math.min(90, sig.confidence + adj));
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════
   //  범용 다이버전스 감지
   // ══════════════════════════════════════════════════════
 
@@ -1172,6 +1278,7 @@ class SignalEngine {
     if (type.startsWith('volume'))   return 'volume';
     if (type.startsWith('ichimoku')) return 'ichimoku';
     if (type.startsWith('hurst'))    return 'hurst';
+    if (type.startsWith('stochRsi')) return 'rsi'; // StochRSI는 RSI 카테고리 귀속
     return 'ma'; // fallback
   }
 
