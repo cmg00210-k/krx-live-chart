@@ -21,6 +21,13 @@ class PatternBacktester {
     this.KRX_SLIPPAGE = 0.10;     // 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
     this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
 
+    /** [Phase0-E] 보유기간별 거래비용 — Kyle (1985): 왕복 비용은 1회 발생, 장기 보유 시 분산 대비 감소
+     *  h=1: 0.31% (σ의 12-16%), h=5: 0.14%, h=20: 0.07%
+     *  sqrt(h) 정규화: Sharpe-ratio 관점에서 비용의 σ 대비 영향도 일관화 */
+    this._horizonCost = function(h) {
+      return this.KRX_COST / Math.sqrt(Math.max(1, h));
+    };
+
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
     this._META = {
       threeWhiteSoldiers:     { name: '적삼병',     signal: 'buy'  },
@@ -295,7 +302,7 @@ class PatternBacktester {
     const folds = (opts && opts.folds) || 4;
     const horizon = (opts && opts.horizon) || 5;
     const minTrain = (opts && opts.minTrain) || 60;
-    const purge = horizon; // purging window = forecast horizon
+    const purge = horizon * 2; // [Phase0-C] 2×horizon — Bailey & Lopez de Prado (2014): AR(1) 반감기 6.5봉 > horizon(5)
     const len = candles.length;
 
     // OOS 블록 크기: 전체의 ~20%를 folds개로 분배
@@ -641,7 +648,7 @@ class PatternBacktester {
         if (!entryPrice || entryPrice === 0) continue;
 
         const exitPrice = candles[exitIdx].close;
-        const ret = (exitPrice - entryPrice) / entryPrice * 100 - this.KRX_COST; // % (왕복 거래비용 차감)
+        const ret = (exitPrice - entryPrice) / entryPrice * 100 - this._horizonCost(h); // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
         validOccs.push(occ);
       }
@@ -853,7 +860,7 @@ class PatternBacktester {
         const entryPrice = candles[entryIdx2].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
-        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100 - this.KRX_COST; // 왕복 거래비용 차감
+        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100 - this._horizonCost(d); // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
       }
 

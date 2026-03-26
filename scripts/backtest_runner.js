@@ -31,12 +31,26 @@ const DATA_DIR = path.join(ROOT, 'data');
 
 // ── Create VM sandbox + load engine ──────────────────
 function createEngine() {
+  // [Phase H] fetch stub for Node.js VM — backtester._loadRLPolicy() needs fetch()
+  // Load rl_policy.json synchronously and return it via a fake fetch Promise
+  const rlPolicyPath = path.join(DATA_DIR, 'backtest', 'rl_policy.json');
+  const fakeFetch = function(url) {
+    if (url.includes('rl_policy') && fs.existsSync(rlPolicyPath)) {
+      const data = JSON.parse(fs.readFileSync(rlPolicyPath, 'utf8'));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
+    }
+    return Promise.resolve({ ok: false });
+  };
+
   const sandbox = {
     console: { log() {}, warn() {}, error() {} },
     Math, Object, Array, Map, Set, Date, Number, String,
     Boolean, RegExp, JSON, Error, TypeError, RangeError,
     parseInt, parseFloat, isNaN, isFinite, Infinity, NaN, undefined,
     self: {},
+    fetch: fakeFetch,
+    Promise,
+    WorkerGlobalScope: undefined,
   };
 
   vm.createContext(sandbox);

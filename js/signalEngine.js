@@ -331,6 +331,11 @@ class SignalEngine {
     // 전체 시그널 병합 (지표 + 복합, 캔들 패턴은 이미 patterns.js에서 관리)
     const signals = [...indicatorSignals, ...compositeSignals];
 
+    // [Phase0-B] 후처리 전 base confidence 스냅샷 — 누적 조정 상한 ±15 적용용
+    for (let si = 0; si < signals.length; si++) {
+      signals[si]._baseConf = signals[si].confidence;
+    }
+
     // ADX 트렌드 필터 — Wilder (1978): 트렌드 추종 시그널 confidence 후조정
     this._applyADXFilter(signals, cache);
     // CCI 레짐 필터 — Lambert (1980): |CCI| 기반 추세/횡보 판별 (ADX와 직교)
@@ -338,16 +343,34 @@ class SignalEngine {
 
     // OLS 추세 확인 → 순방향 confidence boost — Lo & MacKinlay (1999)
     // R² > 0.50 = 강한 추세: 추세 방향 시그널에 +5 boost
+    // [Phase0-B] OLS 상한 95→90 통일: ADX/CCI와 동일 상한 적용
     const olsTrend = cache.olsTrend(20);
     if (olsTrend && olsTrend.r2 > 0.50) {
       const trendDir = olsTrend.direction; // 'up', 'down', 'flat'
       for (let si = 0; si < signals.length; si++) {
         const s = signals[si];
         if (trendDir === 'up' && s.signal === 'buy') {
-          s.confidence = Math.min(95, (s.confidence || 50) + 5);
+          s.confidence = Math.min(90, (s.confidence || 50) + 5);
         } else if (trendDir === 'down' && s.signal === 'sell') {
-          s.confidence = Math.min(95, (s.confidence || 50) + 5);
+          s.confidence = Math.min(90, (s.confidence || 50) + 5);
         }
+      }
+    }
+
+    // [Phase0-B] 누적 조정 상한 ±15 — ADX+CCI+OLS 스택 인플레이션 방지
+    // 근거: financial-theory-expert 감사 결과 최악 +18 가능, 부분 중복 지표의 독립적 가산 이론 정당화 부족
+    const MAX_CUMULATIVE_ADJ = 15;
+    for (let si = 0; si < signals.length; si++) {
+      const s = signals[si];
+      if (s._baseConf != null) {
+        const delta = s.confidence - s._baseConf;
+        if (delta > MAX_CUMULATIVE_ADJ) {
+          s.confidence = s._baseConf + MAX_CUMULATIVE_ADJ;
+        } else if (delta < -MAX_CUMULATIVE_ADJ) {
+          s.confidence = s._baseConf - MAX_CUMULATIVE_ADJ;
+        }
+        s.confidence = Math.max(10, Math.min(90, s.confidence));
+        delete s._baseConf;
       }
     }
 
@@ -357,10 +380,12 @@ class SignalEngine {
     // 시장 심리 계산
     const stats = this._calcStats(signals, candles);
 
-    // entropy 감쇄: 소수 카테고리 집중 시 (entropyNorm < 0.5) confidence 축소
-    // 학술 근거: Shannon (1948) — 낮은 정보량 = 중복 시그널, 독립성 부족
-    if (stats.entropyNorm < 0.5 && signals.length > 2) {
-      const scale = 0.85 + 0.15 * (stats.entropyNorm / 0.5); // [0.85, 1.0]
+    // [P2-11] entropy 감쇄: sqrt 기반 점진적 회복 — Shannon (1948)
+    // 기존: 선형 [0.85, 1.0] at entropyNorm < 0.5 (0.5 이상 무효과)
+    // 개선: sqrt 감쇄 [0.80, 1.0] — 전 구간 적용, 다양성 높으면 빠르게 회복
+    //   entropyNorm=0→0.80, 0.25→0.90, 0.50→0.94, 1.0→1.0
+    if (signals.length > 2 && stats.entropyNorm < 1.0) {
+      const scale = 0.80 + 0.20 * Math.sqrt(Math.max(0, stats.entropyNorm));
       for (let si = 0; si < signals.length; si++) {
         if (signals[si].confidence) {
           signals[si].confidence = Math.max(10, Math.round(signals[si].confidence * scale));

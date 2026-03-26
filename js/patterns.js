@@ -57,7 +57,9 @@ class PatternEngine {
 
   /** 잠자리/비석 도지 그림자 비율 */
   static SPECIAL_DOJI_SHADOW_MIN = 0.70;
-  static SPECIAL_DOJI_COUNTER_MAX = 0.10;
+  /** [Phase1-D] 0.10→0.15: dragonfly/gravestone 반대꼬리 허용 확대 (n=20-22→35-45 목표)
+   *  Nison 원칙 "거의 없는 반대꼬리" 유지하면서, 5%→15% 범위의 미세 꼬리 허용 */
+  static SPECIAL_DOJI_COUNTER_MAX = 0.15;
 
   /** 족집게 봉 body 하한 / 가격 일치 허용오차 (ATR 배수) */
   static TWEEZER_BODY_MIN = 0.15;
@@ -78,10 +80,12 @@ class PatternEngine {
   /** 삼내형(Three Inside) 3봉 확인 body/ATR 최소 — Nison (1991) 확인 봉 유의미 크기 */
   static THREE_INSIDE_CONFIRM_MIN = 0.2;
 
-  /** 버림받은아기 도지 body/range 상한 — 표준 도지(0.05)보다 관대 (Bulkowski 2008) */
-  static ABANDONED_BABY_DOJI_MAX = 0.10;
-  /** 버림받은아기 갭 최소 ATR 비율 — KRX 갭 빈도 낮아 관대 설정 (국제 0.1 → KRX 0.05) */
-  static ABANDONED_BABY_GAP_MIN = 0.05;
+  /** 버림받은아기 도지 body/range 상한 — 표준 도지(0.05)보다 관대 (Bulkowski 2008)
+   *  [Phase1-B] 0.10→0.15: 준도지(near-doji) 포함, 캔들 body 임계(0.30) 대비 충분히 엄격 */
+  static ABANDONED_BABY_DOJI_MAX = 0.15;
+  /** 버림받은아기 갭 최소 ATR 비율 — KRX 갭 빈도 낮아 관대 설정
+   *  [Phase1-B] 0.05→0.03: KRX 연속매매 구조에서 near-gap 포착 (n=10-12→18-30 목표) */
+  static ABANDONED_BABY_GAP_MIN = 0.03;
 
   /** 긴다리도지 양쪽 꼬리/range 최소 — Nison: 양쪽 30% 이상 */
   static LONG_DOJI_SHADOW_MIN = 0.30;
@@ -157,58 +161,61 @@ class PatternEngine {
   static CHANNEL_MIN_SPAN = 15;           // 최소 봉 수
   static CHANNEL_MIN_TOUCHES = 3;         // 상하선 합계 최소 터치 수
 
-  /** H&S 스윙 포인트 검색 윈도우 — Bulkowski (2005): 평균 65일, P75=85일. 80봉 채택 */
-  static HS_WINDOW = 80;
+  /** H&S 스윙 포인트 검색 윈도우 — Bulkowski (2005): 평균 65일, P75=85일
+   *  [Phase1-A] 80→120: P75(85일) + 여유. KRX 낮은 변동성 레짐에서 장기 형성 포착 (n=4→15-25 목표) */
+  static HS_WINDOW = 120;
 
-  /** H&S 어깨 대칭 허용 — Bulkowski: 유효 H&S 중 40%가 >5% 비대칭. Murphy: 완벽 대칭은 이론적 이상 */
-  static HS_SHOULDER_TOLERANCE = 0.10;
+  /** H&S 어깨 대칭 허용 — Bulkowski: 유효 H&S 중 40%가 >5% 비대칭. Murphy: 완벽 대칭은 이론적 이상
+   *  [Phase1-A] 0.10→0.15: Bulkowski 40% 비대칭 포착, 실전 유효 H&S 커버리지 확대 */
+  static HS_SHOULDER_TOLERANCE = 0.15;
 
-  /** Dual Confidence: 패턴별 실측 5일 승률 (pattern_performance.json 기반)
+  /** [Phase2-E] 패턴별 실측 5일 승률 — 5년 데이터 2,768종목 545,307건 (2021-03~2026-03)
    *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
-   *  소표본 패턴(n<50)은 전체 평균 방향으로 수축 권장 — Efron & Morris (1975) James-Stein */
+   *  이전: 1년 302,986건. 갱신: 5년 545,307건 — 소표본 해소, WR 안정화 */
   static PATTERN_WIN_RATES = Object.freeze({
-    hammer: 47.9, invertedHammer: 52.3, shootingStar: 56.0, hangingMan: 55.2,
-    doji: 42.0, dragonflyDoji: 50.0, gravestoneDoji: 59.1, spinningTop: 43.1,
-    bullishEngulfing: 43.5, bearishEngulfing: 56.4, bullishHarami: 45.9, bearishHarami: 53.7,
-    piercingLine: 37.3, darkCloud: 55.1, tweezerBottom: 42.6, tweezerTop: 54.0,
-    threeWhiteSoldiers: 56.2, threeBlackCrows: 63.6, morningStar: 42.9, eveningStar: 53.3,
-    bullishMarubozu: 42.1, bearishMarubozu: 58.1,
-    bullishBeltHold: 55.0, bearishBeltHold: 58.0,
-    threeInsideUp: 56.0, threeInsideDown: 55.0,
-    abandonedBabyBullish: 53.0, abandonedBabyBearish: 53.0,
+    hammer: 45.2, invertedHammer: 48.9, shootingStar: 59.2, hangingMan: 59.4,
+    doji: 42.0, dragonflyDoji: 45.0, gravestoneDoji: 62.0, spinningTop: 43.1,
+    bullishEngulfing: 41.3, bearishEngulfing: 57.2, bullishHarami: 44.1, bearishHarami: 58.7,
+    piercingLine: 50.2, darkCloud: 58.5, tweezerBottom: 46.5, tweezerTop: 56.8,
+    threeWhiteSoldiers: 47.6, threeBlackCrows: 57.5, morningStar: 40.5, eveningStar: 56.7,
+    bullishMarubozu: 41.8, bearishMarubozu: 57.7,
+    bullishBeltHold: 51.4, bearishBeltHold: 57.4,
+    threeInsideUp: 42.4, threeInsideDown: 55.1,
+    abandonedBabyBullish: 51.8, abandonedBabyBearish: 64.8,
     longLeggedDoji: 45.0, channel: 58.0,
-    doubleBottom: 65.6, doubleTop: 73.0,
-    headAndShoulders: 50.0, inverseHeadAndShoulders: 50.0,
-    ascendingTriangle: 41.7, descendingTriangle: 58.3,
-    symmetricTriangle: 32.3, risingWedge: 64.5, fallingWedge: 35.5,
+    doubleBottom: 62.1, doubleTop: 74.7,
+    headAndShoulders: 56.9, inverseHeadAndShoulders: 44.0,
+    ascendingTriangle: 39.5, descendingTriangle: 54.3,
+    symmetricTriangle: 32.3, risingWedge: 59.8, fallingWedge: 39.1,
   });
 
-  /** 패턴별 실측 표본 크기 (pattern_performance.json h=5 기준, 302,986건 전체)
-   *  James-Stein shrinkage 계산에 필요 — Efron & Morris (1975) */
+  /** [Phase2-E] 패턴별 실측 표본 크기 — 5년 545,307건 기준
+   *  James-Stein shrinkage + Beta-Binomial posterior 계산에 필요 */
   static PATTERN_SAMPLE_SIZES = Object.freeze({
-    hammer: 380, invertedHammer: 503, shootingStar: 366, hangingMan: 803,
-    doji: 42031, dragonflyDoji: 20, gravestoneDoji: 22, spinningTop: 137246,
-    bullishEngulfing: 20461, bearishEngulfing: 24538, bullishHarami: 12476, bearishHarami: 8650,
-    piercingLine: 102, darkCloud: 341, tweezerBottom: 660, tweezerTop: 783,
-    threeWhiteSoldiers: 633, threeBlackCrows: 539, morningStar: 5304, eveningStar: 4623,
-    bullishMarubozu: 5873, bearishMarubozu: 7883,
-    bullishBeltHold: 3200, bearishBeltHold: 2800,
-    threeInsideUp: 950, threeInsideDown: 720,
-    abandonedBabyBullish: 12, abandonedBabyBearish: 10,
-    longLeggedDoji: 8500, channel: 1500,
-    doubleBottom: 2930, doubleTop: 1699, headAndShoulders: 4,
-    inverseHeadAndShoulders: 4, ascendingTriangle: 12, descendingTriangle: 12,
-    symmetricTriangle: 1252, risingWedge: 609, fallingWedge: 1420,
+    hammer: 4293, invertedHammer: 6710, shootingStar: 4472, hangingMan: 5554,
+    doji: 42031, dragonflyDoji: 1180, gravestoneDoji: 1107, spinningTop: 559149,
+    bullishEngulfing: 103287, bearishEngulfing: 113066, bullishHarami: 52880, bearishHarami: 47269,
+    piercingLine: 3753, darkCloud: 3093, tweezerBottom: 9024, tweezerTop: 5994,
+    threeWhiteSoldiers: 4811, threeBlackCrows: 4812, morningStar: 29550, eveningStar: 26229,
+    bullishMarubozu: 30796, bearishMarubozu: 41696,
+    bullishBeltHold: 3930, bearishBeltHold: 3355,
+    threeInsideUp: 14275, threeInsideDown: 13760,
+    abandonedBabyBullish: 137, abandonedBabyBearish: 71,
+    longLeggedDoji: 36690, channel: 125,
+    doubleBottom: 1939, doubleTop: 1539, headAndShoulders: 1156,
+    inverseHeadAndShoulders: 1280, ascendingTriangle: 352, descendingTriangle: 503,
+    symmetricTriangle: 2678, risingWedge: 1054, fallingWedge: 2380,
   });
 
   /** James-Stein shrinkage 적용 WR — 카테고리별 grand mean으로 수축
-   *  Efron & Morris (1975): θ_shrunk = (n·θ + n0·θ_cat) / (n + n0), n0=50
-   *  개선: candle/chart 별도 grand mean — spinningTop(n=137K)이 H&S(n=4)를 지배하는 문제 해소
+   *  Efron & Morris (1975): θ_shrunk = (n·θ + n0·θ_cat) / (n + n0)
+   *  [Phase2-E-2] N0=50→35: Empirical Bayes 최적화 (5년 545K건, N0_hat=34.5)
+   *  candle/chart 별도 grand mean — spinningTop(n=559K)이 H&S(n=1156)를 지배하는 문제 해소
    *  차트 패턴 grand mean ~45%, 캔들 패턴 grand mean ~43% (독립 추정) */
   static PATTERN_WIN_RATES_SHRUNK = (() => {
     const raw = PatternEngine.PATTERN_WIN_RATES;
     const sizes = PatternEngine.PATTERN_SAMPLE_SIZES;
-    const N0 = 50; // prior equivalent sample size
+    const N0 = 35; // [Phase2-E-2] Empirical Bayes optimal (was 50, N0_hat=34.5 from 5yr data)
 
     // 차트 패턴 카테고리 (chart grand mean 별도 계산)
     const chartSet = new Set([
@@ -316,8 +323,10 @@ class PatternEngine {
 
     if (lw && lw[patternType] && lw[patternType].confidence > 0.05) {
       const learned = lw[patternType];
-      // alpha: 최대 50% 적응 — 학술값을 완전히 버리지 않음
-      const alpha = Math.max(0, Math.min(learned.confidence * 2, 0.5));
+      // [P2-8] alpha: R²>0.3이면 최대 70% 적응, 아니면 50% 유지
+      // 근거: 높은 R²는 학습된 가중치의 신뢰성이 충분함을 의미
+      const alphaCap = (learned.rSquared && learned.rSquared > 0.3) ? 0.7 : 0.5;
+      const alpha = Math.max(0, Math.min(learned.confidence * 2, alphaCap));
       const W_learned = PatternEngine._normalizeCoeffsToWeights(learned.beta);
       W = {
         body: (1 - alpha) * W.body + alpha * W_learned.body,
@@ -542,6 +551,20 @@ class PatternEngine {
 
     // R:R 검증 게이트 — KRX calibration 기반 (calibrated_constants.json C1+D3)
     this._applyRRGate(patterns, candles);
+
+    // [Phase0-D] R:R 게이트 → confidencePred 직접 반영
+    // 기존: confidence(UI)만 감산, confidencePred(모델입력) 무영향 — 0-D 결함
+    // 수정: R:R 페널티를 confidencePred에도 직접 적용
+    // 근거: poor R:R 패턴이 동일 confidencePred를 받으면 WLS/LinUCB/Ridge 예측 왜곡
+    for (var ri = 0; ri < patterns.length; ri++) {
+      var rp = patterns[ri];
+      if (rp.riskReward == null || rp.confidencePred == null) continue;
+      if (rp.riskReward < 2.25) {
+        rp.confidencePred = Math.max(10, rp.confidencePred - 15);
+      } else if (rp.riskReward < 2.5) {
+        rp.confidencePred = Math.max(10, rp.confidencePred - 7);
+      }
+    }
 
     return this._dedup(patterns);
   }
@@ -1776,7 +1799,7 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   //
   //  Bulkowski (2008): 강세/약세 모두 신뢰도 높으나 출현 빈도 극히 낮음.
-  //  KRX: 가격제한폭 ±30%, 갭 빈도 낮아 GAP_MIN=0.05*ATR로 관대 설정.
+  //  KRX: 가격제한폭 ±30%, 갭 빈도 낮아 GAP_MIN=0.03*ATR로 관대 설정 (Phase1-B).
   //
   detectAbandonedBaby(candles, ctx = {}) {
     const results = [];
@@ -1851,8 +1874,9 @@ class PatternEngine {
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
-    const recentHighs = swingHighs.filter(h => h.index >= candles.length - 40);
-    const recentLows = swingLows.filter(l => l.index >= candles.length - 40);
+    // [Phase1-C] 40→60: Bulkowski 중앙값 47일 포착, wedge/symmetric(50봉)과 정합
+    const recentHighs = swingHighs.filter(h => h.index >= candles.length - 60);
+    const recentLows = swingLows.filter(l => l.index >= candles.length - 60);
 
     for (let i = 0; i < recentHighs.length - 1; i++) {
       const h1 = recentHighs[i], h2 = recentHighs[i + 1];
@@ -1864,10 +1888,10 @@ class PatternEngine {
         .sort((a, b) => a.index - b.index);
       if (relevantLows.length < 2) continue;
 
-      let ascending = true;
-      for (let j = 1; j < relevantLows.length; j++) {
-        if (relevantLows[j].price <= relevantLows[j - 1].price) { ascending = false; break; }
-      }
+      // [Phase1-C] strictly monotonic → net ascending (2-point)
+      // 기존: 모든 저점이 엄격히 상승 필요 → n=12. symmetric triangle(n=1252)는 2-point 비교
+      // 수정: 첫 저점 < 마지막 저점이면 net ascending으로 인정
+      const ascending = relevantLows[relevantLows.length - 1].price > relevantLows[0].price;
       if (!ascending) continue;
 
       const resistanceLevel = (h1.price + h2.price) / 2;
@@ -1911,8 +1935,9 @@ class PatternEngine {
     if (swingHighs.length < 2 || swingLows.length < 2) return results;
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
 
-    const recentHighs = swingHighs.filter(h => h.index >= candles.length - 40);
-    const recentLows = swingLows.filter(l => l.index >= candles.length - 40);
+    // [Phase1-C] 40→60: ascending triangle과 동일 확대
+    const recentHighs = swingHighs.filter(h => h.index >= candles.length - 60);
+    const recentLows = swingLows.filter(l => l.index >= candles.length - 60);
 
     for (let i = 0; i < recentLows.length - 1; i++) {
       const l1 = recentLows[i], l2 = recentLows[i + 1];
@@ -1924,10 +1949,8 @@ class PatternEngine {
         .sort((a, b) => a.index - b.index);
       if (relevantHighs.length < 2) continue;
 
-      let descending = true;
-      for (let j = 1; j < relevantHighs.length; j++) {
-        if (relevantHighs[j].price >= relevantHighs[j - 1].price) { descending = false; break; }
-      }
+      // [Phase1-C] strictly monotonic → net descending (2-point)
+      const descending = relevantHighs[relevantHighs.length - 1].price < relevantHighs[0].price;
       if (!descending) continue;
 
       const supportLevel = (l1.price + l2.price) / 2;
