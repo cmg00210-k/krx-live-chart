@@ -64,6 +64,166 @@ const COMPOSITE_SIGNAL_DEFS = [
     description: '데드크로스 + MACD/RSI 보조 확인 — 하락 추세 전환 신호',
   },
 
+  // Tier 2 (CS-A): 패턴+지표 복합 — pattern_impl/03 Priority A (Nison 1991 + Bollinger 1992 + Murphy 1999)
+  {
+    id: 'buy_hammerBBVol',
+    nameShort: '매수: 해머+BB하단+거래량',
+    signal: 'buy',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 63, // [E-1] KRX 실측 WR×조건부배수 1.25 (tech-pattern-architect 권고)
+    required: ['hammer', 'bbLowerBounce'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 5,
+    window: 5,
+    description: '해머 + BB하단 반등 + 거래량 급증 — 볼린저 지지 + 반전 캔들 합류',
+  },
+  {
+    id: 'sell_shootingStarBBVol',
+    nameShort: '매도: 유성형+BB상단+거래량',
+    signal: 'sell',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 69, // [E-1] shootingStar WR=56% × 1.25 조건부 배수
+    required: ['shootingStar', 'bbUpperBreak'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 5,
+    window: 5,
+    description: '유성형 + BB상단 돌파 + 투매 거래량 — 볼린저 저항 + 반전 캔들 합류',
+  },
+  {
+    id: 'buy_morningStarRsiVol',
+    nameShort: '매수: 샛별형+RSI+거래량',
+    signal: 'buy',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 58, // [E-1] morningStar WR=42.9% but 3봉 구조적 강도 보정
+    required: ['morningStar', 'rsiOversoldExit'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 4,
+    window: 5,
+    description: '샛별형 3봉 반전 + RSI 과매도 탈출 + 거래량 — 바닥 확인 강도 높음',
+  },
+  {
+    id: 'sell_eveningStarRsiVol',
+    nameShort: '매도: 석별형+RSI+거래량',
+    signal: 'sell',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 65, // [E-1] eveningStar WR=53.3% × KRX 약세 패턴 우위 반영
+    required: ['eveningStar', 'rsiOverboughtExit'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 4,
+    window: 5,
+    description: '석별형 3봉 반전 + RSI 과매수 탈출 + 투매 — 천장 확인 강도 높음',
+  },
+
+  // Tier 2 (CS-B): 패턴+지표 복합 — pattern_impl/03 Priority B
+  {
+    id: 'buy_engulfingMacdAlign',
+    nameShort: '매수: 장악형+MACD+정배열',
+    signal: 'buy',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 60, // [E-4] bullishEngulfing WR=43.5% + MACD 조건부 배수
+    required: ['bullishEngulfing', 'macdBullishCross'],
+    optional: ['maAlignment_bull'],
+    optionalBonus: 4,
+    window: 5,
+    description: '상승장악형 + MACD 골든크로스 + MA 정배열 — 추세 전환 확인',
+  },
+  {
+    id: 'sell_engulfingMacdAlign',
+    nameShort: '매도: 장악형+MACD+역배열',
+    signal: 'sell',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 66, // [E-4] bearishEngulfing WR=56.4% + MACD 조건부 배수
+    required: ['bearishEngulfing', 'macdBearishCross'],
+    optional: ['maAlignment_bear'],
+    optionalBonus: 4,
+    window: 5,
+    description: '하락장악형 + MACD 데드크로스 + MA 역배열 — 하락 전환 확인',
+  },
+  {
+    id: 'buy_doubleBottomNeckVol',
+    nameShort: '매수: 이중바닥+거래량',
+    signal: 'buy',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 72, // [E-4] doubleBottom WR=65.6% × 구조적 강도
+    required: ['doubleBottom', 'volumeBreakout'],
+    optional: ['goldenCross'],
+    optionalBonus: 5,
+    window: 5,
+    description: '이중바닥 완성 + 거래량 급증 + 골든크로스 — 강력한 바닥 확인',
+  },
+  {
+    id: 'sell_doubleTopNeckVol',
+    nameShort: '매도: 이중천장+거래량',
+    signal: 'sell',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 75, // [E-4] doubleTop WR=73.0% × 구조적 강도
+    required: ['doubleTop', 'volumeSelloff'],
+    optional: ['deadCross'],
+    optionalBonus: 5,
+    window: 5,
+    description: '이중천장 완성 + 투매 거래량 + 데드크로스 — 강력한 천장 확인',
+  },
+  {
+    id: 'buy_ichimokuTriple',
+    nameShort: '매수: 일목삼역호전',
+    signal: 'buy',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 — Hosoda 원전 기반
+    required: ['ichimokuCloudBreakout', 'ichimokuBullishCross'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 4,
+    window: 5,
+    description: '구름 돌파 + 전환/기준선 교차 + 거래량 — 일목 삼역호전',
+  },
+  {
+    id: 'sell_ichimokuTriple',
+    nameShort: '매도: 일목삼역역전',
+    signal: 'sell',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 (역방향)
+    required: ['ichimokuCloudBreakdown', 'ichimokuBearishCross'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 4,
+    window: 5,
+    description: '구름 하향 이탈 + 전환/기준선 역교차 + 투매 — 일목 삼역역전',
+  },
+  {
+    id: 'buy_goldenMarubozuVol',
+    nameShort: '매수: 골든+마루보주+거래량',
+    signal: 'buy',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 65, // [E-4] goldenCross + 마루보주 동시 = 강한 추세 시작
+    required: ['goldenCross', 'bullishMarubozu'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 5,
+    window: 5,
+    description: '골든크로스 + 양봉 마루보주 + 거래량 급증 — 추세 시작 강력 확인',
+  },
+  {
+    id: 'sell_deadMarubozuVol',
+    nameShort: '매도: 데드+마루보주+거래량',
+    signal: 'sell',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 68, // [E-4] deadCross + 음봉 마루보주 = 강한 하락 시작
+    required: ['deadCross', 'bearishMarubozu'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 5,
+    window: 5,
+    description: '데드크로스 + 음봉 마루보주 + 투매 거래량 — 하락 추세 강력 확인',
+  },
+
   // Tier 3: 약한 시그널 (단일 조건 + 보조)
   {
     id: 'buy_bbBounceRsi',
@@ -121,6 +281,8 @@ class SignalEngine {
       stochRsiOversold: 1.0, stochRsiOverbought: -1.0,
       // 허스트 지수 (레짐 필터 — 방향 중립)
       hurstTrending: 0, hurstMeanReverting: 0,
+      // 칼만 필터 (composite condition 전용 — Harvey 1989, 독립 시그널 아님)
+      kalmanUpturn: 0, kalmanDownturn: 0,
       // 거래량
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
       // 복합 (가중치 = tier별 증폭)
@@ -156,6 +318,7 @@ class SignalEngine {
     indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
     indicatorSignals.push(...this._detectHurstSignal(candles, cache));
     indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
+    indicatorSignals.push(...this._detectKalmanSignals(candles, cache));
 
     // 캔들 패턴 → 시그널 타입 맵 (복합 매칭용)
     const candleSignalMap = this._buildCandleSignalMap(candlePatterns);
@@ -170,6 +333,8 @@ class SignalEngine {
 
     // ADX 트렌드 필터 — Wilder (1978): 트렌드 추종 시그널 confidence 후조정
     this._applyADXFilter(signals, cache);
+    // CCI 레짐 필터 — Lambert (1980): |CCI| 기반 추세/횡보 판별 (ADX와 직교)
+    this._applyCCIFilter(signals, cache);
 
     // 시간순 정렬
     signals.sort((a, b) => a.index - b.index);
@@ -937,6 +1102,74 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
+  //  CCI 레짐 필터 — Lambert (1980), Colby (2003)
+  //  |CCI| 기반 3단계 분류: trending/transition/ranging
+  //  ADX(방향운동)와 직교적(가격 이탈도) — r≈0.50
+  //  KRX 임계값: 150/75 (표준 100/50 대비 상향, 높은 변동성 보상)
+  // ══════════════════════════════════════════════════════
+
+  _applyCCIFilter(signals, cache) {
+    var cciArr = cache.cci(20);
+    if (!cciArr) return;
+
+    for (var i = 0; i < signals.length; i++) {
+      var sig = signals[i];
+      if (!SignalEngine._ADX_TREND_TYPES.has(sig.type)) continue;
+
+      var cciVal = cciArr[sig.index];
+      if (cciVal === null || cciVal === undefined) continue;
+
+      var absCCI = Math.abs(cciVal);
+      var adj = 0;
+      if (absCCI >= 200)      adj = 3;   // 극한 추세 (KRX 조정)
+      else if (absCCI >= 150) adj = 2;   // 강한 추세
+      else if (absCCI >= 75)  adj = 0;   // 전환 구간
+      else                    adj = -3;  // 횡보 (추세 추종 시그널 약화)
+
+      sig.confidence = Math.max(30, Math.min(90, sig.confidence + adj));
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  칼만 필터 방향 전환 — Kalman (1960), Harvey (1989)
+  //  composite condition 전용 (독립 시그널 아님)
+  //  Q=0.1, R=1.0 → 정상상태 K≈0.095, EMA(≈20) 상당 반응속도
+  // ══════════════════════════════════════════════════════
+
+  _detectKalmanSignals(candles, cache) {
+    var signals = [];
+    var kalm = cache.kalman(0.1, 1.0);
+    if (!kalm || kalm.length < 3) return signals;
+
+    for (var i = 2; i < kalm.length; i++) {
+      if (kalm[i] == null || kalm[i - 1] == null || kalm[i - 2] == null) continue;
+
+      var d1 = kalm[i] - kalm[i - 1];
+      var d0 = kalm[i - 1] - kalm[i - 2];
+
+      // 방향 전환: 부호 변경 감지 (0 교차 제외)
+      if (d0 <= 0 && d1 > 0) {
+        signals.push({
+          type: 'kalmanUpturn', signal: 'buy', strength: 'weak',
+          confidence: 40, index: i, time: candles[i].time,
+          nameShort: '칼만 상향', source: 'indicator',
+          description: '칼만 필터 상향 전환 (추세 바닥 추정)',
+        });
+      } else if (d0 >= 0 && d1 < 0) {
+        signals.push({
+          type: 'kalmanDownturn', signal: 'sell', strength: 'weak',
+          confidence: 40, index: i, time: candles[i].time,
+          nameShort: '칼만 하향', source: 'indicator',
+          description: '칼만 필터 하향 전환 (추세 천장 추정)',
+        });
+      }
+    }
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
   //  범용 다이버전스 감지
   // ══════════════════════════════════════════════════════
 
@@ -1221,7 +1454,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, composite: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, composite: 0,
     };
 
     for (const s of signals) {
@@ -1279,6 +1512,7 @@ class SignalEngine {
     if (type.startsWith('ichimoku')) return 'ichimoku';
     if (type.startsWith('hurst'))    return 'hurst';
     if (type.startsWith('stochRsi')) return 'rsi'; // StochRSI는 RSI 카테고리 귀속
+    if (type.startsWith('kalman'))  return 'kalman'; // [E-4] Kalman 필터 카테고리
     return 'ma'; // fallback
   }
 

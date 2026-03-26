@@ -71,8 +71,9 @@ class PatternEngine {
   /** 팽이형 body/range 범위 — 도지(5%)와 보통 봉(30%) 사이 */
   static SPINNING_BODY_MIN = 0.05;
   static SPINNING_BODY_MAX = 0.30;
-  /** 팽이형 꼬리/body 하한 — 양쪽 꼬리가 body의 50% 이상 */
-  static SPINNING_SHADOW_RATIO = 0.5;
+  /** 팽이형 꼬리/body 하한 — 양쪽 꼬리가 body의 75% 이상
+   *  [E-2] 0.50→0.75: Morris(2006) "shadow > body" 기준에 근접, n=137k/303k 과감지 억제 */
+  static SPINNING_SHADOW_RATIO = 0.75;
 
   /** 삼내형(Three Inside) 3봉 확인 body/ATR 최소 — Nison (1991) 확인 봉 유의미 크기 */
   static THREE_INSIDE_CONFIRM_MIN = 0.2;
@@ -473,9 +474,10 @@ class PatternEngine {
       var wr = PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
       var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
       // 형태 품질 반영 — Kirkpatrick & Dahlquist (2011): body ratio + ATR 비율 → 신뢰도 조정
-      // scaling = confidence/50, clamp [0.85, 1.15] (±15%, Caginalp 1998 실증 3~7%p 정합)
+      // scaling = confidence/50, clamp [0.88, 1.12] (±12%, Caginalp 1998 실증 3~7%p 정합)
+      // [E-2] 0.85/1.15→0.88/1.12: WR>55% 패턴에서 Caginalp 7%p 상한 준수 (fin-theory 교차검증)
       // James-Stein shrinkage와 양립: 소표본 패턴에서도 과도한 역전 방지
-      var qualityScaling = Math.min(1.15, Math.max(0.85, patterns[pi].confidence / 50));
+      var qualityScaling = Math.min(1.12, Math.max(0.88, patterns[pi].confidence / 50));
       pred = Math.round(pred * qualityScaling);
       pred = Math.min(95, Math.max(10, pred));
       // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
