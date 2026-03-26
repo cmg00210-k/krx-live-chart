@@ -864,6 +864,8 @@ const patternRenderer = (() => {
           this._buildTriangle(candles, p, toXY, data);
         } else if (p.type === 'risingWedge' || p.type === 'fallingWedge') {
           this._buildWedge(candles, p, toXY, data);
+        } else if (p.type === 'channel') {
+          this._buildChannel(candles, p, toXY, data);
         }
 
         // ── 패턴 라벨 생성 (모든 패턴 공통) ──
@@ -1367,6 +1369,38 @@ const patternRenderer = (() => {
           points: [u1, u2, l2, l1],
           fill: BUY_FILL,
         });
+      }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  채널 패턴 렌더러 — 상하 평행 추세선 + 채우기
+    // ══════════════════════════════════════════════════
+    _buildChannel(candles, p, toXY, data) {
+      if (p.upperSlope == null || p.lowerSlope == null) return;
+      const si = p.startIndex, ei = p.endIndex;
+      if (si == null || ei == null || si >= candles.length) return;
+
+      const eiClamped = Math.min(ei, candles.length - 1);
+      // 추세선 시작/끝 좌표 (slope*index + intercept → price)
+      const upperStart = p.upperSlope * si + p.upperIntercept;
+      const upperEnd = p.upperSlope * eiClamped + p.upperIntercept;
+      const lowerStart = p.lowerSlope * si + p.lowerIntercept;
+      const lowerEnd = p.lowerSlope * eiClamped + p.lowerIntercept;
+
+      const u1 = toXY(candles[si].time, upperStart);
+      const u2 = toXY(candles[eiClamped].time, upperEnd);
+      const l1 = toXY(candles[si].time, lowerStart);
+      const l2 = toXY(candles[eiClamped].time, lowerEnd);
+
+      const lineColor = GOLD_COLOR;
+
+      // 상단 추세선
+      data.polylines.push({ points: [u1, u2], color: lineColor, width: 1.5, dash: [5, 3], dots: false });
+      // 하단 추세선
+      data.polylines.push({ points: [l1, l2], color: lineColor, width: 1.5, dash: [5, 3], dots: false });
+      // 채널 영역 채우기
+      if (u1.x != null && u2.x != null && l1.x != null && l2.x != null) {
+        data.trendAreas.push({ points: [u1, u2, l2, l1], fill: BUY_FILL });
       }
     }
 

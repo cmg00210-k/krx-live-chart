@@ -336,11 +336,37 @@ class SignalEngine {
     // CCI 레짐 필터 — Lambert (1980): |CCI| 기반 추세/횡보 판별 (ADX와 직교)
     this._applyCCIFilter(signals, cache);
 
+    // OLS 추세 확인 → 순방향 confidence boost — Lo & MacKinlay (1999)
+    // R² > 0.50 = 강한 추세: 추세 방향 시그널에 +5 boost
+    const olsTrend = cache.olsTrend(20);
+    if (olsTrend && olsTrend.r2 > 0.50) {
+      const trendDir = olsTrend.direction; // 'up', 'down', 'flat'
+      for (let si = 0; si < signals.length; si++) {
+        const s = signals[si];
+        if (trendDir === 'up' && s.signal === 'buy') {
+          s.confidence = Math.min(95, (s.confidence || 50) + 5);
+        } else if (trendDir === 'down' && s.signal === 'sell') {
+          s.confidence = Math.min(95, (s.confidence || 50) + 5);
+        }
+      }
+    }
+
     // 시간순 정렬
     signals.sort((a, b) => a.index - b.index);
 
     // 시장 심리 계산
     const stats = this._calcStats(signals, candles);
+
+    // entropy 감쇄: 소수 카테고리 집중 시 (entropyNorm < 0.5) confidence 축소
+    // 학술 근거: Shannon (1948) — 낮은 정보량 = 중복 시그널, 독립성 부족
+    if (stats.entropyNorm < 0.5 && signals.length > 2) {
+      const scale = 0.85 + 0.15 * (stats.entropyNorm / 0.5); // [0.85, 1.0]
+      for (let si = 0; si < signals.length; si++) {
+        if (signals[si].confidence) {
+          signals[si].confidence = Math.max(10, Math.round(signals[si].confidence * scale));
+        }
+      }
+    }
 
     return { signals, cache, stats };
   }
