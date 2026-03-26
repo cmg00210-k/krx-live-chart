@@ -51,7 +51,7 @@ try {
   importScripts(
     'colors.js?v=12',
     'indicators.js?v=12',
-    'patterns.js?v=15',
+    'patterns.js?v=16',
     'signalEngine.js?v=14',
     'backtester.js?v=18'
   );

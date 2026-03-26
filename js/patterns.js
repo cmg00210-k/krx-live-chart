@@ -111,9 +111,20 @@ class PatternEngine {
    *  Edwards & Magee (2018): 유의미한 돌파는 일정 거리 이상 이격 필요 */
   static NECKLINE_BREAK_ATR_MULT = 0.5;
 
+  /** 넥라인 미확인 감산 — Bulkowski (2005): 미확인 H&S 35% vs 확인 83% (차이 -48pp) */
+  static NECKLINE_UNCONFIRMED_PENALTY = 15;
+  static NECKLINE_UNCONFIRMED_PRED_PENALTY = 20;
+
+  /** 삼각형/쐐기 돌파 확인 — Bulkowski (2005): 미확인 삼각형 40-50% vs 확인 70-80%
+   *  사선 트렌드라인 특성상 넥라인(0.5)보다 낮은 임계값 적용 */
+  static TRIANGLE_BREAK_ATR_MULT = 0.3;
+  static TRIANGLE_BREAK_LOOKFORWARD = 15;
+  static TRIANGLE_UNCONFIRMED_PENALTY = 12;
+  static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15;
+
   /** Dual Confidence: 패턴별 실측 5일 승률 (pattern_performance.json 기반)
    *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
-   *  Guo et al. (2017) Temperature Scaling: calibrated = form / T  */
+   *  소표본 패턴(n<50)은 전체 평균 방향으로 수축 권장 — Efron & Morris (1975) James-Stein */
   static PATTERN_WIN_RATES = Object.freeze({
     hammer: 47.9, invertedHammer: 52.3, shootingStar: 56.0, hangingMan: 55.2,
     doji: 42.0, dragonflyDoji: 50.0, gravestoneDoji: 59.1, spinningTop: 43.1,
@@ -346,6 +357,28 @@ class PatternEngine {
       }
     }
 
+    // 삼각형/쐐기 돌파 확인 — ascending/descending/symmetric triangle, rising/falling wedge
+    for (let ni = 0; ni < patterns.length; ni++) {
+      const pt = patterns[ni].type;
+      if (pt === 'ascendingTriangle' || pt === 'descendingTriangle' ||
+          pt === 'symmetricTriangle' || pt === 'risingWedge' || pt === 'fallingWedge') {
+        this._checkTriangleBreakout(candles, patterns[ni], atr14);
+      }
+    }
+
+    // 넥라인/삼각형 미확인 패턴 confidence 감산 — Bulkowski (2005)
+    for (let ni = 0; ni < patterns.length; ni++) {
+      const p = patterns[ni];
+      // 넥라인 패턴: necklineBreakConfirmed === false 일 때만 감산 (undefined인 캔들 패턴 방어)
+      if (p.necklineBreakConfirmed === false) {
+        p.confidence = Math.max(10, p.confidence - PatternEngine.NECKLINE_UNCONFIRMED_PENALTY);
+      }
+      // 삼각형/쐐기 패턴: breakoutConfirmed === false 일 때만 감산
+      if (p.breakoutConfirmed === false) {
+        p.confidence = Math.max(10, p.confidence - PatternEngine.TRIANGLE_UNCONFIRMED_PENALTY);
+      }
+    }
+
     // 지지/저항 + 컨플루언스
     const sr = this.detectSupportResistance(candles, swH, swL, ctx);
     this._applyConfluence(patterns, sr, ctx);
@@ -364,7 +397,15 @@ class PatternEngine {
       // Dual Confidence: confidencePred = 실측 승률 기반 예측 신뢰도 (모델 입력용)
       // confidence(형태점수)는 UI 표시용으로 불변 유지
       var wr = PatternEngine.PATTERN_WIN_RATES[patterns[pi].type];
-      patterns[pi].confidencePred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
+      var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
+      // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
+      if (patterns[pi].necklineBreakConfirmed === false) {
+        pred = Math.max(10, pred - PatternEngine.NECKLINE_UNCONFIRMED_PRED_PENALTY);
+      }
+      if (patterns[pi].breakoutConfirmed === false) {
+        pred = Math.max(10, pred - PatternEngine.TRIANGLE_UNCONFIRMED_PRED_PENALTY);
+      }
+      patterns[pi].confidencePred = pred;
     }
 
     // R:R 검증 게이트 — KRX calibration 기반 (calibrated_constants.json C1+D3)
@@ -2116,6 +2157,115 @@ class PatternEngine {
             pattern.breakPrice = close;
             return;
           }
+        }
+      }
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  //  삼각형/쐐기 돌파 확인 — Bulkowski (2005)
+  //  미확인 시 breakoutConfirmed = false → confidence 감산 대상
+  //  확인 시 breakoutConfirmed = true + breakIndex/breakPrice 기록
+  //  symmetricTriangle: 돌파 방향에 따라 signal 동적 전환 (neutral→buy/sell)
+  // ══════════════════════════════════════════════════
+  _checkTriangleBreakout(candles, pattern, atr) {
+    pattern.breakoutConfirmed = false;
+    pattern.breakIndex = null;
+    pattern.breakPrice = null;
+
+    const ei = pattern.endIndex;
+    if (ei == null || ei >= candles.length - 1) return;
+    if (!pattern.trendlines || pattern.trendlines.length < 2) return;
+
+    const lookforward = PatternEngine.TRIANGLE_BREAK_LOOKFORWARD;
+    const atrMult = PatternEngine.TRIANGLE_BREAK_ATR_MULT;
+    const maxIdx = Math.min(ei + lookforward, candles.length - 1);
+
+    const type = pattern.type;
+
+    // 트렌드라인 끝점에서 기울기 추출
+    const tl0 = pattern.trendlines[0].points;
+    const tl1 = pattern.trendlines[1].points;
+    if (!tl0 || tl0.length < 2 || !tl1 || tl1.length < 2) return;
+
+    const i0a = candles.findIndex(c => c.time === tl0[0].time);
+    const i0b = candles.findIndex(c => c.time === tl0[1].time);
+    const i1a = candles.findIndex(c => c.time === tl1[0].time);
+    const i1b = candles.findIndex(c => c.time === tl1[1].time);
+    if (i0a < 0 || i0b < 0 || i1a < 0 || i1b < 0) return;
+    if (i0a === i0b || i1a === i1b) return;
+
+    const slope0 = (tl0[1].value - tl0[0].value) / (i0b - i0a);
+    const slope1 = (tl1[1].value - tl1[0].value) / (i1b - i1a);
+
+    for (let j = ei + 1; j <= maxIdx; j++) {
+      const a = this._atr(atr, j, candles);
+      const threshold = a * atrMult;
+      const close = candles[j].close;
+
+      // 트렌드라인 0: 저항선 (ascending=수평, descending=하향, symmetric=하향, risingWedge=상향, fallingWedge=하향)
+      const line0AtJ = tl0[0].value + slope0 * (j - i0a);
+      // 트렌드라인 1: 지지선 (ascending=상향, descending=수평, symmetric=상향, risingWedge=상향, fallingWedge=하향)
+      const line1AtJ = tl1[0].value + slope1 * (j - i1a);
+
+      if (type === 'ascendingTriangle') {
+        // 수평 저항 상방 돌파
+        if (close > line0AtJ + threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          return;
+        }
+      } else if (type === 'descendingTriangle') {
+        // 수평 지지 하방 돌파
+        if (close < line1AtJ - threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          return;
+        }
+      } else if (type === 'risingWedge') {
+        // 하향 이탈 (하단 트렌드라인 아래)
+        if (close < line1AtJ - threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          return;
+        }
+      } else if (type === 'fallingWedge') {
+        // 상향 이탈 (상단 트렌드라인 위)
+        if (close > line0AtJ + threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          return;
+        }
+      } else if (type === 'symmetricTriangle') {
+        // 양방향 — 돌파 방향에 따라 signal 동적 전환
+        if (close > line0AtJ + threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          pattern.signal = 'buy';
+          pattern.strength = 'strong';
+          // 목표가/손절 설정 — 삼각형 높이 측정이동
+          const triHeight = Math.abs(tl0[0].value - tl1[0].value);
+          const capA = this._atr(atr, ei, candles);
+          pattern.priceTarget = +(close + Math.min(triHeight, capA * PatternEngine.CHART_TARGET_ATR_CAP)).toFixed(0);
+          pattern.stopLoss = +(line1AtJ - capA).toFixed(0);
+          return;
+        }
+        if (close < line1AtJ - threshold) {
+          pattern.breakoutConfirmed = true;
+          pattern.breakIndex = j;
+          pattern.breakPrice = close;
+          pattern.signal = 'sell';
+          pattern.strength = 'strong';
+          const triHeight = Math.abs(tl0[0].value - tl1[0].value);
+          const capA = this._atr(atr, ei, candles);
+          pattern.priceTarget = +(close - Math.min(triHeight, capA * PatternEngine.CHART_TARGET_ATR_CAP)).toFixed(0);
+          pattern.stopLoss = +(line0AtJ + capA).toFixed(0);
+          return;
         }
       }
     }
