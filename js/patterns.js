@@ -74,6 +74,28 @@ class PatternEngine {
   /** 팽이형 꼬리/body 하한 — 양쪽 꼬리가 body의 50% 이상 */
   static SPINNING_SHADOW_RATIO = 0.5;
 
+  /** 삼내형(Three Inside) 3봉 확인 body/ATR 최소 — Nison (1991) 확인 봉 유의미 크기 */
+  static THREE_INSIDE_CONFIRM_MIN = 0.2;
+
+  /** 버림받은아기 도지 body/range 상한 — 표준 도지(0.05)보다 관대 (Bulkowski 2008) */
+  static ABANDONED_BABY_DOJI_MAX = 0.10;
+  /** 버림받은아기 갭 최소 ATR 비율 — KRX 갭 빈도 낮아 관대 설정 (국제 0.1 → KRX 0.05) */
+  static ABANDONED_BABY_GAP_MIN = 0.05;
+
+  /** 긴다리도지 양쪽 꼬리/range 최소 — Nison: 양쪽 30% 이상 */
+  static LONG_DOJI_SHADOW_MIN = 0.30;
+  /** 긴다리도지 range/ATR 최소 — 유의미한 크기 (일반 도지 0.3보다 엄격) */
+  static LONG_DOJI_RANGE_MIN = 0.80;
+
+  /** 띠두름(Belt Hold) body/range 하한 — Morris (2006): 강한 몸통 60%+ */
+  static BELT_BODY_RATIO_MIN = 0.60;
+  /** 띠두름 시가측 꼬리/body 상한 — 시가에서 갭 반전이므로 거의 없어야 함 */
+  static BELT_OPEN_SHADOW_MAX = 0.05;
+  /** 띠두름 종가측 꼬리/body 상한 — 마루보주(0.02)와 구분 */
+  static BELT_CLOSE_SHADOW_MAX = 0.30;
+  /** 띠두름 body/ATR 최소 — 유의미한 크기 */
+  static BELT_BODY_ATR_MIN = 0.40;
+
   /** 유의미한 범위 (range/ATR) 하한 */
   static MIN_RANGE_ATR = 0.3;
 
@@ -93,8 +115,10 @@ class PatternEngine {
 
   /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 302,986건 실측 calibration (calibrated_constants.json D1)
    *  strong: 1.92 (n=73,734, CI95=[1.90,1.95]), medium: 2.21 (n=28,426, CI95=[2.18,2.24]),
-   *  weak: 1.92 (n=181,925, CI95=[1.91,1.93]), KW p=2.6e-139 */
-  static CANDLE_TARGET_ATR = { strong: 1.92, medium: 2.21, weak: 1.92 };
+   *  weak: 1.54 — 실측 도달 ATR 1.92이나, hit rate 차이를 반영한 보수적 조정
+   *    ratio=0.80 (Bulkowski 2008: strong/weak expected move ratio 0.70~0.85 중앙값)
+   *  KW p=2.6e-139 */
+  static CANDLE_TARGET_ATR = { strong: 1.92, medium: 2.21, weak: 1.54 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
   static CHART_TARGET_ATR_CAP = 6;
@@ -358,6 +382,7 @@ class PatternEngine {
 
     // 캔들 패턴 — 빈도순 (Bulkowski 출현율 기준, 빈번한 패턴 먼저 감지)
     // 1봉 패턴 (가장 빈번: 도지 > 해머 > 장악형 > 잉태형)
+    patterns.push(...this.detectLongLeggedDoji(candles, ctx));  // 도지 전에 — hierarchy dedup
     patterns.push(...this.detectDoji(candles, ctx));
     patterns.push(...this.detectHammer(candles, ctx));
     patterns.push(...this.detectShootingStar(candles, ctx));
@@ -366,6 +391,7 @@ class PatternEngine {
     patterns.push(...this.detectDragonflyDoji(candles, ctx));
     patterns.push(...this.detectGravestoneDoji(candles, ctx));
     patterns.push(...this.detectMarubozu(candles, ctx));
+    patterns.push(...this.detectBeltHold(candles, ctx));      // 마루보주 후 — 마루보주 미달 봉 대상
     patterns.push(...this.detectSpinningTop(candles, ctx));
     // 2봉 패턴
     patterns.push(...this.detectEngulfing(candles, ctx));
@@ -379,6 +405,9 @@ class PatternEngine {
     patterns.push(...this.detectThreeBlackCrows(candles, ctx));
     patterns.push(...this.detectMorningStar(candles, ctx));
     patterns.push(...this.detectEveningStar(candles, ctx));
+    patterns.push(...this.detectThreeInsideUp(candles, ctx));
+    patterns.push(...this.detectThreeInsideDown(candles, ctx));
+    patterns.push(...this.detectAbandonedBaby(candles, ctx));
 
     // 차트 패턴
     const swH = this._findSwingHighs(candles, 3);
@@ -443,6 +472,12 @@ class PatternEngine {
       // confidence(형태점수)는 UI 표시용으로 불변 유지
       var wr = PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
       var pred = (wr != null) ? Math.round(wr) : patterns[pi].confidence;
+      // 형태 품질 반영 — Kirkpatrick & Dahlquist (2011): body ratio + ATR 비율 → 신뢰도 조정
+      // scaling = confidence/50, clamp [0.85, 1.15] (±15%, Caginalp 1998 실증 3~7%p 정합)
+      // James-Stein shrinkage와 양립: 소표본 패턴에서도 과도한 역전 방지
+      var qualityScaling = Math.min(1.15, Math.max(0.85, patterns[pi].confidence / 50));
+      pred = Math.round(pred * qualityScaling);
+      pred = Math.min(95, Math.max(10, pred));
       // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
       if (patterns[pi].necklineBreakConfirmed === false) {
         pred = Math.max(10, pred - PatternEngine.NECKLINE_UNCONFIRMED_PRED_PENALTY);
@@ -1463,6 +1498,300 @@ class PatternEngine {
   }
 
   // ══════════════════════════════════════════════════
+  //  긴다리도지 (Long-Legged Doji) — 극단적 우유부단
+  // ══════════════════════════════════════════════════
+  //
+  //  Nison (1991): "The long-legged doji is an especially important
+  //  doji. It has very long upper and lower shadows. This doji
+  //  reflects great indecision in the market."
+  //
+  detectLongLeggedDoji(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const body = Math.abs(c.close - c.open);
+      const range = c.high - c.low;
+      if (range === 0) continue;
+      if (body > range * PatternEngine.DOJI_BODY_RATIO) continue;  // 도지 body 조건
+
+      const upperShadow = c.high - Math.max(c.open, c.close);
+      const lowerShadow = Math.min(c.open, c.close) - c.low;
+
+      // 핵심: 양쪽 꼬리 모두 range의 30% 이상
+      if (upperShadow < range * PatternEngine.LONG_DOJI_SHADOW_MIN) continue;
+      if (lowerShadow < range * PatternEngine.LONG_DOJI_SHADOW_MIN) continue;
+
+      const a = this._atr(atr, i, candles);
+      // range가 ATR의 80% 이상 — 일반 도지보다 큰 범위
+      if (range < a * PatternEngine.LONG_DOJI_RANGE_MIN) continue;
+
+      const trend = this._detectTrend(candles, i, 10, a);
+      const signal = trend.direction === 'up' ? 'sell' : trend.direction === 'down' ? 'buy' : 'neutral';
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction !== 'neutral' ? Math.min(trend.strength, 1) : 0.3;
+      const shadowBalance = 1 - Math.abs(upperShadow - lowerShadow) / range;
+      const confidence = this._quality({ body: 0.5, shadow: shadowBalance, volume: volumeScore, trend: trendScore, extra: 0.5 });
+
+      results.push({
+        type: 'longLeggedDoji', name: '긴다리도지 (Long-Legged Doji)', nameShort: '긴다리도지',
+        signal, strength: 'weak', confidence,
+        stopLoss: signal !== 'neutral' ? this._stopLoss(candles, i, signal, atr) : null,
+        priceTarget: signal !== 'neutral' ? this._candleTarget(candles, i, signal, 'weak', atr) : null,
+        description: `긴 양쪽 꼬리 도지 — 극단적 우유부단. 형태 점수 ${confidence}%`,
+        startIndex: i, endIndex: i,
+        marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  띠두름 (Belt Hold) — 갭 반전
+  // ══════════════════════════════════════════════════
+  //
+  //  Morris (2006): "A belt hold is a strong single-candle pattern
+  //  with a large body, opening at the extreme (high or low), and
+  //  a small shadow on the close side."
+  //  마루보주와 구분: 종가 쪽 꼬리 허용 + 반대 추세 맥락 필수.
+  //
+  detectBeltHold(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const body = Math.abs(c.close - c.open);
+      const range = c.high - c.low;
+      if (range === 0) continue;
+
+      // body/range 60%+ (강한 몸통이나 마루보주(85%)보다는 관대)
+      if (body < range * PatternEngine.BELT_BODY_RATIO_MIN) continue;
+      // 마루보주 조건 충족 시 스킵 (마루보주가 더 극단적 패턴)
+      if (body >= range * PatternEngine.MARUBOZU_BODY_RATIO) continue;
+
+      const a = this._atr(atr, i, candles);
+      if (body < a * PatternEngine.BELT_BODY_ATR_MIN) continue;
+
+      const isBullish = c.close > c.open;
+      const upperShadow = c.high - Math.max(c.open, c.close);
+      const lowerShadow = Math.min(c.open, c.close) - c.low;
+
+      // 시가측 꼬리 거의 없음 (갭 시가)
+      const openShadow = isBullish ? lowerShadow : upperShadow;
+      const closeShadow = isBullish ? upperShadow : lowerShadow;
+      if (openShadow > body * PatternEngine.BELT_OPEN_SHADOW_MAX) continue;
+      if (closeShadow > body * PatternEngine.BELT_CLOSE_SHADOW_MAX) continue;
+
+      // 반대 추세 맥락 (반전 패턴)
+      const trend = this._detectTrend(candles, i, 10, a);
+      if (isBullish && trend.direction !== 'down') continue;
+      if (!isBullish && trend.direction !== 'up') continue;
+
+      const signal = isBullish ? 'buy' : 'sell';
+      const type = isBullish ? 'bullishBeltHold' : 'bearishBeltHold';
+      const bodyScore = Math.min(body / a, 1);
+      const shadowScore = 1 - openShadow / (range || 1);
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = Math.min(trend.strength, 1);
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+
+      results.push({
+        type, name: isBullish ? '강세띠두름 (Bullish Belt Hold)' : '약세띠두름 (Bearish Belt Hold)',
+        nameShort: isBullish ? '강세띠두름' : '약세띠두름',
+        signal, strength: 'medium', confidence,
+        stopLoss: this._stopLoss(candles, i, signal, atr),
+        priceTarget: this._candleTarget(candles, i, signal, 'medium', atr),
+        description: isBullish
+          ? `시가=저가 근처 양봉 — 상승 반전 신호. 형태 점수 ${confidence}%`
+          : `시가=고가 근처 음봉 — 하락 반전 신호. 형태 점수 ${confidence}%`,
+        startIndex: i, endIndex: i,
+        marker: {
+          time: c.time,
+          position: isBullish ? 'belowBar' : 'aboveBar',
+          color: isBullish ? KRX_COLORS.PTN_MARKER_BUY : KRX_COLORS.PTN_MARKER_SELL,
+          shape: isBullish ? 'arrowUp' : 'arrowDown', text: '',
+        },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  삼내형 상승 (Three Inside Up) — 잉태형 확인
+  // ══════════════════════════════════════════════════
+  //
+  //  Nison (1991): "Three inside up is a bullish harami plus
+  //  a confirmation candle that closes above the first candle's open."
+  //  잉태형(medium) → 확인 완료 → strong으로 승격.
+  //
+  detectThreeInsideUp(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 2; i < candles.length; i++) {
+      const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
+
+      // c0: 큰 음봉
+      if (c0.close >= c0.open) continue;
+      const a = this._atr(atr, i, candles);
+      const body0 = c0.open - c0.close;
+      if (body0 < a * PatternEngine.HARAMI_PREV_BODY_MIN) continue;
+
+      // c1: c0 내부에 포함된 작은 양봉 (잉태형 조건)
+      if (c1.close <= c1.open) continue;  // 양봉
+      const body1 = c1.close - c1.open;
+      if (body1 > body0 * PatternEngine.HARAMI_CURR_BODY_MAX) continue;
+      if (body1 < a * PatternEngine.HARAMI_CURR_BODY_MIN) continue;
+      if (c1.open < c0.close || c1.close > c0.open) continue;  // 내포 조건
+
+      // c2: 확인 양봉 — c0 시가 위로 종가 마감
+      if (c2.close <= c2.open) continue;  // 양봉
+      const body2 = c2.close - c2.open;
+      if (body2 < a * PatternEngine.THREE_INSIDE_CONFIRM_MIN) continue;
+      if (c2.close <= c0.open) continue;  // c0 시가 상향 돌파
+
+      const trend = this._detectTrend(candles, i - 2, 10, a);
+      if (trend.direction === 'up') continue;  // 하락 추세 필수
+
+      const bodyScore = Math.min((body0 + body2) / 2 / a, 1);
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+      const stopLoss = this._stopLoss(candles, i, 'buy', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
+
+      results.push({
+        type: 'threeInsideUp', name: '상승삼내형 (Three Inside Up)', nameShort: '상승삼내',
+        signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
+        description: `잉태형 + 확인 양봉 — 강한 상승 반전. 형태 점수 ${confidence}%`,
+        startIndex: i - 2, endIndex: i,
+        marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  삼내형 하락 (Three Inside Down) — 잉태형 확인
+  // ══════════════════════════════════════════════════
+  detectThreeInsideDown(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 2; i < candles.length; i++) {
+      const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
+
+      // c0: 큰 양봉
+      if (c0.close <= c0.open) continue;
+      const a = this._atr(atr, i, candles);
+      const body0 = c0.close - c0.open;
+      if (body0 < a * PatternEngine.HARAMI_PREV_BODY_MIN) continue;
+
+      // c1: c0 내부에 포함된 작은 음봉 (잉태형 조건)
+      if (c1.close >= c1.open) continue;  // 음봉
+      const body1 = c1.open - c1.close;
+      if (body1 > body0 * PatternEngine.HARAMI_CURR_BODY_MAX) continue;
+      if (body1 < a * PatternEngine.HARAMI_CURR_BODY_MIN) continue;
+      if (c1.close < c0.open || c1.open > c0.close) continue;  // 내포 조건
+
+      // c2: 확인 음봉 — c0 시가 아래로 종가 마감
+      if (c2.close >= c2.open) continue;  // 음봉
+      const body2 = c2.open - c2.close;
+      if (body2 < a * PatternEngine.THREE_INSIDE_CONFIRM_MIN) continue;
+      if (c2.close >= c0.open) continue;  // c0 시가 하향 돌파
+
+      const trend = this._detectTrend(candles, i - 2, 10, a);
+      if (trend.direction === 'down') continue;  // 상승 추세 필수
+
+      const bodyScore = Math.min((body0 + body2) / 2 / a, 1);
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+      const stopLoss = this._stopLoss(candles, i, 'sell', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
+
+      results.push({
+        type: 'threeInsideDown', name: '하락삼내형 (Three Inside Down)', nameShort: '하락삼내',
+        signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
+        description: `잉태형 + 확인 음봉 — 강한 하락 반전. 형태 점수 ${confidence}%`,
+        startIndex: i - 2, endIndex: i,
+        marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  버림받은아기 (Abandoned Baby) — 갭 도지 반전
+  // ══════════════════════════════════════════════════
+  //
+  //  Bulkowski (2008): 강세/약세 모두 신뢰도 높으나 출현 빈도 극히 낮음.
+  //  KRX: 가격제한폭 ±30%, 갭 빈도 낮아 GAP_MIN=0.05*ATR로 관대 설정.
+  //
+  detectAbandonedBaby(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = 2; i < candles.length; i++) {
+      const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
+      const a = this._atr(atr, i, candles);
+      const gapMin = a * PatternEngine.ABANDONED_BABY_GAP_MIN;
+
+      const body1 = Math.abs(c1.close - c1.open);
+      const range1 = c1.high - c1.low;
+      if (range1 === 0) continue;
+      // c1: 도지 (관대한 기준)
+      if (body1 > range1 * PatternEngine.ABANDONED_BABY_DOJI_MAX) continue;
+
+      // 강세 버림받은아기: 음봉 → 갭다운 도지 → 갭업 양봉
+      if (c0.close < c0.open && c2.close > c2.open) {
+        if (c1.high < c0.low - gapMin && c1.high < c2.low - gapMin) {
+          const trend = this._detectTrend(candles, i - 2, 10, a);
+          if (trend.direction === 'up') continue;
+
+          const bodyScore = Math.min(Math.abs(c2.close - c2.open) / a, 1);
+          const gapScore = Math.min((c0.low - c1.high + c2.low - c1.high) / (2 * a), 1);
+          const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+          const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
+          const confidence = this._quality({ body: bodyScore, shadow: gapScore, volume: volumeScore, trend: trendScore, extra: 0.7 });
+
+          results.push({
+            type: 'abandonedBabyBullish', name: '강세버림받은아기 (Bullish Abandoned Baby)', nameShort: '강세버림받은아기',
+            signal: 'buy', strength: 'strong', confidence,
+            stopLoss: this._stopLoss(candles, i, 'buy', atr),
+            priceTarget: this._candleTarget(candles, i, 'buy', 'strong', atr),
+            description: `갭 도지 분리 — 강한 상승 반전. 형태 점수 ${confidence}%`,
+            startIndex: i - 2, endIndex: i,
+            marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+          });
+        }
+      }
+
+      // 약세 버림받은아기: 양봉 → 갭업 도지 → 갭다운 음봉
+      if (c0.close > c0.open && c2.close < c2.open) {
+        if (c1.low > c0.high + gapMin && c1.low > c2.high + gapMin) {
+          const trend = this._detectTrend(candles, i - 2, 10, a);
+          if (trend.direction === 'down') continue;
+
+          const bodyScore = Math.min(Math.abs(c2.open - c2.close) / a, 1);
+          const gapScore = Math.min((c1.low - c0.high + c1.low - c2.high) / (2 * a), 1);
+          const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+          const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+          const confidence = this._quality({ body: bodyScore, shadow: gapScore, volume: volumeScore, trend: trendScore, extra: 0.7 });
+
+          results.push({
+            type: 'abandonedBabyBearish', name: '약세버림받은아기 (Bearish Abandoned Baby)', nameShort: '약세버림받은아기',
+            signal: 'sell', strength: 'strong', confidence,
+            stopLoss: this._stopLoss(candles, i, 'sell', atr),
+            priceTarget: this._candleTarget(candles, i, 'sell', 'strong', atr),
+            description: `갭 도지 분리 — 강한 하락 반전. 형태 점수 ${confidence}%`,
+            startIndex: i - 2, endIndex: i,
+            marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
+          });
+        }
+      }
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
   //  상승 삼각형 (Ascending Triangle)
   // ══════════════════════════════════════════════════
   detectAscendingTriangle(candles, swingHighs, swingLows, ctx = {}) {
@@ -2323,10 +2652,17 @@ class PatternEngine {
   }
 
   _dedup(patterns) {
+    // type hierarchy: 더 구체적인 패턴이 덜 구체적인 패턴을 같은 endIndex에서 억제
+    const hierarchy = { longLeggedDoji: 'doji' };
+    const suppressed = new Set();
+    for (const p of patterns) {
+      if (hierarchy[p.type]) suppressed.add(`${hierarchy[p.type]}-${p.endIndex}`);
+    }
     const seen = new Set();
     return patterns.filter(p => {
       const key = `${p.type}-${p.endIndex}`;
       if (seen.has(key)) return false;
+      if (suppressed.has(key)) return false;
       seen.add(key);
       return true;
     });

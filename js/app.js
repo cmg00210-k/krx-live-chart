@@ -59,7 +59,10 @@ var _VIZ_CANDLE_TYPES = new Set([
   'bullishHarami','bearishHarami','morningStar','eveningStar',
   'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
   'tweezerBottom','tweezerTop',
-  'bullishMarubozu','bearishMarubozu','spinningTop'
+  'bullishMarubozu','bearishMarubozu','spinningTop',
+  'longLeggedDoji','bullishBeltHold','bearishBeltHold',
+  'threeInsideUp','threeInsideDown',
+  'abandonedBabyBullish','abandonedBabyBearish'
 ]);
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([

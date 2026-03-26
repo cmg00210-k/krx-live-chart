@@ -54,6 +54,13 @@ class PatternBacktester {
       bullishMarubozu:        { name: '양봉마루보주', signal: 'buy'  },
       bearishMarubozu:        { name: '음봉마루보주', signal: 'sell' },
       spinningTop:            { name: '팽이형',     signal: 'neutral' },
+      longLeggedDoji:         { name: '긴다리도지', signal: 'neutral' },
+      bullishBeltHold:        { name: '강세띠두름', signal: 'buy'  },
+      bearishBeltHold:        { name: '약세띠두름', signal: 'sell' },
+      threeInsideUp:          { name: '상승삼내형', signal: 'buy'  },
+      threeInsideDown:        { name: '하락삼내형', signal: 'sell' },
+      abandonedBabyBullish:   { name: '강세버림받은아기', signal: 'buy'  },
+      abandonedBabyBearish:   { name: '약세버림받은아기', signal: 'sell' },
     };
 
     /** 캐시 키 (종목코드 + 캔들길이) → 결과 */

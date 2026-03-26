@@ -58,6 +58,10 @@ const patternRenderer = (() => {
     darkCloud:          { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
     tweezerBottom:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
     tweezerTop:         { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    threeInsideUp:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    threeInsideDown:    { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    abandonedBabyBullish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    abandonedBabyBearish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
   };
 
   const SINGLE_PATTERNS = {
@@ -71,6 +75,9 @@ const patternRenderer = (() => {
     bullishMarubozu:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
     bearishMarubozu:  { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
     spinningTop:      { key: 'close', color: CANDLE_NEUTRAL, direction: 'neutral' },
+    longLeggedDoji:   { key: 'close', color: CANDLE_NEUTRAL, direction: 'neutral' },
+    bullishBeltHold:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    bearishBeltHold:  { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
   };
 
   const CHART_PATTERNS = new Set([
@@ -91,6 +98,9 @@ const patternRenderer = (() => {
     'piercingLine', 'darkCloud',
     'tweezerBottom', 'tweezerTop',
     'bullishMarubozu', 'bearishMarubozu', 'spinningTop',
+    'longLeggedDoji', 'bullishBeltHold', 'bearishBeltHold',
+    'threeInsideUp', 'threeInsideDown',
+    'abandonedBabyBullish', 'abandonedBabyBearish',
   ]);
 
   // ── 패턴 한글 이름 (간결) ──
@@ -112,6 +122,10 @@ const patternRenderer = (() => {
     risingWedge: '상승쐐기', fallingWedge: '하락쐐기',
     bullishMarubozu: '양봉마루보주', bearishMarubozu: '음봉마루보주',
     spinningTop: '팽이형',
+    longLeggedDoji: '긴다리도지',
+    bullishBeltHold: '강세띠두름', bearishBeltHold: '약세띠두름',
+    threeInsideUp: '상승삼내형', threeInsideDown: '하락삼내형',
+    abandonedBabyBullish: '강세버림받은아기', abandonedBabyBearish: '약세버림받은아기',
     symmetricTriangle: '대칭삼각형',
   };
 
@@ -122,12 +136,14 @@ const patternRenderer = (() => {
     'inverseHeadAndShoulders', 'fallingWedge',
     'ascendingTriangle', 'piercingLine',
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
+    'bullishBeltHold', 'threeInsideUp', 'abandonedBabyBullish',
   ]);
   const BEARISH_TYPES = new Set([
     'hangingMan', 'shootingStar', 'bearishEngulfing', 'bearishHarami',
     'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
     'risingWedge', 'descendingTriangle',
     'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
+    'bearishBeltHold', 'threeInsideDown', 'abandonedBabyBearish',
   ]);
 
 

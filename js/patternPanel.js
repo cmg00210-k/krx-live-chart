@@ -334,6 +334,76 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     bulkowskiWinRate: 89,
     invalidation: '우측어깨가 머리보다 낮으면 패턴 무효. 넥라인 돌파 시 거래량 급증이 동반되어야 유효.'
   },
+
+  longLeggedDoji: {
+    nameKo: '긴다리도지',
+    category: '캔들스틱 (중립)',
+    candles: 1,
+    academicDesc: '시가 ≈ 종가이며 양쪽 꼬리가 모두 range의 30% 이상인 도지. 일반 도지보다 큰 범위(ATR 80%+)에서 극단적 우유부단을 표현.',
+    psychology: '장중 매수세와 매도세가 극단적 공방을 벌였으나 결국 균형. 추세 전환의 강력한 전조이며, 높은 변동성 환경에서 특히 유의미.',
+    bulkowskiWinRate: 51,
+    invalidation: '횡보장에서 빈번히 출현 시 의미 약화. 추세 말기 출현 시에만 반전 신호로 유효.'
+  },
+
+  bullishBeltHold: {
+    nameKo: '강세띠두름',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '하락 추세에서 시가가 저점 근처(아래꼬리 거의 없음)인 큰 양봉. 마루보주보다 종가쪽 꼬리를 허용하나 강한 매수 반전 신호.',
+    psychology: '시가에서 즉시 매수세가 압도하여 종일 상승. 시가 근처 아래꼬리가 없어 매수 의지가 강력함을 시사.',
+    bulkowskiWinRate: 56,
+    invalidation: '선행 하락 추세가 없으면 의미 없음. 거래량 미동반 시 신뢰도 하락.'
+  },
+
+  bearishBeltHold: {
+    nameKo: '약세띠두름',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '상승 추세에서 시가가 고점 근처(윗꼬리 거의 없음)인 큰 음봉. 마루보주보다 종가쪽 꼬리를 허용하나 강한 매도 반전 신호.',
+    psychology: '시가에서 즉시 매도세가 압도하여 종일 하락. 시가 근처 윗꼬리가 없어 매도 의지가 강력함을 시사.',
+    bulkowskiWinRate: 54,
+    invalidation: '선행 상승 추세가 없으면 의미 없음. 거래량 미동반 시 신뢰도 하락.'
+  },
+
+  threeInsideUp: {
+    nameKo: '상승삼내형',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '상승잉태형(큰 음봉 + 작은 양봉 내포) 뒤에 확인 양봉이 첫 봉 시가를 돌파. 잉태형의 확인 완성판으로 신뢰도가 medium에서 strong으로 승격.',
+    psychology: '1일차 강한 매도 후 2일차에 매도세 소진 확인. 3일차 매수세가 1일차 시작점을 넘어 추세 반전을 확정.',
+    bulkowskiWinRate: 65,
+    invalidation: '확인 봉(3봉)이 첫 봉 시가를 넘지 못하면 잉태형으로 강등. 거래량 증가 동반 시 신뢰도 상승.'
+  },
+
+  threeInsideDown: {
+    nameKo: '하락삼내형',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '하락잉태형(큰 양봉 + 작은 음봉 내포) 뒤에 확인 음봉이 첫 봉 시가를 하회. 잉태형의 확인 완성판.',
+    psychology: '1일차 강한 매수 후 2일차에 매수세 피로 확인. 3일차 매도세가 1일차 시작점 아래로 하락하며 반전 확정.',
+    bulkowskiWinRate: 68,
+    invalidation: '확인 봉(3봉)이 첫 봉 시가를 하회하지 못하면 잉태형으로 강등.'
+  },
+
+  abandonedBabyBullish: {
+    nameKo: '강세버림받은아기',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '하락 중 음봉 → 갭다운 도지 → 갭업 양봉의 3봉 구조. 도지가 양쪽 캔들과 완전히 분리(갭)된 희귀하고 강력한 상승 반전 패턴.',
+    psychology: '매도세 소진 후 도지에서 균형, 이후 매수세가 갭으로 진입하며 추세 반전. 도지의 고립이 시장 심리 단절을 상징.',
+    bulkowskiWinRate: 70,
+    invalidation: '갭이 충분하지 않으면 샛별형과 구분 불가. KRX에서 갭 빈도가 낮아 출현 자체가 드묾.'
+  },
+
+  abandonedBabyBearish: {
+    nameKo: '약세버림받은아기',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '상승 중 양봉 → 갭업 도지 → 갭다운 음봉의 3봉 구조. 도지가 양쪽 캔들과 완전히 분리된 희귀하고 강력한 하락 반전 패턴.',
+    psychology: '매수세 소진 후 도지에서 균형, 이후 매도세가 갭으로 진입하며 추세 반전.',
+    bulkowskiWinRate: 68,
+    invalidation: '갭이 충분하지 않으면 석별형과 구분 불가. KRX에서 출현 빈도 극히 낮음.'
+  },
 });
 
 
