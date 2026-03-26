@@ -133,10 +133,21 @@ function calcKalman(closes, Q = 0.01, R = 1.0) {
   let P = 1.0;          // 추정 오차
   result[0] = x;
 
+  // Adaptive Q: EWMA 변동성으로 Q 스케일링 — Mehra (1970), Mohamed & Schwarz (1999)
+  // Q_t = Q_base * (σ_t / σ̄)^2. 저변동성 → 부드러움, 고변동성 → 민감
+  var ewmaVar = 0, ewmaAlpha = 0.06; // ~2/(30+1) for 30-bar EWMA
+  var varSum = 0, varCount = 0;
+
   for (let i = 1; i < closes.length; i++) {
+    var ret = (closes[i] - closes[i - 1]) / (closes[i - 1] || 1);
+    ewmaVar = ewmaAlpha * ret * ret + (1 - ewmaAlpha) * ewmaVar;
+    varSum += ewmaVar; varCount++;
+    var meanVar = varSum / varCount;
+    var qAdaptive = meanVar > 0 ? Q * (ewmaVar / meanVar) : Q;
+
     // 예측
     const xPred = x;
-    const PPred = P + Q;
+    const PPred = P + qAdaptive;
     // 갱신
     const K = PPred / (PPred + R);
     x = xPred + K * (closes[i] - xPred);

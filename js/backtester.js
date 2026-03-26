@@ -387,6 +387,7 @@ class PatternBacktester {
           pType: pType,
           horizon: h,
           absTStat: Math.abs(hs.tStat || 0),
+          df: hs.n - 1,
           stats: hs,
         });
       }
@@ -395,8 +396,12 @@ class PatternBacktester {
     const m = tests.length;
     if (m === 0) return;
 
-    // Step 2: |t-stat| 내림차순 정렬 (가장 유의한 것부터)
-    tests.sort(function(a, b) { return b.absTStat - a.absTStat; });
+    // Step 2: p-value 근사 후 오름차순 정렬 — Holm (1979) 원문: p-value 정렬 필수
+    // |t-stat| 정렬은 df 동일할 때만 유효; df 상이하면 p-value 불일치 (Bailey & Lopez de Prado 2014)
+    for (var ti = 0; ti < m; ti++) {
+      tests[ti].pValue = this._approxPValue(tests[ti].absTStat, tests[ti].df);
+    }
+    tests.sort(function(a, b) { return a.pValue - b.pValue; });
 
     // Step 3: Holm step-down 절차
     // t-분포 임계값 lookup: alpha → t-critical (양측)
@@ -475,6 +480,28 @@ class PatternBacktester {
     }
 
     return Math.abs(tVal);
+  }
+
+  /** 양측 t-분포 p-value 근사 — 정규 근사 + df 보정
+   *  Abramowitz & Stegun 26.7.5: 정규 근사 z ≈ t * sqrt((df-0.667)/(df-0.333)) / sqrt(df)
+   *  df >= 3에서 ~0.01 정확도 (Holm 정렬에 충분)
+   *
+   *  @param {number} absT — |t-stat|
+   *  @param {number} df — 자유도
+   *  @returns {number} — 양측 p-value (0~1)
+   */
+  _approxPValue(absT, df) {
+    if (df < 1 || !isFinite(absT)) return 1;
+    if (absT <= 0) return 1;
+    // 정규 근사: z ≈ absT * (1 - 1/(4*df)) / sqrt(1 + absT^2/(2*df))
+    var z = absT * (1 - 1 / (4 * df)) / Math.sqrt(1 + absT * absT / (2 * df));
+    // 표준정규 상보 CDF: Φ(-z) ≈ Abramowitz & Stegun 7.1.26
+    var b1 = 0.319381530, b2 = -0.356563782, b3 = 1.781477937;
+    var b4 = -1.821255978, b5 = 1.330274429;
+    var t = 1 / (1 + 0.2316419 * z);
+    var phi = Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
+    var tail = phi * t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))));
+    return Math.max(0, Math.min(1, 2 * tail)); // 양측
   }
 
 

@@ -421,10 +421,23 @@ async function updateFinancials() {
     set('fin-pbr', '\u2014');
   }
 
-  // PSR = 시가총액(억원) / 매출액(억원)
+  // PSR = 시가총액(억원) / TTM 매출액(억원)
+  // latest.rev는 분기 매출 → 최근 4분기 합(TTM)으로 보정, 연간 데이터면 그대로 사용
   let psrVal = null;
-  if (mcapEok && rev > 0) {
-    psrVal = +(mcapEok / rev).toFixed(2);
+  let revTTM = rev;
+  if (latest.p && latest.p.includes('Q') && data.length >= 4) {
+    // 분기 데이터: 최근 4분기 합산
+    let sum = 0, qCount = 0;
+    for (let qi = 0; qi < data.length && qCount < 4; qi++) {
+      if (data[qi].p && data[qi].p.includes('Q') && data[qi].rev) {
+        sum += Number(data[qi].rev) || 0;
+        qCount++;
+      }
+    }
+    if (qCount === 4) revTTM = sum;
+  }
+  if (mcapEok && revTTM > 0) {
+    psrVal = +(mcapEok / revTTM).toFixed(2);
     set('fin-psr', psrVal.toFixed(2) + '배');
     setClass('fin-psr', 'fin-grid-value');
   } else {
