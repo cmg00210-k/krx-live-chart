@@ -56,8 +56,8 @@ try {
   importScripts(
     'colors.js?v=12',
     'indicators.js?v=15',
-    'patterns.js?v=30',
-    'signalEngine.js?v=26',
+    'patterns.js?v=31',
+    'signalEngine.js?v=27',
     'backtester.js?v=26'
   );
   _workerReady = true;
