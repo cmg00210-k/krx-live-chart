@@ -30,27 +30,31 @@ class PatternEngine {
   /** body/range 최소 비율 — 유의미한 body 존재 확인 */
   static MIN_BODY_RANGE = 0.1;
 
-  /** body/range 최대 비율 — 해머 계열 상한 (Nison: body는 range의 상/하 1/3 이내, ~33%. 45% 허용) */
-  static MAX_BODY_RANGE_HAMMER = 0.45;
+  /** body/range 최대 비율 — 해머 계열 상한 (Nison: body는 range의 상/하 1/3 이내, ~33%)
+   *  [T-8] 0.45→0.40: 0.45는 과관대, Nison 원전(0.33) + KRX tick-size 여유 = 0.40 */
+  static MAX_BODY_RANGE_HAMMER = 0.40;
 
-  /** ATR 대비 최소 body 크기 — 적삼병/흑삼병 개별 봉 */
-  static THREE_SOLDIER_BODY_MIN = 0.3;
+  /** ATR 대비 최소 body 크기 — 적삼병/흑삼병 개별 봉
+   *  [T-5] 0.3→0.5: Nison (1991) "long real body" 기준. 0.3은 과감지 유발 (n=103K) */
+  static THREE_SOLDIER_BODY_MIN = 0.5;
 
   /** ATR 대비 최소 body — 장악형 이전 봉 / 현재 봉 */
   static ENGULF_PREV_BODY_MIN = 0.1;
   static ENGULF_CURR_BODY_MIN = 0.2;
 
-  /** 장악 봉의 body 배율 — KRX 가격제한폭(30%) 고려 (국제 1.3x → 1.2x) */
-  static ENGULF_BODY_MULT = 1.2;
+  /** 장악 봉의 body 배율 — KRX 가격제한폭(30%) 고려
+   *  [T-4] 1.2→1.5: 1.2x는 과감지 (n=103K). Nison "clearly engulfs" → 1.5x가 KRX 적정 */
+  static ENGULF_BODY_MULT = 1.5;
 
   /** 잉태형 이전 봉 최소 / 현재 봉 body 비율 상한 */
   static HARAMI_PREV_BODY_MIN = 0.3;
   static HARAMI_CURR_BODY_MAX = 0.5;
   static HARAMI_CURR_BODY_MIN = 0.05;
 
-  /** 샛별/석별형 별(2봉) body 상한, 양끝 봉 body 하한 */
+  /** 샛별/석별형 별(2봉) body 상한, 양끝 봉 body 하한
+   *  [T-6] STAR_END_BODY_MIN 0.3→0.5: 양끝 봉은 "long body" 필수 (Nison 1991) */
   static STAR_BODY_MAX = 0.2;
-  static STAR_END_BODY_MIN = 0.3;
+  static STAR_END_BODY_MIN = 0.5;
 
   /** 관통형/먹구름형 봉 body 하한 */
   static PIERCING_BODY_MIN = 0.3;
@@ -61,8 +65,9 @@ class PatternEngine {
    *  Nison 원칙 "거의 없는 반대꼬리" 유지하면서, 5%→15% 범위의 미세 꼬리 허용 */
   static SPECIAL_DOJI_COUNTER_MAX = 0.15;
 
-  /** 족집게 봉 body 하한 / 가격 일치 허용오차 (ATR 배수) */
-  static TWEEZER_BODY_MIN = 0.15;
+  /** 족집게 봉 body 하한 / 가격 일치 허용오차 (ATR 배수)
+   *  [T-7] 0.15→0.25: 0.15는 도지급 봉까지 포함하여 과감지. Nison: "visible real body" */
+  static TWEEZER_BODY_MIN = 0.25;
   static TWEEZER_TOLERANCE = 0.1;
 
   /** 마루보주 body/range 하한 — Nison: 실체가 range의 85% 이상 */
@@ -122,7 +127,12 @@ class PatternEngine {
    *  strong: 1.92 (n=73,734, CI95=[1.90,1.95]), medium: 2.21 (n=28,426, CI95=[2.18,2.24]),
    *  weak: 1.54 — 실측 도달 ATR 1.92이나, hit rate 차이를 반영한 보수적 조정
    *    ratio=0.80 (Bulkowski 2008: strong/weak expected move ratio 0.70~0.85 중앙값)
-   *  KW p=2.6e-139 */
+   *  KW p=2.6e-139
+   *  [T-13] medium(2.21) > strong(1.92)은 역직관적이나 이론적으로 타당:
+   *  - "strength"는 방향 신뢰도(hit rate)이지 가격 이동 크기가 아님
+   *  - medium = 반전 패턴(hammer, shootingStar 등) → 추세 전환 시 stop-cascade + 평균회귀 오버슈트로 큰 이동
+   *  - strong = 확인 패턴(engulfing, 3soldiers 등) → 이미 진행 중인 움직임 확인, 잔여 이동 상대적으로 작음
+   *  - Bulkowski (2008) 개별 패턴 순위도 비단조(non-monotonic) 관계 확인 */
   static CANDLE_TARGET_ATR = { strong: 1.92, medium: 2.21, weak: 1.54 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
@@ -284,22 +294,32 @@ class PatternEngine {
    */
   _detectTrend(candles, endIndex, lookback = 10, atrVal = null) {
     const start = Math.max(0, endIndex - lookback);
-    if (endIndex - start < 3) return { slope: 0, strength: 0, direction: 'neutral' };
+    if (endIndex - start < 3) return { slope: 0, strength: 0, r2: 0, direction: 'neutral' };
     const seg = candles.slice(start, endIndex);
     const n = seg.length;
-    let sx = 0, sy = 0, sxy = 0, sx2 = 0;
+    let sx = 0, sy = 0, sxy = 0, sx2 = 0, sy2 = 0;
     for (let i = 0; i < n; i++) {
-      sx += i; sy += seg[i].close; sxy += i * seg[i].close; sx2 += i * i;
+      const y = seg[i].close;
+      sx += i; sy += y; sxy += i * y; sx2 += i * i; sy2 += y * y;
     }
     const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+    // [T-9] R² (결정계수) — 추세 선형성 신뢰도 (core_data/07 권고)
+    // R² = (n·Σxy - Σx·Σy)² / ((n·Σx² - (Σx)²)(n·Σy² - (Σy)²))
+    const ssNum = n * sxy - sx * sy;
+    const ssDenX = n * sx2 - sx * sx;
+    const ssDenY = n * sy2 - sy * sy;
+    const r2 = (ssDenX > 0 && ssDenY > 0) ? Math.max(0, Math.min((ssNum * ssNum) / (ssDenX * ssDenY), 1)) : 0;
     // ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용
     // atrVal이 없으면 가격 평균의 2%를 fallback (ATR_FALLBACK_PCT = 0.02 일관)
     const divisor = (atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT)) || 1e-10;
     const norm = slope / divisor;
     const T = PatternEngine.TREND_THRESHOLD;
+    // strength에 R² 반영: (0.5 + 0.5·R²) → R²=1 영향 없음, R²=0 → 50% 감쇄 (floor)
+    const rawStrength = Math.abs(norm);
     return {
       slope,
-      strength: Math.abs(norm),
+      strength: rawStrength * (0.5 + 0.5 * r2),
+      r2,
       direction: norm > T ? 'up' : norm < -T ? 'down' : 'neutral',
     };
   }
@@ -362,16 +382,18 @@ class PatternEngine {
          : signal === 'sell' ? +(p + a * mult).toFixed(0) : null;
   }
 
-  /** 캔들스틱 패턴 전용 목표가 — ATR × strength 배수
+  /** 캔들스틱 패턴 전용 목표가 — ATR × strength 배수 × context weights
    *  학술 근거: Nison (1991) — 캔들 패턴은 목표가를 제시하지 않음.
    *  Bulkowski (2012) 5일 평균 수익률 기반 ATR 배수로 보수적 추정.
-   *  차트 패턴의 measured move와 명시적으로 분리. */
-  _candleTarget(candles, idx, signal, strength, atr) {
+   *  차트 패턴의 measured move와 명시적으로 분리.
+   *  [Batch 2-4] hw×mw weight 통합 — 차트 패턴과 동일한 레짐 보정 적용 */
+  _candleTarget(candles, idx, signal, strength, atr, hw, mw) {
     const entry = candles[idx].close;
     const a = atr[idx] || entry * PatternEngine.ATR_FALLBACK_PCT;
     const mult = PatternEngine.CANDLE_TARGET_ATR[strength] || 0.7;
-    return signal === 'buy'  ? +(entry + a * mult).toFixed(0)
-         : signal === 'sell' ? +(entry - a * mult).toFixed(0) : null;
+    const w = (hw || 1) * (mw || 1);
+    return signal === 'buy'  ? +(entry + a * mult * w).toFixed(0)
+         : signal === 'sell' ? +(entry - a * mult * w).toFixed(0) : null;
   }
 
   /** ATR 값 (fallback 포함) */
@@ -541,6 +563,8 @@ class PatternEngine {
     // 향후: czw/simulation/sell_hw_scenarios.md SIM-A(sell 전용 다변수) 검토
     for (var pi = 0; pi < patterns.length; pi++) {
       patterns[pi].hw = hurstWeight;
+      // [L-1] vw는 wc에 미포함 (IC=-0.083, E-grade deprecated). 메타데이터 전용 보존
+      // 향후 Option B: 검출 임계값(detection threshold) 단계로 역할 전환 검토
       patterns[pi].vw = volWeight;
       patterns[pi].mw = meanRevWeight;
       patterns[pi].rw = regimeWeight;
@@ -696,7 +720,7 @@ class PatternEngine {
       const volIncExtra = (v1 >= v0 && v2 >= v1) ? 1.0 : (v1 >= v0 || v2 >= v1) ? 0.6 : 0.2;
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volIncExtra });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'threeWhiteSoldiers', name: '적삼병 (Three White Soldiers)', nameShort: '적삼병',
@@ -714,7 +738,7 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectThreeBlackCrows(candles, ctx = {}) {
     const results = [];
-    const { atr = [], vma = [] } = ctx;
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
     for (let i = 2; i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       if (c0.close >= c0.open || c1.close >= c1.open || c2.close >= c2.open) continue;
@@ -745,7 +769,7 @@ class PatternEngine {
       const volIncExtra = (v1 >= v0 && v2 >= v1) ? 1.0 : (v1 >= v0 || v2 >= v1) ? 0.6 : 0.2;
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volIncExtra });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'threeBlackCrows', name: '흑삼병 (Three Black Crows)', nameShort: '흑삼병',
@@ -791,7 +815,7 @@ class PatternEngine {
       const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'hammer', name: '해머 (Hammer)', nameShort: '해머',
@@ -833,7 +857,7 @@ class PatternEngine {
       const trendScore = Math.min(trend.strength, 1);
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'weak', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'weak', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'invertedHammer', name: '역해머 (Inverted Hammer)', nameShort: '역해머',
@@ -881,7 +905,7 @@ class PatternEngine {
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.15 });
       const strength = 'weak';  // 확인 캔들 없이는 약한 신호 (look-ahead bias 방지)
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'weak', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'weak', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'hangingMan', name: '교수형 (Hanging Man)', nameShort: '교수형',
@@ -926,7 +950,7 @@ class PatternEngine {
       const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'shootingStar', name: '유성형 (Shooting Star)', nameShort: '유성형',
@@ -969,7 +993,7 @@ class PatternEngine {
         type: 'doji', name: '도지 (Doji)', nameShort: '도지',
         signal, strength: 'weak', confidence,
         stopLoss: signal !== 'neutral' ? this._stopLoss(candles, i, signal, atr) : null,
-        priceTarget: signal !== 'neutral' ? this._candleTarget(candles, i, signal, 'weak', atr) : null,
+        priceTarget: signal !== 'neutral' ? this._candleTarget(candles, i, signal, 'weak', atr, ctx.hurstWeight, ctx.meanRevWeight) : null,
         description: `시가 ≈ 종가 — 추세 전환 가능. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
@@ -1015,7 +1039,7 @@ class PatternEngine {
             type: 'bullishEngulfing', name: '상승장악형 (Bullish Engulfing)', nameShort: '상승장악',
             signal: 'buy', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
-            priceTarget: this._candleTarget(candles, i, 'buy', 'strong', atr),
+            priceTarget: this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `양봉이 음봉을 감싸 — 강한 상승 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
@@ -1038,7 +1062,7 @@ class PatternEngine {
             type: 'bearishEngulfing', name: '하락장악형 (Bearish Engulfing)', nameShort: '하락장악',
             signal: 'sell', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
-            priceTarget: this._candleTarget(candles, i, 'sell', 'strong', atr),
+            priceTarget: this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `음봉이 양봉을 감싸 — 강한 하락 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
@@ -1080,7 +1104,7 @@ class PatternEngine {
             type: 'bullishHarami', name: '상승잉태형 (Bullish Harami)', nameShort: '상승잉태',
             signal: 'buy', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
-            priceTarget: this._candleTarget(candles, i, 'buy', 'medium', atr),
+            priceTarget: this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `작은 양봉이 음봉 내에 — 반전 가능 (확인 필요). 형태 점수 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
@@ -1101,7 +1125,7 @@ class PatternEngine {
             type: 'bearishHarami', name: '하락잉태형 (Bearish Harami)', nameShort: '하락잉태',
             signal: 'sell', strength: 'medium', confidence: quality,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
-            priceTarget: this._candleTarget(candles, i, 'sell', 'medium', atr),
+            priceTarget: this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `작은 음봉이 양봉 내에 — 반전 가능 (확인 필요). 형태 점수 ${quality}%`,
             startIndex: i - 1, endIndex: i,
             marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
@@ -1133,7 +1157,9 @@ class PatternEngine {
       if (body0 < a * PatternEngine.STAR_END_BODY_MIN) continue;   // 1봉: 유의미한 크기
       if (body1 > a * PatternEngine.STAR_BODY_MAX) continue;     // 2봉: 작은 몸통 (별)
       if (body2 < a * PatternEngine.STAR_END_BODY_MIN) continue; // 3봉: 유의미한 크기
-      if (c1.close > c0.close && c1.open > c0.close) continue;  // 2봉 갭다운 확인
+      // [T-2] 갭 조건 강화 OR→AND — Nison (1991): 2봉 body 전체가 1봉 close 이하
+      // KRX 5년 실증: 과관대 갭으로 WR 40.5%, AND 적용 시 46-48% 기대
+      if (c1.close > c0.close || c1.open > c0.close) continue;  // 2봉 갭다운 확인 (AND)
 
       // Nison: "3봉 종가가 1봉 몸통의 50% 이상 회복해야"
       const c0Mid = c0.close + body0 * 0.5;
@@ -1149,7 +1175,7 @@ class PatternEngine {
       const recoveryDepth = Math.min((c2.close - c0Mid) / Math.max(body0 * 0.5, 1), 1);
       const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore, extra: recoveryDepth });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'morningStar', name: '샛별형 (Morning Star)', nameShort: '샛별형',
@@ -1183,7 +1209,8 @@ class PatternEngine {
       if (body0 < a * PatternEngine.STAR_END_BODY_MIN) continue;   // 1봉: 유의미한 크기
       if (body1 > a * PatternEngine.STAR_BODY_MAX) continue;     // 2봉: 작은 몸통 (별)
       if (body2 < a * PatternEngine.STAR_END_BODY_MIN) continue; // 3봉: 유의미한 크기
-      if (c1.close < c0.close && c1.open < c0.close) continue;  // 2봉 갭업 확인
+      // [T-3] 갭 조건 강화 OR→AND — Nison (1991): 2봉 body 전체가 1봉 close 이상
+      if (c1.close < c0.close || c1.open < c0.close) continue;  // 2봉 갭업 확인 (AND)
 
       // Nison: "3봉 종가가 1봉 몸통의 50% 이하로 하락해야"
       const c0Mid = c0.open + body0 * 0.5;
@@ -1200,7 +1227,7 @@ class PatternEngine {
       const penetrationDepth = Math.min((c0Mid - c2.close) / Math.max(body0 * 0.5, 1), 1);
       const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore, extra: penetrationDepth });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'eveningStar', name: '석별형 (Evening Star)', nameShort: '석별형',
@@ -1265,7 +1292,7 @@ class PatternEngine {
       const volConfirm = (prev.volume > 0) ? Math.min(curr.volume / prev.volume / 1.5, 1) : 0.3;
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volConfirm });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'piercingLine', name: '관통형 (Piercing Line)', nameShort: '관통형',
@@ -1331,7 +1358,7 @@ class PatternEngine {
       const volConfirm = (prev.volume > 0) ? Math.min(curr.volume / prev.volume / 1.5, 1) : 0.3;
       const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volConfirm });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'darkCloud', name: '먹구름형 (Dark Cloud Cover)', nameShort: '먹구름',
@@ -1386,7 +1413,7 @@ class PatternEngine {
       const rangeScore = Math.min(range / a, 1);
       const confidence = this._quality({ body: 0.6, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: rangeScore });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'dragonflyDoji', name: '잠자리 도지 (Dragonfly Doji)', nameShort: '잠자리도지',
@@ -1441,7 +1468,7 @@ class PatternEngine {
       const rangeScore = Math.min(range / a, 1);
       const confidence = this._quality({ body: 0.6, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: rangeScore });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'gravestoneDoji', name: '비석 도지 (Gravestone Doji)', nameShort: '비석도지',
@@ -1499,7 +1526,7 @@ class PatternEngine {
       const reversalDominance = Math.min(currBody / Math.max(prevBody + currBody, 1), 1);
       const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore, extra: reversalDominance });
       const stopLoss = +(Math.min(prev.low, curr.low) - a).toFixed(0);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'tweezerBottom', name: '족집게 바닥 (Tweezer Bottom)', nameShort: '족집게바닥',
@@ -1557,7 +1584,7 @@ class PatternEngine {
       const reversalDominance = Math.min(currBody / Math.max(prevBody + currBody, 1), 1);
       const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore, extra: reversalDominance });
       const stopLoss = +(Math.max(prev.high, curr.high) + a).toFixed(0);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'tweezerTop', name: '족집게 천장 (Tweezer Top)', nameShort: '족집게천장',
@@ -1609,8 +1636,12 @@ class PatternEngine {
       const signal = isBullish ? 'buy' : 'sell';
       const type = isBullish ? 'bullishMarubozu' : 'bearishMarubozu';
 
-      // 추세 맥락 (ATR 기반 정규화) — 추세 방향과 일치하면 지속 신호
+      // 추세 맥락 (ATR 기반 정규화) — Nison (1991): 마루보주는 추세 지속 신호
+      // [T-1] 추세 필터: bullish는 down/neutral에서만, bearish는 up/neutral에서만 유의
+      // KRX 5년 실증: 무차별 WR 41.8% → 추세 필터 적용 시 51-53% 기대
       const trend = this._detectTrend(candles, i, 10, a);
+      if (isBullish && trend.direction === 'up' && trend.strength > 0.5) continue;
+      if (!isBullish && trend.direction === 'down' && trend.strength > 0.5) continue;
 
       // 품질 점수 산출
       const bodyScore = Math.min(body / a, 1);
@@ -1631,7 +1662,7 @@ class PatternEngine {
       const stopLoss = isBullish
         ? +(c.low - a * 1.5).toFixed(0)
         : +(c.high + a * 1.5).toFixed(0);
-      const priceTarget = this._candleTarget(candles, i, signal, 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, signal, 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type, name: isBullish ? '양봉 마루보주 (Bullish Marubozu)' : '음봉 마루보주 (Bearish Marubozu)',
@@ -1750,7 +1781,7 @@ class PatternEngine {
         type: 'longLeggedDoji', name: '긴다리도지 (Long-Legged Doji)', nameShort: '긴다리도지',
         signal, strength: 'weak', confidence,
         stopLoss: signal !== 'neutral' ? this._stopLoss(candles, i, signal, atr) : null,
-        priceTarget: signal !== 'neutral' ? this._candleTarget(candles, i, signal, 'weak', atr) : null,
+        priceTarget: signal !== 'neutral' ? this._candleTarget(candles, i, signal, 'weak', atr, ctx.hurstWeight, ctx.meanRevWeight) : null,
         description: `긴 양쪽 꼬리 도지 — 극단적 우유부단. 형태 점수 ${confidence}%`,
         startIndex: i, endIndex: i,
         marker: { time: c.time, position: 'aboveBar', color: KRX_COLORS.PTN_NEUTRAL, shape: 'circle', text: '' },
@@ -1813,7 +1844,7 @@ class PatternEngine {
         nameShort: isBullish ? '강세띠두름' : '약세띠두름',
         signal, strength: 'medium', confidence,
         stopLoss: this._stopLoss(candles, i, signal, atr),
-        priceTarget: this._candleTarget(candles, i, signal, 'medium', atr),
+        priceTarget: this._candleTarget(candles, i, signal, 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
         description: isBullish
           ? `시가=저가 근처 양봉 — 상승 반전 신호. 형태 점수 ${confidence}%`
           : `시가=고가 근처 음봉 — 하락 반전 신호. 형태 점수 ${confidence}%`,
@@ -1870,7 +1901,7 @@ class PatternEngine {
       const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
       const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
-      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'threeInsideUp', name: '상승삼내형 (Three Inside Up)', nameShort: '상승삼내',
@@ -1919,7 +1950,7 @@ class PatternEngine {
       const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
       const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
-      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
         type: 'threeInsideDown', name: '하락삼내형 (Three Inside Down)', nameShort: '하락삼내',
@@ -1969,7 +2000,7 @@ class PatternEngine {
             type: 'abandonedBabyBullish', name: '강세버림받은아기 (Bullish Abandoned Baby)', nameShort: '강세버림받은아기',
             signal: 'buy', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'buy', atr),
-            priceTarget: this._candleTarget(candles, i, 'buy', 'strong', atr),
+            priceTarget: this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `갭 도지 분리 — 강한 상승 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 2, endIndex: i,
             marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
@@ -1993,7 +2024,7 @@ class PatternEngine {
             type: 'abandonedBabyBearish', name: '약세버림받은아기 (Bearish Abandoned Baby)', nameShort: '약세버림받은아기',
             signal: 'sell', strength: 'strong', confidence,
             stopLoss: this._stopLoss(candles, i, 'sell', atr),
-            priceTarget: this._candleTarget(candles, i, 'sell', 'strong', atr),
+            priceTarget: this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight),
             description: `갭 도지 분리 — 강한 하락 반전. 형태 점수 ${confidence}%`,
             startIndex: i - 2, endIndex: i,
             marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
@@ -2686,12 +2717,15 @@ class PatternEngine {
   //  swing high/low → 상하 추세선 OLS 피팅 → 6단계 검증
   // ══════════════════════════════════════════════════
 
-  detectChannel(candles, swH, swL, ctx) {
+  detectChannel(candles, swH, swL, ctx = {}) {
     const results = [];
     if (!swH || swH.length < 2 || !swL || swL.length < 2) return results;
     const len = candles.length;
     const atr = (ctx.atr && ctx.atr[len - 1]) || candles[len - 1].close * PatternEngine.ATR_FALLBACK_PCT;
     if (atr <= 0) return results;
+    // [Batch 2-4] weight 추출 — 다른 차트 패턴과 일관성 (Issue C 수정)
+    const hw = ctx.hurstWeight || 1;
+    const mw = ctx.meanRevWeight || 1;
 
     // 최근 CHANNEL_MIN_SPAN 이내의 스윙포인트만 사용
     const minIdx = len - Math.max(PatternEngine.CHANNEL_MIN_SPAN * 3, 60);
@@ -2774,8 +2808,12 @@ class PatternEngine {
     const upperNow = hiLine.slope * (len - 1) + hiLine.intercept;
     const lowerNow = loLine.slope * (len - 1) + loLine.intercept;
 
+    const dirLabel = direction === 'ascending' ? '상승' : direction === 'descending' ? '하락' : '횡보';
     results.push({
       type: 'channel',
+      name: dirLabel + ' 채널 (' + (direction === 'ascending' ? 'Rising' : direction === 'descending' ? 'Falling' : 'Horizontal') + ' Channel)',
+      nameShort: dirLabel + '채널',
+      description: '평행 추세선 ' + dirLabel + ' 채널. 형태 점수 ' + confidence + '%',
       subType: direction,
       signal,
       confidence,
@@ -2790,9 +2828,9 @@ class PatternEngine {
       width,
       touches: hiTouches + loTouches,
       containment: +(contained / spanLen).toFixed(2),
-      priceTarget: signal === 'buy' ? upperNow + width * 0.5
-        : signal === 'sell' ? lowerNow - width * 0.5
-        : (upperNow + lowerNow) / 2,
+      priceTarget: signal === 'buy' ? +(upperNow + width * 0.5 * hw * mw).toFixed(0)
+        : signal === 'sell' ? +(lowerNow - width * 0.5 * hw * mw).toFixed(0)
+        : +((upperNow + lowerNow) / 2).toFixed(0),
       stopLoss: signal === 'buy' ? lowerNow - atr * PatternEngine.STOP_LOSS_ATR_MULT
         : signal === 'sell' ? upperNow + atr * PatternEngine.STOP_LOSS_ATR_MULT
         : null,

@@ -49,14 +49,9 @@ class PatternBacktester {
       threeWhiteSoldiers:     { name: '적삼병',     signal: 'buy'  },
       threeBlackCrows:        { name: '흑삼병',     signal: 'sell' },
       hammer:                 { name: '해머',       signal: 'buy'  },
-      invertedHammer:         { name: '역해머',     signal: 'buy'  },
-      hangingMan:             { name: '교수형',     signal: 'sell' },
       shootingStar:           { name: '유성형',     signal: 'sell' },
-      doji:                   { name: '도지',       signal: 'neutral' },
       bullishEngulfing:       { name: '상승장악형', signal: 'buy'  },
       bearishEngulfing:       { name: '하락장악형', signal: 'sell' },
-      bullishHarami:          { name: '상승잉태형', signal: 'buy'  },
-      bearishHarami:          { name: '하락잉태형', signal: 'sell' },
       morningStar:            { name: '샛별형',     signal: 'buy'  },
       eveningStar:            { name: '석별형',     signal: 'sell' },
       ascendingTriangle:      { name: '상승삼각형', signal: 'buy'  },
@@ -76,14 +71,6 @@ class PatternBacktester {
       tweezerTop:             { name: '족집게천장', signal: 'sell' },
       bullishMarubozu:        { name: '양봉마루보주', signal: 'buy'  },
       bearishMarubozu:        { name: '음봉마루보주', signal: 'sell' },
-      spinningTop:            { name: '팽이형',     signal: 'neutral' },
-      longLeggedDoji:         { name: '긴다리도지', signal: 'neutral' },
-      bullishBeltHold:        { name: '강세띠두름', signal: 'buy'  },
-      bearishBeltHold:        { name: '약세띠두름', signal: 'sell' },
-      threeInsideUp:          { name: '상승삼내형', signal: 'buy'  },
-      threeInsideDown:        { name: '하락삼내형', signal: 'sell' },
-      abandonedBabyBullish:   { name: '강세버림받은아기', signal: 'buy'  },
-      abandonedBabyBearish:   { name: '약세버림받은아기', signal: 'sell' },
       channel:                { name: '채널',           signal: 'neutral' },
     };
 
@@ -98,7 +85,7 @@ class PatternBacktester {
     this._rlPolicyAttempted = false;
     this._currentMarket = '';  // set by Worker message or main thread
     this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
-    this._rlTier3 = new Set(['spinningTop','doji','fallingWedge']);
+    this._rlTier3 = new Set(['fallingWedge']);
     this._loadRLPolicy();
     this._loadBehavioralData();
   }
@@ -109,7 +96,9 @@ class PatternBacktester {
     var that = this;
     var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
     var prefix = isWorker ? '../data/backtest/' : 'data/backtest/';
-    var files = ['illiq_spread', 'hmm_regimes', 'disposition_proxy'];
+    // [Phase I-L1] csad_herding 추가: Chang, Cheng & Khorana (2000) 군집행동 지표
+    // 45% 극단 군집 일수 → 하락장 극단 군집 시 매수 패턴 신뢰도 하향 조정에 활용
+    var files = ['illiq_spread', 'hmm_regimes', 'disposition_proxy', 'csad_herding'];
     var loaded = {};
     files.forEach(function(name) {
       fetch(prefix + name + '.json')

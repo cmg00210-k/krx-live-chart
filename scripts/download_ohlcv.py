@@ -84,7 +84,8 @@ def get_all_stocks():
 def download_stock(code, name, market, start_date, end_date, output_dir):
     """단일 종목 OHLCV 다운로드 → 시장별 폴더에 JSON 저장"""
     try:
-        df = stock.get_market_ohlcv(start_date, end_date, code)
+        # [C-3] 수정주가 적용: 액면분할/병합 반영 (미반영 시 허위 패턴 발생)
+        df = stock.get_market_ohlcv(start_date, end_date, code, adjusted=True)
 
         if df.empty:
             return None

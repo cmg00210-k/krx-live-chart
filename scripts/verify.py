@@ -85,18 +85,13 @@ def info(msg):
 # detectSupportResistance -> support/resistance (excluded from checklist).
 CANONICAL_PATTERNS = {
     "threeWhiteSoldiers", "threeBlackCrows",
-    "hammer", "invertedHammer", "hangingMan", "shootingStar",
-    "doji", "dragonflyDoji", "gravestoneDoji", "spinningTop",
-    "longLeggedDoji",
+    "hammer", "shootingStar",
+    "dragonflyDoji", "gravestoneDoji",
     "bullishEngulfing", "bearishEngulfing",
-    "bullishHarami", "bearishHarami",
     "piercingLine", "darkCloud",
     "tweezerBottom", "tweezerTop",
     "morningStar", "eveningStar",
     "bullishMarubozu", "bearishMarubozu",
-    "bullishBeltHold", "bearishBeltHold",
-    "threeInsideUp", "threeInsideDown",
-    "abandonedBabyBullish", "abandonedBabyBearish",
     "ascendingTriangle", "descendingTriangle",
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
@@ -105,7 +100,7 @@ CANONICAL_PATTERNS = {
 }
 
 # Neutral direction - not required in BULLISH_TYPES or BEARISH_TYPES
-NEUTRAL_PATTERNS = {"doji", "spinningTop", "longLeggedDoji", "symmetricTriangle", "channel"}
+NEUTRAL_PATTERNS = {"symmetricTriangle", "channel"}
 
 # Chart patterns - appear in CHART_PATTERNS + _VIZ_CHART_TYPES
 CHART_PATTERNS_SET = {
@@ -159,12 +154,7 @@ def check_patterns(strict=False):
     detect_calls = set(re.findall(r"this\.detect(\w+)\(", patterns_src))
     expand = {
         "Engulfing":      ["bullishEngulfing",      "bearishEngulfing"],
-        "Harami":         ["bullishHarami",          "bearishHarami"],
         "Marubozu":       ["bullishMarubozu",        "bearishMarubozu"],
-        "BeltHold":       ["bullishBeltHold",        "bearishBeltHold"],
-        "AbandonedBaby":  ["abandonedBabyBullish",   "abandonedBabyBearish"],
-        "ThreeInsideUp":  ["threeInsideUp"],
-        "ThreeInsideDown":["threeInsideDown"],
     }
     derived = set()
     for call in detect_calls:
@@ -232,8 +222,8 @@ def check_patterns(strict=False):
 
     # Single-candle candle patterns
     single_expected = {
-        "hammer", "invertedHammer", "hangingMan", "shootingStar",
-        "doji", "dragonflyDoji", "gravestoneDoji", "spinningTop",
+        "hammer", "shootingStar",
+        "dragonflyDoji", "gravestoneDoji",
         "bullishMarubozu", "bearishMarubozu",
     }
     # Multi-candle candle patterns

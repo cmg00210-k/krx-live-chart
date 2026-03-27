@@ -55,26 +55,6 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '선행 추세가 하락이 아닌 경우 해머 의미 상실. 다음 봉의 확인(양봉 마감) 없이 단독 사용 시 오류율 증가.'
   },
 
-  invertedHammer: {
-    nameKo: '역해머',
-    category: '캔들스틱 (반전)',
-    candles: 1,
-    academicDesc: '하락 추세 말기의 짧은 몸통 + 긴 윗꼬리 봉. 윗꼬리가 몸통의 2배 이상. 매수 시도가 있었으나 완전히 성공하지 못한 초기 반전 시도.',
-    psychology: '매수세가 장중 반등을 시도했으나 고가에서 매도 압력에 밀림. 그러나 종가가 시가 근처에서 유지되어 매수 의지를 시사.',
-    bulkowskiWinRate: 55,
-    invalidation: '다음 봉에서 확인 양봉이 나타나지 않으면 의미 없음. 거래량 미동반 시 신뢰도 급감.'
-  },
-
-  hangingMan: {
-    nameKo: '교수형',
-    category: '캔들스틱 (반전)',
-    candles: 1,
-    academicDesc: '상승 추세 말기의 짧은 몸통 + 긴 아래꼬리 봉. 해머와 동일 형태이나 상승 추세에서 출현하여 반대 의미. 잠재적 하락 반전 경고.',
-    psychology: '장중 큰 매도 압력이 발생하여 가격이 급락했다가 회복. 그러나 이 매도 압력 자체가 기존 상승 추세의 균열 신호.',
-    bulkowskiWinRate: 59,
-    invalidation: '다음 봉이 양봉이거나 고점 갱신 시 무효. 거래량 급증 없이 나타나면 단순 조정으로 해석.'
-  },
-
   shootingStar: {
     nameKo: '유성형',
     category: '캔들스틱 (반전)',
@@ -83,16 +63,6 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     psychology: '매수세가 상승을 시도했으나 고가에서 강한 매도벽에 부딪혀 좌절. 추세 전환의 강력한 초기 신호.',
     bulkowskiWinRate: 63,
     invalidation: '다음 봉의 확인(음봉 마감) 필요. 거래량이 평균 이하이면 단순 변동으로 해석.'
-  },
-
-  doji: {
-    nameKo: '도지',
-    category: '캔들스틱 (중립)',
-    candles: 1,
-    academicDesc: '시가와 종가가 거의 같은 봉. 매수세와 매도세가 균형을 이루어 우유부단한 시장 상태를 나타냄. 추세 전환의 잠재적 전조.',
-    psychology: '매수자와 매도자가 장중 치열한 공방을 벌였으나 결국 무승부. 기존 추세에 대한 확신이 약화되는 심리적 전환점.',
-    bulkowskiWinRate: 51,
-    invalidation: '횡보장에서 빈번히 출현하면 의미 없음. 추세 내에서 출현할 때만 반전 신호로 유효.'
   },
 
   bullishEngulfing: {
@@ -113,26 +83,6 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     psychology: '전일 매수세가 형성한 상승분을 당일 매도세가 완전히 소거. 이익 실현 욕구가 추가 매수 의지를 능가.',
     bulkowskiWinRate: 79,
     invalidation: '장악 봉 거래량 감소 시 신뢰도 하락. 지지선 근처에서는 하락 지속 실패 가능.'
-  },
-
-  bullishHarami: {
-    nameKo: '상승잉태형',
-    category: '캔들스틱 (반전)',
-    candles: 2,
-    academicDesc: '하락 추세에서 긴 음봉 뒤에 그 몸통 안에 포함되는 짧은 양봉 출현. 하락 모멘텀 약화의 초기 신호.',
-    psychology: '전일의 강한 매도 이후 변동성이 축소되면서 매도세 피로 신호. 매수자가 조심스럽게 진입하기 시작.',
-    bulkowskiWinRate: 53,
-    invalidation: '확인 봉(3일차 양봉)이 없으면 신뢰도 낮음. 단독으로는 약한 신호이므로 다른 지표와의 합류 확인 필요.'
-  },
-
-  bearishHarami: {
-    nameKo: '하락잉태형',
-    category: '캔들스틱 (반전)',
-    candles: 2,
-    academicDesc: '상승 추세에서 긴 양봉 뒤에 그 몸통 안에 포함되는 짧은 음봉 출현. 상승 모멘텀 약화의 초기 신호.',
-    psychology: '전일의 강한 매수 이후 변동성이 축소되면서 매수세 피로 신호. 이익 실현 매물이 서서히 출현.',
-    bulkowskiWinRate: 53,
-    invalidation: '확인 봉(3일차 음봉) 없으면 신뢰도 낮음. 단독으로는 약한 신호.'
   },
 
   morningStar: {
@@ -235,16 +185,6 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '거래량이 평균 이하이면 유동성 부족에 의한 왜곡 가능. 하락 추세 말기에 나타나면 클라이맥스 매도(바닥 경고)로 해석될 수 있음.'
   },
 
-  spinningTop: {
-    nameKo: '팽이형',
-    category: '캔들스틱 (중립)',
-    candles: 1,
-    academicDesc: '작은 실체(5~30%)에 양쪽으로 긴 꼬리가 달린 봉. 도지보다 실체가 있으나, 매수/매도 어느 쪽도 우위를 점하지 못한 우유부단 상태.',
-    psychology: '장중 매수세와 매도세가 번갈아 우위를 점했으나 종가에서 결국 큰 방향 결정 없이 마감. 기존 추세에 대한 확신이 약화되는 전조.',
-    bulkowskiWinRate: 51,
-    invalidation: '횡보장에서 빈번히 출현 시 의미 없음. 추세 말기에 출현할 때 반전 전조로 유효. 단독 사용보다 다른 신호와 복합 분석 권장.'
-  },
-
   ascendingTriangle: {
     nameKo: '상승삼각형',
     category: '차트패턴 (지속)',
@@ -345,75 +285,6 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '우측어깨가 머리보다 낮으면 패턴 무효. 넥라인 돌파 시 거래량 급증이 동반되어야 유효.'
   },
 
-  longLeggedDoji: {
-    nameKo: '긴다리도지',
-    category: '캔들스틱 (중립)',
-    candles: 1,
-    academicDesc: '시가 ≈ 종가이며 양쪽 꼬리가 모두 range의 30% 이상인 도지. 일반 도지보다 큰 범위(ATR 80%+)에서 극단적 우유부단을 표현.',
-    psychology: '장중 매수세와 매도세가 극단적 공방을 벌였으나 결국 균형. 추세 전환의 강력한 전조이며, 높은 변동성 환경에서 특히 유의미.',
-    bulkowskiWinRate: 51,
-    invalidation: '횡보장에서 빈번히 출현 시 의미 약화. 추세 말기 출현 시에만 반전 신호로 유효.'
-  },
-
-  bullishBeltHold: {
-    nameKo: '강세띠두름',
-    category: '캔들스틱 (반전)',
-    candles: 1,
-    academicDesc: '하락 추세에서 시가가 저점 근처(아래꼬리 거의 없음)인 큰 양봉. 마루보주보다 종가쪽 꼬리를 허용하나 강한 매수 반전 신호.',
-    psychology: '시가에서 즉시 매수세가 압도하여 종일 상승. 시가 근처 아래꼬리가 없어 매수 의지가 강력함을 시사.',
-    bulkowskiWinRate: 56,
-    invalidation: '선행 하락 추세가 없으면 의미 없음. 거래량 미동반 시 신뢰도 하락.'
-  },
-
-  bearishBeltHold: {
-    nameKo: '약세띠두름',
-    category: '캔들스틱 (반전)',
-    candles: 1,
-    academicDesc: '상승 추세에서 시가가 고점 근처(윗꼬리 거의 없음)인 큰 음봉. 마루보주보다 종가쪽 꼬리를 허용하나 강한 매도 반전 신호.',
-    psychology: '시가에서 즉시 매도세가 압도하여 종일 하락. 시가 근처 윗꼬리가 없어 매도 의지가 강력함을 시사.',
-    bulkowskiWinRate: 54,
-    invalidation: '선행 상승 추세가 없으면 의미 없음. 거래량 미동반 시 신뢰도 하락.'
-  },
-
-  threeInsideUp: {
-    nameKo: '상승삼내형',
-    category: '캔들스틱 (반전)',
-    candles: 3,
-    academicDesc: '상승잉태형(큰 음봉 + 작은 양봉 내포) 뒤에 확인 양봉이 첫 봉 시가를 돌파. 잉태형의 확인 완성판으로 신뢰도가 medium에서 strong으로 승격.',
-    psychology: '1일차 강한 매도 후 2일차에 매도세 소진 확인. 3일차 매수세가 1일차 시작점을 넘어 추세 반전을 확정.',
-    bulkowskiWinRate: 65,
-    invalidation: '확인 봉(3봉)이 첫 봉 시가를 넘지 못하면 잉태형으로 강등. 거래량 증가 동반 시 신뢰도 상승.'
-  },
-
-  threeInsideDown: {
-    nameKo: '하락삼내형',
-    category: '캔들스틱 (반전)',
-    candles: 3,
-    academicDesc: '하락잉태형(큰 양봉 + 작은 음봉 내포) 뒤에 확인 음봉이 첫 봉 시가를 하회. 잉태형의 확인 완성판.',
-    psychology: '1일차 강한 매수 후 2일차에 매수세 피로 확인. 3일차 매도세가 1일차 시작점 아래로 하락하며 반전 확정.',
-    bulkowskiWinRate: 68,
-    invalidation: '확인 봉(3봉)이 첫 봉 시가를 하회하지 못하면 잉태형으로 강등.'
-  },
-
-  abandonedBabyBullish: {
-    nameKo: '강세버림받은아기',
-    category: '캔들스틱 (반전)',
-    candles: 3,
-    academicDesc: '하락 중 음봉 → 갭다운 도지 → 갭업 양봉의 3봉 구조. 도지가 양쪽 캔들과 완전히 분리(갭)된 희귀하고 강력한 상승 반전 패턴.',
-    psychology: '매도세 소진 후 도지에서 균형, 이후 매수세가 갭으로 진입하며 추세 반전. 도지의 고립이 시장 심리 단절을 상징.',
-    bulkowskiWinRate: 70,
-    invalidation: '갭이 충분하지 않으면 샛별형과 구분 불가. KRX에서 갭 빈도가 낮아 출현 자체가 드묾.'
-  },
-
-  abandonedBabyBearish: {
-    nameKo: '약세버림받은아기',
-    category: '캔들스틱 (반전)',
-    candles: 3,
-    academicDesc: '상승 중 양봉 → 갭업 도지 → 갭다운 음봉의 3봉 구조. 도지가 양쪽 캔들과 완전히 분리된 희귀하고 강력한 하락 반전 패턴.',
-    psychology: '매수세 소진 후 도지에서 균형, 이후 매도세가 갭으로 진입하며 추세 반전.',
-    bulkowskiWinRate: 68,
-    invalidation: '갭이 충분하지 않으면 석별형과 구분 불가. KRX에서 출현 빈도 극히 낮음.'
-  },
 });
 
 
@@ -473,7 +344,7 @@ function renderPatternPanel(patterns) {
     const endIdx = p.endIndex != null ? p.endIndex : (p.index != null ? p.index : (p.startIndex || 0));
     const timeVal = (candles[endIdx] && candles[endIdx].time) || '';
 
-    return `<div class="pattern-item ${sc}" data-pattern-idx="${idx}" data-time="${timeVal}" data-index="${endIdx}" title="클릭하여 차트에서 확인"><div class="pattern-header"><span class="pattern-name">${p.nameShort}</span>${conf}<span class="pattern-signal ${sc}">${st}</span><span class="pattern-strength">${str}</span></div><div class="pattern-desc">${p.description}</div>${risk}</div>`;
+    return `<div class="pattern-item ${sc}" data-pattern-idx="${idx}" data-time="${timeVal}" data-index="${endIdx}" title="클릭하여 차트에서 확인"><div class="pattern-header"><span class="pattern-name">${p.nameShort || p.name || p.type}</span>${conf}<span class="pattern-signal ${sc}">${st}</span><span class="pattern-strength">${str}</span></div><div class="pattern-desc">${p.description}</div>${risk}</div>`;
   }).join('');
 
   // 패턴 항목 클릭 → 해당 봉으로 차트 스크롤
@@ -524,7 +395,7 @@ function updatePatternSummaryBar(patterns) {
 
   textEl.innerHTML =
     `패턴 <span class="psb-count">${patterns.length}개</span> 감지${_demoTag}` +
-    ` | 최고: <span class="psb-top"${tooltipAttr}>${top.nameShort}</span>` +
+    ` | 최고: <span class="psb-top"${tooltipAttr}>${top.nameShort || top.name || top.type}</span>` +
     ` <span class="psb-conf ${confClass}">${confVal}%</span>` +
     ` (${signalText})`;
 

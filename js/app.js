@@ -305,7 +305,7 @@ function _cacheDom() {
 }
 
 // ── 시그널 카테고리 필터 상태 ──
-let activeSignalCategories = new Set(['ma', 'macd', 'rsi', 'bb', 'volume', 'composite']);
+let activeSignalCategories = new Set(['ma', 'macd', 'rsi', 'bb', 'volume', 'composite', 'ichimoku', 'hurst', 'kalman']);
 
 // ── Web Worker 상태 (Phase 9) ──
 let _analysisWorker = null;
@@ -324,8 +324,7 @@ const _CHART_PATTERN_TYPES = new Set([
   'doubleBottom', 'doubleTop',
   'headAndShoulders', 'inverseHeadAndShoulders',
   'ascendingTriangle', 'descendingTriangle', 'symmetricTriangle',
-  'risingWedge', 'fallingWedge',
-  'flag', 'supportBounce', 'resistanceReject',
+  'risingWedge', 'fallingWedge', 'channel',
 ]);
 
 // ── 즐겨찾기 (워치리스트) ──
@@ -1409,7 +1408,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=17');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=18');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -1892,11 +1891,10 @@ function _requestWorkerAnalysis() {
 // ── 패턴/시그널 카테고리 분류 (사이드바 pill 용) ──
 // patterns.js 타입 → candle, signalEngine 타입 → indicator/volume
 const _CANDLE_PATTERN_TYPES = new Set([
-  'doji', 'hammer', 'shootingStar', 'bullishEngulfing', 'bearishEngulfing',
+  'hammer', 'shootingStar', 'bullishEngulfing', 'bearishEngulfing',
   'morningStar', 'eveningStar', 'threeWhiteSoldiers', 'threeBlackCrows',
-  'hangingMan', 'invertedHammer', 'bullishHarami', 'bearishHarami',
   'piercingLine', 'darkCloud', 'dragonflyDoji', 'gravestoneDoji',
-  'tweezerBottom', 'tweezerTop',
+  'tweezerBottom', 'tweezerTop', 'bullishMarubozu', 'bearishMarubozu',
 ]);
 // _CHART_PATTERN_TYPES는 상단(61줄)에서 이미 정의됨
 const _VOLUME_SIGNAL_TYPES = new Set([

@@ -640,7 +640,7 @@ class SignalEngine {
     // H>0.6(추세): RSI 역행 위험 → confidence 하향
     // H<0.4(반지속): RSI 반전 유효 → confidence 상향
     const H = cache.hurst();
-    const hBase = (H !== null && H !== undefined)
+    const hBase = (H !== null && H !== undefined && !isNaN(H))
       ? Math.round(65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2)))
       : 55;  // H 없으면 기본 55
     // hBase: H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
@@ -1309,6 +1309,8 @@ class SignalEngine {
     const swingHighs = [];
     const swingLows = [];
 
+    // [H-2] 스윙 확인에 i+1..i+swingOrder 참조 (3-bar lookahead)
+    // 차트 표시용으로는 문제 없으나, 실시간 매매 시 swingOrder봉 지연 발생
     for (let i = swingOrder; i < candles.length - swingOrder; i++) {
       if (indicator[i] === null) continue;
 

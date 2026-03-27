@@ -37,7 +37,13 @@ echo [5/6] Sector fundamentals...
 python scripts/download_sector.py
 
 echo [6/6] Cloudflare Pages deploy...
-call npx wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message="daily-update"
+python scripts/stage_deploy.py
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Staging failed -- file count over limit
+    pause
+    exit /b 1
+)
+call npx wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message="daily-update"
 
 echo.
 echo ============================================
