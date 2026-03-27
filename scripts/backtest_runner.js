@@ -48,6 +48,7 @@ function createEngine() {
     Math, Object, Array, Map, Set, Date, Number, String,
     Boolean, RegExp, JSON, Error, TypeError, RangeError,
     parseInt, parseFloat, isNaN, isFinite, Infinity, NaN, undefined,
+    setTimeout, clearTimeout, setInterval, clearInterval,
     self: {},
     fetch: fakeFetch,
     Promise,

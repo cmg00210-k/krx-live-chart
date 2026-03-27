@@ -18,24 +18,24 @@
   ],
   "thetas": [
     [
-      -2.1244451410582315,
-      0.003687856537268247,
-      0.4981875818872512,
-      0.05543071758374161,
-      0.009164122189018797,
-      0.11970583490249974,
-      -0.3263743257895051,
-      0.7387081269788638
+      -0.04639517300612768,
+      -0.00694430214088788,
+      -0.35253703351133864,
+      -0.007762555482869458,
+      -0.021404964382363053,
+      0.09752218817260343,
+      0.0786501572670414,
+      0.06561211909114698
     ],
     [
-      0.01581699705405418,
-      0.009021932803124114,
-      -0.20149094459795697,
-      -0.0020600774730178063,
-      -0.6092890419366329,
-      -0.008578646899113591,
-      -0.0003068363723569016,
-      -0.001644166604715773
+      -0.10602455318828817,
+      0.020726967920136903,
+      0.07482216575829591,
+      -0.04378893430642942,
+      0.03878280648904818,
+      -0.20809072195534872,
+      0.07939543901277649,
+      0.019694218757526923
     ],
     [
       0.0,
@@ -48,32 +48,32 @@
       0.0
     ],
     [
-      -0.21147545178312277,
-      0.0417945056248911,
-      0.17283561424789268,
-      0.0760613525580335,
-      0.0784079757249233,
-      0.10239544270810351,
-      -0.04087019386658077,
-      -0.02111139863302268
+      -0.21038413460914446,
+      0.024787471871374884,
+      0.1096173293155117,
+      0.0839379241255364,
+      0.08718741719081496,
+      0.030528233191656658,
+      0.03211637315034996,
+      -0.0085190324865764
     ],
     [
-      -0.12472177993183618,
-      -0.022010456112277678,
-      0.13713065313206377,
-      0.025025646698664437,
-      -0.01825917869238245,
-      -0.07872589732221862,
-      0.14048660168220703,
-      0.0031585746016879
+      -1.1225223309616088,
+      -0.38443790134112943,
+      0.01808138484360661,
+      0.3952066750552856,
+      -0.2513268651271177,
+      0.7737238322298657,
+      1.0371323112659354,
+      -0.023959443009554493
     ]
   ],
   "n_updates": [
-    2252,
-    4135,
-    45355,
-    70950,
-    76443
+    1166,
+    23634,
+    7341,
+    14036,
+    1582
   ],
   "context_names": [
     "ewma_vol",
@@ -85,71 +85,71 @@
     "raw_hurst"
   ],
   "training_summary": {
-    "n_samples": 199135,
+    "n_samples": 47759,
     "n_periods": 8,
-    "mean_ic_adjusted": 0.045868,
-    "mean_ic_original": 0.053693,
-    "t_stat_delta": -0.8484
+    "mean_ic_adjusted": -0.008832,
+    "mean_ic_original": -0.005763,
+    "t_stat_delta": -0.1518
   },
   "normalization": {
     "ewma_vol": {
-      "mean": 0.026713,
-      "std": 0.017879
+      "mean": 0.026411,
+      "std": 0.019188
     },
     "raw_hurst": {
-      "mean": 0.947379,
-      "std": 0.074609
+      "mean": 0.947134,
+      "std": 0.075901
     },
-    "pred_std": 0.912305,
+    "pred_std": 1.409038,
     "move_atr": {
-      "mean": 1.749223,
-      "std": 1.433023
+      "mean": 1.735149,
+      "std": 1.526166
     },
     "jeffrey_div": {
-      "mean": 240.917463,
-      "std": 35252.840889
+      "mean": 425.762508,
+      "std": 46780.910964
     }
   },
   "win_rates_live": {
     "hammer": {
-      "alpha": 182.0,
-      "beta": 198.0
+      "alpha": 375.0,
+      "beta": 346.0
     },
     "invertedHammer": {
       "alpha": 263.1,
       "beta": 239.9
     },
     "shootingStar": {
-      "alpha": 205.0,
-      "beta": 161.0
+      "alpha": 382.0,
+      "beta": 322.0
     },
     "hangingMan": {
-      "alpha": 443.3,
-      "beta": 359.7
+      "alpha": 818.3,
+      "beta": 722.7
     },
     "doji": {
       "alpha": 17653.0,
       "beta": 24378.0
     },
     "dragonflyDoji": {
-      "alpha": 10.0,
-      "beta": 10.0
+      "alpha": 34.0,
+      "beta": 22.0
     },
     "gravestoneDoji": {
-      "alpha": 13.0,
-      "beta": 9.0
+      "alpha": 29.0,
+      "beta": 30.0
     },
     "spinningTop": {
       "alpha": 59153.0,
       "beta": 78093.0
     },
     "bullishEngulfing": {
-      "alpha": 8900.5,
-      "beta": 11560.5
+      "alpha": 16521.5,
+      "beta": 20470.5
     },
     "bearishEngulfing": {
-      "alpha": 13839.4,
-      "beta": 10698.6
+      "alpha": 24506.4,
+      "beta": 19785.6
     },
     "bullishHarami": {
       "alpha": 5726.5,
@@ -160,44 +160,44 @@
       "beta": 4004.9
     },
     "piercingLine": {
-      "alpha": 38.0,
-      "beta": 64.0
+      "alpha": 77.0,
+      "beta": 125.0
     },
     "darkCloud": {
-      "alpha": 187.9,
-      "beta": 153.1
+      "alpha": 332.9,
+      "beta": 289.1
     },
     "tweezerBottom": {
-      "alpha": 281.2,
-      "beta": 378.8
+      "alpha": 413.2,
+      "beta": 529.8
     },
     "tweezerTop": {
-      "alpha": 422.8,
-      "beta": 360.2
+      "alpha": 618.8,
+      "beta": 547.2
     },
     "threeWhiteSoldiers": {
-      "alpha": 355.7,
-      "beta": 277.3
+      "alpha": 470.7,
+      "beta": 355.3
     },
     "threeBlackCrows": {
-      "alpha": 342.8,
-      "beta": 196.2
+      "alpha": 611.8,
+      "beta": 340.2
     },
     "morningStar": {
-      "alpha": 2275.4,
-      "beta": 3028.6
+      "alpha": 2532.4,
+      "beta": 3343.6
     },
     "eveningStar": {
-      "alpha": 2464.1,
-      "beta": 2158.9
+      "alpha": 2700.1,
+      "beta": 2384.9
     },
     "bullishMarubozu": {
-      "alpha": 2472.5,
-      "beta": 3400.5
+      "alpha": 5386.5,
+      "beta": 6337.5
     },
     "bearishMarubozu": {
-      "alpha": 4580.0,
-      "beta": 3303.0
+      "alpha": 8760.0,
+      "beta": 6907.0
     },
     "bullishBeltHold": {
       "alpha": 1760.0,
@@ -232,145 +232,40 @@
       "beta": 630.0
     },
     "doubleBottom": {
-      "alpha": 1922.1,
-      "beta": 1007.9
+      "alpha": 2435.1,
+      "beta": 1300.9
     },
     "doubleTop": {
-      "alpha": 1240.3,
-      "beta": 458.7
+      "alpha": 1755.3,
+      "beta": 667.7
     },
     "headAndShoulders": {
-      "alpha": 2.0,
-      "beta": 2.0
+      "alpha": 157.0,
+      "beta": 144.0
     },
     "inverseHeadAndShoulders": {
-      "alpha": 2.0,
-      "beta": 2.0
+      "alpha": 171.0,
+      "beta": 225.0
     },
     "ascendingTriangle": {
-      "alpha": 5.0,
-      "beta": 7.0
+      "alpha": 29.0,
+      "beta": 34.0
     },
     "descendingTriangle": {
-      "alpha": 7.0,
-      "beta": 5.0
+      "alpha": 42.0,
+      "beta": 39.0
     },
     "symmetricTriangle": {
-      "alpha": 404.4,
-      "beta": 847.6
+      "alpha": 968.4,
+      "beta": 1961.6
     },
     "risingWedge": {
-      "alpha": 392.8,
-      "beta": 216.2
+      "alpha": 515.8,
+      "beta": 293.2
     },
     "fallingWedge": {
-      "alpha": 504.1,
-      "beta": 915.9
+      "alpha": 1214.1,
+      "beta": 1962.9
     }
-  },
-  "platt_params": {
-    "strongBuy_hammerRsiVolume": [
-      4.0,
-      -2.0
-    ],
-    "strongSell_shootingMacdVol": [
-      4.0,
-      -2.0
-    ],
-    "buy_goldenCrossRsi": [
-      4.0,
-      -2.0
-    ],
-    "sell_deadCrossMacd": [
-      4.0,
-      -2.0
-    ],
-    "buy_bbBounceRsi": [
-      4.0,
-      -2.0
-    ],
-    "sell_bbBreakoutRsi": [
-      4.0,
-      -2.0
-    ],
-    "buy_hammerBBVol": [
-      4.0,
-      -2.0
-    ],
-    "sell_shootingStarBBVol": [
-      4.0,
-      -2.0
-    ],
-    "buy_morningStarRsiVol": [
-      4.0,
-      -2.0
-    ],
-    "sell_eveningStarRsiVol": [
-      4.0,
-      -2.0
-    ],
-    "buy_engulfingMacdAlign": [
-      4.0,
-      -2.0
-    ],
-    "sell_engulfingMacdAlign": [
-      4.0,
-      -2.0
-    ],
-    "buy_doubleBottomNeckVol": [
-      4.0,
-      -2.0
-    ],
-    "sell_doubleTopNeckVol": [
-      4.0,
-      -2.0
-    ],
-    "buy_ichimokuTriple": [
-      4.0,
-      -2.0
-    ],
-    "sell_ichimokuTriple": [
-      4.0,
-      -2.0
-    ],
-    "buy_goldenMarubozuVol": [
-      4.0,
-      -2.0
-    ],
-    "sell_deadMarubozuVol": [
-      4.0,
-      -2.0
-    ]
-  },
-  "adx_isotonic": [
-    [10, -10], [15, -5], [20, 0], [25, 5], [30, 7], [40, 10], [50, 10]
-  ],
-  "cci_isotonic": [
-    [40, -3], [75, 0], [100, 0], [150, 2], [200, 3], [300, 3]
-  ],
-  "rr_bayesian": {
-    "max_pen": 15,
-    "k": 8,
-    "rr_mid": 2.375
-  },
-  "composite_windows": {
-    "strongBuy_hammerRsiVolume": 4,
-    "strongSell_shootingMacdVol": 4,
-    "buy_goldenCrossRsi": 6,
-    "sell_deadCrossMacd": 6,
-    "buy_bbBounceRsi": 4,
-    "sell_bbBreakoutRsi": 4,
-    "buy_hammerBBVol": 4,
-    "sell_shootingStarBBVol": 4,
-    "buy_morningStarRsiVol": 5,
-    "sell_eveningStarRsiVol": 5,
-    "buy_engulfingMacdAlign": 5,
-    "sell_engulfingMacdAlign": 5,
-    "buy_doubleBottomNeckVol": 7,
-    "sell_doubleTopNeckVol": 7,
-    "buy_ichimokuTriple": 7,
-    "sell_ichimokuTriple": 7,
-    "buy_goldenMarubozuVol": 5,
-    "sell_deadMarubozuVol": 5
   }
 }
