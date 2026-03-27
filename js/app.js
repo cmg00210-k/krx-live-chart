@@ -54,7 +54,7 @@ function _deactivateOscillator(ind) {
 var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
 // 캔들 패턴 타입 Set (필터링용)
 var _VIZ_CANDLE_TYPES = new Set([
-  'threeWhiteSoldiers','threeBlackCrows','hammer',
+  'threeWhiteSoldiers','threeBlackCrows','hammer','hangingMan',
   'shootingStar','bullishEngulfing','bearishEngulfing',
   'morningStar','eveningStar',
   'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
@@ -305,7 +305,7 @@ function _cacheDom() {
 }
 
 // ── 시그널 카테고리 필터 상태 ──
-let activeSignalCategories = new Set(['ma', 'macd', 'rsi', 'bb', 'volume', 'composite', 'ichimoku', 'hurst', 'kalman']);
+let activeSignalCategories = new Set(['ma', 'macd', 'rsi', 'bb', 'volume', 'composite', 'ichimoku', 'hurst', 'kalman', 'stochastic']);
 
 // ── Web Worker 상태 (Phase 9) ──
 let _analysisWorker = null;
@@ -1408,7 +1408,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=18');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=19');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -1912,6 +1912,7 @@ const _INDICATOR_SIGNAL_TYPES = new Set([
   'ichimokuBullishCross', 'ichimokuBearishCross',
   'ichimokuCloudBreakout', 'ichimokuCloudBreakdown',
   'hurstTrending', 'hurstMeanReverting',
+  'stochasticOversold', 'stochasticOverbought',
 ]);
 
 /**

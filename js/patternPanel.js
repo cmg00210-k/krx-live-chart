@@ -55,6 +55,16 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '선행 추세가 하락이 아닌 경우 해머 의미 상실. 다음 봉의 확인(양봉 마감) 없이 단독 사용 시 오류율 증가.'
   },
 
+  hangingMan: {
+    nameKo: '교수형',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '상승 추세 고점에서 해머와 동일한 형태(짧은 몸통 + 긴 아래꼬리)가 나타남. 매수세가 저점에서 반등했으나 고점 매물대의 존재를 시사. Nison (1991): 맥락이 패턴을 정의한다.',
+    psychology: '상승 중 장중 큰 하락이 발생한 것 자체가 매수 강도 약화 신호. 긴 아래꼬리는 매수세의 최후 저항이며, 확인봉(음봉)이 뒤따르면 추세 전환 확정.',
+    bulkowskiWinRate: 59,
+    invalidation: '선행 추세가 상승이 아닌 경우 무효. 확인봉(다음 봉 음봉) 없이 단독 신뢰도 41%. 거래량 감소 동반 시 약화.'
+  },
+
   shootingStar: {
     nameKo: '유성형',
     category: '캔들스틱 (반전)',

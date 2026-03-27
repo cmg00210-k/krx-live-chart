@@ -49,6 +49,7 @@ class PatternBacktester {
       threeWhiteSoldiers:     { name: '적삼병',     signal: 'buy'  },
       threeBlackCrows:        { name: '흑삼병',     signal: 'sell' },
       hammer:                 { name: '해머',       signal: 'buy'  },
+      hangingMan:             { name: '교수형',     signal: 'sell' },
       shootingStar:           { name: '유성형',     signal: 'sell' },
       bullishEngulfing:       { name: '상승장악형', signal: 'buy'  },
       bearishEngulfing:       { name: '하락장악형', signal: 'sell' },

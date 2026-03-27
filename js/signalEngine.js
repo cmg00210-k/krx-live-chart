@@ -279,6 +279,8 @@ class SignalEngine {
       ichimokuCloudBreakout: 3, ichimokuCloudBreakdown: -3,
       // StochRSI (RSI 중립대 보조 — Chande & Kroll 1994)
       stochRsiOversold: 1.0, stochRsiOverbought: -1.0,
+      // Stochastic (Lane 1984 — Slow %K/%D cross, RSI와 측정대상 상이)
+      stochasticOversold: 1.5, stochasticOverbought: -1.5,
       // 허스트 지수 (레짐 필터 — 방향 중립)
       hurstTrending: 0, hurstMeanReverting: 0,
       // 칼만 필터 (composite condition 전용 — Harvey 1989, 독립 시그널 아님)
@@ -318,6 +320,7 @@ class SignalEngine {
     indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
     indicatorSignals.push(...this._detectHurstSignal(candles, cache));
     indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
+    indicatorSignals.push(...this._detectStochasticSignals(candles, cache));
     indicatorSignals.push(...this._detectKalmanSignals(candles, cache));
 
     // 캔들 패턴 → 시그널 타입 맵 (복합 매칭용)
@@ -908,11 +911,10 @@ class SignalEngine {
       }
 
       if (decreasing) {
-        // 동일 구간 중복 방지: 직전 봉에도 이 시그널이 있는지 확인
-        // (6봉 연속이면 5번째, 6번째 둘 다 감지되므로 마지막만)
-        if (i + 1 < candles.length) {
-          const nextDecreasing = volumes[i + 1] < volumes[i];
-          if (nextDecreasing) continue;  // 아직 감소 중 → 나중에 감지
+        // [M-1 fix] 후향적 중복 방지: 이전 시그널이 i-1이면 교체 (lookahead 제거)
+        // 연속 감소 구간에서 마지막 봉만 유지 — 미래 데이터 참조 없이 동일 효과
+        if (signals.length > 0 && signals[signals.length - 1].index === i - 1) {
+          signals.pop();
         }
 
         signals.push({
@@ -1152,6 +1154,96 @@ class SignalEngine {
           index: i,
           time: candles[i].time,
           description: `RSI(${rsi[i].toFixed(1)}) 중립대에서 StochRSI K(${stochK[i].toFixed(1)}) 극고 — 단기 조정 가능`,
+        });
+        lastSellIdx = i;
+      }
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  Stochastic Oscillator 시그널 — Lane (1984), Murphy (1999)
+  //  Slow Stochastic (14,3,3) %K/%D 교차 기반 모멘텀 반전 탐지
+  //
+  //  RSI와의 차별화:
+  //   - RSI: 가격 변동폭의 상대강도 (Wilder 1978)
+  //   - Stochastic: 거래범위 내 종가 위치 (Lane 1984)
+  //   → 측정 대상이 다르므로 독립 시그널로 유효
+  //
+  //  Williams %R 컨플루언스:
+  //   %R = -(100 - Raw %K) — 수학적 동치이므로 독립 시그널이 아닌
+  //   확인 보너스(+3)로만 활용 (이중 카운트 방지)
+  // ══════════════════════════════════════════════════════
+
+  _detectStochasticSignals(candles, cache) {
+    const signals = [];
+    const { k, d } = cache.stochastic(14, 3, 3);
+    if (!k || !d) return signals;
+
+    // Williams %R — 컨플루언스 확인용 (독립 시그널 아님)
+    const wr = cache.williamsR(14);
+
+    const OVERSOLD   = 20;  // Lane (1984) 표준
+    const OVERBOUGHT = 80;
+    const EXTREME_OS = 10;  // Bulkowski (2005): 극단 반등 +12pp
+    const EXTREME_OB = 90;
+    const COOLDOWN   = 7;   // Slow Stochastic half-cycle (Appel 2005)
+    const BASE_CONF  = 52;
+    const WR_BONUS   = 3;   // %R 동시 확인 보너스
+
+    let lastBuyIdx  = -COOLDOWN;
+    let lastSellIdx = -COOLDOWN;
+
+    for (let i = 1; i < candles.length; i++) {
+      if (k[i] === null || k[i - 1] === null ||
+          d[i] === null || d[i - 1] === null) continue;
+
+      // ── 매수: 과매도 구간에서 %K > %D 상향 교차 ──
+      if (k[i - 1] <= d[i - 1] && k[i] > d[i] && k[i] < OVERSOLD &&
+          (i - lastBuyIdx) >= COOLDOWN) {
+
+        const extremeBonus = Math.min(10, Math.floor((OVERSOLD - k[i]) / 4) * 2);
+        const isExtreme = k[i] < EXTREME_OS;
+        const maxConf = isExtreme ? 70 : 65;
+        const wrBonus = (wr && wr[i] !== null && wr[i] < -80) ? WR_BONUS : 0;
+
+        signals.push({
+          type: 'stochasticOversold',
+          source: 'indicator',
+          nameShort: '스토캐스틱 과매도 반등',
+          signal: 'buy',
+          strength: isExtreme ? 'strong' : 'medium',
+          confidence: Math.min(maxConf, BASE_CONF + extremeBonus + wrBonus),
+          index: i,
+          time: candles[i].time,
+          description: `Stoch %K(${k[i].toFixed(1)})가 %D(${d[i].toFixed(1)}) 상향교차 — `
+            + `과매도 구간${isExtreme ? ' (극단)' : ''} 모멘텀 반전${wrBonus ? ' + WR확인' : ''}`,
+        });
+        lastBuyIdx = i;
+      }
+
+      // ── 매도: 과매수 구간에서 %K < %D 하향 교차 ──
+      if (k[i - 1] >= d[i - 1] && k[i] < d[i] && k[i] > OVERBOUGHT &&
+          (i - lastSellIdx) >= COOLDOWN) {
+
+        const extremeBonus = Math.min(10, Math.floor((k[i] - OVERBOUGHT) / 4) * 2);
+        const isExtreme = k[i] > EXTREME_OB;
+        const maxConf = isExtreme ? 68 : 63; // 매도 cap -2 (KRX 공매도 제한 비대칭)
+        const wrBonus = (wr && wr[i] !== null && wr[i] > -20) ? WR_BONUS : 0;
+
+        signals.push({
+          type: 'stochasticOverbought',
+          source: 'indicator',
+          nameShort: '스토캐스틱 과매수 이탈',
+          signal: 'sell',
+          strength: isExtreme ? 'strong' : 'medium',
+          confidence: Math.min(maxConf, BASE_CONF + extremeBonus + wrBonus),
+          index: i,
+          time: candles[i].time,
+          description: `Stoch %K(${k[i].toFixed(1)})가 %D(${d[i].toFixed(1)}) 하향교차 — `
+            + `과매수 구간${isExtreme ? ' (극단)' : ''} 모멘텀 약화${wrBonus ? ' + WR확인' : ''}`,
         });
         lastSellIdx = i;
       }
@@ -1513,6 +1605,10 @@ class SignalEngine {
           }
         }
 
+        // [M-4 documented] Composite cap 95 vs individual 90 — 이론적 타당성 확인됨
+        // Bayesian updating: 독립적 확인 시그널은 사후확률을 단조증가시킴
+        // Grinold-Kahn IC aggregation: IR_composite ≈ IC·√(N·(1+(N-1)ρ)⁻¹), ρ<1이면 IR 향상
+        // 5pt 차등: OHLCV 기반 기술적 지표의 공유 노이즈를 반영한 적정 수준
         const confidence = Math.min(
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
@@ -1534,9 +1630,17 @@ class SignalEngine {
           confidencePred = Math.max(10, Math.min(90, Math.round(100 / (1 + Math.exp(-_pz)))));
         }
 
-        // 기준 인덱스 = 윈도우 내 가장 마지막 시그널
-        const refIdx = Math.min(baseIdx + effectiveWindow, candles.length - 1);
-        const actualIdx = Math.min(refIdx, candles.length - 1);
+        // [M-2 fix] 기준 인덱스 = 윈도우 내 required 시그널 중 실제 가장 마지막 위치
+        // (기존: window end 사용 → 실제 시그널 클러스터와 괴리)
+        let latestRequiredIdx = baseIdx;
+        for (let r = 1; r < requiredIndices.length; r++) {
+          for (const idx of requiredIndices[r]) {
+            if (idx >= windowStart && idx <= windowEnd && idx > latestRequiredIdx) {
+              latestRequiredIdx = idx;
+            }
+          }
+        }
+        const actualIdx = Math.min(latestRequiredIdx, candles.length - 1);
 
         // 중복 방지: 동일 compositeId가 ±window 범위에 이미 있으면 스킵
         const alreadyExists = composites.some(
@@ -1605,7 +1709,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, composite: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0,
     };
 
     for (const s of signals) {
@@ -1685,6 +1789,7 @@ class SignalEngine {
     if (type.startsWith('ichimoku')) return 'ichimoku';
     if (type.startsWith('hurst'))    return 'hurst';
     if (type.startsWith('stochRsi')) return 'rsi'; // StochRSI는 RSI 카테고리 귀속
+    if (type.startsWith('stochastic')) return 'stochastic'; // Lane (1984) Slow Stochastic — RSI와 별도
     if (type.startsWith('kalman'))  return 'kalman'; // [E-4] Kalman 필터 카테고리
     return 'ma'; // fallback
   }
@@ -1711,7 +1816,7 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, composite: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0 },
       entropy: 0,
       entropyNorm: 0,
     };

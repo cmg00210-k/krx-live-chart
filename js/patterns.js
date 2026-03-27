@@ -487,9 +487,11 @@ class PatternEngine {
     const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap, candles };
     const patterns = [];
 
-    // 캔들 패턴 — KRX 5년 실증 통계적 유의성 기준 선별 (승률 ±2% 이내 또는 확인캔들 의존 패턴 제거)
+    // 캔들 패턴 — KRX 5년 실증 통계적 유의성 기준 선별
+    // 비활성: doji(WR~50%), invertedHammer(D등급), harami(확인캔들 의존), spinningTop(IC=0)
     // 1봉 패턴
     patterns.push(...this.detectHammer(candles, ctx));
+    patterns.push(...this.detectHangingMan(candles, ctx));
     patterns.push(...this.detectShootingStar(candles, ctx));
     patterns.push(...this.detectDragonflyDoji(candles, ctx));
     patterns.push(...this.detectGravestoneDoji(candles, ctx));

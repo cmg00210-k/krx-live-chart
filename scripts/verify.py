@@ -85,7 +85,7 @@ def info(msg):
 # detectSupportResistance -> support/resistance (excluded from checklist).
 CANONICAL_PATTERNS = {
     "threeWhiteSoldiers", "threeBlackCrows",
-    "hammer", "shootingStar",
+    "hammer", "hangingMan", "shootingStar",
     "dragonflyDoji", "gravestoneDoji",
     "bullishEngulfing", "bearishEngulfing",
     "piercingLine", "darkCloud",

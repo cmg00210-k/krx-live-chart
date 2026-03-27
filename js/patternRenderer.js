@@ -60,6 +60,7 @@ const patternRenderer = (() => {
 
   const SINGLE_PATTERNS = {
     hammer:         { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    hangingMan:     { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
     shootingStar:   { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
     dragonflyDoji:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
     gravestoneDoji: { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
@@ -76,7 +77,7 @@ const patternRenderer = (() => {
 
   // ── 3계층 분류용 캔들스틱 패턴 Set ──
   const CANDLE_PATTERN_TYPES = new Set([
-    'hammer', 'shootingStar',
+    'hammer', 'hangingMan', 'shootingStar',
     'dragonflyDoji', 'gravestoneDoji',
     'bullishEngulfing', 'bearishEngulfing',
     'morningStar', 'eveningStar',
@@ -90,7 +91,7 @@ const patternRenderer = (() => {
   // ── 패턴 한국어 명칭 (PATTERN_ACADEMIC_META.nameKo 기준) ──
   // 한국 트레이더가 실제 사용하는 용어 (일본어 유래 표준 용어 포함)
   const PATTERN_NAMES_KO = {
-    hammer: '해머', shootingStar: '유성형',
+    hammer: '해머', hangingMan: '교수형', shootingStar: '유성형',
     dragonflyDoji: '잠자리도지', gravestoneDoji: '비석도지',
     bullishEngulfing: '상승장악형', bearishEngulfing: '하락장악형',
     piercingLine: '관통형', darkCloud: '먹구름형',
@@ -115,7 +116,7 @@ const patternRenderer = (() => {
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
   ]);
   const BEARISH_TYPES = new Set([
-    'shootingStar', 'bearishEngulfing',
+    'shootingStar', 'hangingMan', 'bearishEngulfing',
     'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
     'risingWedge', 'descendingTriangle',
     'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
