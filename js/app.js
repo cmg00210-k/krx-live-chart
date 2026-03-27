@@ -996,6 +996,7 @@ async function _continueInit() {
           source: 'drag',
           learnedWeights: adaptiveWeights,
           market: currentStock && currentStock.market ? currentStock.market : '',
+          timeframe: currentTimeframe,
         });
       } else {
         // 폴백: 메인 스레드 동기 분석
@@ -1507,15 +1508,20 @@ function _initAnalysisWorker() {
             candles: candles,
             market: currentStock && currentStock.market ? currentStock.market : '',
             version: _workerVersion,
+            timeframe: currentTimeframe,
           });
         }
         return;
       }
 
-      // ── 백테스트 결과 (적응형 가중치 + 승률 맵 갱신) ──
+      // ── 백테스트 결과 (적응형 가중치 + 승률 맵 + AMH 기준시점 갱신) ──
       if (msg.type === 'backtestResult') {
         if (msg.learnedWeights) {
           adaptiveWeights = msg.learnedWeights;
+          // [AMH] 백테스트 기준시점도 함께 전달 (다음 analyze에서 Worker가 주입)
+          if (msg.backtestEpochMs != null) {
+            adaptiveWeights._backtestEpochMs = msg.backtestEpochMs;
+          }
           console.log('[Adaptive] 학습 가중치 업데이트:', Object.keys(adaptiveWeights).length, '패턴');
         }
         return;
@@ -1885,6 +1891,7 @@ function _requestWorkerAnalysis() {
     version: _workerVersion,
     learnedWeights: adaptiveWeights,
     market: currentStock && currentStock.market ? currentStock.market : '',
+    timeframe: currentTimeframe,
   });
 }
 

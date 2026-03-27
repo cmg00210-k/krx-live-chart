@@ -109,7 +109,9 @@ class PatternEngine {
   /** 유의미한 범위 (range/ATR) 하한 */
   static MIN_RANGE_ATR = 0.3;
 
-  /** 추세 감지 정규화 방향 임계값 */
+  /** 추세 감지 정규화 방향 임계값
+   *  [D-Heuristic] core_data/07 SS3.4: |T|>1 = "strong trend". 0.3은 느슨한 하한 —
+   *  가격이 lookback당 0.3 ATR 이동하는 추세. Brock et al. (1992)는 raw cross 사용. */
   static TREND_THRESHOLD = 0.3;
 
   /** 품질 점수 가중치 (Nison/Morris 원칙 기반) */
@@ -120,7 +122,9 @@ class PatternEngine {
   /** 손절가 ATR 배수 (기본) */
   static STOP_LOSS_ATR_MULT = 2;
 
-  /** ATR fallback: 가격의 2% */
+  /** ATR fallback: 가격의 2%
+   *  [D-Heuristic] ATR(14) 불가 시 근사값. KRX 대형주 일봉 median ATR/close ≈ 2.1%.
+   *  주기적으로 실제 median ATR/close 비율 대조 권장. */
   static ATR_FALLBACK_PCT = 0.02;
 
   /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 302,986건 실측 calibration (calibrated_constants.json D1)
@@ -272,6 +276,31 @@ class PatternEngine {
   /** 전역 학습 가중치 (Worker에서 주입) */
   static _globalLearnedWeights = null;
 
+  /** 백테스트 기준시점 (ms) — AMH 시변 감쇠 계산용. Worker에서 주입.
+   *  Lo (2004): 패턴 알파는 exp(-λ×days)로 감쇠. null이면 감쇠 미적용. */
+  static _backtestEpochMs = null;
+
+  /**
+   * AMH 시변 감쇠 인자 — Lo (2004), McLean & Pontiff (2016)
+   * 학습된 가중치의 신뢰도를 백테스트 기준시점 이후 경과 일수에 따라 감쇠.
+   * decayFactor = exp(-λ × daysSince)
+   *
+   * λ 기준: core_data/20 §10 KRX 패턴 반감기
+   *   KOSDAQ: 반감기 189일(~9개월) → λ = ln(2)/189 ≈ 0.00367
+   *   KOSPI:  반감기 378일(~18개월) → λ = ln(2)/378 ≈ 0.00183
+   *   기본값: 반감기 252일(~1년)     → λ = ln(2)/252 ≈ 0.00275
+   *
+   * @returns {number} 0~1 감쇠 인자 (1=감쇠 없음, 0에 수렴=완전 감쇠)
+   */
+  static _temporalDecayFactor() {
+    if (PatternEngine._backtestEpochMs == null) return 1.0;
+    var daysSince = (Date.now() - PatternEngine._backtestEpochMs) / 86400000;
+    if (daysSince <= 0) return 1.0;
+    // 기본 λ=0.00275 (반감기 252일). 시장별 분화는 Worker가 _backtestEpochMs 설정 시
+    // 별도 decay를 적용할 수 있으나, 현재는 보수적 기본값 사용.
+    return Math.exp(-0.00275 * daysSince);
+  }
+
   /**
    * 회귀 계수를 Q_WEIGHT 구조로 정규화
    */
@@ -287,29 +316,62 @@ class PatternEngine {
   //  유틸리티
   // ══════════════════════════════════════════════════
 
-  /** 선형 추세 감지 — ATR 기반 정규화로 변동성 일관 감도 보장
+  /** Theil-Sen 로버스트 추세 감지 — ATR 기반 정규화
+   *  Sen (1968), Theil (1950): 이상치(스파이크/급락)에 강건한 추세선.
+   *  Breakdown point ≈ 29.3% — 데이터의 ~29%가 이상치여도 왜곡되지 않음.
+   *  core_data/07_pattern_algorithms.md S2.3 구현.
+   *
    *  Murphy (1999): "Trend identification should be normalized against
    *  recent volatility for consistent sensitivity across market regimes."
-   *  @param {number} [atrVal] 미리 계산된 ATR 값 (없으면 가격 평균 1% fallback)
+   *  @param {Array} candles - OHLCV 배열
+   *  @param {number} endIndex - 분석 끝 인덱스 (exclusive)
+   *  @param {number} [lookback=10] - 회귀 윈도우
+   *  @param {number} [atrVal] - 미리 계산된 ATR 값 (없으면 가격 평균 2% fallback)
+   *  @returns {{ slope: number, strength: number, r2: number, direction: string }}
    */
   _detectTrend(candles, endIndex, lookback = 10, atrVal = null) {
     const start = Math.max(0, endIndex - lookback);
     if (endIndex - start < 3) return { slope: 0, strength: 0, r2: 0, direction: 'neutral' };
     const seg = candles.slice(start, endIndex);
     const n = seg.length;
-    let sx = 0, sy = 0, sxy = 0, sx2 = 0, sy2 = 0;
+
+    // --- Theil-Sen 기울기: 모든 쌍의 기울기(slope)의 중앙값 ---
+    // O(n^2) — n <= lookback (보통 10~20), 쌍 수 최대 190개로 성능 무관
+    const pairSlopes = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        // x는 등간격 인덱스이므로 x_j - x_i = j - i (항상 양수, 0 나눔 불가)
+        pairSlopes.push((seg[j].close - seg[i].close) / (j - i));
+      }
+    }
+    pairSlopes.sort((a, b) => a - b);
+    const mid = pairSlopes.length >> 1;
+    const slope = pairSlopes.length % 2 === 1
+      ? pairSlopes[mid]
+      : (pairSlopes[mid - 1] + pairSlopes[mid]) / 2;
+
+    // --- 절편: median(y_i - slope * x_i) ---
+    const intercepts = [];
+    for (let i = 0; i < n; i++) intercepts.push(seg[i].close - slope * i);
+    intercepts.sort((a, b) => a - b);
+    const imid = intercepts.length >> 1;
+    const intercept = intercepts.length % 2 === 1
+      ? intercepts[imid]
+      : (intercepts[imid - 1] + intercepts[imid]) / 2;
+
+    // --- R² (결정계수) — 추세 선형성 신뢰도 ---
+    let ssRes = 0, ssTot = 0, sy = 0;
+    for (let i = 0; i < n; i++) sy += seg[i].close;
+    const yBar = sy / n;
     for (let i = 0; i < n; i++) {
       const y = seg[i].close;
-      sx += i; sy += y; sxy += i * y; sx2 += i * i; sy2 += y * y;
+      const yHat = intercept + slope * i;
+      ssRes += (y - yHat) * (y - yHat);
+      ssTot += (y - yBar) * (y - yBar);
     }
-    const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
-    // [T-9] R² (결정계수) — 추세 선형성 신뢰도 (core_data/07 권고)
-    // R² = (n·Σxy - Σx·Σy)² / ((n·Σx² - (Σx)²)(n·Σy² - (Σy)²))
-    const ssNum = n * sxy - sx * sy;
-    const ssDenX = n * sx2 - sx * sx;
-    const ssDenY = n * sy2 - sy * sy;
-    const r2 = (ssDenX > 0 && ssDenY > 0) ? Math.max(0, Math.min((ssNum * ssNum) / (ssDenX * ssDenY), 1)) : 0;
-    // ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용
+    const r2 = ssTot > 0 ? Math.max(0, Math.min(1 - ssRes / ssTot, 1)) : 0;
+
+    // --- ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용 ---
     // atrVal이 없으면 가격 평균의 2%를 fallback (ATR_FALLBACK_PCT = 0.02 일관)
     const divisor = (atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT)) || 1e-10;
     const norm = slope / divisor;
@@ -356,7 +418,10 @@ class PatternEngine {
       // [P2-8] alpha: R²>0.3이면 최대 70% 적응, 아니면 50% 유지
       // 근거: 높은 R²는 학습된 가중치의 신뢰성이 충분함을 의미
       const alphaCap = (learned.rSquared && learned.rSquared > 0.3) ? 0.7 : 0.5;
-      const alpha = Math.max(0, Math.min(learned.confidence * 2, alphaCap));
+      // [AMH] Lo (2004) 시변 감쇠: 오래된 백테스트 결과일수록 exp(-λ×days) 비율로
+      // confidence를 축소. decayedConfidence ≈ 0이면 alpha ≈ 0 → Q_WEIGHT 유지.
+      const decayedConfidence = learned.confidence * PatternEngine._temporalDecayFactor();
+      const alpha = Math.max(0, Math.min(decayedConfidence * 2, alphaCap));
       const W_learned = PatternEngine._normalizeCoeffsToWeights(learned.beta);
       W = {
         body: (1 - alpha) * W.body + alpha * W_learned.body,
@@ -405,7 +470,7 @@ class PatternEngine {
   //  전체 분석
   // ══════════════════════════════════════════════════
 
-  analyze(candles) {
+  analyze(candles, opts) {
     if (!candles || candles.length < 10) return [];
     // indicators.js 전역 함수 직접 호출 (불필요한 래퍼 제거)
     const closes = candles.map(c => c.close);
@@ -484,7 +549,11 @@ class PatternEngine {
       dynamicATRCap = 5; // moderate tail
     }
 
-    const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap, candles };
+    // [PERF] UI 분석 시 lookback 윈도우 제한 — 분봉(5m/1m)에서 8-20x 속도 향상
+    // detectFrom: 패턴 감지 루프 시작 인덱스. 지표 사전계산(ATR/MA/Hurst 등)은 전체 데이터 유지.
+    // 백테스트는 opts 없이 호출하므로 전체 이력 분석 유지.
+    const _detectFrom = (opts && opts.detectFrom != null) ? Math.max(0, opts.detectFrom) : 0;
+    const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap, candles, detectFrom: _detectFrom };
     const patterns = [];
 
     // 캔들 패턴 — KRX 5년 실증 통계적 유의성 기준 선별
@@ -510,8 +579,10 @@ class PatternEngine {
     // threeInsideUp 제거: WR 42.4% (D등급, 매수 기준선 이하), shadow 결함, threeInsideDown 비대칭 — KRX 5년 실증 근거 없음
 
     // 차트 패턴
-    const swH = this._findSwingHighs(candles, 3);
-    const swL = this._findSwingLows(candles, 3);
+    // [PERF] 스윙 포인트 탐지도 윈도우 적용 — HS_WINDOW(120) + 버퍼 10
+    const swingFrom = Math.max(0, (_detectFrom || 0) - PatternEngine.HS_WINDOW - 10);
+    const swH = this._findSwingHighs(candles, 3, swingFrom);
+    const swL = this._findSwingLows(candles, 3, swingFrom);
     patterns.push(...this.detectDoubleBottom(candles, swL, ctx));
     patterns.push(...this.detectDoubleTop(candles, swH, ctx));
     patterns.push(...this.detectAscendingTriangle(candles, swH, swL, ctx));
@@ -695,7 +766,7 @@ class PatternEngine {
   detectThreeWhiteSoldiers(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       if (c0.close <= c0.open || c1.close <= c1.open || c2.close <= c2.open) continue;
       if (c1.close <= c0.close || c2.close <= c1.close) continue;
@@ -741,7 +812,7 @@ class PatternEngine {
   detectThreeBlackCrows(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       if (c0.close >= c0.open || c1.close >= c1.open || c2.close >= c2.open) continue;
       if (c1.close >= c0.close || c2.close >= c1.close) continue;
@@ -790,7 +861,7 @@ class PatternEngine {
   detectHammer(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -836,7 +907,7 @@ class PatternEngine {
   detectInvertedHammer(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -878,7 +949,7 @@ class PatternEngine {
   detectHangingMan(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -926,7 +997,7 @@ class PatternEngine {
   detectShootingStar(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -971,7 +1042,7 @@ class PatternEngine {
   detectDoji(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1010,7 +1081,7 @@ class PatternEngine {
   detectEngulfing(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
       const prevBody = Math.abs(prev.close - prev.open);
       const currBody = Math.abs(curr.close - curr.open);
@@ -1081,7 +1152,7 @@ class PatternEngine {
   detectHarami(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
       const prevBody = Math.abs(prev.close - prev.open);
       const currBody = Math.abs(curr.close - curr.open);
@@ -1144,7 +1215,7 @@ class PatternEngine {
   detectMorningStar(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       const a = this._atr(atr, i, candles);
 
@@ -1196,7 +1267,7 @@ class PatternEngine {
   detectEveningStar(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       const a = this._atr(atr, i, candles);
 
@@ -1253,7 +1324,7 @@ class PatternEngine {
   detectPiercingLine(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
 
       // 전봉: 음봉 (하락)
@@ -1319,7 +1390,7 @@ class PatternEngine {
   detectDarkCloud(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
 
       // 전봉: 양봉 (상승)
@@ -1385,7 +1456,7 @@ class PatternEngine {
   detectDragonflyDoji(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1440,7 +1511,7 @@ class PatternEngine {
   detectGravestoneDoji(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1495,7 +1566,7 @@ class PatternEngine {
   detectTweezerBottom(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
 
       // 전봉: 음봉 (하락), 현봉: 양봉 (상승)
@@ -1553,7 +1624,7 @@ class PatternEngine {
   detectTweezerTop(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 5; i < candles.length; i++) {
+    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
       const prev = candles[i - 1], curr = candles[i];
 
       // 전봉: 양봉 (상승), 현봉: 음봉 (하락)
@@ -1616,7 +1687,7 @@ class PatternEngine {
   detectMarubozu(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1703,7 +1774,7 @@ class PatternEngine {
   detectSpinningTop(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1754,7 +1825,7 @@ class PatternEngine {
   detectLongLeggedDoji(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1804,7 +1875,7 @@ class PatternEngine {
   detectBeltHold(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 1; i < candles.length; i++) {
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1873,7 +1944,7 @@ class PatternEngine {
   detectThreeInsideUp(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
 
       // c0: 큰 음봉
@@ -1922,7 +1993,7 @@ class PatternEngine {
   detectThreeInsideDown(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
 
       // c0: 큰 양봉
@@ -1975,7 +2046,7 @@ class PatternEngine {
   detectAbandonedBaby(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = 2; i < candles.length; i++) {
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
       const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
       const a = this._atr(atr, i, candles);
       const gapMin = a * PatternEngine.ABANDONED_BABY_GAP_MIN;
@@ -2686,9 +2757,9 @@ class PatternEngine {
   //  유틸리티: 스윙 포인트 & 중복 제거
   // ══════════════════════════════════════════════════
 
-  _findSwingHighs(candles, lookback) {
+  _findSwingHighs(candles, lookback, detectFrom) {
     const highs = [];
-    for (let i = lookback; i < candles.length - lookback; i++) {
+    for (let i = Math.max(lookback, detectFrom || 0); i < candles.length - lookback; i++) {
       let isHigh = true;
       for (let j = 1; j <= lookback; j++) {
         if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) {
@@ -2700,9 +2771,9 @@ class PatternEngine {
     return highs;
   }
 
-  _findSwingLows(candles, lookback) {
+  _findSwingLows(candles, lookback, detectFrom) {
     const lows = [];
-    for (let i = lookback; i < candles.length - lookback; i++) {
+    for (let i = Math.max(lookback, detectFrom || 0); i < candles.length - lookback; i++) {
       let isLow = true;
       for (let j = 1; j <= lookback; j++) {
         if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) {

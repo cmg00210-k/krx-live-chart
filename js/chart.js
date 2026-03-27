@@ -609,7 +609,7 @@ class ChartManager {
 
     // [PERF] 지표 계산 캐시: 캔들 길이 + 마지막 캔들 시간 + 마지막 종가로 변경 감지
     // 동일 캔들이면 calcMA/calcEMA/calcBB 등 고비용 계산을 건너뜀
-    var _cacheKey = candles.length + '_' + candles[candles.length - 1].time + '_' + candles[candles.length - 1].close;
+    var _cacheKey = candles.length + '_' + candles[candles.length - 1].time + '_' + candles[candles.length - 1].open + '_' + candles[candles.length - 1].close;
     if (this._indicatorCache.key !== _cacheKey) {
       this._indicatorCache = { key: _cacheKey, results: {} };
     }
@@ -1101,7 +1101,7 @@ class ChartManager {
   _getSubChartCache(candles) {
     if (!candles || !candles.length) return {};
     var last = candles[candles.length - 1];
-    var key = candles.length + '_' + last.time + '_' + last.close;
+    var key = candles.length + '_' + last.time + '_' + last.open + '_' + last.close;
     if (this._subChartCache.key !== key) {
       this._subChartCache = { key: key, results: {} };
     }

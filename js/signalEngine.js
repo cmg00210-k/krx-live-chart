@@ -19,7 +19,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     required: ['hammer', 'rsiOversoldExit'],
     optional: ['volumeBreakout'],
     optionalBonus: 5,
-    window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
+    window: 5,  // [D-Heuristic] 5봉(1거래주). Nison (1991): "수 세션 내 확인". 3→5 KRX 복합 수렴 테스트.
     description: '해머 캔들 + RSI 과매도 탈출 + 거래량 급증 — 바닥 반등 확률 높음',
   },
   {
@@ -361,7 +361,8 @@ class SignalEngine {
     }
 
     // [Phase0-B] 누적 조정 상한 ±15 — ADX+CCI+OLS 스택 인플레이션 방지
-    // 근거: financial-theory-expert 감사 결과 최악 +18 가능, 부분 중복 지표의 독립적 가산 이론 정당화 부족
+    // [D-Heuristic] ADX(Wilder 1978)/CCI(Lambert 1980)/OLS는 부분 상관 추세 지표.
+    // 가산 boost는 독립성을 가정하나 이론적 정당화 부족. 15pt cap → 최대 ~15% 신뢰도 이동.
     const MAX_CUMULATIVE_ADJ = 15;
     for (let si = 0; si < signals.length; si++) {
       const s = signals[si];

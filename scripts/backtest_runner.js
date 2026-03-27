@@ -8,6 +8,7 @@
 //  Usage:
 //    node scripts/backtest_runner.js <code> <market>    # Single stock
 //    node scripts/backtest_runner.js --batch            # All stocks (NDJSON)
+//    node scripts/backtest_runner.js --batch --incremental  # Changed stocks only
 //
 //  Output:
 //    Single mode: JSON object to stdout
@@ -182,7 +183,22 @@ if (args[0] === '--batch') {
 
   const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
   const stocks = index.stocks || [];
-  const total = stocks.length;
+
+  // --- Incremental mode: filter to changed stocks only ---
+  let targetStocks = stocks;
+  const incrementalIdx = args.indexOf('--incremental');
+  if (incrementalIdx !== -1) {
+    const codesFile = path.join(DATA_DIR, 'backtest', '.incremental_codes.json');
+    if (fs.existsSync(codesFile)) {
+      const changedCodes = new Set(JSON.parse(fs.readFileSync(codesFile, 'utf8')));
+      targetStocks = stocks.filter(s => changedCodes.has(s.code));
+      process.stderr.write('[backtest] Incremental mode: ' + targetStocks.length + '/' + stocks.length + ' stocks to process\n');
+    } else {
+      process.stderr.write('[backtest] WARNING: --incremental but no .incremental_codes.json found. Processing all.\n');
+    }
+  }
+
+  const total = targetStocks.length;
 
   process.stderr.write(`[backtest] Loading engine...\n`);
   const sandbox = createEngine();
@@ -193,7 +209,7 @@ if (args[0] === '--batch') {
   let skipped = 0;
   const startTime = Date.now();
 
-  for (const stock of stocks) {
+  for (const stock of targetStocks) {
     try {
       const result = analyzeStock(sandbox, stock.code, stock.market);
       process.stdout.write(JSON.stringify(result) + '\n');

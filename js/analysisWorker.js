@@ -39,10 +39,15 @@ let _learnedWeights = {};
 // backtest 메시지 처리 후 갱신, analyze 결과 패턴에 부착
 let _winRateMap = {};
 
-function _makeCacheKey(candles) {
+// ── 백테스트 기준시점 — AMH 시변성 감쇠 계산용 ────────
+// Lo (2004) AMH: 패턴 알파는 exp(-λ×days) 속도로 감쇠.
+// null이면 감쇠 미적용 (하위 호환 유지).
+let _backtestEpochMs = null;
+
+function _makeCacheKey(candles, timeframe) {
   if (!candles || !candles.length) return '';
   var last = candles[candles.length - 1];
-  return candles.length + '_' + last.time + '_' + last.open + '_' + last.close;
+  return (timeframe || '') + '_' + candles.length + '_' + last.time + '_' + last.open + '_' + last.close;
 }
 
 // ── Worker 내부에 필요한 스크립트 로드 ───────────────
@@ -105,13 +110,28 @@ function _extractWinRateMap(backtestResults) {
 // _winRateMap이 채워진 상태에서만 의미 있음.
 // analyze보다 backtest가 나중에 실행되므로 첫 호출에는 빈 맵.
 // 이후 재분석 시에는 이전 백테스트 승률이 자동 부착됨.
+//
+// [AMH] 시변 감쇠 적용: 오래된 백테스트 승률은 중립값(50%)으로 회귀.
+// winRateDecayed = 50 + (winRate - 50) × exp(-λ × daysSince)
+// Lo (2004), McLean & Pontiff (2016): 전략 알파는 시간에 따라 감쇠.
 function _attachWinRates(patterns) {
   if (!patterns || !patterns.length) return;
+
+  // 감쇠 인자 계산 (기본 λ=0.00275, 반감기 252일)
+  var winRateDecay = 1.0;
+  if (_backtestEpochMs != null) {
+    var daysSince = (Date.now() - _backtestEpochMs) / 86400000;
+    if (daysSince > 0) {
+      winRateDecay = Math.exp(-0.00275 * daysSince);
+    }
+  }
+
   for (var i = 0; i < patterns.length; i++) {
     var p = patterns[i];
     var entry = _winRateMap[p.type];
     if (entry) {
-      p.backtestWinRate = entry.winRate;
+      // 중립(50)으로의 지수 감쇠: 오래된 엣지 추정치는 서서히 무의미해진다
+      p.backtestWinRate = +(50 + (entry.winRate - 50) * winRateDecay).toFixed(1);
       p.backtestSampleSize = entry.sampleSize;
     } else {
       p.backtestWinRate = null;
@@ -146,15 +166,24 @@ self.onmessage = function (e) {
 
       // [PERF] 캐시 키 비교 — 동일 캔들이면 재분석 건너뜀
       // drag 이벤트에서 동일 visible 구간 반복 요청 시 효과적
-      const cacheKey = _makeCacheKey(analyzeCandles);
+      const cacheKey = _makeCacheKey(analyzeCandles, msg.timeframe);
       let patterns, signals, stats;
 
       // 적응형 가중치 주입 (이전 백테스트에서 학습)
       if (msg.learnedWeights) {
         _learnedWeights = msg.learnedWeights;
+        // [AMH] app.js가 _backtestEpochMs를 learnedWeights에 piggyback
+        if (msg.learnedWeights._backtestEpochMs != null) {
+          _backtestEpochMs = msg.learnedWeights._backtestEpochMs;
+        }
+      }
+      if (msg.backtestEpochMs != null) {
+        _backtestEpochMs = msg.backtestEpochMs;
       }
       if (typeof patternEngine !== 'undefined' && patternEngine.constructor) {
         patternEngine.constructor._globalLearnedWeights = _learnedWeights;
+        // [AMH] 감쇠 계산용 기준시점 주입
+        patternEngine.constructor._backtestEpochMs = _backtestEpochMs;
       }
 
       if (_analyzeCache.key === cacheKey && _analyzeCache.patterns) {
@@ -164,8 +193,12 @@ self.onmessage = function (e) {
         stats = _analyzeCache.stats;
       } else {
         // 캐시 미스: 새로 분석
+        // [PERF] UI 분석: lookback 윈도우 제한 (HS_WINDOW=120 + S/R 버퍼 + 지표 warm-up)
+        // 분봉(5m/1m)에서 8-20x 속도향상. 백테스트는 별도 전체 분석.
+        var uiWindow = 180;
+        var detectFrom = Math.max(0, analyzeCandles.length - uiWindow);
         // 1) 캔들 패턴 분석
-        patterns = patternEngine.analyze(analyzeCandles);
+        patterns = patternEngine.analyze(analyzeCandles, { detectFrom: detectFrom });
 
         // 2) 지표 시그널 + 복합 시그널 분석
         //    signalEngine.analyze()는 IndicatorCache를 내부 생성하며,
@@ -179,8 +212,8 @@ self.onmessage = function (e) {
           signalEngine.applyProspectBoost(signals, analyzeCandles, patterns._srLevels, result.cache);
         }
 
-        // 캐시 갱신
-        _analyzeCache = { key: cacheKey, patterns: patterns, signals: signals, stats: stats };
+        // 캐시 갱신 — windowed 플래그: 백테스트 캐시 시딩 시 윈도우된 결과 제외
+        _analyzeCache = { key: cacheKey, patterns: patterns, signals: signals, stats: stats, windowed: detectFrom > 0 };
       }
 
       // 이전 백테스트에서 캐시된 승률을 패턴에 부착 (첫 분석 시 빈 맵 → null 부착)
@@ -220,8 +253,8 @@ self.onmessage = function (e) {
       // If backtester's cache structure changes (field rename, shape change), this will
       // silently stop working and fall back to re-analysis — safe but slower.
       // No public setter exists on PatternBacktester for this purpose.
-      const btCacheKey = _makeCacheKey(candles);
-      if (_analyzeCache.key === btCacheKey && _analyzeCache.patterns) {
+      const btCacheKey = _makeCacheKey(candles, msg.timeframe);
+      if (_analyzeCache.key === btCacheKey && _analyzeCache.patterns && !_analyzeCache.windowed) {
         backtester._analyzeCache = {
           _candles: candles,
           patterns: _analyzeCache.patterns,
@@ -234,10 +267,20 @@ self.onmessage = function (e) {
       // 승률 맵 갱신 (다음 analyze 호출 시 패턴에 자동 부착됨)
       _extractWinRateMap(results);
 
+      // [AMH] 백테스트 기준시점 기록 — Lo (2004) 시변 효율성
+      // 마지막 캔들 시각을 ms 단위로 저장. 일봉("YYYY-MM-DD") + 분봉(Unix sec) 양쪽 처리.
+      if (candles && candles.length > 0) {
+        var lastTime = candles[candles.length - 1].time;
+        _backtestEpochMs = (typeof lastTime === 'string')
+          ? new Date(lastTime).getTime()
+          : lastTime * 1000;
+      }
+
       self.postMessage({
         type: 'backtestResult',
         results: results,
         learnedWeights: _learnedWeights,
+        backtestEpochMs: _backtestEpochMs,
         candleLength: candles.length,
         version: version,
       });
