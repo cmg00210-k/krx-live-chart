@@ -207,9 +207,14 @@ class PatternEngine {
     symmetricTriangle: 2678, risingWedge: 1054, fallingWedge: 2380,
   });
 
-  /** James-Stein shrinkage 적용 WR — 카테고리별 grand mean으로 수축
-   *  Efron & Morris (1975): θ_shrunk = (n·θ + n0·θ_cat) / (n + n0)
+  /** Beta-Binomial 켤레 사전분포 사후 평균 — 카테고리별 grand mean으로 수축
+   *  공식: θ_post = (n·θ + N0·μ_grand) / (n + N0)
+   *  이는 Beta(α0,β0) 사전분포의 사후 평균과 대수적으로 동일 (α0=N0·μ, β0=N0·(1-μ))
+   *  [Fix] 이전 명칭 수정: "James-Stein shrinkage"는 가우시안 평균 이론 — 이항 비율(win rate)엔
+   *        Beta-Binomial 켤레 사전이 올바른 명칭. 공식 자체는 동일하므로 수치 변경 없음.
+   *        (James-Stein 1961은 Gaussian 동시 추정; 이항 비율엔 Efron & Morris 1975 EB가 적합)
    *  [Phase2-E-2] N0=50→35: Empirical Bayes 최적화 (5년 545K건, N0_hat=34.5)
+   *  N0 의미: 사전분포의 가상 표본 수. n<<N0 → grand mean에 강하게 수축; n>>N0 → 원시값 유지
    *  candle/chart 별도 grand mean — spinningTop(n=559K)이 H&S(n=1156)를 지배하는 문제 해소
    *  차트 패턴 grand mean ~45%, 캔들 패턴 grand mean ~43% (독립 추정) */
   static PATTERN_WIN_RATES_SHRUNK = (() => {
@@ -228,7 +233,12 @@ class PatternEngine {
     let sumWN_candle = 0, sumN_candle = 0;
     let sumWN_chart = 0, sumN_chart = 0;
     for (const k in raw) {
-      const n = sizes[k] || 1;
+      // [Fix] || 1 → || N0: PATTERN_SAMPLE_SIZES 누락 시 n=1이면 수축 계수=97.2%로
+      //        패턴 WR이 grand mean에 거의 완전히 묻힘. N0(=35)를 기본값으로 하면
+      //        수축 50%로 완화 — 누락 패턴에 "보통 표본" 수준의 신뢰도 부여.
+      //        누락 발생 시 콘솔 경고로 추적 가능하게 함.
+      if (!(k in sizes)) { if (typeof console !== 'undefined') console.warn('[PatternEngine] PATTERN_SAMPLE_SIZES 누락 패턴:', k, '→ n=N0 폴백'); }
+      const n = sizes[k] || N0;
       if (chartSet.has(k)) { sumWN_chart += raw[k] * n; sumN_chart += n; }
       else { sumWN_candle += raw[k] * n; sumN_candle += n; }
     }
@@ -237,7 +247,7 @@ class PatternEngine {
 
     const shrunk = {};
     for (const k in raw) {
-      const n = sizes[k] || 1;
+      const n = sizes[k] || N0;  // [Fix] || 1 → || N0 (50% 수축, 이전 97.2% 과수축 방지)
       const gm = chartSet.has(k) ? grandMeanChart : grandMeanCandle;
       shrunk[k] = +((n * raw[k] + N0 * gm) / (n + N0)).toFixed(1);
     }
@@ -245,7 +255,7 @@ class PatternEngine {
   })();
 
   /** Beta-Binomial 사후 승률 — rl_policy.json win_rates_live에서 로드
-   *  null이면 PATTERN_WIN_RATES_SHRUNK 폴백 (기존 James-Stein)
+   *  null이면 PATTERN_WIN_RATES_SHRUNK 폴백 (Beta-Binomial 사전 기반 수축 추정)
    *  Phase G-2: conjugate prior → posterior mean = alpha/(alpha+beta) */
   static PATTERN_WIN_RATES_LIVE = null;
 
@@ -390,6 +400,9 @@ class PatternEngine {
     const atr14 = calcATR(candles, 14);
     const atr50 = calcATR(candles, 50);
     const lastATR14 = atr14[atr14.length - 1] || 1;
+    // [Note] 50봉 미만 데이터에서 atr50[last]는 null → lastATR50=lastATR14 → ratio=1.0
+    //        → volWeight=1.0 (보정 없음). 데이터 부족 시 레짐 보정 비활성화는 의도된 폴백.
+    //        충분한 데이터가 없으면 ATR14/ATR50 비율 자체가 무의미하기 때문.
     const lastATR50 = atr50[atr50.length - 1] || lastATR14;
     const volWeight = Math.max(0.7, Math.min(1 / Math.sqrt(lastATR14 / lastATR50), 1.4));
 
@@ -449,25 +462,18 @@ class PatternEngine {
       dynamicATRCap = 5; // moderate tail
     }
 
-    const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap };
+    const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap, candles };
     const patterns = [];
 
-    // 캔들 패턴 — 빈도순 (Bulkowski 출현율 기준, 빈번한 패턴 먼저 감지)
-    // 1봉 패턴 (가장 빈번: 도지 > 해머 > 장악형 > 잉태형)
-    patterns.push(...this.detectLongLeggedDoji(candles, ctx));  // 도지 전에 — hierarchy dedup
-    patterns.push(...this.detectDoji(candles, ctx));
+    // 캔들 패턴 — KRX 5년 실증 통계적 유의성 기준 선별 (승률 ±2% 이내 또는 확인캔들 의존 패턴 제거)
+    // 1봉 패턴
     patterns.push(...this.detectHammer(candles, ctx));
     patterns.push(...this.detectShootingStar(candles, ctx));
-    patterns.push(...this.detectHangingMan(candles, ctx));
-    patterns.push(...this.detectInvertedHammer(candles, ctx));
     patterns.push(...this.detectDragonflyDoji(candles, ctx));
     patterns.push(...this.detectGravestoneDoji(candles, ctx));
     patterns.push(...this.detectMarubozu(candles, ctx));
-    patterns.push(...this.detectBeltHold(candles, ctx));      // 마루보주 후 — 마루보주 미달 봉 대상
-    patterns.push(...this.detectSpinningTop(candles, ctx));
     // 2봉 패턴
     patterns.push(...this.detectEngulfing(candles, ctx));
-    patterns.push(...this.detectHarami(candles, ctx));
     patterns.push(...this.detectPiercingLine(candles, ctx));
     patterns.push(...this.detectDarkCloud(candles, ctx));
     patterns.push(...this.detectTweezerBottom(candles, ctx));
@@ -477,9 +483,7 @@ class PatternEngine {
     patterns.push(...this.detectThreeBlackCrows(candles, ctx));
     patterns.push(...this.detectMorningStar(candles, ctx));
     patterns.push(...this.detectEveningStar(candles, ctx));
-    patterns.push(...this.detectThreeInsideUp(candles, ctx));
-    patterns.push(...this.detectThreeInsideDown(candles, ctx));
-    patterns.push(...this.detectAbandonedBaby(candles, ctx));
+    // threeInsideUp 제거: WR 42.4% (D등급, 매수 기준선 이하), shadow 결함, threeInsideDown 비대칭 — KRX 5년 실증 근거 없음
 
     // 차트 패턴
     const swH = this._findSwingHighs(candles, 3);
@@ -540,8 +544,10 @@ class PatternEngine {
       patterns[pi].vw = volWeight;
       patterns[pi].mw = meanRevWeight;
       patterns[pi].rw = regimeWeight;
-      patterns[pi].wc = +(hurstWeight * meanRevWeight).toFixed(4);
-      // Dual Confidence: confidencePred = James-Stein shrinkage 적용 승률 (모델 입력용)
+      // [Phase I-L0] regimeWeight 버그 수정: rw 계산 후 wc에 미반영 → 곱셈 추가
+      // 근거: Hamilton (1989) HMM 레짐 가중치는 wc 복합 인자에 포함되어야 함
+      patterns[pi].wc = +(hurstWeight * meanRevWeight * regimeWeight).toFixed(4);
+      // Dual Confidence: confidencePred = Beta-Binomial 사후 승률 (모델 입력용)
       // confidence(형태점수)는 UI 표시용으로 불변 유지
       var wr = (PatternEngine.PATTERN_WIN_RATES_LIVE && PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type] != null)
         ? PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type]
@@ -558,7 +564,10 @@ class PatternEngine {
       // 형태 품질 반영 — Kirkpatrick & Dahlquist (2011): body ratio + ATR 비율 → 신뢰도 조정
       // scaling = confidence/50, clamp [0.88, 1.12] (±12%, Caginalp 1998 실증 3~7%p 정합)
       // [E-2] 0.85/1.15→0.88/1.12: WR>55% 패턴에서 Caginalp 7%p 상한 준수 (fin-theory 교차검증)
-      // James-Stein shrinkage와 양립: 소표본 패턴에서도 과도한 역전 방지
+      // Beta-Binomial 사후 추정과 양립: 소표본 패턴에서도 과도한 역전 방지
+      // [이론 한계] 확률값에 곱셈 스케일링은 경계 위반 가능(pred*1.12>100). min(95,...) 클램프로
+      //             방어하나, 이상적으로는 logit 공간 가산 보정이 수학적으로 더 엄밀함.
+      //             현재 범위(WR 43~65%)에서 실용 오차 <2%p 이내로 허용 수준 판단.
       var qualityScaling = Math.min(1.12, Math.max(0.88, patterns[pi].confidence / 50));
       pred = Math.round(pred * qualityScaling);
       pred = Math.min(95, Math.max(10, pred));
@@ -595,10 +604,63 @@ class PatternEngine {
       }
     }
 
+    // [Phase I-L1] 시장 군집행동 맥락 조정 — CSAD + HMM 연계
+    // 극단 군집(herding_flag=2) + 하락장(r_market<0) → 매수 패턴 신뢰도 하향 보정
+    this._applyHerdingAdjust(patterns);
+
     var deduped = this._dedup(patterns);
     // [Phase I] S/R levels 첨부 — applyProspectBoost 등 후처리에서 활용
     deduped._srLevels = sr;
     return deduped;
+  }
+
+  /**
+   * [Phase I-L1] CSAD 군집행동 × HMM 레짐 연계 신뢰도 조정
+   * Chang, Cheng & Khorana (2000) 군집행동 지표 + Hamilton (1989) HMM
+   *
+   * 근거:
+   *  - 극단 군집(flag=2) + 하락장(r_market<0): 투자자들이 동조화하여 패닉 매도 →
+   *    캔들 반전 패턴의 지지 신뢰도 하락 (KRX 45% 극단 군집 일수)
+   *  - HMM 고변동 레짐(bull_prob>0.7, σ=3.4x): 패턴 완성 후 급반전 위험 상승
+   *  조합 페널티 = 군집 ×0.76, HMM 고변동 ×0.75 (별도 조건 — 중복 불적용)
+   *  clamp: 조정 후 confidence 최소 10, 최대 변화 -24%p (0.76×100=76)
+   */
+  _applyHerdingAdjust(patterns) {
+    if (typeof backtester === 'undefined' || !backtester._behavioralData) return;
+    var bd = backtester._behavioralData;
+
+    // CSAD herding flag (시장 전체 수준)
+    var herdingFlag = 0, rMarket = 0;
+    if (bd['csad_herding'] && bd['csad_herding'].daily && bd['csad_herding'].daily.length > 0) {
+      var lastCSAD = bd['csad_herding'].daily[bd['csad_herding'].daily.length - 1];
+      herdingFlag = lastCSAD.herding_flag || 0;
+      rMarket = lastCSAD.r_market || 0;
+    }
+
+    // HMM 고변동 레짐
+    var hmmBullProb = 0;
+    if (bd['hmm_regimes'] && bd['hmm_regimes'].daily && bd['hmm_regimes'].daily.length > 0) {
+      var lastHMM = bd['hmm_regimes'].daily[bd['hmm_regimes'].daily.length - 1];
+      hmmBullProb = lastHMM.bull_prob || 0;
+    }
+
+    for (var ci = 0; ci < patterns.length; ci++) {
+      var p = patterns[ci];
+      // 극단 군집 + 하락장 → 매수 패턴 신뢰도 ×0.76
+      // 근거: KRX CSAD 실증, 극단 군집 하락일 매수 반전 성공률 -24%p (core_data/20 §3.4)
+      if (p.signal === 'buy' && herdingFlag === 2 && rMarket < 0) {
+        p.confidence = Math.max(10, Math.round(p.confidence * 0.76));
+        if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.76));
+      }
+      // [H-3 FIX] else if → CSAD 조건과 중복 적용 방지 (이중 페널티 ×0.57 해소)
+      // HMM 고변동 레짐(bull_prob>0.7) → 매수 패턴 신뢰도 ×0.75 (CSAD 미적용 + marubozu 제외)
+      // 근거: KRX HMM σ=3.4% 레짐에서 단기 반전 패턴 오신호 급증 (core_data/21 §2)
+      // bullishMarubozu 제외: 고변동 레짐에서 강한 방향성 지속 신호이므로 페널티 부적합
+      else if (p.signal === 'buy' && hmmBullProb > 0.7 && p.type !== 'bullishMarubozu') {
+        p.confidence = Math.max(10, Math.round(p.confidence * 0.75));
+        if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.75));
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════
@@ -628,7 +690,11 @@ class PatternEngine {
       const trend = this._detectTrend(candles, i - 2, 10, a);
       if (trend.direction === 'up') continue;  // Nison: 반전 패턴이므로 상승추세에서는 무효
       const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [Phase I-L0] extra: 연속 거래량 증가 — 3봉 연속 거래량 증가 시 신뢰도 상승 (Nison 거래량 원칙)
+      // 연속 증가: 1.0, 2봉만 증가: 0.6, 1봉만 또는 불일치: 0.2
+      const v0 = candles[i - 2].volume, v1 = candles[i - 1].volume, v2 = candles[i].volume;
+      const volIncExtra = (v1 >= v0 && v2 >= v1) ? 1.0 : (v1 >= v0 || v2 >= v1) ? 0.6 : 0.2;
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volIncExtra });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
 
@@ -663,15 +729,21 @@ class PatternEngine {
 
       // Nison: "각 음봉의 아래꼬리가 짧아야 한다" — 적삼병 윗꼬리 검증의 대칭
       // 아래꼬리가 길면 해당 가격대에서 매수세 저항을 의미 → 하락 신뢰도 저하
+      // [Fix-MED] bodyMin(=0.3, ATR 배수 상수)을 꼬리/몸통 비율에 재사용 → 0.5로 통일 (적삼병 윗꼬리 기준과 대칭)
       const ls0 = c0.close - c0.low, ls1 = c1.close - c1.low, ls2 = c2.close - c2.low;
-      if (ls0 > b0 * bodyMin || ls1 > b1 * bodyMin || ls2 > b2 * bodyMin) continue;
+      if (ls0 > b0 * 0.5 || ls1 > b1 * 0.5 || ls2 > b2 * 0.5) continue;
 
       const bodyScore = Math.min((b0 + b1 + b2) / 3 / a, 1);
       const shadowScore = 1 - Math.min((ls0 / b0 + ls1 / b1 + ls2 / b2) / 3, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trend = this._detectTrend(candles, i - 2, 10, a);
-      const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      if (trend.direction === 'down') continue;  // [Fix-HIGH] Nison: 반전 패턴 — 하락추세에서 무효 (적삼병 대칭)
+      const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+      // [H-2 FIX] extra: 거래량 단계적 증가 (적삼병 volIncExtra 대칭)
+      // Edwards & Magee: 하락 가속 음봉 시 거래량 증가 = 매도 확신
+      const v0 = c0.volume, v1 = c1.volume, v2 = c2.volume;
+      const volIncExtra = (v1 >= v0 && v2 >= v1) ? 1.0 : (v1 >= v0 || v2 >= v1) ? 0.6 : 0.2;
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volIncExtra });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
 
@@ -714,7 +786,10 @@ class PatternEngine {
       const shadowScore = Math.min(lowerShadow / range, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [Phase I-L0] extra: 거래량 급등 — 저가 반전 시 매수세 유입 확인 (Odean 1998)
+      // vol/vma > 1.5 (surge threshold) → extra 1.0, vol/vma < 1 → extra 하락
+      const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
 
@@ -847,7 +922,9 @@ class PatternEngine {
       const shadowScore = Math.min(upperShadow / range, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [H-2 FIX] extra: 거래량 급증 (해머 volSurge 대칭) — Morris: 고점 반전은 거래량 증가로 확인
+      const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
 
@@ -926,8 +1003,12 @@ class PatternEngine {
       // 상승 장악형
       if (prev.close < prev.open && curr.close > curr.open) {
         if (curr.open <= prev.close && curr.close >= prev.open) {
-          const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
-          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          if (trend.direction === 'up') continue;  // [Fix-MED] 상승 추세에서 상승 반전 불필요 — 반전 패턴 원칙
+          const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
+          // [Phase I-L0] extra: 장악 비율 초과분 — ENGULF_BODY_MULT(1.2) 이상 얼마나 더 큰지
+          // currBody = prevBody * 1.2 → extra 0, currBody = prevBody * 3.2 → extra 1.0
+          const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
           // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
           if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
           results.push({
@@ -945,8 +1026,12 @@ class PatternEngine {
       // 하락 장악형
       if (prev.close > prev.open && curr.close < curr.open) {
         if (curr.open >= prev.close && curr.close <= prev.open) {
-          const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
-          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore });
+          if (trend.direction === 'down') continue;  // [Fix-MED] 하락 추세에서 하락 반전 불필요 — 반전 패턴 원칙
+          const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+          // [H-1 FIX] extra: 장악 비율 초과분 (상승장악형 engulfExtra 대칭)
+          // currBody = prevBody * 1.2 → extra 0, currBody = prevBody * 3.2 → extra 1.0
+          const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
           // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
           if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
           results.push({
@@ -1059,7 +1144,10 @@ class PatternEngine {
       const bodyScore = Math.min((body0 + body2) / 2 / a, 1);
       const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.2;
       const starScore = 1 - Math.min(body1 / a, 1);
-      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore });
+      // [Phase I-L0] extra: 3봉 회복 깊이 — 50% 이상 회복한 정도 (Nison: 더 깊은 회복=신뢰도 상승)
+      // c0Mid 기준 초과분 / (body0 * 0.5): 0=정확히 50%, 1=100% 회복 (c2.close=c0.open)
+      const recoveryDepth = Math.min((c2.close - c0Mid) / Math.max(body0 * 0.5, 1), 1);
+      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore, extra: recoveryDepth });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr);
 
@@ -1106,7 +1194,11 @@ class PatternEngine {
       const bodyScore = Math.min((body0 + body2) / 2 / a, 1);
       const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.2;
       const starScore = 1 - Math.min(body1 / a, 1);
-      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore });
+      // [H-2 FIX] extra: 3봉 하락 침투 깊이 (샛별형 recoveryDepth 대칭)
+      // Nison: 3봉이 1봉 몸통 중간 이하로 더 많이 하락할수록 반전 신뢰도 상승
+      // c0Mid 기준 하락분 / (body0 * 0.5): 0=정확히 50%, 1=100% 침투(c2.close=c0.open)
+      const penetrationDepth = Math.min((c0Mid - c2.close) / Math.max(body0 * 0.5, 1), 1);
+      const confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: starScore, extra: penetrationDepth });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr);
 
@@ -1168,7 +1260,10 @@ class PatternEngine {
       const shadowScore = Math.min(penetration, 1);  // 관통 깊이가 깊을수록 신뢰
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [Phase I-L0] extra: 반전봉 거래량 우세 — 관통 봉 거래량 > 전봉 거래량 시 매수 유입 확인
+      // curr.volume / prev.volume / 1.5: ratio 1.5x → extra 1.0 (강한 매수 유입)
+      const volConfirm = (prev.volume > 0) ? Math.min(curr.volume / prev.volume / 1.5, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volConfirm });
       const stopLoss = this._stopLoss(candles, i, 'buy', atr);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
 
@@ -1231,7 +1326,10 @@ class PatternEngine {
       const shadowScore = Math.min(penetration, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [H-2 FIX] extra: 거래량 확인 (관통형 volConfirm 대칭)
+      // Nison/Edwards: 먹구름형은 현봉 거래량이 전봉 대비 증가해야 신뢰도 높음
+      const volConfirm = (prev.volume > 0) ? Math.min(curr.volume / prev.volume / 1.5, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volConfirm });
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
 
@@ -1396,7 +1494,10 @@ class PatternEngine {
       const bodyScore = Math.min((prevBody + currBody) / 2 / a, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore });
+      // [Phase I-L0] extra: 반전봉 우세도 — 2봉 중 반전 양봉(currBody)이 클수록 신뢰 상승 (Nison)
+      // currBody / (prevBody + currBody): 0.5=동등, 1.0=반전봉이 전봉 압도
+      const reversalDominance = Math.min(currBody / Math.max(prevBody + currBody, 1), 1);
+      const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore, extra: reversalDominance });
       const stopLoss = +(Math.min(prev.low, curr.low) - a).toFixed(0);
       const priceTarget = this._candleTarget(candles, i, 'buy', 'medium', atr);
 
@@ -1451,7 +1552,10 @@ class PatternEngine {
       const bodyScore = Math.min((prevBody + currBody) / 2 / a, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore });
+      // [H-2 FIX] extra: 반전봉 우세도 (족집게바닥 reversalDominance 대칭)
+      // Nison: 2봉 중 반전 음봉(currBody)이 클수록 매도 압력 신뢰 상승
+      const reversalDominance = Math.min(currBody / Math.max(prevBody + currBody, 1), 1);
+      const confidence = this._quality({ body: bodyScore, shadow: matchScore, volume: volumeScore, trend: trendScore, extra: reversalDominance });
       const stopLoss = +(Math.max(prev.high, curr.high) + a).toFixed(0);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr);
 
@@ -1516,8 +1620,10 @@ class PatternEngine {
       const trendScore = (isBullish && trend.direction === 'up') || (!isBullish && trend.direction === 'down')
         ? Math.min(trend.strength, 1) : 0.3;
 
-      // 기본 신뢰도 75, 거래량 확인 시 +10
-      let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore });
+      // [Phase I-L0] extra: 마루보주 순도 — body/range가 0.85 초과 얼마나 순수한지
+      // 0.85=최소 (extra 0), 1.0=완전 마루보주 (extra 1.0)
+      const purity = Math.min((body / range - PatternEngine.MARUBOZU_BODY_RATIO) / Math.max(1 - PatternEngine.MARUBOZU_BODY_RATIO, 0.001), 1);
+      let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: purity });
       // [ACC] 거래량 확인: 전일 대비 1.2배 이상이면 +10% (Nison 거래량 원칙)
       if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 100);
 
@@ -2445,7 +2551,8 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectSupportResistance(candles, swingHighs, swingLows, ctx = {}) {
     const { atr = [] } = ctx;
-    const lastATR = atr[candles.length - 1] || candles[candles.length - 1].close * 0.02;
+    // [Fix] 하드코딩 0.02 → ATR_FALLBACK_PCT 상수 사용 (재교정 시 일관성 보장)
+    const lastATR = atr[candles.length - 1] || candles[candles.length - 1].close * PatternEngine.ATR_FALLBACK_PCT;
     const tol = lastATR * 0.5;
 
     const pts = [
@@ -2485,11 +2592,16 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   _applyConfluence(patterns, srLevels, ctx = {}) {
     if (!srLevels || !srLevels.length) return;
-    const { atr = [] } = ctx;
+    const { atr = [], candles: ctxCandles = [] } = ctx;
 
     patterns.forEach(p => {
       if (p.confidence == null || p.endIndex == null) return;
-      const a = atr[p.endIndex] || 1;
+      // [Fix] || 1 → ATR_FALLBACK_PCT 기반 정상 폴백
+      // 이전: atr[p.endIndex] || 1 — 삼성전자(60,000원)에서 허용오차가 1원으로 줄어
+      //        stopLoss ↔ S/R 거리 비교가 항상 실패 → 컨플루언스 부스트가 무음 비활성화
+      const _cls = ctxCandles[p.endIndex] ? ctxCandles[p.endIndex].close : null;
+      const a = atr[p.endIndex] || (_cls ? _cls * PatternEngine.ATR_FALLBACK_PCT : null);
+      if (!a) return;
       let boost = 0;
 
       for (const sr of srLevels) {
@@ -2513,8 +2625,11 @@ class PatternEngine {
 
   /** R:R 검증 게이트 — KRX 302,986건 calibration (calibrated_constants.json C1+D3)
    *  최적 임계: [2.25, 2.5] (F=323.49, p=6.3e-141)
-   *  페널티: below 2.25 → -12, mid [2.25,2.5) → -25 (Cohen's d=0.83)
-   *  이론: 전망이론 λ=2.25 (Kahneman & Tversky 1979) */
+   *  페널티: below 2.25 → -25 (중증), mid [2.25,2.5) → -12 (경증) — R:R 낮을수록 큰 패널티
+   *  [Fix] 이전 주석 반전 오류 수정: -12/-25 순서가 코드와 반대였음
+   *  이론: 전망이론 λ=2.25 (Kahneman & Tversky 1979) — 행동 편향 기술자 기반 보수적 임계
+   *  주의: λ는 기계적 필터 파라미터가 아닌 행동심리 계수. Kelly 기준 손익분기(=(1-p)/p)보다
+   *        엄격함 — 많은 양기댓값 거래를 거부할 수 있음 (단, KRX 실증으로 최적값 검증됨) */
   _applyRRGate(patterns, candles) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];

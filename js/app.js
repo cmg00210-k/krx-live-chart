@@ -54,15 +54,12 @@ function _deactivateOscillator(ind) {
 var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
 // 캔들 패턴 타입 Set (필터링용)
 var _VIZ_CANDLE_TYPES = new Set([
-  'threeWhiteSoldiers','threeBlackCrows','hammer','invertedHammer',
-  'hangingMan','shootingStar','doji','bullishEngulfing','bearishEngulfing',
-  'bullishHarami','bearishHarami','morningStar','eveningStar',
+  'threeWhiteSoldiers','threeBlackCrows','hammer',
+  'shootingStar','bullishEngulfing','bearishEngulfing',
+  'morningStar','eveningStar',
   'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
   'tweezerBottom','tweezerTop',
-  'bullishMarubozu','bearishMarubozu','spinningTop',
-  'longLeggedDoji','bullishBeltHold','bearishBeltHold',
-  'threeInsideUp','threeInsideDown',
-  'abandonedBabyBullish','abandonedBabyBearish'
+  'bullishMarubozu','bearishMarubozu'
 ]);
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([
@@ -120,6 +117,7 @@ let _fallbackTimer = null;
 let _prevPrice = null;       // 가격 변화 flash 감지용
 let _kbNavTimer = null;      // 키보드 네비게이션 디바운스 타이머
 let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.json)
+let _marketContext = null;   // [Phase I-L2] 시장 맥락 (market_context.json — CCSI/VKOSPI/flow)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 
 // ══════════════════════════════════════════════════════
@@ -778,6 +776,23 @@ async function _continueInit() {
     }
   } catch (e) {
     console.warn('[KRX] 업종 데이터 로드 실패:', e.message);
+  }
+
+  // [Phase I-L2] 시장 맥락 데이터 로드 — getContextualConfidence()에서 사용
+  // scripts/download_market_context.py로 생성 (CCSI, VKOSPI, 투자자 순매수, 어닝시즌)
+  try {
+    var mctxRes = await fetch('data/market_context.json');
+    if (mctxRes.ok) {
+      _marketContext = await mctxRes.json();
+      if (_marketContext.source === 'demo') {
+        console.log('[KRX] 시장 맥락 데이터 로드 (데모 모드)');
+      } else {
+        console.log('[KRX] 시장 맥락 데이터 로드:', _marketContext.generated_at);
+      }
+    }
+  } catch (e) {
+    // market_context.json은 선택적 — 없어도 정상 동작
+    console.log('[KRX] 시장 맥락 데이터 없음 (download_market_context.py 실행 시 활성화)');
   }
 
   // 복원된 환경설정을 UI에 반영
@@ -1457,6 +1472,8 @@ function _initAnalysisWorker() {
 
         detectedPatterns = msg.patterns;
         detectedSignals = msg.signals;
+        // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
+        _applyMarketContextToPatterns(detectedPatterns);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
 
@@ -1940,6 +1957,60 @@ function _categorizePatterns(patterns, signals) {
 }
 
 /**
+ * [Phase I-L2] 외부 시장 맥락 기반 패턴 신뢰도 조정
+ * data/market_context.json (download_market_context.py 생성) 활용
+ *
+ * 조정 인자 (모두 독립 — 중복 적용 가능, clamp [0.55, 1.35]):
+ *  - CCSI <85 → ×0.88 (소비심리 악화, 상승 반전 신뢰도 저하)
+ *  - CCSI >108 → ×1.06 (소비심리 호전, 상승 반전 신뢰도 상승) [105→108: Lemmon&Portniaguina 2006]
+ *  - VKOSPI >30 → ×0.82 (고변동 공포 국면, 패턴 오신호 증가)
+ *  - net_foreign_eok >1000 → ×1.08 (외국인 유의미한 순매수) [500→1000: Richards 2005 ~$75M]
+ *  - earning_season=1 → ×0.93 (실적 불확실성, 패턴 예측력 저하)
+ *  데모 데이터 소스는 조정 미적용 (source==='demo' 시 no-op)
+ *
+ * @param {Array} patterns - patternEngine.analyze() 결과
+ */
+function _applyMarketContextToPatterns(patterns) {
+  if (!_marketContext || !patterns || patterns.length === 0) return;
+  if (_marketContext.source === 'demo') return; // 데모 데이터는 실제 조정 미적용
+
+  var ccsi = _marketContext.ccsi;
+  var vkospi = _marketContext.vkospi;
+  var netForeign = _marketContext.net_foreign_eok;
+  var earningSeason = _marketContext.earning_season;
+
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var p = patterns[pi];
+    var adj = 1.0;
+
+    // CCSI 조정 (매수 패턴만)
+    if (p.signal === 'buy' && ccsi != null) {
+      if (ccsi < 85) adj *= 0.88;
+      else if (ccsi > 108) adj *= 1.06;  // [학술 수정] 105→108 (Lemmon&Portniaguina 2006)
+    }
+
+    // VKOSPI 고변동 조정 (매수/매도 모두 — 불확실성 증가)
+    if (vkospi != null && vkospi > 30) adj *= 0.82;
+
+    // 외국인 유의미한 순매수 확인 (매수 패턴만) — [학술 수정] 500→1000억 (Richards 2005: ~$75M 이상)
+    if (p.signal === 'buy' && netForeign != null && netForeign > 1000) adj *= 1.08;
+
+    // 어닝시즌 (매수/매도 모두 — 실적 불확실성)
+    if (earningSeason === 1) adj *= 0.93;
+
+    // clamp [0.55, 1.35]
+    adj = Math.max(0.55, Math.min(1.35, adj));
+
+    if (adj !== 1.0) {
+      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      if (p.confidencePred != null) {
+        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      }
+    }
+  }
+}
+
+/**
  * Signal에 Wc 주입 — detectedPatterns의 평균 wc를 모든 시그널에 매칭
  * wc가 없는 패턴(seed/null)은 평균 계산에서 제외
  */
@@ -1970,6 +2041,8 @@ function _analyzeOnMainThread() {
   if (detectedPatterns._srLevels && typeof signalEngine.applyProspectBoost === 'function') {
     signalEngine.applyProspectBoost(detectedSignals, analyzeCandles, detectedPatterns._srLevels, result.cache);
   }
+  // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
+  _applyMarketContextToPatterns(detectedPatterns);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;
 
