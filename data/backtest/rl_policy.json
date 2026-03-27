@@ -1,5 +1,7 @@
 {
   "algorithm": "LinUCB",
+  "effective_mode": "ridge_only",
+  "effective_mode_reason": "LinUCB t_stat_delta=-0.1518 < significance_threshold=2.0",
   "d": 7,
   "K": 5,
   "action_names": [

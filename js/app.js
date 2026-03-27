@@ -1409,7 +1409,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=19');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=20');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;

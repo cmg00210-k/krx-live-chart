@@ -12,7 +12,7 @@ CheeseStock is a Korean stock market (KOSPI/KOSDAQ) charting web app that layers
 [Layer 0] Browser (cheesestock.co.kr)
     ├─ index.html + css/style.css (4-column grid: sidebar | chart | patterns | financials)
     ├─ Service Worker (sw.js) — offline cache
-    └─ CDN: TradingView LWC v4.2.3, Pretendard, JetBrains Mono
+    └─ CDN: TradingView LWC v5.1.0, Pretendard, JetBrains Mono
 
 [Layer 1] Data Pipeline
     ├─ dataService (api.js) — file/ws/demo/koscom modes

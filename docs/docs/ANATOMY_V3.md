@@ -68,7 +68,7 @@ krx-live-chart-remote/
 │   ├── [5]  indicators.js    1,091줄   20개 지표 함수 + IndicatorCache
 │   ├── [6]  patterns.js     2,873줄   PatternEngine (39종, ATR 정규화, Wc)
 │   ├── [7]  signalEngine.js  1,667줄   34 기본 + 18 복합 신호 (3-Tier)
-│   ├── [8]  chart.js         1,778줄   TradingView LWC v4.2.3 래퍼
+│   ├── [8]  chart.js         1,778줄   TradingView LWC v5.1.0 래퍼
 │   ├── [9]  patternRenderer  1,893줄   Canvas2D 패턴 시각화 (9 레이어)
 │   ├── [10] signalRenderer     598줄   Canvas2D 신호 시각화 (듀얼 PaneView)
 │   ├── [11] backtester.js      934줄   WLS Ridge + BH-FDR + LinUCB

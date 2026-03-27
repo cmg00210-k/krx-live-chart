@@ -831,11 +831,13 @@ class PatternBacktester {
             stats.expectedReturn = +predicted.toFixed(2);
 
             // ── LinUCB Contextual Bandit 조정 (Stage B) ──
-            // Phase 6 audit: LinUCB delta t=-0.85 (STOP). Only apply if
-            // t_stat_delta >= 2.0 in training summary (statistically significant improvement).
+            // Significance gate: only apply LinUCB if t_stat_delta >= 2.0 in training summary.
+            // Current result: t_stat_delta=-0.1518 (NOT SIGNIFICANT) → Ridge-only mode active.
+            // _buildRLContext() is expensive — skip entirely when Ridge-only.
             if (this._rlPolicy) {
-              var deltaT = this._rlPolicy.training_summary && this._rlPolicy.training_summary.t_stat_delta;
+              var deltaT = this._rlPolicy.training_summary ? this._rlPolicy.training_summary.t_stat_delta : null;
               if (deltaT != null && deltaT >= 2.0) {
+                // LinUCB path (expensive): build context and apply bandit adjustment
                 var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
                 var rlResult = this._applyLinUCB(rlCtx);
                 stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
@@ -843,6 +845,7 @@ class PatternBacktester {
                 stats.rlFactor = rlResult.factor;
                 predicted = stats.expectedReturn;
               }
+              // else: Ridge-only, no context build needed (performance optimization)
             }
 
             // 95% 신뢰구간: SE = sqrt(sigma^2 * (1 + x' (X'WX)^-1 x))

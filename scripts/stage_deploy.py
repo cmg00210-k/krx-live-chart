@@ -58,6 +58,9 @@ EXCLUDE_EXACT = {
     ".cfignore",                   # deploy tooling artifact, not app code
     ".vercelignore",               # leftover from old Vercel setup
     "vercel.json",                 # leftover from old Vercel setup
+    "package.json",                # dev tooling config (wrangler pinning)
+    "package-lock.json",           # npm lockfile
+    ".nvmrc",                      # Node version manager config
     os.path.join("data", "backtest", "raw_results.ndjson"),
     os.path.join("data", "backtest", "batch_log.txt"),
     os.path.join("data", "backtest", "wr_5year.txt"),

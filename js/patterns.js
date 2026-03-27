@@ -127,17 +127,16 @@ class PatternEngine {
    *  주기적으로 실제 median ATR/close 비율 대조 권장. */
   static ATR_FALLBACK_PCT = 0.02;
 
-  /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 302,986건 실측 calibration (calibrated_constants.json D1)
-   *  strong: 1.92 (n=73,734, CI95=[1.90,1.95]), medium: 2.21 (n=28,426, CI95=[2.18,2.24]),
-   *  weak: 1.54 — 실측 도달 ATR 1.92이나, hit rate 차이를 반영한 보수적 조정
-   *    ratio=0.80 (Bulkowski 2008: strong/weak expected move ratio 0.70~0.85 중앙값)
-   *  KW p=2.6e-139
-   *  [T-13] medium(2.21) > strong(1.92)은 역직관적이나 이론적으로 타당:
+  /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 76,443건 Theil-Sen calibration (calibrated_constants.json D1)
+   *  strong: 1.88 (n=55,469, CI95=[1.86,1.91]), medium: 2.31 (n=5,403, CI95=[2.23,2.39]),
+   *  weak: 2.18 (n=1,392, CI95=[2.09,2.28])
+   *  KW p=2.22e-61
+   *  [T-13] medium(2.31) > weak(2.18) > strong(1.88) 비단조 관계:
    *  - "strength"는 방향 신뢰도(hit rate)이지 가격 이동 크기가 아님
    *  - medium = 반전 패턴(hammer, shootingStar 등) → 추세 전환 시 stop-cascade + 평균회귀 오버슈트로 큰 이동
    *  - strong = 확인 패턴(engulfing, 3soldiers 등) → 이미 진행 중인 움직임 확인, 잔여 이동 상대적으로 작음
    *  - Bulkowski (2008) 개별 패턴 순위도 비단조(non-monotonic) 관계 확인 */
-  static CANDLE_TARGET_ATR = { strong: 1.92, medium: 2.21, weak: 1.54 };
+  static CANDLE_TARGET_ATR = { strong: 1.88, medium: 2.31, weak: 2.18 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
   static CHART_TARGET_ATR_CAP = 6;
@@ -2727,13 +2726,12 @@ class PatternEngine {
     });
   }
 
-  /** R:R 검증 게이트 — KRX 302,986건 calibration (calibrated_constants.json C1+D3)
-   *  최적 임계: [2.25, 2.5] (F=323.49, p=6.3e-141)
-   *  페널티: below 2.25 → -25 (중증), mid [2.25,2.5) → -12 (경증) — R:R 낮을수록 큰 패널티
-   *  [Fix] 이전 주석 반전 오류 수정: -12/-25 순서가 코드와 반대였음
-   *  이론: 전망이론 λ=2.25 (Kahneman & Tversky 1979) — 행동 편향 기술자 기반 보수적 임계
-   *  주의: λ는 기계적 필터 파라미터가 아닌 행동심리 계수. Kelly 기준 손익분기(=(1-p)/p)보다
-   *        엄격함 — 많은 양기댓값 거래를 거부할 수 있음 (단, KRX 실증으로 최적값 검증됨) */
+  /** R:R 검증 게이트 — KRX 76,443건 Theil-Sen calibration (calibrated_constants.json C1+D3)
+   *  최적 구간: [1.0, 1.5] (C1: p=0.78, 변경 없음)
+   *  페널티: below 1.0 → -3 (d=-0.105, p=7.2e-15), above 1.5 → -4 (d=-0.135, p=2.1e-27)
+   *  mid [1.0,1.5) 구간이 최적 (mean_ret=+0.16%) — 양쪽 극단 모두 패널티
+   *  이론: 극저 R:R = 불충분한 보상, 극고 R:R = 비현실적 목표 (미도달 확률 급등)
+   *  scale=30 기준 Cohen's d 효과크기: 0.105*30≈3.1, 0.135*30≈4.1 → 반올림 적용 */
   _applyRRGate(patterns, candles) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
@@ -2745,10 +2743,10 @@ class PatternEngine {
       if (risk <= 0) continue;
       var rr = reward / risk;
       p.riskReward = +rr.toFixed(2);
-      if (rr < 2.25) {
-        p.confidence = Math.max(10, p.confidence - 25);
-      } else if (rr < 2.5) {
-        p.confidence = Math.max(10, p.confidence - 12);
+      if (rr < 1.0) {
+        p.confidence = Math.max(10, p.confidence - 3);
+      } else if (rr >= 1.5) {
+        p.confidence = Math.max(10, p.confidence - 4);
       }
     }
   }

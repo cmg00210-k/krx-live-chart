@@ -1,0 +1,17 @@
+{
+  "private": true,
+  "name": "krx-live-chart",
+  "version": "1.0.0",
+  "description": "KRX Live Chart (CheeseStock) - Korean stock market charting web app",
+  "scripts": {
+    "serve": "npx serve -l 5500 -s",
+    "deploy": "wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message=\"deploy\"",
+    "backtest": "node scripts/backtest_runner.js --batch"
+  },
+  "devDependencies": {
+    "wrangler": "^4.78.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

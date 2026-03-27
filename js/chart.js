@@ -202,6 +202,9 @@ class ChartManager {
     // 리사이즈 옵저버: Map<container, { observer, chart }>
     this._resizeMap = new Map();
 
+    // LWC v5 watermark plugin 참조 (createTextWatermark)
+    this._watermark = null;
+
     // 시간축 동기화 구독 해제 함수들
     this._syncUnsubs = [];
     this._syncing = false;
@@ -386,7 +389,7 @@ class ChartManager {
 
     // 캔들스틱 시리즈 (원화: 소수점 없음)
     // borderVisible: false → investing.com 스타일 깔끔한 캔들 (테두리 없음)
-    this.candleSeries = this.mainChart.addCandlestickSeries({
+    this.candleSeries = this.mainChart.addSeries(LightweightCharts.CandlestickSeries,{
       upColor: KRX_COLORS.UP,
       downColor: KRX_COLORS.DOWN,
       borderVisible: false,
@@ -398,7 +401,7 @@ class ChartManager {
     });
 
     // 거래량 히스토그램
-    this.volumeSeries = this.mainChart.addHistogramSeries({
+    this.volumeSeries = this.mainChart.addSeries(LightweightCharts.HistogramSeries,{
       priceFormat: { type: 'volume' },
       priceScaleId: 'vol',
       lastValueVisible: false,              // 우측 가격축에 거래량 태그 숨김
@@ -464,7 +467,7 @@ class ChartManager {
 
     this.rsiChart = LightweightCharts.createChart(container, opts);
 
-    this.rsiSeries = this.rsiChart.addLineSeries({
+    this.rsiSeries = this.rsiChart.addSeries(LightweightCharts.LineSeries,{
       color: KRX_COLORS.RSI,
       lineWidth: 1.5,
       priceLineVisible: false,
@@ -495,19 +498,19 @@ class ChartManager {
 
     this.macdChart = LightweightCharts.createChart(container, opts);
 
-    this.macdHistSeries = this.macdChart.addHistogramSeries({
+    this.macdHistSeries = this.macdChart.addSeries(LightweightCharts.HistogramSeries,{
       priceLineVisible: false,
       lastValueVisible: false,
     });
 
-    this.macdLineSeries = this.macdChart.addLineSeries({
+    this.macdLineSeries = this.macdChart.addSeries(LightweightCharts.LineSeries,{
       color: KRX_COLORS.MACD_LINE,
       lineWidth: 1.5,
       priceLineVisible: false,
       lastValueVisible: true,
     });
 
-    this.macdSignalSeries = this.macdChart.addLineSeries({
+    this.macdSignalSeries = this.macdChart.addSeries(LightweightCharts.LineSeries,{
       color: KRX_COLORS.MACD_SIGNAL,
       lineWidth: 1.2,
       priceLineVisible: false,
@@ -530,7 +533,7 @@ class ChartManager {
 
   // ══════════════════════════════════════════════════
   //  메인 시리즈 타입 전환 (candlestick ↔ bar)
-  //  LWC addBarSeries()를 사용하여 진정한 바 차트 렌더링
+  //  LWC v5 addSeries(BarSeries)를 사용하여 진정한 바 차트 렌더링
   // ══════════════════════════════════════════════════
   _swapMainSeries(toType) {
     if (this._mainSeriesType === toType) return;
@@ -560,7 +563,7 @@ class ChartManager {
 
     // 4. Create new series of the target type
     if (toType === 'bar') {
-      this.candleSeries = this.mainChart.addBarSeries({
+      this.candleSeries = this.mainChart.addSeries(LightweightCharts.BarSeries,{
         upColor: KRX_COLORS.UP,
         downColor: KRX_COLORS.DOWN,
         openVisible: true,
@@ -570,7 +573,7 @@ class ChartManager {
         priceFormat: { type: 'price', precision: 0, minMove: 1 },
       });
     } else {
-      this.candleSeries = this.mainChart.addCandlestickSeries({
+      this.candleSeries = this.mainChart.addSeries(LightweightCharts.CandlestickSeries,{
         upColor: KRX_COLORS.UP,
         downColor: KRX_COLORS.DOWN,
         borderVisible: false,
@@ -621,7 +624,7 @@ class ChartManager {
       this._swapMainSeries('candlestick');
       this.candleSeries.setData([]);
       if (!this.indicatorSeries._priceLine) {
-        this.indicatorSeries._priceLine = this.mainChart.addLineSeries({
+        this.indicatorSeries._priceLine = this.mainChart.addSeries(LightweightCharts.LineSeries,{
           color: KRX_COLORS.LINE_PRICE,
           lineWidth: 2,
           priceLineVisible: true,
@@ -638,7 +641,7 @@ class ChartManager {
         delete this.indicatorSeries._priceLine;
       }
 
-      // bar 모드: LWC addBarSeries() 사용, 그 외: candlestick
+      // bar 모드: LWC v5 addSeries(BarSeries) 사용, 그 외: candlestick
       this._swapMainSeries(chartType === 'bar' ? 'bar' : 'candlestick');
 
       // Heikin Ashi 변환
@@ -686,7 +689,7 @@ class ChartManager {
 
       // ── 20일 평균 거래량선 (점선) ──
       if (!this._volMaSeries) {
-        this._volMaSeries = this.mainChart.addLineSeries({
+        this._volMaSeries = this.mainChart.addSeries(LightweightCharts.LineSeries,{
           priceScaleId: 'vol',
           color: KRX_COLORS.VOL_MA,              // 청회색 (Price MA20 노랑과 구분)
           lineWidth: 1,
@@ -780,7 +783,7 @@ class ChartManager {
 
       // 강세 구름 (초록 틴트)
       if (!this.indicatorSeries._ichBullCeil) {
-        this.indicatorSeries._ichBullCeil = this.mainChart.addAreaSeries({
+        this.indicatorSeries._ichBullCeil = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.ICH_BULL_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -791,7 +794,7 @@ class ChartManager {
         });
       }
       if (!this.indicatorSeries._ichBullFloor) {
-        this.indicatorSeries._ichBullFloor = this.mainChart.addAreaSeries({
+        this.indicatorSeries._ichBullFloor = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.CHART_BG,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -806,7 +809,7 @@ class ChartManager {
 
       // 약세 구름 (빨강 틴트)
       if (!this.indicatorSeries._ichBearCeil) {
-        this.indicatorSeries._ichBearCeil = this.mainChart.addAreaSeries({
+        this.indicatorSeries._ichBearCeil = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.ICH_BEAR_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -817,7 +820,7 @@ class ChartManager {
         });
       }
       if (!this.indicatorSeries._ichBearFloor) {
-        this.indicatorSeries._ichBearFloor = this.mainChart.addAreaSeries({
+        this.indicatorSeries._ichBearFloor = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.CHART_BG,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -873,7 +876,7 @@ class ChartManager {
         }
       }
       if (!this.indicatorSeries._bbCeil) {
-        this.indicatorSeries._bbCeil = this.mainChart.addAreaSeries({
+        this.indicatorSeries._bbCeil = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.BB_FILL,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -884,7 +887,7 @@ class ChartManager {
         });
       }
       if (!this.indicatorSeries._bbFloor) {
-        this.indicatorSeries._bbFloor = this.mainChart.addAreaSeries({
+        this.indicatorSeries._bbFloor = this.mainChart.addSeries(LightweightCharts.AreaSeries,{
           topColor: KRX_COLORS.CHART_BG,
           bottomColor: 'transparent',
           lineColor: 'transparent',
@@ -970,13 +973,7 @@ class ChartManager {
   //  패턴 시각화
   // ══════════════════════════════════════════════════
   _drawPatterns(candles, chartType, patterns) {
-    // 마커를 설정할 시리즈 결정 (라인 모드일 때는 priceLine 시리즈 사용)
-    const markerSeries = (chartType === 'line' && this.indicatorSeries._priceLine)
-      ? this.indicatorSeries._priceLine
-      : this.candleSeries;
-
     if (!patterns || !patterns.length) {
-      markerSeries.setMarkers([]);
       // 미사용 추세선 시리즈 정리
       this.trendlineSeries.forEach(s => {
         try { this.mainChart.removeSeries(s); } catch (e) {}
@@ -986,8 +983,7 @@ class ChartManager {
     }
 
     // ── 마커 비활성화: patternRenderer v3가 Canvas로 전문 시각화 처리 ──
-    // 기존 투박한 화살표 마커 대신 Canvas 글로우/브래킷/라벨 사용
-    markerSeries.setMarkers([]);
+    // LWC v5: setMarkers() 제거됨, Canvas 글로우/브래킷/라벨만 사용
 
     // ── 추세선 (삼각형, 쐐기 패턴) — 데이터 공간 LineSeries ──
     // Canvas 오버레이와 함께 LineSeries도 유지 (줌/팬 시 정확한 스케일링)
@@ -1021,7 +1017,7 @@ class ChartManager {
         this.trendlineSeries[i].applyOptions({ color, lineStyle, lineWidth: 1 });
         this.trendlineSeries[i].setData(data);
       } else {
-        const series = this.mainChart.addLineSeries({
+        const series = this.mainChart.addSeries(LightweightCharts.LineSeries,{
           color,
           lineWidth: 1,
           lineStyle,
@@ -1116,7 +1112,7 @@ class ChartManager {
     }
 
     if (!this.indicatorSeries[key]) {
-      this.indicatorSeries[key] = this.mainChart.addLineSeries({
+      this.indicatorSeries[key] = this.mainChart.addSeries(LightweightCharts.LineSeries,{
         color: color,
         lineWidth: lineWidth,
         priceLineVisible: false,
@@ -1230,8 +1226,8 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.stochChart = LightweightCharts.createChart(container, opts);
-    this.stochKSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_K, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
-    this.stochDSeries = this.stochChart.addLineSeries({ color: KRX_COLORS.STOCH_D, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
+    this.stochKSeries = this.stochChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.STOCH_K, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.stochDSeries = this.stochChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.STOCH_D, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: true });
     // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
     this.stochKSeries.createPriceLine({ price: 80, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.stochKSeries.createPriceLine({ price: 20, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
@@ -1263,7 +1259,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.cciChart = LightweightCharts.createChart(container, opts);
-    this.cciSeries = this.cciChart.addLineSeries({ color: KRX_COLORS.CCI, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.cciSeries = this.cciChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.CCI, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
     this.cciSeries.createPriceLine({ price: 100, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.cciSeries.createPriceLine({ price: -100, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
@@ -1294,9 +1290,9 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.adxChart = LightweightCharts.createChart(container, opts);
-    this.adxSeries = this.adxChart.addLineSeries({ color: KRX_COLORS.ADX, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-    this.adxPlusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
-    this.adxMinusDISeries = this.adxChart.addLineSeries({ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
+    this.adxSeries = this.adxChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.ADX, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+    this.adxPlusDISeries = this.adxChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.UP, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
+    this.adxMinusDISeries = this.adxChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.DOWN, lineWidth: 1.2, priceLineVisible: false, lastValueVisible: false });
     // ADX 25선
     this.adxSeries.createPriceLine({ price: 25, color: KRX_COLORS.ADX_REF_LINE, lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this._observeResize(container, this.adxChart);
@@ -1328,7 +1324,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.willrChart = LightweightCharts.createChart(container, opts);
-    this.willrSeries = this.willrChart.addLineSeries({ color: KRX_COLORS.WILLR, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.willrSeries = this.willrChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.WILLR, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     // [FIX] 하드코딩 rgba → KRX_COLORS 참조 (RSI 서브차트와 통일)
     this.willrSeries.createPriceLine({ price: -20, color: KRX_COLORS.UP_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
     this.willrSeries.createPriceLine({ price: -80, color: KRX_COLORS.DOWN_FILL(0.4), lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
@@ -1359,7 +1355,7 @@ class ChartManager {
     opts.timeScale = { ...opts.timeScale, visible: false };
     opts.rightPriceScale.scaleMargins = { top: 0.1, bottom: 0.1 };
     this.atrChart = LightweightCharts.createChart(container, opts);
-    this.atrSeries = this.atrChart.addLineSeries({ color: KRX_COLORS.ATR_LINE, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
+    this.atrSeries = this.atrChart.addSeries(LightweightCharts.LineSeries,{ color: KRX_COLORS.ATR_LINE, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true });
     this._observeResize(container, this.atrChart);
     this._rebuildSync();
     return this.atrChart;
@@ -1448,6 +1444,12 @@ class ChartManager {
   }
 
   destroyAll() {
+    // watermark plugin cleanup (LWC v5)
+    if (this._watermark) {
+      try { this._watermark.detach(); } catch (e) {}
+      this._watermark = null;
+    }
+
     // renderer cleanup (stale 참조 방지)
     if (typeof patternRenderer !== 'undefined' && patternRenderer.cleanup) patternRenderer.cleanup();
     if (typeof signalRenderer !== 'undefined' && signalRenderer.cleanup) signalRenderer.cleanup();
@@ -1656,19 +1658,27 @@ class ChartManager {
     );
   }
 
-  /** 워터마크 설정 (종목명 배경 표시) */
+  /** 워터마크 설정 (종목명 배경 표시) — LWC v5 createTextWatermark plugin */
   setWatermark(text) {
     if (!this.mainChart) return;
-    this.mainChart.applyOptions({
-      watermark: {
-        visible: true,
-        fontSize: 48,
+    // v5: watermark는 chart option이 아닌 pane plugin으로 분리됨
+    if (this._watermark) {
+      try { this._watermark.detach(); } catch (e) {}
+    }
+    if (text) {
+      var panes = this.mainChart.panes();
+      if (!panes || !panes.length) return;
+      var pane = panes[0];
+      this._watermark = LightweightCharts.createTextWatermark(pane, {
         horzAlign: 'center',
         vertAlign: 'center',
-        color: KRX_COLORS.CHART_WATERMARK,
-        text: text,
-      },
-    });
+        lines: [{
+          text: text,
+          fontSize: 48,
+          color: KRX_COLORS.CHART_WATERMARK,
+        }],
+      });
+    }
   }
 
   /** OHLC 크로스헤어 콜백 등록 */

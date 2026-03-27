@@ -22,7 +22,7 @@ See `.claude/rules/architecture.md` for file responsibilities table and data flo
 
 | Library | Version | CDN |
 |---------|---------|-----|
-| TradingView Lightweight Charts | v4.2.3 | unpkg.com |
+| TradingView Lightweight Charts | v5.1.0 | unpkg.com |
 | Pretendard (Korean font) | v1.3.9 | jsDelivr |
 | JetBrains Mono | — | Google Fonts |
 

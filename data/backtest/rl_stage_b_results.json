@@ -758,5 +758,7 @@
       ]
     }
   },
-  "elapsed_seconds": 18.5
+  "elapsed_seconds": 18.5,
+  "recommendation": "ridge_only",
+  "recommendation_reason": "IC degraded: -0.006 -> -0.009, t_stat_delta=-0.1518 not significant"
 }
