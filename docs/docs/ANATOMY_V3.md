@@ -57,7 +57,7 @@ cheesestock.co.kr  (브라우저)
 krx-live-chart-remote/
 │
 ├── index.html              진입점 (16 defer 스크립트)
-├── sw.js                   Service Worker (cheesestock-v24)
+├── sw.js                   Service Worker (see line 8 for CACHE_NAME)
 ├── CLAUDE.md               프로젝트 지침서
 │
 ├── js/                     ★ 핵심 런타임 (17파일, 22,748줄)
@@ -351,14 +351,9 @@ MA교차(4) + MACD(2) + RSI(4) + BB(3) + 거래량(3) + 일목(4) + Hurst(2) + S
 
 ### 11.1 버전 매트릭스
 
-| 파일 | index.html | Worker | 비고 |
-|------|:-:|:-:|------|
-| colors.js | v12 | v12 | |
-| indicators.js | v14 | v14 | |
-| patterns.js | **v24** | **v24** | Phase H P2 |
-| signalEngine.js | **v21** | **v21** | Phase H P2 |
-| backtester.js | v23 | v23 | |
-| SW CACHE_NAME | — | — | **cheesestock-v24** |
+Current `?v=N` values: see `index.html` lines 633-648 and `js/analysisWorker.js` lines 57-61.
+SW `CACHE_NAME`: see `sw.js` line 8.
+These are the single sources of truth -- do not duplicate version numbers here.
 
 ### 11.2 기능 카운트
 

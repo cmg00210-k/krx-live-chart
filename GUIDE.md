@@ -343,11 +343,7 @@ memory/
 
 ### 7.2 Version Tracking
 
-| File | Version | Cache |
-|------|---------|-------|
-| backtester.js | ?v=18 | Worker importScripts |
-| patterns.js | ?v=15 | Worker importScripts |
-| Service Worker | cheesestock-v16 | CACHE_NAME |
+Current `?v=N` values are maintained in `index.html` (lines 633-648) and `js/analysisWorker.js` (lines 57-61). The Service Worker `CACHE_NAME` is in `sw.js` line 8. These are the single sources of truth -- do not duplicate version numbers here.
 
 ### 7.3 Known Issues (Priority Order)
 

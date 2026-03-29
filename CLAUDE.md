@@ -20,18 +20,18 @@ See `.claude/rules/architecture.md` for file responsibilities table and data flo
 
 ### CDN Dependencies
 
-| Library | Version | CDN |
-|---------|---------|-----|
-| TradingView Lightweight Charts | v5.1.0 | unpkg.com |
-| Pretendard (Korean font) | v1.3.9 | jsDelivr |
-| JetBrains Mono | — | Google Fonts |
+| Library | CDN | Version |
+|---------|-----|---------|
+| TradingView Lightweight Charts | unpkg.com | see `index.html` `<script>` tag |
+| Pretendard (Korean font) | jsDelivr | see `index.html` `<link>` tag |
+| JetBrains Mono | Google Fonts | — |
 
 ## Core Principles
 
 - **Dual-mode required**: All features must work in both WS (real-time Kiwoom) and file (static JSON) modes. File mode first, WS upgrade in background. Domain detection in `api.js` for `cheesestock.co.kr`/`.pages.dev`→WSS, localhost→`ws://localhost:8765`.
 - **Use `KRX_COLORS.*` or `var(--*)`** for all colors. See `.claude/rules/colors.md`.
 - **Web Worker offloads analysis** — IndicatorCache contains functions (cannot postMessage). Pattern analysis throttled to 3s intervals.
-- **Service Worker** (`sw.js`): Cache name `cheesestock-v2`. Bump `CACHE_NAME` when deploying breaking changes.
+- **Service Worker** (`sw.js`): Cache name `cheesestock-vN` (see `sw.js` line 8 for current value). Bump `CACHE_NAME` when deploying breaking changes.
 
 ## Key Patterns
 
