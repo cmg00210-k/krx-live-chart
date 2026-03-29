@@ -2335,6 +2335,11 @@ class PatternEngine {
         const lowSlope = Math.abs(_tsLFW ? _tsLFW.slope : (l2.price - l1.price) / (l2.index - l1.index)) / a;
         if (lowSlope >= highSlope) continue;
 
+        // [P0-fix] 쐐기 수렴 검증 — Rising Wedge와 대칭 (Bulkowski 2005: 유효 쐐기는 ≥10% 수렴)
+        const startHeight = h1.price - l1.price;
+        const endHeight = h2.price - l2.price;
+        if (startHeight <= 0 || endHeight >= startHeight * 0.9) continue;
+
         const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
         if (span < 8) continue;
 
@@ -2609,7 +2614,8 @@ class PatternEngine {
     for (let i = 0; i < rL.length - 2; i++) {
       const ls = rL[i], head = rL[i + 1], rs = rL[i + 2];
       if (head.price >= ls.price || head.price >= rs.price) continue;
-      const shoulderAsym = Math.abs(ls.price - rs.price) / ls.price;
+      // [P0-fix] head.price 사용 — H&S와 차원 일관성 (기존 ls.price는 비대칭 분모)
+      const shoulderAsym = Math.abs(ls.price - rs.price) / Math.abs(head.price);
       if (shoulderAsym > PatternEngine.HS_SHOULDER_TOLERANCE) continue;
 
       const t1 = rH.find(h => h.index > ls.index && h.index < head.index);

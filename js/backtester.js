@@ -37,11 +37,15 @@ class PatternBacktester {
       return this.KRX_SLIPPAGE;
     };
 
-    /** [Phase0-E] 보유기간별 거래비용 — Kyle (1985): 왕복 비용은 1회 발생, 장기 보유 시 분산 대비 감소
-     *  h=1: 0.31% (σ의 12-16%), h=5: 0.14%, h=20: 0.07%
-     *  sqrt(h) 정규화: Sharpe-ratio 관점에서 비용의 σ 대비 영향도 일관화 */
+    /** [P0-fix] 보유기간별 거래비용 — 고정비(세금+수수료)와 변동비(슬리피지) 분리
+     *  고정비(tax+comm=0.21%): 왕복 1회 발생, horizon 비례 분할 (1/h)
+     *  변동비(slippage=0.10%): 시장미시구조 잡음 √h 스케일링 — Kyle (1985)
+     *  h=1: 0.31%, h=5: 0.087%, h=20: 0.033% (기존: 0.07% — 112% 과대계상 수정) */
     this._horizonCost = function(h) {
-      return this.KRX_COST / Math.sqrt(Math.max(1, h));
+      var hSafe = Math.max(1, h);
+      var fixedCost = (this.KRX_COMMISSION + this.KRX_TAX) / hSafe;
+      var variableCost = this.KRX_SLIPPAGE / Math.sqrt(hSafe);
+      return fixedCost + variableCost;
     };
 
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
