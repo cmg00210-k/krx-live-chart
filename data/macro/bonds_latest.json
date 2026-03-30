@@ -1,0 +1,23 @@
+{
+  "updated": "2026-03-30",
+  "yields": {
+    "ktb_1y": null,
+    "ktb_2y": null,
+    "ktb_3y": null,
+    "ktb_5y": null,
+    "ktb_10y": null,
+    "ktb_20y": null,
+    "ktb_30y": null
+  },
+  "credit_spreads": {
+    "aa_minus": null,
+    "bbb_minus": null,
+    "aa_spread": null,
+    "bbb_spread": null
+  },
+  "nss_params": null,
+  "slope_10y3y": null,
+  "slope_10y2y": null,
+  "curve_inverted": null,
+  "credit_regime": "unknown"
+}

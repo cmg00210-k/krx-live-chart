@@ -414,6 +414,20 @@ class SignalEngine {
       }
     }
 
+    // ── ADV Level Multiplier — Katz & Shapiro (1985) 네트워크 외부성 ──
+    // 유동성(거래대금) 등급별 패턴 신뢰도 승수 (정보 전달용, 실제 적용은 renderer/app)
+    var advResult = this.calcADVLevel(candles, 60);
+    stats.advLevel = advResult.level;
+    stats.advMultiplier = advResult.multiplier;
+    stats.categoryCounts.adv = advResult.level; // 등급을 카운트 필드에 기록
+
+    // ── VRP Regime Signal — Carr & Wu (2009) 변동성 위험 프리미엄 ──
+    // EWMA 장기/단기 비율로 위험 선호 레짐 판별
+    var vrpResult = this.calcVRPRegime(candles, cache);
+    stats.vrpRegime = vrpResult.regime;
+    stats.vrpMultiplier = vrpResult.multiplier;
+    stats.categoryCounts.vrp = vrpResult.regime === 'neutral' ? 0 : 1; // 비중립 = 활성
+
     return { signals, cache, stats };
   }
 
@@ -1710,7 +1724,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, vrp: 0,
     };
 
     for (const s of signals) {
@@ -1806,6 +1820,129 @@ class SignalEngine {
     return '강한 매도';
   }
 
+  // ══════════════════════════════════════════════════════
+  //  ADV Level Multiplier — 네트워크 외부성 (Katz & Shapiro, 1985)
+  //  평균 거래대금(ADV) 기반 패턴 신뢰도 승수
+  //  유동성 높은 종목 = 더 많은 시장 참여자 = 패턴 신뢰도 ↑
+  // ══════════════════════════════════════════════════════
+
+  /** ADV 등급별 신뢰도 승수 — 극소형(0.75), 소형(0.85), 중형(1.00), 대형(1.10) */
+  static ADV_MULTIPLIERS = [0.75, 0.85, 1.00, 1.10];
+
+  /**
+   * ADV(Average Daily Value) 등급 계산
+   * @param {Array} candles — OHLCV 배열
+   * @param {number} [lookback=60] — 평균 산출 기간 (봉 수)
+   * @returns {{ level: number, adv_eok: number, multiplier: number }}
+   */
+  calcADVLevel(candles, lookback) {
+    if (lookback === undefined || lookback === null) lookback = 60;
+    var result = { level: 0, adv_eok: 0, multiplier: SignalEngine.ADV_MULTIPLIERS[0] };
+    if (!candles || candles.length === 0) return result;
+
+    var start = Math.max(0, candles.length - lookback);
+    var sum = 0;
+    var count = 0;
+    for (var i = start; i < candles.length; i++) {
+      var c = candles[i];
+      var close = c.close || 0;
+      var volume = c.volume || 0;
+      if (close > 0 && volume > 0) {
+        sum += close * volume;
+        count++;
+      }
+    }
+    if (count === 0) return result;
+
+    var adv = sum / count;
+    var adv_eok = adv / 1e8; // 억원 단위 변환
+
+    // 등급 분류: <1억 → 0, <10억 → 1, <100억 → 2, >=100억 → 3
+    var level;
+    if (adv_eok < 1)        level = 0;
+    else if (adv_eok < 10)  level = 1;
+    else if (adv_eok < 100) level = 2;
+    else                    level = 3;
+
+    return {
+      level: level,
+      adv_eok: +adv_eok.toFixed(2),
+      multiplier: SignalEngine.ADV_MULTIPLIERS[level],
+    };
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  VRP Regime Signal — 변동성 위험 프리미엄 (Carr & Wu, 2009)
+  //  VRP = Implied Vol − Realized Vol (proxy: EWMA vol ratio)
+  //  장기/단기 EWMA 변동성 비율로 위험 선호 레짐 판별
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * VRP 레짐 계산 (EWMA 변동성 비율 프록시)
+   * @param {Array} candles — OHLCV 배열
+   * @param {IndicatorCache} [cache] — 캐시 (있으면 EWMA vol 재사용)
+   * @returns {{ regime: string, ratio: number, multiplier: number }}
+   *   regime: 'risk-on' (vrp_proxy > 1.2) | 'risk-off' (< 0.8) | 'neutral'
+   */
+  calcVRPRegime(candles, cache) {
+    var result = { regime: 'neutral', ratio: 1.0, multiplier: 1.00 };
+    if (!candles || candles.length < 60) return result;
+
+    var closes = [];
+    for (var i = 0; i < candles.length; i++) {
+      closes.push(candles[i].close || 0);
+    }
+
+    // EWMA 변동성: 장기 lambda=0.97 (~60일 반감기), 단기 lambda=0.86 (~10일 반감기)
+    // lambda = 1 − 2/(span+1): span=60→0.967≈0.97, span=10→0.818≈0.86
+    var volLong, volShort;
+
+    if (cache && typeof cache.ewmaVol === 'function') {
+      volLong = cache.ewmaVol(0.97);
+      volShort = cache.ewmaVol(0.86);
+    } else {
+      // IndicatorCache 미사용 시 직접 계산 (Worker 환경 등)
+      volLong = (typeof calcEWMAVol === 'function') ? calcEWMAVol(closes, 0.97) : null;
+      volShort = (typeof calcEWMAVol === 'function') ? calcEWMAVol(closes, 0.86) : null;
+    }
+
+    if (!volLong || !volShort) return result;
+
+    // 최근 유효 값 추출
+    var lastLong = null, lastShort = null;
+    for (var i = volLong.length - 1; i >= 0; i--) {
+      if (volLong[i] !== null && volLong[i] > 0) { lastLong = volLong[i]; break; }
+    }
+    for (var i = volShort.length - 1; i >= 0; i--) {
+      if (volShort[i] !== null && volShort[i] > 0) { lastShort = volShort[i]; break; }
+    }
+
+    if (!lastLong || !lastShort || lastShort <= 0) return result;
+
+    // vrp_proxy = long_vol / short_vol
+    // > 1.2 → 장기 변동성 > 단기 → 현재 안정 (변동성 감소 추세) → risk-on
+    // < 0.8 → 단기 변동성 급등 → 현재 불안정 → risk-off
+    var ratio = lastLong / lastShort;
+
+    var regime, multiplier;
+    if (ratio > 1.2) {
+      regime = 'risk-on';
+      multiplier = 1.05;
+    } else if (ratio < 0.8) {
+      regime = 'risk-off';
+      multiplier = 0.95;
+    } else {
+      regime = 'neutral';
+      multiplier = 1.00;
+    }
+
+    return {
+      regime: regime,
+      ratio: +ratio.toFixed(3),
+      multiplier: multiplier,
+    };
+  }
+
   /**
    * 빈 통계 객체
    */
@@ -1817,9 +1954,13 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, vrp: 0 },
       entropy: 0,
       entropyNorm: 0,
+      advLevel: 0,
+      advMultiplier: 0.75,
+      vrpRegime: 'neutral',
+      vrpMultiplier: 1.00,
     };
   }
 }

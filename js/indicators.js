@@ -1670,6 +1670,303 @@ class IndicatorCache {
     return (idx >= 0 && idx < arr.length) ? arr[idx] : null;
   }
 
+  // ── 주의 상태 (Stigler/Peng-Xiong Attention Theory) ──
+
+  /**
+   * 주의 결핍/폭발 상태 — Stigler (1961) 정보 비용 + Peng & Xiong (2006) 제한적 주의
+   * 거래량 결핍 후 갑작스러운 폭발은 과잉반응 유발 (core_data/18 §5.1)
+   * @param {number} idx — 캔들 인덱스
+   * @param {number} lookback — 백분위 산출 기간 (기본 20)
+   * @returns {{ deprivationDays: number, isAttentionJump: boolean, multiplier: number }|null}
+   */
+  attentionState(idx, lookback = 20) {
+    const key = `attn_${lookback}`;
+    if (!(key in this._cache)) {
+      const vols = this.volumes;
+      const len = vols.length;
+      const result = new Array(len).fill(null);
+
+      for (let i = lookback; i < len; i++) {
+        // lookback 윈도우 거래량 정렬 → 백분위 산출
+        const window = [];
+        for (let j = i - lookback; j < i; j++) {
+          if (vols[j] != null && vols[j] >= 0) window.push(vols[j]);
+        }
+        if (window.length < 5) continue; // 최소 샘플 방어
+
+        window.sort((a, b) => a - b);
+        const q30Idx = Math.floor(window.length * 0.3);
+        const q70Idx = Math.floor(window.length * 0.7);
+        const q30 = window[q30Idx];
+        const q70 = window[q70Idx];
+
+        // 최근 5봉 중 결핍일 (volume < q30) 카운트
+        let deprivationDays = 0;
+        const deprivLookback = Math.min(5, i);
+        for (let j = i - deprivLookback; j < i; j++) {
+          if (vols[j] != null && vols[j] < q30) deprivationDays++;
+        }
+
+        // 주의 폭발 판정: 현재 거래량 > q70*2.0 AND 결핍일 >= 3
+        const curVol = vols[i] != null ? vols[i] : 0;
+        const isAttentionJump = curVol > q70 * 2.0 && deprivationDays >= 3;
+        const multiplier = isAttentionJump ? 1.10 : 1.0;
+
+        result[i] = { deprivationDays, isAttentionJump, multiplier };
+      }
+      this._cache[key] = result;
+    }
+    const arr = this._cache[key];
+    return (idx >= 0 && idx < arr.length) ? arr[idx] : null;
+  }
+
+  // ── 점프 강도 (Merton Jump-Diffusion) ─────────────
+
+  /**
+   * 점프 강도 — Merton (1976) Jump-Diffusion 모형
+   * 로그수익률 중 ATR 기반 임계값 초과를 점프로 분류, 연율화 빈도 산출
+   * @param {number} idx — 캔들 인덱스
+   * @param {number} lookback — 점프 관측 기간 (기본 252, ~1년)
+   * @returns {{ lambda: number, isJump: boolean, jumpCount: number }|null}
+   */
+  jumpIntensity(idx, lookback = 252) {
+    const key = `jump_${lookback}`;
+    if (!(key in this._cache)) {
+      const closes = this.closes;
+      const len = closes.length;
+      const result = new Array(len).fill(null);
+
+      if (len < 2) { this._cache[key] = result; }
+      else {
+        // 로그수익률 산출
+        const logReturns = new Array(len).fill(null);
+        for (let i = 1; i < len; i++) {
+          if (closes[i] > 0 && closes[i - 1] > 0) {
+            logReturns[i] = Math.log(closes[i] / closes[i - 1]);
+          }
+        }
+
+        // ATR of returns (14기간) — 수익률의 변동폭 기반 임계값
+        const atrPeriod = 14;
+        const absReturns = new Array(len).fill(null);
+        for (let i = 1; i < len; i++) {
+          if (logReturns[i] != null) absReturns[i] = Math.abs(logReturns[i]);
+        }
+
+        // 수익률 ATR: 이동평균(|r_t|, atrPeriod) — Wilder 방식
+        const atrReturns = new Array(len).fill(null);
+        let atrSum = 0, atrCnt = 0;
+        for (let i = 1; i < len; i++) {
+          if (absReturns[i] != null) {
+            if (atrCnt < atrPeriod) {
+              atrSum += absReturns[i];
+              atrCnt++;
+              if (atrCnt === atrPeriod) {
+                atrReturns[i] = atrSum / atrPeriod;
+              }
+            } else {
+              atrReturns[i] = (atrReturns[i - 1] * (atrPeriod - 1) + absReturns[i]) / atrPeriod;
+            }
+          } else if (atrCnt >= atrPeriod && atrReturns[i - 1] != null) {
+            atrReturns[i] = atrReturns[i - 1]; // 결측 시 이전 값 유지
+          }
+        }
+
+        // 점프 임계값: 3 * ATR_return
+        const JUMP_MULT = 3;
+
+        // 최소 시작 인덱스: atrPeriod + 1 (수익률 ATR 확보 필요)
+        const minStart = atrPeriod + 1;
+
+        for (let i = minStart; i < len; i++) {
+          if (logReturns[i] == null || atrReturns[i] == null) continue;
+
+          const threshold = JUMP_MULT * atrReturns[i];
+          if (threshold <= 0) continue; // flat-price 방어
+
+          // lookback 윈도우 내 점프 카운트
+          const windowStart = Math.max(minStart, i - lookback + 1);
+          let jumpCount = 0;
+          for (let j = windowStart; j <= i; j++) {
+            if (logReturns[j] != null && atrReturns[j] != null) {
+              const thr = JUMP_MULT * atrReturns[j];
+              if (thr > 0 && Math.abs(logReturns[j]) > thr) jumpCount++;
+            }
+          }
+
+          const windowLen = i - windowStart + 1;
+          const isJump = Math.abs(logReturns[i]) > threshold;
+          // 연율화 점프 빈도: λ = (jumpCount / windowLen) * 252
+          const lambda = windowLen > 0 ? (jumpCount / windowLen) * 252 : 0;
+
+          result[i] = { lambda, isJump, jumpCount };
+        }
+        this._cache[key] = result;
+      }
+    }
+    const arr = this._cache[key];
+    return (idx >= 0 && idx < arr.length) ? arr[idx] : null;
+  }
+
+  // ── HAR-RV 모형 (Corsi 2009) ──────────────────────
+
+  /**
+   * Heterogeneous Autoregressive Realized Volatility (HAR-RV)
+   * Corsi (2009): 일/주/월 실현변동성 분해 → OLS 예측
+   * @param {number} idx — 캔들 인덱스
+   * @returns {{ harRV: number, rv_d: number, rv_w: number, rv_m: number }|null}
+   */
+  harRV(idx) {
+    const key = 'harRV';
+    if (!(key in this._cache)) {
+      const closes = this.closes;
+      const len = closes.length;
+      const result = new Array(len).fill(null);
+
+      // 최소 데이터: 22(월간RV) + 60(OLS 피팅) = 82봉 이상 필요
+      const D = 1, W = 5, M = 22;
+      const MIN_FIT = 60; // OLS 피팅 최소 관측수
+      const MIN_BARS = M + MIN_FIT;
+
+      if (len < MIN_BARS + 1) { this._cache[key] = result; }
+      else {
+        // 로그수익률 제곱 (일간 실현분산 프록시)
+        const r2 = new Array(len).fill(null);
+        for (let i = 1; i < len; i++) {
+          if (closes[i] > 0 && closes[i - 1] > 0) {
+            const r = Math.log(closes[i] / closes[i - 1]);
+            r2[i] = r * r;
+          }
+        }
+
+        // RV 컴포넌트 배열: rv_d(1일), rv_w(5일 평균), rv_m(22일 평균)
+        const rvD = new Array(len).fill(null);
+        const rvW = new Array(len).fill(null);
+        const rvM = new Array(len).fill(null);
+
+        for (let i = M; i < len; i++) {
+          // rv_d = r_t^2
+          if (r2[i] != null) rvD[i] = r2[i];
+
+          // rv_w = mean(r2[i-4..i]) — 최근 5일 평균
+          let sumW = 0, cntW = 0;
+          for (let j = i - W + 1; j <= i; j++) {
+            if (r2[j] != null) { sumW += r2[j]; cntW++; }
+          }
+          if (cntW >= 3) rvW[i] = sumW / cntW; // 최소 3일 유효
+
+          // rv_m = mean(r2[i-21..i]) — 최근 22일 평균
+          let sumM = 0, cntM = 0;
+          for (let j = i - M + 1; j <= i; j++) {
+            if (r2[j] != null) { sumM += r2[j]; cntM++; }
+          }
+          if (cntM >= 10) rvM[i] = sumM / cntM; // 최소 10일 유효
+        }
+
+        // OLS 피팅 + 예측: 각 시점에서 trailing 60봉 윈도우로 회귀
+        for (let i = MIN_BARS; i < len; i++) {
+          // y = RV_d(t+1), X = [1, RV_d(t), RV_w(t), RV_m(t)]
+          // 피팅 윈도우: [i-MIN_FIT, i-1] (t), y는 [i-MIN_FIT+1, i]
+          const X = []; // 각 행: [1, rvD, rvW, rvM]
+          const y = []; // RV_d(t+1)
+
+          for (let t = i - MIN_FIT; t < i; t++) {
+            if (rvD[t] != null && rvW[t] != null && rvM[t] != null && rvD[t + 1] != null) {
+              X.push([1, rvD[t], rvW[t], rvM[t]]);
+              y.push(rvD[t + 1]);
+            }
+          }
+
+          // 최소 30개 유효 관측 필요 (OLS 안정성)
+          if (X.length < 30) continue;
+
+          // 현재 시점 독립변수
+          if (rvD[i] == null || rvW[i] == null || rvM[i] == null) continue;
+
+          // OLS: β = (X'X)^{-1} X'y — 4x4 정규방정식
+          const p = 4; // 파라미터 수 (intercept + 3)
+          const n = X.length;
+
+          // X'X (4x4)
+          const XtX = Array.from({ length: p }, () => new Array(p).fill(0));
+          const Xty = new Array(p).fill(0);
+
+          for (let k = 0; k < n; k++) {
+            for (let a = 0; a < p; a++) {
+              Xty[a] += X[k][a] * y[k];
+              for (let b = a; b < p; b++) {
+                XtX[a][b] += X[k][a] * X[k][b];
+              }
+            }
+          }
+          // 대칭 채우기
+          for (let a = 0; a < p; a++) {
+            for (let b = 0; b < a; b++) {
+              XtX[a][b] = XtX[b][a];
+            }
+          }
+
+          // 4x4 역행렬 (가우스-조르당)
+          const aug = XtX.map((row, r) => {
+            const ext = new Array(2 * p).fill(0);
+            for (let c = 0; c < p; c++) ext[c] = row[c];
+            ext[p + r] = 1;
+            return ext;
+          });
+
+          let singular = false;
+          for (let col = 0; col < p; col++) {
+            // 피벗 선택
+            let maxVal = Math.abs(aug[col][col]), maxRow = col;
+            for (let r = col + 1; r < p; r++) {
+              if (Math.abs(aug[r][col]) > maxVal) {
+                maxVal = Math.abs(aug[r][col]);
+                maxRow = r;
+              }
+            }
+            if (maxVal < 1e-12) { singular = true; break; }
+            if (maxRow !== col) { const tmp = aug[col]; aug[col] = aug[maxRow]; aug[maxRow] = tmp; }
+
+            const pivot = aug[col][col];
+            for (let c = 0; c < 2 * p; c++) aug[col][c] /= pivot;
+
+            for (let r = 0; r < p; r++) {
+              if (r === col) continue;
+              const factor = aug[r][col];
+              for (let c = 0; c < 2 * p; c++) aug[r][c] -= factor * aug[col][c];
+            }
+          }
+          if (singular) continue;
+
+          // β = inv(X'X) * X'y
+          const beta = new Array(p).fill(0);
+          for (let a = 0; a < p; a++) {
+            for (let b = 0; b < p; b++) {
+              beta[a] += aug[a][p + b] * Xty[b];
+            }
+          }
+
+          // 예측: RV_hat_{t+1} = β_0 + β_1*RV_d + β_2*RV_w + β_3*RV_m
+          let rvHat = beta[0] + beta[1] * rvD[i] + beta[2] * rvW[i] + beta[3] * rvM[i];
+          if (rvHat < 0) rvHat = 0; // 음수 분산 방어
+
+          // 연율화: HAR_RV_ann = sqrt(RV_hat * 252) * 100 (%)
+          const harRVann = Math.sqrt(rvHat * 252) * 100;
+
+          result[i] = {
+            harRV: harRVann,
+            rv_d: rvD[i],
+            rv_w: rvW[i],
+            rv_m: rvM[i]
+          };
+        }
+        this._cache[key] = result;
+      }
+    }
+    const arr = this._cache[key];
+    return (idx >= 0 && idx < arr.length) ? arr[idx] : null;
+  }
+
   // ── 캐시 관리 ──────────────────────────────────────
 
   /** 특정 지표 캐시만 무효화 */
@@ -1689,4 +1986,41 @@ class IndicatorCache {
   get cachedKeys() {
     return Object.keys(this._cache);
   }
+}
+
+// ── 독립 래퍼 함수 (하위 호환용) ──────────────────────
+
+/**
+ * 주의 결핍/폭발 상태 배열 — Stigler/Peng-Xiong Attention Theory
+ * @param {Array} candles — OHLCV 캔들 배열
+ * @param {number} lookback — 백분위 산출 기간 (기본 20)
+ * @returns {Array<{deprivationDays,isAttentionJump,multiplier}|null>}
+ */
+function calcAttentionState(candles, lookback = 20) {
+  if (!candles || candles.length === 0) return [];
+  const cache = new IndicatorCache(candles);
+  return candles.map((_, i) => cache.attentionState(i, lookback));
+}
+
+/**
+ * 점프 강도 배열 — Merton (1976) Jump-Diffusion
+ * @param {Array} candles — OHLCV 캔들 배열
+ * @param {number} lookback — 점프 관측 기간 (기본 252)
+ * @returns {Array<{lambda,isJump,jumpCount}|null>}
+ */
+function calcJumpIntensity(candles, lookback = 252) {
+  if (!candles || candles.length === 0) return [];
+  const cache = new IndicatorCache(candles);
+  return candles.map((_, i) => cache.jumpIntensity(i, lookback));
+}
+
+/**
+ * HAR-RV 모형 배열 — Corsi (2009)
+ * @param {Array} candles — OHLCV 캔들 배열
+ * @returns {Array<{harRV,rv_d,rv_w,rv_m}|null>}
+ */
+function calcHAR_RV(candles) {
+  if (!candles || candles.length === 0) return [];
+  const cache = new IndicatorCache(candles);
+  return candles.map((_, i) => cache.harRV(i));
 }

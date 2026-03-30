@@ -55,9 +55,9 @@ function _makeCacheKey(candles, timeframe) {
 try {
   importScripts(
     'colors.js?v=12',
-    'indicators.js?v=18',
-    'patterns.js?v=34',
-    'signalEngine.js?v=27',
+    'indicators.js?v=19',
+    'patterns.js?v=35',
+    'signalEngine.js?v=28',
     'backtester.js?v=30'
   );
   _workerReady = true;
@@ -216,7 +216,10 @@ self.onmessage = function (e) {
         var uiWindow = 180;
         var detectFrom = Math.max(0, analyzeCandles.length - uiWindow);
         // 1) 캔들 패턴 분석
-        patterns = patternEngine.analyze(analyzeCandles, { detectFrom: detectFrom });
+        // [Phase C-1] 밸류에이션 S/R: financialData가 있으면 opts에 포함
+        var analyzeOpts = { detectFrom: detectFrom };
+        if (msg.financialData) analyzeOpts.financialData = msg.financialData;
+        patterns = patternEngine.analyze(analyzeCandles, analyzeOpts);
 
         // 2) 지표 시그널 + 복합 시그널 분석
         //    signalEngine.analyze()는 IndicatorCache를 내부 생성하며,

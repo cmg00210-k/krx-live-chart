@@ -304,6 +304,19 @@ class PatternEngine {
    *  AMH lambda 시장별 분화에 사용. 'KOSPI'|'KOSDAQ'|null */
   static _currentMarket = null;
 
+  /** 밸류에이션 S/R 가격 필터 범위 — 현재가 ±30% 이내만 포함
+   *  Rothschild & Stiglitz (1976) 정보 비대칭 하 스크리닝 이론:
+   *  펀더멘털 밸류에이션 임계점은 시장 참여자의 매수/매도 의사결정 앵커로 작용.
+   *  ±30% = KRX 일일 가격제한폭(±30%)과 일치, 합리적 밸류에이션 판단 범위. */
+  static VALUATION_SR_RANGE = 0.30;
+
+  /** 밸류에이션 S/R 최대 수준 수 — 과밀 방지 (기술적 S/R 최대 10개 대비 보수적) */
+  static VALUATION_SR_MAX_LEVELS = 5;
+
+  /** 밸류에이션 S/R 기본 강도 — 기술적 S/R(최대 1.0) 대비 보수적
+   *  단일 접촉(touches=1)이므로 기술적 S/R의 다중 접촉 강도를 초과할 수 없음 */
+  static VALUATION_SR_STRENGTH = 0.6;
+
   /** [C] AMH lambda 시장별 상수 — core_data/20 §10 KRX 패턴 반감기 실증 */
   static AMH_LAMBDA = Object.freeze({
     KOSDAQ: 0.00367,  // 반감기 189일(~9개월) — 소형주 빠른 효율화
@@ -680,13 +693,35 @@ class PatternEngine {
 
     // 지지/저항 + 컨플루언스
     const sr = this.detectSupportResistance(candles, swH, swL, ctx);
+
+    // 밸류에이션 기반 S/R 병합 — opts.financialData가 유효한 bps/eps를 포함할 때
+    // Rothschild & Stiglitz (1976): 펀더멘털 밸류에이션 앵커가 기술적 S/R 레이어에 추가됨
+    // 기존 기술적 S/R은 불변, 밸류에이션 S/R은 추가 레이어로 concat
+    if (opts && opts.financialData) {
+      const fd = opts.financialData;
+      if ((fd.bps && fd.bps > 0) || (fd.eps && fd.eps > 0)) {
+        const currentPrice = candles[candles.length - 1].close;
+        const valSR = this.detectValuationSR(currentPrice, fd);
+        if (valSR.length > 0) {
+          // valuation S/R을 기술적 S/R 배열 뒤에 병합
+          // _applyConfluence는 type 'support'/'resistance'만 검사하므로
+          // 'valuation_support'/'valuation_resistance'는 자연스럽게 무시됨
+          // — 밸류에이션 S/R은 컨플루언스 부스트에는 미참여 (의도적)
+          // — 다만 _srLevels에 포함되어 downstream(ProspectBoost, UI 표시)에서 활용 가능
+          for (let vi = 0; vi < valSR.length; vi++) {
+            sr.push(valSR[vi]);
+          }
+        }
+      }
+    }
+
     this._applyConfluence(patterns, sr, ctx);
 
     // CZW 가중치를 패턴 객체에 기록
     // sell hw 반전(2-hw) 제거: R²=0.0008, corr_current=corr_new=0.0286 (calibrated_constants.json D2)
     // 선형 변환은 상관관계를 변경하지 못함 (단조 변환 불변성)
     // buy/sell 동일하게 hw 직접 사용, MRA hw_x_signal(-5.303)이 방향 차이를 처리
-    // 향후: czw/simulation/sell_hw_scenarios.md SIM-A(sell 전용 다변수) 검토
+    // 향후: docs/sell_hw_scenarios.md SIM-A(sell 전용 다변수) 검토
     for (var pi = 0; pi < patterns.length; pi++) {
       patterns[pi].hw = hurstWeight;
       // [L-1] vw는 wc에 미포함 (IC=-0.083, E-grade deprecated). 메타데이터 전용 보존
@@ -2997,6 +3032,121 @@ class PatternEngine {
       }
     }
     return levels.sort((a, b) => b.touches - a.touches).slice(0, 10);
+  }
+
+  // ══════════════════════════════════════════════════
+  //  밸류에이션 기반 지지/저항 (Fundamental S/R)
+  // ══════════════════════════════════════════════════
+
+  /**
+   * 펀더멘털 밸류에이션 임계값에서 지지/저항 수준 생성
+   *
+   * 학술 근거:
+   *  - Rothschild & Stiglitz (1976): 정보 비대칭 하에서 시장 참여자는
+   *    펀더멘털 밸류에이션 임계점(PBR=1.0, PER=10 등)을 스크리닝 앵커로 사용.
+   *  - Shiller (2000) "Irrational Exuberance": 라운드 넘버 및 밸류에이션
+   *    배수가 심리적 지지/저항으로 작용 (behavioral anchoring).
+   *  - Damodaran (2012): PBR=1.0은 자산 청산 가치, PER=10/15는
+   *    KOSPI 역사적 평균/고평가 분기점.
+   *
+   * PBR 임계값: 0.5(심화저평가), 1.0(순자산가치), 1.5, 2.0, 3.0
+   * PER 임계값: 5(심화저평가), 10(가치주), 15(적정), 20(성장주), 30(고평가)
+   *
+   * @param {number} currentPrice — 현재 주가
+   * @param {Object} financialData — { bps, eps, per, pbr } (getFinancialData() 결과)
+   * @returns {Array} 밸류에이션 S/R 수준 배열
+   */
+  detectValuationSR(currentPrice, financialData) {
+    if (!currentPrice || currentPrice <= 0 || !financialData) return [];
+
+    const { bps, eps } = financialData;
+    const range = PatternEngine.VALUATION_SR_RANGE;
+    const strength = PatternEngine.VALUATION_SR_STRENGTH;
+    const lowerBound = currentPrice * (1 - range);
+    const upperBound = currentPrice * (1 + range);
+
+    const levels = [];
+
+    // PBR 기반 가격 수준 — BPS(주당순자산) × PBR 배수
+    // BPS > 0 조건: 자본잠식(BPS<=0) 시 PBR 무의미
+    if (bps && bps > 0) {
+      const pbrThresholds = [
+        { mult: 0.5, label: 'PBR=0.5' },
+        { mult: 1.0, label: 'PBR=1.0' },
+        { mult: 1.5, label: 'PBR=1.5' },
+        { mult: 2.0, label: 'PBR=2.0' },
+        { mult: 3.0, label: 'PBR=3.0' },
+      ];
+      for (let i = 0; i < pbrThresholds.length; i++) {
+        const price = Math.round(bps * pbrThresholds[i].mult);
+        if (price >= lowerBound && price <= upperBound && price > 0) {
+          levels.push({
+            price: price,
+            type: price < currentPrice ? 'valuation_support' : 'valuation_resistance',
+            touches: 1,
+            strength: strength,
+            label: pbrThresholds[i].label,
+          });
+        }
+      }
+    }
+
+    // PER 기반 가격 수준 — EPS(주당순이익) × PER 배수
+    // EPS > 0 조건: 적자(EPS<=0) 시 PER 무의미
+    if (eps && eps > 0) {
+      const perThresholds = [
+        { mult: 5,  label: 'PER=5' },
+        { mult: 10, label: 'PER=10' },
+        { mult: 15, label: 'PER=15' },
+        { mult: 20, label: 'PER=20' },
+        { mult: 30, label: 'PER=30' },
+      ];
+      for (let i = 0; i < perThresholds.length; i++) {
+        const price = Math.round(eps * perThresholds[i].mult);
+        if (price >= lowerBound && price <= upperBound && price > 0) {
+          levels.push({
+            price: price,
+            type: price < currentPrice ? 'valuation_support' : 'valuation_resistance',
+            touches: 1,
+            strength: strength,
+            label: perThresholds[i].label,
+          });
+        }
+      }
+    }
+
+    // 중복 제거: PBR과 PER 수준이 근접하면 (2% 이내) 병합하여 라벨 결합
+    // 예: PBR=1.0 → 50,000원, PER=10 → 51,000원 → "PBR=1.0 / PER=10"
+    const merged = [];
+    const used = new Set();
+    for (let i = 0; i < levels.length; i++) {
+      if (used.has(i)) continue;
+      let best = levels[i];
+      let combinedLabel = best.label;
+      for (let j = i + 1; j < levels.length; j++) {
+        if (used.has(j)) continue;
+        if (Math.abs(levels[j].price - best.price) / currentPrice < 0.02) {
+          combinedLabel += ' / ' + levels[j].label;
+          // 평균 가격 사용
+          best = {
+            price: Math.round((best.price + levels[j].price) / 2),
+            type: best.type,
+            touches: 1,
+            strength: strength,
+            label: combinedLabel,
+          };
+          used.add(j);
+        }
+      }
+      best.label = combinedLabel;
+      merged.push(best);
+      used.add(i);
+    }
+
+    // 현재가에 가까운 순서로 정렬, 최대 수 제한
+    return merged
+      .sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice))
+      .slice(0, PatternEngine.VALUATION_SR_MAX_LEVELS);
   }
 
   // ══════════════════════════════════════════════════

@@ -13,6 +13,9 @@
 var _finTrendData = [];
 var _finTrendMetric = 'revenue';
 
+// ── 매크로 데이터 캐시 (KTB10Y 등) ──
+var _macroData = null;
+
 // ── 업종 비교용 최신 재무값 캐시 ──
 var _latestFinOpm = 0;
 var _latestFinRoe = 0;
@@ -116,6 +119,18 @@ function _getBroadIndustry(name) {
 // ══════════════════════════════════════════════════════
 
 /**
+ * 매크로 데이터 로드 (KTB10Y 국고채 10년물 금리 등)
+ * data/macro/macro_latest.json에서 비동기 로드, 실패 시 무시 (fallback 3.5%)
+ */
+async function _loadMacroData() {
+  if (_macroData) return;
+  try {
+    var resp = await fetch('data/macro/macro_latest.json', { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) _macroData = await resp.json();
+  } catch (e) { /* 매크로 데이터 선택적 — 실패 시 KTB10Y 기본값 3.5% 사용 */ }
+}
+
+/**
  * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
  * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
  */
@@ -125,7 +140,7 @@ function _clearAllFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var i = 0; i < ids.length; i++) {
@@ -214,13 +229,16 @@ async function updateFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var _i = 0; _i < _finIds.length; _i++) {
     var _el = document.getElementById(_finIds[_i]);
     if (_el) _el.textContent = '\u2014';
   }
+
+  // 매크로 데이터 사전 로드 (KTB10Y — Yield Gap 계산용, 비차단)
+  _loadMacroData();
 
   var data;
   try {
@@ -442,6 +460,23 @@ async function updateFinancials() {
     setClass('fin-psr', 'fin-grid-value');
   } else {
     set('fin-psr', '\u2014');
+  }
+
+  // ── Yield Gap (Fed/BOK Model): 이익수익률 vs 국고채 10년물 ──
+  // E/P = 1/PER (%), Yield Gap = E/P - KTB10Y
+  // 양수 → 주식이 채권 대비 저평가 (bullish), 음수 → 고평가 (bearish)
+  if (perVal && perVal > 0) {
+    var earningsYield = (1 / perVal) * 100; // E/P (%)
+    // KTB10Y: 매크로 데이터에서 로드, 실패 시 기본값 3.5%
+    var ktb10y = (_macroData && _macroData.ktb10y != null) ? _macroData.ktb10y : 3.5;
+    var yieldGapVal = +(earningsYield - ktb10y).toFixed(2);
+    var yieldGapStr = (yieldGapVal >= 0 ? '+' : '') + yieldGapVal.toFixed(2) + '%p';
+    set('fin-yield-gap', yieldGapStr);
+    // 양수(저평가) = fin-good 초록, 음수(고평가) = dn 파랑
+    setClass('fin-yield-gap', 'fin-grid-value' + (yieldGapVal >= 0 ? ' up' : ' dn'));
+  } else {
+    set('fin-yield-gap', '\u2014');
+    setClass('fin-yield-gap', 'fin-grid-value');
   }
 
   // ── 성장성: 3년 CAGR 계산 ──

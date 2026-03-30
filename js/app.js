@@ -122,6 +122,10 @@ let _prevPrice = null;       // 가격 변화 flash 감지용
 let _kbNavTimer = null;      // 키보드 네비게이션 디바운스 타이머
 let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.json)
 let _marketContext = null;   // [Phase I-L2] 시장 맥락 (market_context.json — CCSI/VKOSPI/flow)
+var _macroLatest = null;     // 매크로 데이터 캐시 (macro_latest.json — KTB10Y/USD/CPI 등)
+var _bondsLatest = null;     // 채권 데이터 캐시 (bonds_latest.json — 수익률곡선 등)
+var _lastAdvLevel = 0;       // 최근 Worker 분석의 ADV 유동성 등급 (signalEngine.calcADVLevel)
+var _lastVrpRegime = 'neutral';  // 최근 Worker 분석의 VRP 레짐 (signalEngine.calcVRPRegime)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 
 // ══════════════════════════════════════════════════════
@@ -798,6 +802,9 @@ async function _continueInit() {
     console.log('[KRX] 시장 맥락 데이터 없음 (download_market_context.py 실행 시 활성화)');
   }
 
+  // 매크로/채권 데이터 로드 (비차단 — 차트 오버레이 정보용)
+  _loadMarketData();
+
   // 복원된 환경설정을 UI에 반영
   _applyPrefsToUI();
 
@@ -1001,6 +1008,7 @@ async function _continueInit() {
           learnedWeights: adaptiveWeights,
           market: currentStock && currentStock.market ? currentStock.market : '',
           timeframe: currentTimeframe,
+          financialData: _getFinancialDataForSR(),  // 밸류에이션 S/R용 bps/eps
         });
       } else {
         // 폴백: 메인 스레드 동기 분석
@@ -1481,6 +1489,12 @@ function _initAnalysisWorker() {
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
 
+        // ADV 유동성 등급 / VRP 레짐 캐시 (Worker stats에서 추출)
+        if (msg.stats) {
+          if (msg.stats.advLevel != null) _lastAdvLevel = msg.stats.advLevel;
+          if (msg.stats.vrpRegime != null) _lastVrpRegime = msg.stats.vrpRegime;
+        }
+
         // 차트 패턴 구조선 보존 (드래그 시 소실 방지)
         _saveChartPatternStructLines(detectedPatterns);
 
@@ -1898,6 +1912,7 @@ function _requestWorkerAnalysis() {
     learnedWeights: adaptiveWeights,
     market: currentStock && currentStock.market ? currentStock.market : '',
     timeframe: currentTimeframe,
+    financialData: _getFinancialDataForSR(),  // 밸류에이션 S/R용 bps/eps
   });
 }
 
@@ -1966,6 +1981,49 @@ function _categorizePatterns(patterns, signals) {
   }
 
   return result;
+}
+
+/**
+ * 매크로/채권 데이터 비동기 로드 — 차트 오버레이 정보용
+ * data/macro/macro_latest.json (KTB10Y, USD/KRW, CPI 등)
+ * data/macro/bonds_latest.json (수익률곡선 등)
+ * 선택적 데이터: 로드 실패 시 무시 (기존 기능에 영향 없음)
+ */
+async function _loadMarketData() {
+  try {
+    var results = await Promise.allSettled([
+      fetch('data/macro/macro_latest.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/macro/bonds_latest.json', { signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (results[0].status === 'fulfilled' && results[0].value.ok)
+      _macroLatest = await results[0].value.json();
+    if (results[1].status === 'fulfilled' && results[1].value.ok)
+      _bondsLatest = await results[1].value.json();
+    if (_macroLatest || _bondsLatest) {
+      console.log('[KRX] 매크로/채권 데이터 로드 완료');
+    }
+  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+}
+
+/**
+ * 현재 종목의 재무 데이터에서 밸류에이션 S/R용 bps/eps 추출
+ * _financialCache (data.js 전역)에서 동기적 접근
+ * @returns {Object|null} { bps, eps } 또는 null (데이터 미로드/seed)
+ */
+function _getFinancialDataForSR() {
+  if (typeof _financialCache === 'undefined' || !currentStock) return null;
+  var cached = _financialCache[currentStock.code];
+  if (!cached) return null;
+  // seed 생성 가짜 데이터는 밸류에이션 S/R에 사용하지 않음
+  if (cached.source !== 'dart' && cached.source !== 'hardcoded') return null;
+  // quarterly 또는 annual 데이터에서 bps/eps 추출
+  var arr = (cached.quarterly && cached.quarterly.length) ? cached.quarterly : cached.annual;
+  if (!arr || !arr.length) return null;
+  var latest = arr[0];
+  var bps = latest.bps ? Number(latest.bps) : null;
+  var eps = latest.eps ? Number(latest.eps) : null;
+  if (!bps && !eps) return null;
+  return { bps: bps || null, eps: eps || null };
 }
 
 /**
