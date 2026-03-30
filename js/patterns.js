@@ -155,6 +155,13 @@ class PatternEngine {
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
   static CHART_TARGET_RAW_CAP = 2.0;
 
+  /** [C] Prospect Theory 비대칭 손절/목표 — Kahneman & Tversky (1979)
+   *  손실 회피 계수 λ=2.25, sqrt(λ)=1.50 → KRX 호가 단위 적응 1.15 (dampened)
+   *  손절: 더 넓게 (whipsaw 방지), 목표: 더 보수적 (disposition effect 반영) */
+  static PROSPECT_STOP_WIDEN = 1.15;
+  /** [C] 1/PROSPECT_STOP_WIDEN — disposition effect 보수주의 */
+  static PROSPECT_TARGET_COMPRESS = 0.87;
+
   /** 넥라인 돌파 확인 — lookforward bar 수 상한
    *  Bulkowski (2005): 패턴 완성 후 평균 돌파 시점은 5~15일.
    *  20 bar 이후 돌파는 패턴 효력 소멸로 판단 (time decay). */
@@ -293,16 +300,26 @@ class PatternEngine {
   /** 백테스트 기준시점 (ms) — AMH 시변 감쇠 계산용. Worker에서 주입.
    *  Lo (2004): 패턴 알파는 exp(-λ×days)로 감쇠. null이면 감쇠 미적용. */
   static _backtestEpochMs = null;
+  /** [FLAG-3] 현재 분석 중인 시장 — analyze() 호출 시 opts.market으로 설정
+   *  AMH lambda 시장별 분화에 사용. 'KOSPI'|'KOSDAQ'|null */
+  static _currentMarket = null;
+
+  /** [C] AMH lambda 시장별 상수 — core_data/20 §10 KRX 패턴 반감기 실증 */
+  static AMH_LAMBDA = Object.freeze({
+    KOSDAQ: 0.00367,  // 반감기 189일(~9개월) — 소형주 빠른 효율화
+    KOSPI:  0.00183,  // 반감기 378일(~18개월) — 대형주 느린 효율화
+    DEFAULT: 0.00275, // 반감기 252일(~1년) — 시장 미지정 시 보수적 기본값
+  });
 
   /**
    * AMH 시변 감쇠 인자 — Lo (2004), McLean & Pontiff (2016)
    * 학습된 가중치의 신뢰도를 백테스트 기준시점 이후 경과 일수에 따라 감쇠.
    * decayFactor = exp(-λ × daysSince)
    *
-   * λ 기준: core_data/20 §10 KRX 패턴 반감기
-   *   KOSDAQ: 반감기 189일(~9개월) → λ = ln(2)/189 ≈ 0.00367
-   *   KOSPI:  반감기 378일(~18개월) → λ = ln(2)/378 ≈ 0.00183
-   *   기본값: 반감기 252일(~1년)     → λ = ln(2)/252 ≈ 0.00275
+   * [FLAG-3] 시장별 λ 런타임 분화:
+   *   KOSDAQ: λ=0.00367 (반감기 189일, 소형주 빠른 효율화)
+   *   KOSPI:  λ=0.00183 (반감기 378일, 대형주 느린 효율화)
+   *   기본값: λ=0.00275 (반감기 252일)
    *
    * @returns {number} 0~1 감쇠 인자 (1=감쇠 없음, 0에 수렴=완전 감쇠)
    */
@@ -310,18 +327,29 @@ class PatternEngine {
     if (PatternEngine._backtestEpochMs == null) return 1.0;
     var daysSince = (Date.now() - PatternEngine._backtestEpochMs) / 86400000;
     if (daysSince <= 0) return 1.0;
-    // 기본 λ=0.00275 (반감기 252일). 시장별 분화는 Worker가 _backtestEpochMs 설정 시
-    // 별도 decay를 적용할 수 있으나, 현재는 보수적 기본값 사용.
-    return Math.exp(-0.00275 * daysSince);
+    var mkt = PatternEngine._currentMarket;
+    var lambda = (mkt === 'KOSDAQ') ? PatternEngine.AMH_LAMBDA.KOSDAQ
+               : (mkt === 'KOSPI')  ? PatternEngine.AMH_LAMBDA.KOSPI
+               : PatternEngine.AMH_LAMBDA.DEFAULT;
+    return Math.exp(-lambda * daysSince);
   }
 
   /**
    * 회귀 계수를 Q_WEIGHT 구조로 정규화
+   * [FLAG-2] shadow 독립 추정: 회귀에 shadow 전용 계수가 없으므로,
+   * body(confidence) 계수를 prior 비율(Q_WEIGHT body:shadow = 0.25:0.15)로 분배.
+   * 기존 hardcode 0.6 → prior 기반 비율 = shadow/(body+shadow) = 0.15/0.40 = 0.375
    */
   static _normalizeCoeffsToWeights(coeffs) {
     const fc = [Math.abs(coeffs[1] || 0), Math.abs(coeffs[2] || 0), Math.abs(coeffs[3] || 0), Math.abs(coeffs[4] || 0)];
     const s = fc.reduce((a, b) => a + b, 0.001);
-    const raw = { body: fc[0] / s, volume: fc[2] / s, trend: fc[1] / s, shadow: fc[0] / s * 0.6, extra: fc[3] / s };
+    // body와 shadow는 regression의 confidence 계수(fc[0])를 prior 비율로 분할
+    var priorBody = PatternEngine.Q_WEIGHT.body;
+    var priorShadow = PatternEngine.Q_WEIGHT.shadow;
+    var splitRatio = priorShadow / (priorBody + priorShadow);  // 0.375
+    var bodyShare = fc[0] / s * (1 - splitRatio);
+    var shadowShare = fc[0] / s * splitRatio;
+    const raw = { body: bodyShare, volume: fc[2] / s, trend: fc[1] / s, shadow: shadowShare, extra: fc[3] / s };
     const sum = Object.values(raw).reduce((a, b) => a + b, 0.001);
     return { body: raw.body / sum, volume: raw.volume / sum, trend: raw.trend / sum, shadow: raw.shadow / sum, extra: raw.extra / sum };
   }
@@ -453,24 +481,28 @@ class PatternEngine {
     return Math.round(Math.min(100, Math.max(0, raw * 100)));
   }
 
-  /** ATR 기반 손절가 */
+  /** ATR 기반 손절가 — [GAP-3] Prospect Theory 비대칭 적용
+   *  Kahneman & Tversky (1979): 손실 회피로 손절 거리를 PROSPECT_STOP_WIDEN만큼 확대.
+   *  넓은 손절 = whipsaw 감소, 심리적 손실 감내 여유 증가. */
   _stopLoss(candles, idx, signal, atr, mult = PatternEngine.STOP_LOSS_ATR_MULT) {
     const p = candles[idx].close;
     const a = atr[idx] || p * PatternEngine.ATR_FALLBACK_PCT;
-    return signal === 'buy' ? +(p - a * mult).toFixed(0)
-         : signal === 'sell' ? +(p + a * mult).toFixed(0) : null;
+    var adjMult = mult * PatternEngine.PROSPECT_STOP_WIDEN;
+    return signal === 'buy' ? +(p - a * adjMult).toFixed(0)
+         : signal === 'sell' ? +(p + a * adjMult).toFixed(0) : null;
   }
 
   /** 캔들스틱 패턴 전용 목표가 — ATR × strength 배수 × context weights
    *  학술 근거: Nison (1991) — 캔들 패턴은 목표가를 제시하지 않음.
    *  Bulkowski (2012) 5일 평균 수익률 기반 ATR 배수로 보수적 추정.
    *  차트 패턴의 measured move와 명시적으로 분리.
-   *  [Batch 2-4] hw×mw weight 통합 — 차트 패턴과 동일한 레짐 보정 적용 */
+   *  [Batch 2-4] hw×mw weight 통합 — 차트 패턴과 동일한 레짐 보정 적용
+   *  [GAP-3] Prospect Theory 목표가 압축 — disposition effect로 목표 보수적 설정 */
   _candleTarget(candles, idx, signal, strength, atr, hw, mw) {
     const entry = candles[idx].close;
     const a = atr[idx] || entry * PatternEngine.ATR_FALLBACK_PCT;
     const mult = PatternEngine.CANDLE_TARGET_ATR[strength] || 0.7;
-    const w = (hw || 1) * (mw || 1);
+    const w = (hw || 1) * (mw || 1) * PatternEngine.PROSPECT_TARGET_COMPRESS;
     return signal === 'buy'  ? +(entry + a * mult * w).toFixed(0)
          : signal === 'sell' ? +(entry - a * mult * w).toFixed(0) : null;
   }
@@ -486,6 +518,8 @@ class PatternEngine {
 
   analyze(candles, opts) {
     if (!candles || candles.length < 10) return [];
+    // [FLAG-3] 시장별 AMH lambda 설정 — opts.market = 'KOSPI'|'KOSDAQ'
+    PatternEngine._currentMarket = (opts && opts.market) ? opts.market : null;
     // indicators.js 전역 함수 직접 호출 (불필요한 래퍼 제거)
     const closes = candles.map(c => c.close);
     const hurst = calcHurst(closes);
@@ -724,6 +758,9 @@ class PatternEngine {
     // 극단 군집(herding_flag=2) + 하락장(r_market<0) → 매수 패턴 신뢰도 하향 보정
     this._applyHerdingAdjust(patterns);
 
+    // [Phase I-L2] 구조 변화점 근접 패턴 신뢰도 감산 — Page (1954) CUSUM
+    this._applyBreakpointAdjust(patterns, candles);
+
     var deduped = this._dedup(patterns);
     // [Phase I] S/R levels 첨부 — applyProspectBoost 등 후처리에서 활용
     deduped._srLevels = sr;
@@ -734,21 +771,37 @@ class PatternEngine {
    * [Phase I-L1] CSAD 군집행동 × HMM 레짐 연계 신뢰도 조정
    * Chang, Cheng & Khorana (2000) 군집행동 지표 + Hamilton (1989) HMM
    *
+   * [GAP-4] CCK Bilateral + Continuous:
+   *  - 3일 평균 CSAD로 단일일 노이즈 감소 (>= 3일 데이터 시, 미달 시 1일 폴백)
+   *  - 하락장 군집 → 매수 패턴 감산 (기존)
+   *  - 상승장 군집 → 매도(반전) 패턴 감산 (신규 bilateral)
+   *  - HMM 고변동 레짐 → 매수 패턴 감산 (CSAD 미적용 시만)
+   *
    * 근거:
-   *  - 극단 군집(flag=2) + 하락장(r_market<0): 투자자들이 동조화하여 패닉 매도 →
-   *    캔들 반전 패턴의 지지 신뢰도 하락 (KRX 45% 극단 군집 일수)
-   *  - HMM 고변동 레짐(bull_prob>0.7, σ=3.4x): 패턴 완성 후 급반전 위험 상승
+   *  - 극단 군집 + 하락장(r_market<0): 패닉 매도 동조 → 매수 반전 오신호
+   *  - 극단 군집 + 상승장(r_market>0): 유포리아 동조 → 매도 반전 오신호
+   *  - HMM 고변동 레짐(bull_prob>0.7, σ=3.4x): 급반전 위험 상승
    *  조합 페널티 = 군집 ×0.76, HMM 고변동 ×0.75 (별도 조건 — 중복 불적용)
-   *  clamp: 조정 후 confidence 최소 10, 최대 변화 -24%p (0.76×100=76)
+   *  clamp: 조정 후 confidence 최소 10
    */
   _applyHerdingAdjust(patterns) {
     if (typeof backtester === 'undefined' || !backtester._behavioralData) return;
     var bd = backtester._behavioralData;
 
-    // CSAD herding flag (시장 전체 수준)
+    // [GAP-4] CSAD herding flag — 3일 평균으로 단일일 노이즈 감소
+    // Chang, Cheng & Khorana (2000): CSAD 일별 변동성이 크므로 3일 이동 평균이 더 안정적
     var herdingFlag = 0, rMarket = 0;
-    if (bd['csad_herding'] && bd['csad_herding'].daily && bd['csad_herding'].daily.length > 0) {
-      var lastCSAD = bd['csad_herding'].daily[bd['csad_herding'].daily.length - 1];
+    var csadDaily = (bd['csad_herding'] && bd['csad_herding'].daily) ? bd['csad_herding'].daily : [];
+    if (csadDaily.length >= 3) {
+      var hfSum = 0, rmSum = 0;
+      for (var di = csadDaily.length - 3; di < csadDaily.length; di++) {
+        hfSum += (csadDaily[di].herding_flag || 0);
+        rmSum += (csadDaily[di].r_market || 0);
+      }
+      herdingFlag = hfSum / 3;
+      rMarket = rmSum / 3;
+    } else if (csadDaily.length > 0) {
+      var lastCSAD = csadDaily[csadDaily.length - 1];
       herdingFlag = lastCSAD.herding_flag || 0;
       rMarket = lastCSAD.r_market || 0;
     }
@@ -764,7 +817,15 @@ class PatternEngine {
       var p = patterns[ci];
       // 극단 군집 + 하락장 → 매수 패턴 신뢰도 ×0.76
       // 근거: KRX CSAD 실증, 극단 군집 하락일 매수 반전 성공률 -24%p (core_data/20 §3.4)
-      if (p.signal === 'buy' && herdingFlag === 2 && rMarket < 0) {
+      // [GAP-4] 3일 평균: herdingFlag >= 1.67 (3일 중 2일 이상 flag=2 + 부분)
+      if (p.signal === 'buy' && herdingFlag >= 1.67 && rMarket < 0) {
+        p.confidence = Math.max(10, Math.round(p.confidence * 0.76));
+        if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.76));
+      }
+      // [GAP-4] 극단 군집 + 상승장 → 매도(반전) 패턴 신뢰도 ×0.76
+      // CCK Bilateral: 상승장 군집행동 시 역추세 매도 패턴도 과잉 동조에 의한 오신호 위험
+      // bearishMarubozu 제외: 강한 방향성 지속 신호이므로 페널티 부적합
+      else if (p.signal === 'sell' && herdingFlag >= 1.67 && rMarket > 0 && p.type !== 'bearishMarubozu') {
         p.confidence = Math.max(10, Math.round(p.confidence * 0.76));
         if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.76));
       }
@@ -775,6 +836,38 @@ class PatternEngine {
       else if (p.signal === 'buy' && hmmBullProb > 0.7 && p.type !== 'bullishMarubozu') {
         p.confidence = Math.max(10, Math.round(p.confidence * 0.75));
         if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.75));
+      }
+    }
+  }
+
+  // ── 구조 변화점 근접 패턴 신뢰도 감산 — Page (1954), Bai-Perron (1998) ──
+  // 최근 20봉 이내 CUSUM breakpoint → 레짐 전환 중 패턴 근거 불충분 → 감산
+  _applyBreakpointAdjust(patterns, candles) {
+    if (!candles || candles.length < 60 || typeof calcOnlineCUSUM !== 'function') return;
+    var closes = candles.map(function(c) { return c.close; });
+    var returns = [];
+    for (var ri = 1; ri < closes.length; ri++) {
+      if (closes[ri - 1] > 0 && closes[ri] > 0) {
+        returns.push(Math.log(closes[ri] / closes[ri - 1]));
+      } else {
+        returns.push(0);
+      }
+    }
+    var cusum = calcOnlineCUSUM(returns, 2.5);
+    if (!cusum.isRecent || cusum.breakpoints.length === 0) return;
+    var lastBP = cusum.breakpoints[cusum.breakpoints.length - 1];
+    var barsSince = returns.length - 1 - lastBP.index;
+    // 선형 회복: 0봉→×0.70, 30봉+→×1.0
+    var discount = 0.70 + 0.30 * Math.min(1.0, barsSince / 30);
+    for (var bi = 0; bi < patterns.length; bi++) {
+      var p = patterns[bi];
+      var pIdx = (p.endIndex != null ? p.endIndex : p.startIndex) || 0;
+      // returns 인덱스는 candles 인덱스 - 1
+      if (Math.abs((pIdx - 1) - lastBP.index) < 20) {
+        p.confidence = Math.max(10, Math.round(p.confidence * discount));
+        if (p.confidencePred != null) {
+          p.confidencePred = Math.max(10, Math.round(p.confidencePred * discount));
+        }
       }
     }
   }

@@ -54,8 +54,8 @@ const sidebarManager = (() => {
   let _filteredStocks = [];          // 현재 필터/정렬 적용된 전체 종목 배열
 
   // ── R5: 3모드 순환 순서 ──
-  const _viewModes = ['default', 'analysis'];
-  const _viewModeLabels = { 'default': '기본', analysis: '상세' };
+  const _viewModes = ['default', 'analysis', 'screener'];
+  const _viewModeLabels = { 'default': '기본', analysis: '상세', screener: '스크린' };
 
   // ── 시가총액 데이터 (억원 단위, index.json에서 동적 빌드) ──
   // init() 호출 시 _buildMarketCapFromStocks()로 ALL_STOCKS에서 자동 채움.
@@ -594,7 +594,26 @@ const sidebarManager = (() => {
       // localStorage 저장
       try { localStorage.setItem(LS_VIEW, _viewMode); } catch(ex) {}
 
+      // 스크리너 패널 토글: screener 모드에서만 패널 표시, 나머지 섹션 숨김
+      _toggleScreenerPanel(_viewMode === 'screener');
+
       build(_currentSort, true);
+    });
+  }
+
+  /** 스크리너 패널 표시/숨김 토글 */
+  function _toggleScreenerPanel(show) {
+    var panel = document.getElementById('sb-screener-panel');
+    var body = document.querySelector('.sb-body');
+    if (!panel || !body) return;
+    // 스크리너 패널 외 모든 sb-section 토글
+    var sections = body.querySelectorAll('.sb-section');
+    sections.forEach(function(s) {
+      if (s.id === 'sb-screener-panel') {
+        s.style.display = show ? 'flex' : 'none';
+      } else {
+        s.style.display = show ? 'none' : '';
+      }
     });
   }
 

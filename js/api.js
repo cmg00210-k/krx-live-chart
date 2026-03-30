@@ -175,6 +175,8 @@ const TIMEFRAMES = {
   '30m': { label: '30분',   seconds: 1800,  count: 120 },
   '1h':  { label: '1시간',  seconds: 3600,  count: 120 },
   '1d':  { label: '일봉',   seconds: 86400, count: 200 },
+  '1w':  { label: '주봉',   seconds: 604800, count: 104 },
+  '1M':  { label: '월봉',   seconds: 2592000, count: 60 },
 };
 
 // ── 캔들 배열 메모리 상한 (장시간 세션 메모리 누수 방지) ──
@@ -321,6 +323,17 @@ class KRXDataService {
       if (candles.length === 0) {
         console.log('[KRX] 파일 없음, 데모 폴백:', stock.code);
         candles = this._demoGenerateCandles(stock, timeframe);
+      }
+    } else if (KRX_API_CONFIG.mode === 'file' && (timeframe === '1w' || timeframe === '1M')) {
+      // 주봉/월봉: 일봉에서 클라이언트 리샘플링
+      var dailyCandles = await this._fileGetCandles(stock);
+      if (dailyCandles.length >= 5) {
+        candles = timeframe === '1w'
+          ? this._resampleToWeekly(dailyCandles)
+          : this._resampleToMonthly(dailyCandles);
+      }
+      if (!candles || candles.length === 0) {
+        candles = dailyCandles;  // fallback to daily
       }
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
       // file 모드 + 분봉: 보간 분봉 JSON 우선 시도 → 없으면 리샘플링 또는 일봉 폴백
@@ -666,6 +679,114 @@ class KRXDataService {
       });
     }
     return result;
+  }
+
+  /**
+   * 일봉 → 주봉/월봉 캘린더 기반 리샘플링 (공통 엔진)
+   * groupFn이 각 캔들의 time 문자열을 그룹 키로 변환한다.
+   * - 월봉: groupFn("2026-03-15") → "2026-03"
+   * - 주봉: groupFn("2026-03-15") → "2026-W11"
+   * @param {Array} candles - 일봉 배열 (time: "YYYY-MM-DD" 문자열, 시간순)
+   * @param {Function} groupFn - (timeStr) → groupKey
+   * @returns {Array} 리샘플링된 캔들 배열
+   */
+  _resampleByDate(candles, groupFn) {
+    if (!candles || candles.length < 2) return candles || [];
+    var groups = {};
+    var groupOrder = [];  // 삽입 순서 보존 (Object.keys 정렬 대신)
+    for (var i = 0; i < candles.length; i++) {
+      var c = candles[i];
+      if (typeof c.time !== 'string') continue;
+      var key = groupFn(c.time);
+      if (!key) continue;
+      if (!groups[key]) {
+        groups[key] = [];
+        groupOrder.push(key);
+      }
+      groups[key].push(c);
+    }
+    var result = [];
+    // 키를 정렬하여 시간순 보장 (YYYY-MM, YYYY-Wnn 모두 사전순=시간순)
+    groupOrder.sort();
+    for (var k = 0; k < groupOrder.length; k++) {
+      var group = groups[groupOrder[k]];
+      if (group.length === 0) continue;
+      var hi = group[0].high, lo = group[0].low, vol = 0;
+      for (var g = 0; g < group.length; g++) {
+        if (group[g].high > hi) hi = group[g].high;
+        if (group[g].low < lo) lo = group[g].low;
+        vol += group[g].volume || 0;
+      }
+      result.push({
+        time: group[0].time,   // 해당 기간의 첫 거래일 (실제 존재하는 날짜)
+        open: group[0].open,
+        high: hi,
+        low: lo,
+        close: group[group.length - 1].close,
+        volume: vol,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * ISO 주차 키 생성 (순수 문자열 연산, Date 객체 불사용)
+   * ISO 8601: 주는 월요일 시작, 1월 4일이 포함된 주가 W01
+   * @param {string} dateStr - "YYYY-MM-DD" 형식
+   * @returns {string} "YYYY-Wnn" 형식 (예: "2026-W12")
+   */
+  _getISOWeekKey(dateStr) {
+    // UTC 기준 Date 생성 (로컬 타임존 영향 제거)
+    var parts = dateStr.split('-');
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10) - 1;
+    var d = parseInt(parts[2], 10);
+    var date = new Date(Date.UTC(y, m, d));
+
+    // ISO 주차 계산: 목요일이 속한 연도의 주차로 결정
+    // 1) 가장 가까운 목요일 찾기
+    var dayOfWeek = date.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    // ISO: Mon=1, Tue=2, ..., Sun=7 → shift: (dayOfWeek + 6) % 7 + 1 은 불필요
+    // 목요일까지 이동: Thu=4, 현재 ISO day = (dayOfWeek || 7)
+    var isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+    // 가장 가까운 목요일 = date + (4 - isoDay)
+    var thu = new Date(date.getTime());
+    thu.setUTCDate(date.getUTCDate() + (4 - isoDay));
+
+    // 2) 해당 목요일이 속한 연도의 1월 1일
+    var yearOfWeek = thu.getUTCFullYear();
+    var jan1 = new Date(Date.UTC(yearOfWeek, 0, 1));
+
+    // 3) 1월 1일부터 목요일까지의 일수 → 주차
+    var daysDiff = Math.round((thu.getTime() - jan1.getTime()) / 86400000);
+    var weekNum = Math.floor(daysDiff / 7) + 1;
+
+    // 0-pad week number
+    var weekStr = weekNum < 10 ? '0' + weekNum : '' + weekNum;
+    return yearOfWeek + '-W' + weekStr;
+  }
+
+  /**
+   * 일봉 → 주봉 리샘플링 (ISO 주 기준 캘린더 그룹화)
+   * @param {Array} dailyCandles - 일봉 배열 (time: "YYYY-MM-DD" 문자열)
+   * @returns {Array} 주봉 배열
+   */
+  _resampleToWeekly(dailyCandles) {
+    var self = this;
+    return this._resampleByDate(dailyCandles, function(timeStr) {
+      return self._getISOWeekKey(timeStr);
+    });
+  }
+
+  /**
+   * 일봉 → 월봉 리샘플링 (YYYY-MM 기준 캘린더 그룹화)
+   * @param {Array} dailyCandles - 일봉 배열 (time: "YYYY-MM-DD" 문자열)
+   * @returns {Array} 월봉 배열
+   */
+  _resampleToMonthly(dailyCandles) {
+    return this._resampleByDate(dailyCandles, function(timeStr) {
+      return timeStr.substring(0, 7);  // "YYYY-MM"
+    });
   }
 
   // ══════════════════════════════════════════════════

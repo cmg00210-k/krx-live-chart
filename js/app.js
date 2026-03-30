@@ -1413,7 +1413,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=21');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=23');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -1499,6 +1499,8 @@ function _initAnalysisWorker() {
         // 패턴 감지 알림 (패턴이 있을 때만)
         if (detectedPatterns.length > 0) {
           showToast(detectedPatterns.length + '개 패턴 감지됨', 'info');
+          // Local Notification API — 탭이 백그라운드일 때 브라우저 알림
+          _notifyPatterns(detectedPatterns);
         }
 
         // 차트에 패턴 렌더링 반영 + 오버레이 통합 렌더 (vizToggles 필터 적용)
@@ -3510,7 +3512,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // 1-6: 타임프레임 전환 (기존 .tf-btn 클릭을 프로그래밍 방식으로 트리거)
-  const tfMap = { '1': '1m', '2': '5m', '3': '15m', '4': '30m', '5': '1h', '6': '1d' };
+  const tfMap = { '1': '1m', '2': '5m', '3': '15m', '4': '30m', '5': '1h', '6': '1d', '7': '1w', '8': '1M' };
   if (tfMap[key]) {
     const tfBtn = document.querySelector(`.tf-btn[data-tf="${tfMap[key]}"]`);
     if (tfBtn && !tfBtn.classList.contains('active')) {
@@ -3758,6 +3760,371 @@ document.querySelectorAll('#ind-dropdown-menu .ind-check').forEach(function (lab
 
 // 초기 커스텀 표시
 _markCustomParams();
+
+
+// ══════════════════════════════════════════════════════
+//  Local Notification API (P3c — 웹 Push 알림)
+//  서버 불필요: 브라우저 Notification API + SW showNotification
+//  탭 백그라운드 시 패턴 감지를 브라우저 알림으로 전달
+// ══════════════════════════════════════════════════════
+
+var _notifEnabled = false;
+var _notifLastTag = '';  // 중복 방지
+
+/** 알림 권한 요청 */
+function _requestNotifPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    _notifEnabled = true;
+    _updateNotifBtn();
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    showToast('브라우저 설정에서 알림을 허용해주세요', 'warning');
+    return;
+  }
+  Notification.requestPermission().then(function(perm) {
+    _notifEnabled = (perm === 'granted');
+    _updateNotifBtn();
+    if (_notifEnabled) {
+      showToast('패턴 알림이 활성화되었습니다', 'success');
+    }
+  });
+}
+
+/** 벨 버튼 상태 업데이트 */
+function _updateNotifBtn() {
+  var btn = document.getElementById('notif-btn');
+  if (!btn) return;
+  btn.classList.toggle('notif-active', _notifEnabled);
+}
+
+/** 패턴 감지 시 로컬 알림 전송 (백그라운드 탭용) */
+function _notifyPatterns(patterns) {
+  if (!_notifEnabled || !patterns || patterns.length === 0) return;
+  if (document.visibilityState === 'visible') return;  // 포그라운드면 toast로 충분
+
+  var stockName = currentStock ? currentStock.name : '';
+  var body = patterns.slice(0, 3).map(function(p) {
+    return _getPatternKo(p.type);
+  }).join(', ');
+  var tag = 'ptn-' + (currentStock ? currentStock.code : '') + '-' + patterns.length;
+  if (tag === _notifLastTag) return;  // 중복 방지
+  _notifLastTag = tag;
+
+  // SW showNotification 우선 (백그라운드 탭에서도 안정적)
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(function(reg) {
+      reg.showNotification(stockName + ' — ' + patterns.length + '개 패턴', {
+        body: body,
+        icon: 'img/favicon.svg',
+        tag: tag,
+        renotify: false,
+        silent: true,
+      });
+    });
+  } else {
+    // 폴백: 직접 Notification
+    new Notification(stockName + ' — ' + patterns.length + '개 패턴', { body: body, tag: tag });
+  }
+}
+
+// 벨 버튼 이벤트
+(function() {
+  var btn = document.getElementById('notif-btn');
+  if (!btn) return;
+  // SW 등록 완료 후 버튼 표시
+  if ('Notification' in window) {
+    btn.style.display = 'flex';
+    if (Notification.permission === 'granted') {
+      _notifEnabled = true;
+      _updateNotifBtn();
+    }
+  }
+  btn.addEventListener('click', function() {
+    if (_notifEnabled) {
+      _notifEnabled = false;
+      _updateNotifBtn();
+      showToast('패턴 알림이 비활성화되었습니다', 'info');
+    } else {
+      _requestNotifPermission();
+    }
+  });
+})();
+
+
+// ══════════════════════════════════════════════════════
+//  전종목 패턴 스크리너 (P3 — Benchmark P1 최고 ROI)
+//  Worker batch scan: ALL_STOCKS 순회, 종목별 패턴 분석
+// ══════════════════════════════════════════════════════
+
+var _screenerRunning = false;
+var _screenerResults = [];
+var _screenerAbort = false;
+
+/** 패턴 한글명 매핑 (patternRenderer PATTERN_NAMES_KO 재사용) */
+function _getPatternKo(type) {
+  if (typeof patternRenderer !== 'undefined' && patternRenderer.PATTERN_NAMES_KO) {
+    return patternRenderer.PATTERN_NAMES_KO[type] || type;
+  }
+  return type;
+}
+
+/** 패턴 방향 판별 */
+function _getPatternDirection(p) {
+  var bull = ['hammer','bullishEngulfing','bullishHarami','piercingLine','morningStar',
+    'threeWhiteSoldiers','tweezerBottom','bullishMarubozu','invertedHammer',
+    'doubleBottom','inverseHeadAndShoulders','ascendingTriangle','fallingWedge'];
+  var bear = ['shootingStar','bearishEngulfing','bearishHarami','darkCloud','eveningStar',
+    'threeBlackCrows','tweezerTop','bearishMarubozu','hangingMan',
+    'doubleTop','headAndShoulders','descendingTriangle','risingWedge'];
+  if (bull.indexOf(p.type) !== -1) return 'bullish';
+  if (bear.indexOf(p.type) !== -1) return 'bearish';
+  return 'neutral';
+}
+
+/** 스크리너 결과 렌더 */
+function _renderScreenerResults(results, ptnFilter, dirFilter) {
+  var container = document.getElementById('sb-screener-results');
+  if (!container) return;
+  var filtered = results;
+  if (ptnFilter) filtered = filtered.filter(function(r) { return r.type === ptnFilter; });
+  if (dirFilter) filtered = filtered.filter(function(r) { return r.dir === dirFilter; });
+  // 신뢰도 내림차순
+  filtered.sort(function(a, b) { return b.confidence - a.confidence; });
+  if (filtered.length === 0) {
+    container.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:11px">결과 없음</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < Math.min(filtered.length, 200); i++) {
+    var r = filtered[i];
+    var dirCls = r.dir === 'bullish' ? 'bullish' : r.dir === 'bearish' ? 'bearish' : 'neutral';
+    var chgCls = r.change >= 0 ? 'up' : 'down';
+    var chgSign = r.change >= 0 ? '+' : '';
+    html += '<div class="sb-item" data-code="' + r.code + '" style="cursor:pointer">'
+      + '<div class="sb-row1">'
+      + '<span class="sb-name">' + r.name + '</span>'
+      + '<span class="sb-screener-ptn-badge ' + dirCls + '">' + _getPatternKo(r.type) + '</span>'
+      + '</div>'
+      + '<div class="sb-row2">'
+      + '<span class="sb-code">' + r.code + '</span>'
+      + '<span style="flex:1"></span>'
+      + '<span class="sb-change ' + chgCls + '">' + chgSign + r.change.toFixed(1) + '%</span>'
+      + '</div></div>';
+  }
+  container.innerHTML = html;
+
+  // 클릭 이벤트: 종목 선택
+  container.querySelectorAll('.sb-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var code = el.dataset.code;
+      if (code && typeof selectStock === 'function') selectStock(code);
+    });
+  });
+}
+
+/** 스크리너 패턴 select 옵션 동적 생성 */
+function _populateScreenerPatternSelect() {
+  var sel = document.getElementById('sb-screener-ptn');
+  if (!sel || sel.children.length > 1) return;
+  var types = [
+    'hammer','shootingStar','bullishEngulfing','bearishEngulfing',
+    'morningStar','eveningStar','threeWhiteSoldiers','threeBlackCrows',
+    'doubleBottom','doubleTop','headAndShoulders','inverseHeadAndShoulders',
+    'ascendingTriangle','descendingTriangle','fallingWedge','risingWedge'
+  ];
+  types.forEach(function(t) {
+    var opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = _getPatternKo(t);
+    sel.appendChild(opt);
+  });
+}
+
+/** 전종목 배치 스캔 실행 (Worker 병렬화) */
+async function _startScreenerScan() {
+  if (_screenerRunning) {
+    _screenerAbort = true;
+    return;
+  }
+  _screenerRunning = true;
+  _screenerAbort = false;
+  _screenerResults = [];
+
+  var runBtn = document.getElementById('sb-screener-run');
+  var statusEl = document.getElementById('sb-screener-status');
+  var progressEl = document.getElementById('sb-screener-progress');
+  var progressBar = document.getElementById('sb-screener-progress-bar');
+
+  if (runBtn) { runBtn.textContent = '중지'; }
+  if (progressEl) progressEl.style.display = 'block';
+  if (progressBar) progressBar.style.width = '0%';
+
+  var stocks = typeof dataService !== 'undefined' ? dataService.getStocks() : [];
+  var total = stocks.length;
+  var scanned = 0;
+
+  // ── Worker 생성 ────────────────────────────────────
+  var screenerWorker = null;
+  var workerReady = false;
+  try {
+    screenerWorker = new Worker('js/screenerWorker.js?v=1');
+  } catch (workerErr) {
+    console.warn('[Screener] Worker 생성 실패, 메인 스레드 폴백:', workerErr.message);
+  }
+
+  // Worker 결과 수신 대기용 resolve 함수 (한 번에 1종목씩 직렬 처리)
+  var _pendingResolve = null;
+
+  if (screenerWorker) {
+    screenerWorker.onmessage = function(e) {
+      var msg = e.data;
+      if (msg.type === 'ready') {
+        workerReady = true;
+        return;
+      }
+      if (msg.type === 'scan-result') {
+        // Worker 분석 결과를 메인 스레드에서 수집
+        var patterns = msg.patterns || [];
+        for (var j = 0; j < patterns.length; j++) {
+          var p = patterns[j];
+          _screenerResults.push({
+            code: msg.code,
+            name: msg.name,
+            type: p.type,
+            dir: _getPatternDirection(p),
+            confidence: p.confidence || 50,
+            change: 0,  // Worker에서는 stock 객체 미전송; 아래에서 보정
+          });
+        }
+        if (_pendingResolve) { _pendingResolve(); _pendingResolve = null; }
+        return;
+      }
+      if (msg.type === 'error') {
+        // Worker 내 에러 — 해당 종목 건너뛰기
+        if (_pendingResolve) { _pendingResolve(); _pendingResolve = null; }
+      }
+    };
+    screenerWorker.onerror = function() {
+      // Worker 전체 에러 — 대기 중인 Promise 해제
+      if (_pendingResolve) { _pendingResolve(); _pendingResolve = null; }
+    };
+
+    // Worker ready 대기 (최대 3초)
+    var readyStart = Date.now();
+    while (!workerReady && Date.now() - readyStart < 3000) {
+      await new Promise(function(r) { setTimeout(r, 50); });
+    }
+    if (!workerReady) {
+      console.warn('[Screener] Worker ready 타임아웃, 메인 스레드 폴백');
+      screenerWorker.terminate();
+      screenerWorker = null;
+    }
+  }
+
+  // ── 스캔 루프 ──────────────────────────────────────
+  for (var i = 0; i < total; i++) {
+    if (_screenerAbort) break;
+    var stock = stocks[i];
+
+    try {
+      // I/O는 메인 스레드 (IndexedDB/fetch)
+      var candles = await dataService.getCandles(stock, '1d');
+
+      if (candles && candles.length >= 30) {
+        if (screenerWorker) {
+          // ── Worker 경로: CPU 분석을 Worker에 위임 ──
+          var scanDone = new Promise(function(resolve) {
+            _pendingResolve = resolve;
+            screenerWorker.postMessage({
+              type: 'scan',
+              code: stock.code,
+              name: stock.name,
+              candles: candles,
+            });
+          });
+          // 타임아웃 5초 — 단일 종목이 Worker를 차단하지 않도록
+          var timeout = new Promise(function(resolve) { setTimeout(resolve, 5000); });
+          await Promise.race([scanDone, timeout]);
+
+          // change 보정 (Worker에서 stock 객체를 보내지 않으므로)
+          for (var k = _screenerResults.length - 1; k >= 0; k--) {
+            if (_screenerResults[k].code === stock.code && _screenerResults[k].change === 0) {
+              _screenerResults[k].change = stock.changePercent || 0;
+            } else {
+              break;  // 역순 탐색, 다른 종목 도달 시 중단
+            }
+          }
+        } else {
+          // ── 폴백: 메인 스레드 분석 (Worker 생성 실패 시) ──
+          var patterns = patternEngine.analyze(candles);
+          var recent = patterns.filter(function(p) {
+            var idx = p.endIndex != null ? p.endIndex : p.startIndex;
+            return idx != null && idx >= candles.length - 5;
+          });
+          for (var j = 0; j < recent.length; j++) {
+            var p = recent[j];
+            _screenerResults.push({
+              code: stock.code,
+              name: stock.name,
+              type: p.type,
+              dir: _getPatternDirection(p),
+              confidence: p.confidence || 50,
+              change: stock.changePercent || 0,
+            });
+          }
+        }
+      }
+    } catch (ex) { /* skip failed stock */ }
+
+    scanned++;
+    if (statusEl) statusEl.textContent = scanned + ' / ' + total;
+    if (progressBar) progressBar.style.width = (scanned / total * 100).toFixed(1) + '%';
+    // UI 응답성 유지 — 10종목마다 yield
+    if (scanned % 10 === 0) await new Promise(function(r) { setTimeout(r, 0); });
+  }
+
+  // ── 정리 ───────────────────────────────────────────
+  if (screenerWorker) {
+    screenerWorker.terminate();
+    screenerWorker = null;
+  }
+
+  _screenerRunning = false;
+  if (runBtn) { runBtn.textContent = '전종목 스캔'; }
+  if (statusEl) {
+    statusEl.textContent = _screenerResults.length + '개 패턴 (' + scanned + '종목 스캔)';
+  }
+  if (progressBar) progressBar.style.width = '100%';
+
+  // 결과 렌더
+  var ptnSel = document.getElementById('sb-screener-ptn');
+  var dirSel = document.getElementById('sb-screener-dir');
+  _renderScreenerResults(_screenerResults, ptnSel ? ptnSel.value : '', dirSel ? dirSel.value : '');
+}
+
+// 스크리너 이벤트 바인딩
+(function() {
+  var runBtn = document.getElementById('sb-screener-run');
+  if (runBtn) {
+    runBtn.addEventListener('click', _startScreenerScan);
+  }
+  var ptnSel = document.getElementById('sb-screener-ptn');
+  var dirSel = document.getElementById('sb-screener-dir');
+  if (ptnSel) {
+    ptnSel.addEventListener('change', function() {
+      _renderScreenerResults(_screenerResults, ptnSel.value, dirSel ? dirSel.value : '');
+    });
+  }
+  if (dirSel) {
+    dirSel.addEventListener('change', function() {
+      _renderScreenerResults(_screenerResults, ptnSel ? ptnSel.value : '', dirSel.value);
+    });
+  }
+  // 패턴 옵션 동적 생성 (DOM 로드 후)
+  setTimeout(_populateScreenerPatternSelect, 500);
+})();
 
 
 // ══════════════════════════════════════════════════════

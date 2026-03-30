@@ -101,6 +101,7 @@ class PatternBacktester {
     this._rlTier3 = new Set(['fallingWedge']);
     this._loadRLPolicy();
     this._loadBehavioralData();
+    this._loadCalibratedConstants();
   }
 
   /** [Phase I-L2] Behavioral data JSONs — core_data 18-21 quantification outputs */
@@ -153,6 +154,42 @@ class PatternBacktester {
       .catch(function() { /* silent fallback */ });
   }
 
+  /** Load calibrated constants JSON (graceful: missing file = no-op).
+   *  calibrated_constants.json: 5 parameters from calibrate_constants.py
+   *  Injects into PatternEngine static fields if available.
+   *  [C][L:GS] calibrate_constants.py offline pipeline output.
+   */
+  _calibratedAttempted = false;
+  _loadCalibratedConstants() {
+    if (this._calibratedAttempted) return;
+    this._calibratedAttempted = true;
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var url = isWorker
+      ? '../data/backtest/calibrated_constants.json'
+      : 'data/backtest/calibrated_constants.json';
+    fetch(url)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data) return;
+        // D1: candle_target_atr → PatternEngine.CANDLE_TARGET_ATR
+        if (data.D1 && data.D1.candle_target_atr && typeof PatternEngine !== 'undefined') {
+          var d1 = data.D1.candle_target_atr;
+          if (d1.strong > 0 && d1.medium > 0 && d1.weak > 0) {
+            PatternEngine.CANDLE_TARGET_ATR = {
+              strong: +d1.strong.toFixed(2),
+              medium: +d1.medium.toFixed(2),
+              weak: +d1.weak.toFixed(2),
+            };
+          }
+        }
+        // C2: conf_L N_scale (currently hardcoded as n/300)
+        // D3: rr_penalty thresholds
+        // These are embedded in function logic, not easily injectable.
+        // For now, D1 injection is the highest-impact automation.
+      })
+      .catch(function() { /* silent fallback — use hardcoded values */ });
+  }
+
   /** Build 7-dim context vector for LinUCB (resid dims removed — runtime N/A)
    *  @param {number} predicted — WLS predicted return
    *  @param {string} signal — 'buy'/'sell'/'neutral'
@@ -192,6 +229,7 @@ class PatternBacktester {
     // [D][L:BAY] Fallback mu/sigma for returns-based H (Anis & Lloyd 1976 finite-sample bias).
     // Staleness guard: rl_policy.json may have old price-level stats (mean>0.80).
     // Returns-based H centers ~0.55-0.65; price-level H centers ~0.95 (spurious).
+    // Fallback values from 2026-03-31 RL recalibration (rl_policy.json normalization.raw_hurst).
     var rawHurst = 0;
     if (candles && candles.length >= 40 && typeof calcHurst === 'function') {
       var hCloses = [];
@@ -202,8 +240,8 @@ class PatternBacktester {
         var hNorm = this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.raw_hurst;
         // Staleness guard: price-level H has mean>0.80; returns-based H has mean<0.80
         var hStale = hNorm && hNorm.mean > 0.80;
-        var hMean = (hNorm && !hStale) ? hNorm.mean : 0.6;
-        var hStd = (hNorm && !hStale) ? hNorm.std : 0.12;
+        var hMean = (hNorm && !hStale) ? hNorm.mean : 0.612;
+        var hStd = (hNorm && !hStale) ? hNorm.std : 0.133;
         rawHurst = Math.max(-3, Math.min(3, (hVal - hMean) / Math.max(hStd, 1e-6)));
       }
     }
@@ -531,6 +569,48 @@ class PatternBacktester {
     return Math.abs(tVal);
   }
 
+  /** Fat-tail adjusted t-critical — Cont (2001) "Stylized Facts of Asset Returns"
+   *  금융 수익률은 보편적으로 K > 3 (leptokurtic). 표준 t(df)는 꼬리 위험을 과소평가.
+   *  초과 첨도 K_e > 0.5일 때, 유효 자유도 nu = 4 + 6/(K_e) 로 축소하여
+   *  CI 폭을 현실적으로 확장한다. (K_e ≤ 0.5이면 정규 근사 충분)
+   *
+   *  @param {number} df — 원래 자유도 (n - 1)
+   *  @param {Array<number>} returns — 수익률 배열 (초과 첨도 계산용)
+   *  @param {number} [alpha=0.05] — 유의수준 (양측)
+   *  @returns {number} — fat-tail 보정된 t-critical (양수)
+   */
+  _tCritFatTail(df, returns, alpha) {
+    if (!alpha) alpha = 0.05;
+    if (!returns || returns.length < 4) return this._tCriticalForAlpha(alpha, df);
+
+    // 초과 첨도 (excess kurtosis) 계산: K_e = m4/m2^2 - 3
+    var n = returns.length;
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += returns[i];
+    var mean = sum / n;
+    var m2 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+      var d = returns[i] - mean;
+      var d2 = d * d;
+      m2 += d2;
+      m4 += d2 * d2;
+    }
+    m2 /= n;
+    m4 /= n;
+    if (m2 < 1e-12) return this._tCriticalForAlpha(alpha, df);
+    var excessKurtosis = (m4 / (m2 * m2)) - 3;
+
+    // Fat-tail 보정: K_e > 0.5 → 유효 df 축소
+    // nu_kurtosis ≈ 4 + 6/K_e (t-분포의 첨도 = 6/(nu-4), 역산)
+    var effectiveDf = df;
+    if (excessKurtosis > 0.5) {
+      var nuKurtosis = 4 + 6 / excessKurtosis;
+      effectiveDf = Math.min(df, Math.max(1, Math.floor(nuKurtosis)));
+    }
+
+    return this._tCriticalForAlpha(alpha, effectiveDf);
+  }
+
   /** 양측 t-분포 p-value 근사 — 정규 근사 + df 보정
    *  Abramowitz & Stegun 26.7.5: 정규 근사 z ≈ t * sqrt((df-0.667)/(df-0.333)) / sqrt(df)
    *  df >= 3에서 ~0.01 정확도 (Holm 정렬에 충분)
@@ -757,10 +837,11 @@ class PatternBacktester {
       const avgLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0) / lossReturns.length) : 0;
       const riskReward = avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? 999.99 : 0);
 
-      // t-검정: H0: mean = 0 (소표본 보정: 정밀 t-분포 임계값 테이블, 95% 양측)
+      // t-검정: H0: mean = 0 (fat-tail 보정 Cornish-Fisher 임계값, 95% 양측)
+      // Cont (2001): 금융 수익률 K > 3 → 유효 df 축소로 꼬리 위험 반영
       const tStat = stdDev > 0 && n > 1 ? mean / (stdDev / Math.sqrt(n)) : 0;
       const df = n - 1;
-      const tCritical = df >= 120 ? 1.96 : df >= 60 ? 2.00 : df >= 30 ? 2.04 : df >= 15 ? 2.13 : df >= 10 ? 2.23 : df >= 5 ? 2.57 : 4.30;
+      const tCritical = this._tCritFatTail(df, returns, 0.05);
       const significant = Math.abs(tStat) > tCritical;
 
       // 표본 수 경고
@@ -838,9 +919,9 @@ class PatternBacktester {
           for (var si = 0; si < X.length; si++) X[si][sj] /= sSd;
         }
 
-        // [C][L:GS] Ridge λ=1.0 (post-standardization). Hoerl, Kennard & Baldwin (1975).
-        // Pre-standardization λ=2.0 caused 278x unequal shrinkage; now uniform across features.
-        var reg = calcWLSRegression(X, returns, weights, 1.0);
+        // [C][L:GCV] Ridge λ auto-selected via GCV (Golub, Heath & Wahba 1979). Fallback λ=1.0.
+        var optLambda = selectRidgeLambdaGCV(X, returns, weights, 5);
+        var reg = calcWLSRegression(X, returns, weights, optLambda);
         if (reg) {
           // Reverse-transform coefficients to original scale (Friedman, Hastie & Tibshirani 2010)
           for (var rj = 1; rj < reg.coeffs.length; rj++) {
@@ -903,8 +984,9 @@ class PatternBacktester {
               }
             }
             var se = Math.sqrt(reg.sigmaHat2 * (1 + xInvx));
-            // [FIX-7] 정밀 t-분포 임계값 테이블 (95% 신뢰구간, 양측)
-            var tCrit = reg.df >= 120 ? 1.96 : reg.df >= 60 ? 2.00 : reg.df >= 30 ? 2.04 : reg.df >= 15 ? 2.13 : reg.df >= 10 ? 2.23 : reg.df >= 5 ? 2.57 : 4.30;
+            // [FIX-7] Fat-tail 보정 Cornish-Fisher 임계값 (95% CI, 양측)
+            // Cont (2001): 금융 수익률 초과 첨도 → 유효 df 축소
+            var tCrit = this._tCritFatTail(reg.df, returns, 0.05);
             stats.ci95Lower = +(predicted - tCrit * se).toFixed(2);
             stats.ci95Upper = +(predicted + tCrit * se).toFixed(2);
           }

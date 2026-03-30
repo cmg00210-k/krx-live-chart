@@ -62,6 +62,7 @@
       <input id="search-input" type="text" placeholder="종목명 또는 코드 검색..." autocomplete="off">
       <div id="search-dropdown"></div>
     </div>
+    <button id="notif-btn" class="notif-btn" title="패턴 알림 설정" style="display:none">&#128276;<span class="notif-badge" id="notif-badge" style="display:none">0</span></button>
     <div id="ticker-strip">
       <span id="market-state" class="market-state closed">장마감</span>
       <div class="ticker-item"><span class="ticker-name">KOSPI</span><span class="ticker-val" id="t-kospi">&mdash;</span></div>
@@ -103,10 +104,30 @@
         <div class="sb-view-group" id="sb-view-group">
           <button class="sb-view-opt active" data-view="default" title="기본">기본</button>
           <button class="sb-view-opt" data-view="analysis" title="상세">상세</button>
+          <button class="sb-view-opt" data-view="screener" title="전종목 패턴 스캔">스크린</button>
         </div>
         <button class="sb-chip sb-pattern-only-chip" data-filter="patternOnly" style="display:none">패턴 감지만</button>
       </div>
       <div class="sb-body">
+        <!-- 스크리너 패널 -->
+        <div class="sb-section sb-screener-panel" id="sb-screener-panel" style="display:none">
+          <div class="sb-screener-controls">
+            <select class="sb-sort-select" id="sb-screener-ptn">
+              <option value="">모든 패턴</option>
+            </select>
+            <select class="sb-sort-select" id="sb-screener-dir">
+              <option value="">방향 전체</option>
+              <option value="bullish">상승</option>
+              <option value="bearish">하락</option>
+            </select>
+            <button class="sb-screener-run-btn" id="sb-screener-run">전종목 스캔</button>
+          </div>
+          <div class="sb-screener-progress" id="sb-screener-progress" style="display:none">
+            <div class="sb-screener-progress-bar" id="sb-screener-progress-bar"></div>
+          </div>
+          <div class="sb-screener-status" id="sb-screener-status">스캔 준비</div>
+          <div class="sb-list" id="sb-screener-results"></div>
+        </div>
         <!-- 즐겨찾기 섹션 -->
         <div class="sb-section" id="sb-watchlist-section" style="display:none">
           <div class="sb-header" id="sb-watchlist-header">
@@ -191,12 +212,14 @@
 
       <!-- 차트 툴바 -->
       <div id="chart-toolbar">
-        <button class="tf-btn" data-tf="1m">1분</button>
+        <button class="tf-btn" data-tf="1m" disabled title="1분봉 미배포 (데이터 용량 제한)">1분</button>
         <button class="tf-btn" data-tf="5m">5분</button>
-        <button class="tf-btn" data-tf="15m">15분</button>
+        <button class="tf-btn tf-btn-resampled" data-tf="15m" title="5분봉 3봉 합산">15분</button>
         <button class="tf-btn" data-tf="30m">30분</button>
         <button class="tf-btn" data-tf="1h">1시간</button>
         <button class="tf-btn active" data-tf="1d">일봉</button>
+        <button class="tf-btn tf-btn-resampled" data-tf="1w" title="일봉 합산 (주별 그룹)">주봉</button>
+        <button class="tf-btn tf-btn-resampled" data-tf="1M" title="일봉 합산 (월별 그룹)">월봉</button>
         <div class="sep"></div>
         <button class="ct-btn active" data-ct="candle">캔들</button>
         <button class="ct-btn" data-ct="line">라인</button>
@@ -632,19 +655,19 @@
   <!-- ?v= 캐시 버스팅: 코드 배포 시 숫자를 올리면 CDN/브라우저 캐시 즉시 무효화 -->
   <script defer src="js/colors.js?v=12"></script>
   <script defer src="js/data.js?v=10"></script>
-  <script defer src="js/api.js?v=10"></script>
+  <script defer src="js/api.js?v=12"></script>
   <script defer src="js/realtimeProvider.js?v=10"></script>
-  <script defer src="js/indicators.js?v=15"></script>
-  <script defer src="js/patterns.js?v=33"></script>
+  <script defer src="js/indicators.js?v=18"></script>
+  <script defer src="js/patterns.js?v=34"></script>
   <script defer src="js/signalEngine.js?v=27"></script>
   <script defer src="js/chart.js?v=12"></script>
   <script defer src="js/patternRenderer.js?v=17"></script>
   <script defer src="js/signalRenderer.js?v=10"></script>
-  <script defer src="js/backtester.js?v=28"></script>
-  <script defer src="js/sidebar.js?v=10"></script>
+  <script defer src="js/backtester.js?v=30"></script>
+  <script defer src="js/sidebar.js?v=11"></script>
   <script defer src="js/patternPanel.js?v=16"></script>
   <script defer src="js/financials.js?v=11"></script>
   <script defer src="js/drawingTools.js?v=10"></script>
-  <script defer src="js/app.js?v=24"></script>
+  <script defer src="js/app.js?v=26"></script>
 </body>
 </html>

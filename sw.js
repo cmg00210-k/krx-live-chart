@@ -5,7 +5,7 @@
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'cheesestock-v33';
+const CACHE_NAME = 'cheesestock-v35';
 
 // 오프라인 시에도 앱 실행에 필요한 정적 자산 목록
 const STATIC_ASSETS = [
@@ -29,6 +29,7 @@ const STATIC_ASSETS = [
   '/js/drawingTools.js',
   '/js/realtimeProvider.js',
   '/js/analysisWorker.js',
+  '/js/screenerWorker.js',
   '/js/app.js',
 ];
 

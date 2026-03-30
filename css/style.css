@@ -158,6 +158,22 @@ html, body {
 .market-tag.kospi { background: rgba(41,98,255,0.15); color: #5b8af5; }
 .market-tag.kosdaq { background: rgba(156,39,176,0.15); color: #ce93d8; }
 
+/* ── NOTIFICATION BELL ── */
+.notif-btn {
+  position: relative; background: none; border: none; color: var(--text-muted);
+  font-size: 16px; cursor: pointer; padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius); transition: all var(--transition);
+  min-width: 32px; min-height: 32px; display: flex; align-items: center; justify-content: center;
+}
+.notif-btn:hover { color: var(--accent); background: var(--bg-element); }
+.notif-btn.notif-active { color: var(--accent); }
+.notif-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 14px; height: 14px;
+  background: var(--up); color: #fff; font-size: 9px; font-weight: 700;
+  font-family: var(--font-mono); border-radius: 7px;
+  display: flex; align-items: center; justify-content: center; padding: 0 3px; line-height: 1;
+}
+
 /* ── TICKER ── */
 #ticker-strip { margin-left: auto; display: flex; gap: var(--sp-4); align-items: center; }
 .ticker-item { display: flex; flex-direction: column; align-items: flex-end; }
@@ -404,6 +420,40 @@ html, body {
   border-color: var(--accent);
   background: rgba(160,136,48,0.08);
 }
+/* ── 스크리너 패널 ── */
+.sb-screener-panel { display: flex; flex-direction: column; flex: 1; }
+.sb-screener-controls {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+  padding: var(--sp-2); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.sb-screener-run-btn {
+  grid-column: 1 / -1; height: var(--ctrl-h-md);
+  background: var(--accent); border: none; border-radius: var(--ctrl-radius);
+  color: #0A0A0A; font-size: var(--ctrl-font); font-weight: 700;
+  font-family: var(--font-sans); cursor: pointer; transition: opacity var(--transition);
+}
+.sb-screener-run-btn:hover { opacity: 0.85; }
+.sb-screener-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.sb-screener-status {
+  font-size: var(--fs-nano); color: var(--text-muted);
+  padding: 4px var(--sp-3); text-align: center; flex-shrink: 0;
+}
+.sb-screener-progress {
+  height: 2px; background: var(--border); margin: 0 var(--sp-3);
+  border-radius: 1px; overflow: hidden; flex-shrink: 0;
+}
+.sb-screener-progress-bar {
+  height: 100%; background: var(--accent); width: 0%; transition: width 0.1s linear;
+}
+.sb-screener-ptn-badge {
+  display: inline-flex; align-items: center; font-size: 9px; font-weight: 700;
+  font-family: var(--font-sans); padding: 1px 4px; border-radius: 3px;
+  flex-shrink: 0; white-space: nowrap;
+}
+.sb-screener-ptn-badge.bullish { background: rgba(224,80,80,0.15); color: var(--up); }
+.sb-screener-ptn-badge.bearish { background: rgba(80,134,220,0.15); color: var(--down); }
+.sb-screener-ptn-badge.neutral { background: rgba(255,235,59,0.12); color: var(--neutral); }
+
 /* 사이드바 컨트롤 focus-visible 2px 통일 */
 .sb-sort-select:focus-visible,
 .sb-sector-select:focus-visible,
@@ -1116,6 +1166,18 @@ html, body {
 }
 .tf-btn:hover, .ct-btn:hover, .ind-btn:hover { color: var(--text); background: var(--bg-element); }
 .tf-btn.active, .ct-btn.active, .ind-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+/* 클라이언트 리샘플링 타임프레임 표시 — 서버 파일 없이 합성 생성됨을 암시 */
+.tf-btn-resampled { position: relative; }
+.tf-btn-resampled::after {
+  content: '~';
+  font-size: 8px;
+  color: var(--text-muted);
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  line-height: 1;
+}
+.tf-btn-resampled.active::after { color: rgba(255,255,255,0.5); }
 /* ── 툴바 좌/우 분리: 지표·패턴·표시 그룹을 우측으로 밀기 ── */
 .toolbar-right {
   margin-left: auto;

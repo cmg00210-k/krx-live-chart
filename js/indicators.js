@@ -392,6 +392,157 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
   };
 }
 
+/**
+ * Jacobi eigenvalue algorithm for symmetric matrices (p <= 10).
+ * Returns eigenvalues and eigenvectors for GCV lambda selection.
+ * @param {number[][]} A - p x p symmetric matrix (modified in-place → diagonal)
+ * @param {number} p - matrix dimension
+ * @returns {{ eigenvalues: number[], eigenvectors: number[][] }}
+ */
+function _jacobiEigen(A, p) {
+  // Identity matrix for eigenvector accumulation
+  var V = [];
+  for (var i = 0; i < p; i++) {
+    V[i] = new Array(p).fill(0);
+    V[i][i] = 1;
+  }
+  for (var iter = 0; iter < 100; iter++) {
+    // Find largest off-diagonal |A[pi][qi]|
+    var maxVal = 0, pi = 0, qi = 1;
+    for (var i = 0; i < p; i++) {
+      for (var j = i + 1; j < p; j++) {
+        if (Math.abs(A[i][j]) > maxVal) {
+          maxVal = Math.abs(A[i][j]);
+          pi = i; qi = j;
+        }
+      }
+    }
+    if (maxVal < 1e-12) break;
+    // Givens rotation angle
+    var diff = A[qi][qi] - A[pi][pi];
+    var t;
+    if (Math.abs(A[pi][qi]) < 1e-15 * Math.abs(diff)) {
+      t = A[pi][qi] / diff;
+    } else {
+      var phi = diff / (2 * A[pi][qi]);
+      t = 1 / (Math.abs(phi) + Math.sqrt(phi * phi + 1));
+      if (phi < 0) t = -t;
+    }
+    var c = 1 / Math.sqrt(t * t + 1);
+    var s = t * c;
+    var tau = s / (1 + c);
+    // Apply rotation to A
+    var tmp = A[pi][qi];
+    A[pi][qi] = 0;
+    A[pi][pi] -= t * tmp;
+    A[qi][qi] += t * tmp;
+    for (var j = 0; j < p; j++) {
+      if (j === pi || j === qi) continue;
+      var g = A[pi][j], h = A[qi][j];
+      A[pi][j] = g - s * (h + g * tau);
+      A[qi][j] = h + s * (g - h * tau);
+      A[j][pi] = A[pi][j];
+      A[j][qi] = A[qi][j];
+    }
+    // Accumulate eigenvectors
+    for (var j = 0; j < p; j++) {
+      var g2 = V[j][pi], h2 = V[j][qi];
+      V[j][pi] = g2 - s * (h2 + g2 * tau);
+      V[j][qi] = h2 + s * (g2 - h2 * tau);
+    }
+  }
+  var evals = new Array(p);
+  for (var i = 0; i < p; i++) evals[i] = A[i][i];
+  return { eigenvalues: evals, eigenvectors: V };
+}
+
+/**
+ * GCV-optimal Ridge lambda selection. Golub, Heath & Wahba (1979), Technometrics 21(2).
+ * Selects lambda minimizing GCV(λ) = (RSS/n) / (1 - tr(H_λ)/n)².
+ * Uses Jacobi eigendecomposition of XᵀWX for efficient trace computation.
+ *
+ * @param {number[][]} X - n x p standardized design matrix (col 0 = intercept)
+ * @param {number[]} y - n x 1 response (returns)
+ * @param {number[]} weights - n x 1 exponential decay weights
+ * @param {number} p - column count (5)
+ * @returns {number} optimal lambda (1.0 fallback if GCV unreliable)
+ */
+function selectRidgeLambdaGCV(X, y, weights, p) {
+  var n = X.length;
+  if (n < 2 * p) return 1.0;
+
+  // Step 1: Form A = XᵀWX (p x p) and b = XᵀWy (p x 1)
+  var A = [], b = new Array(p).fill(0), yNorm2 = 0;
+  for (var j = 0; j < p; j++) A[j] = new Array(p).fill(0);
+  for (var i = 0; i < n; i++) {
+    var w = weights ? weights[i] : 1;
+    yNorm2 += w * y[i] * y[i];
+    for (var j = 0; j < p; j++) {
+      b[j] += X[i][j] * w * y[i];
+      for (var k = j; k < p; k++) {
+        var val = X[i][j] * w * X[i][k];
+        A[j][k] += val;
+        if (k !== j) A[k][j] += val;
+      }
+    }
+  }
+
+  // Step 2: Eigendecompose A (deep copy — Jacobi modifies in-place)
+  var Ac = [];
+  for (var j = 0; j < p; j++) Ac[j] = A[j].slice();
+  var eig = _jacobiEigen(Ac, p);
+  var sigma = eig.eigenvalues;
+  var V = eig.eigenvectors;
+  for (var j = 0; j < p; j++) {
+    if (sigma[j] < 1e-10) sigma[j] = 1e-10;
+  }
+
+  // Step 3: z = Vᵀ b
+  var z = new Array(p).fill(0);
+  for (var j = 0; j < p; j++) {
+    for (var k = 0; k < p; k++) z[j] += V[k][j] * b[k];
+  }
+
+  // Step 4: RSS_perp (lambda-independent)
+  var rssPerp = yNorm2;
+  for (var j = 0; j < p; j++) rssPerp -= z[j] * z[j] / sigma[j];
+  if (rssPerp < 0) rssPerp = 0;
+
+  // Step 5: GCV grid search
+  var grid = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
+  var bestLam = 1.0, bestGCV = Infinity;
+  var gcvArr = [];
+  for (var gi = 0; gi < grid.length; gi++) {
+    var lam = grid[gi];
+    var trH = 0, rssBias = 0;
+    for (var j = 0; j < p; j++) {
+      var lamj = (j === 0) ? 0 : lam;
+      var den = sigma[j] + lamj;
+      trH += sigma[j] / den;
+      rssBias += lamj * lamj * z[j] * z[j] / (sigma[j] * den * den);
+    }
+    var rss = rssPerp + rssBias;
+    var gcvDen = 1 - trH / n;
+    if (gcvDen < 0.05) { gcvArr.push(Infinity); continue; }
+    var gcv = (rss / n) / (gcvDen * gcvDen);
+    gcvArr.push(gcv);
+    if (gcv < bestGCV) { bestGCV = gcv; bestLam = lam; }
+  }
+
+  // Step 6: Flatness check — if GCV varies < 1%, surface is flat → default
+  var gcvMin = Infinity, gcvMax = -Infinity, cnt = 0;
+  for (var gi = 0; gi < gcvArr.length; gi++) {
+    if (gcvArr[gi] < Infinity) {
+      if (gcvArr[gi] < gcvMin) gcvMin = gcvArr[gi];
+      if (gcvArr[gi] > gcvMax) gcvMax = gcvArr[gi];
+      cnt++;
+    }
+  }
+  if (cnt >= 2 && gcvMin > 0 && (gcvMax - gcvMin) / gcvMin < 0.01) return 1.0;
+
+  return bestLam;
+}
+
 /** OLS 추세선 — calcWLSRegression wrapper (uniform weights, λ=0)
  *  Lo & MacKinlay (1999): 가격 수준 R² > 0.15 = 추세 존재, > 0.50 = 강한 추세
  *  slope는 ATR(14)로 정규화하여 가격대 무관 비교 가능
@@ -865,6 +1016,296 @@ function calcTheilSen(xValues, yValues) {
 
 
 // ══════════════════════════════════════════════════════
+//  EWMA 변동성 — J.P. Morgan RiskMetrics (1996) IGARCH
+//  Bollerslev (1986) GARCH(1,1) 특수 케이스 (omega=0, alpha+beta=1)
+//  σ²_t = λ·σ²_{t-1} + (1-λ)·r²_{t-1},  r_t = ln(P_t / P_{t-1})
+//  [B] lambda=0.94 — Academic Tunable (RiskMetrics daily default)
+// ══════════════════════════════════════════════════════
+
+/**
+ * EWMA 조건부 변동성 계산
+ * Bollerslev (1986) GARCH(1,1) IGARCH 특수 케이스 (omega=0)
+ * J.P. Morgan RiskMetrics (1996): lambda=0.94 for daily data
+ *
+ * @param {number[]} closes — 종가 배열 (양수)
+ * @param {number} [lambda=0.94] — 감쇠 계수 [B] Tunable: 일간=0.94, 분간=0.97
+ * @returns {number[]} — 조건부 표준편차 배열 (index 0 = null, 최소 2개 필요)
+ */
+function calcEWMAVol(closes, lambda) {
+  if (lambda === undefined || lambda === null) lambda = 0.94; // [B] RiskMetrics default
+  var len = closes.length;
+  var result = new Array(len).fill(null);
+  if (len < 2) return result;
+
+  // log-returns: r_t = ln(P_t / P_{t-1}). 양수 방어
+  var returns = new Array(len).fill(null);
+  for (var i = 1; i < len; i++) {
+    if (closes[i] <= 0 || closes[i - 1] <= 0) return result; // 음수/0 가격 방어
+    returns[i] = Math.log(closes[i] / closes[i - 1]);
+  }
+
+  // 초기 분산: 첫 min(20, len-1)개 수익률의 표본 분산
+  var initN = Math.min(20, len - 1);
+  var initSum = 0, initSumSq = 0;
+  for (var i = 1; i <= initN; i++) {
+    initSum += returns[i];
+    initSumSq += returns[i] * returns[i];
+  }
+  var initMean = initSum / initN;
+  var initVar = initSumSq / initN - initMean * initMean;
+  if (initVar <= 0) initVar = 1e-8; // flat-price 방어
+
+  // EWMA 재귀: σ²_t = λ·σ²_{t-1} + (1-λ)·r²_{t-1}
+  var variance = initVar;
+  var oneMinusLambda = 1 - lambda;
+
+  for (var i = 1; i < len; i++) {
+    var r = returns[i]; // r_i = ln(P_i / P_{i-1})
+    if (r === null) break;
+    // 업데이트: 직전 수익률로 현재 분산 추정
+    variance = lambda * variance + oneMinusLambda * returns[i] * returns[i];
+    result[i] = Math.sqrt(variance);
+  }
+  return result;
+}
+
+/**
+ * 변동성 레짐 분류 — 장기 평균 대비 현재 변동성 비율
+ * 장기 평균: EMA(σ, alpha=0.01) — ~100 bar half-life (2/alpha - 1 ≈ 199)
+ *
+ * @param {number[]} ewmaVol — calcEWMAVol() 반환값 (null 포함)
+ * @returns {string[]} — 'low' (ratio < 0.75) | 'mid' (0.75-1.50) | 'high' (> 1.50) | null
+ */
+function classifyVolRegime(ewmaVol) {
+  var len = ewmaVol.length;
+  var result = new Array(len).fill(null);
+  var longRunEMA = null;
+  var alpha = 0.01; // [B] ~100 bar half-life: EMA alpha for long-run mean
+
+  for (var i = 0; i < len; i++) {
+    var sigma = ewmaVol[i];
+    if (sigma === null || sigma <= 0) continue;
+
+    if (longRunEMA === null) {
+      longRunEMA = sigma;
+    } else {
+      longRunEMA = alpha * sigma + (1 - alpha) * longRunEMA;
+    }
+
+    if (longRunEMA <= 0) continue;
+    var ratio = sigma / longRunEMA;
+
+    if (ratio < 0.75) {
+      result[i] = 'low';
+    } else if (ratio <= 1.50) {
+      result[i] = 'mid';
+    } else {
+      result[i] = 'high';
+    }
+  }
+  return result;
+}
+
+// ══════════════════════════════════════════════════════
+//  구조적 변환점 탐지 — Page (1954) CUSUM + Bai-Perron (1998)
+//  레짐 인식 패턴 가중치를 위한 변환점 검출
+// ══════════════════════════════════════════════════════
+
+/**
+ * Online CUSUM 변환점 탐지 — Page (1954)
+ * 양방향 CUSUM + 슬랙 파라미터로 ARL 최적화 (Roberts 1966)
+ *
+ * @param {number[]} returns — 로그수익률 배열
+ * @param {number} [threshold=2.5] — 탐지 임계값 (σ 단위)
+ * @returns {{breakpoints: Array<{index:number, direction:string, magnitude:number}>,
+ *            cusum: {plus:number, minus:number}, isRecent: boolean}}
+ */
+function calcOnlineCUSUM(returns, threshold) {
+  if (threshold === undefined || threshold === null) threshold = 2.5;
+
+  var empty = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false };
+  if (!returns || returns.length < 40) return empty;
+
+  var len = returns.length;
+  var breakpoints = [];
+
+  // EMA 기반 러닝 평균/분산 — alpha = 2/31 (~30-bar half-life)
+  var alpha = 2 / 31;   // [B] ~30-bar half-life for adaptive mean/variance
+  var slack = 0.5;       // [B] Roberts (1966) ARL 최적화 슬랙
+  var warmup = 30;       // [B] 워밍업 기간 (초기 평균/분산 안정화)
+
+  // 초기 통계: 첫 warmup 구간의 표본 평균/분산
+  var initSum = 0;
+  var initSumSq = 0;
+  for (var i = 0; i < warmup; i++) {
+    initSum += returns[i];
+    initSumSq += returns[i] * returns[i];
+  }
+  var runMean = initSum / warmup;
+  var runVar = initSumSq / warmup - runMean * runMean;
+  if (runVar <= 0) runVar = 1e-10; // flat-price 방어
+
+  // 양방향 CUSUM 상태
+  var sPlus = 0;   // 상향 감지 CUSUM
+  var sMinus = 0;  // 하향 감지 CUSUM
+
+  for (var i = warmup; i < len; i++) {
+    var r = returns[i];
+
+    // z-score 표준화
+    var sigma = Math.sqrt(runVar);
+    if (sigma < 1e-12) sigma = 1e-12;
+    var z = (r - runMean) / sigma;
+
+    // 양방향 CUSUM 업데이트 (슬랙 차감 후 0 이상 유지)
+    sPlus = Math.max(0, sPlus + z - slack);
+    sMinus = Math.max(0, sMinus - z - slack);
+
+    // 임계값 초과 → 변환점 기록 + CUSUM 리셋
+    if (sPlus > threshold) {
+      breakpoints.push({ index: i, direction: 'up', magnitude: sPlus });
+      sPlus = 0;
+    }
+    if (sMinus > threshold) {
+      breakpoints.push({ index: i, direction: 'down', magnitude: sMinus });
+      sMinus = 0;
+    }
+
+    // EMA 기반 러닝 통계 업데이트
+    runMean = alpha * r + (1 - alpha) * runMean;
+    var diff = r - runMean;
+    runVar = alpha * (diff * diff) + (1 - alpha) * runVar;
+    if (runVar <= 0) runVar = 1e-10;
+  }
+
+  // isRecent: 마지막 변환점이 최근 20 바 이내인지
+  var isRecent = false;
+  if (breakpoints.length > 0) {
+    isRecent = (len - 1 - breakpoints[breakpoints.length - 1].index) <= 20;
+  }
+
+  return {
+    breakpoints: breakpoints,
+    cusum: { plus: sPlus, minus: sMinus },
+    isRecent: isRecent
+  };
+}
+
+/**
+ * 이진 분할 구조적 변환점 — 단순화 Bai-Perron (1998)
+ * BIC 기준 최적 분할점 탐색 (Greedy binary segmentation)
+ *
+ * 복잡도: O(n × maxBreaks × maxSegmentSize)
+ * 252-bar, maxBreaks=3 → ~576 반복 (실시간 적합)
+ *
+ * @param {number[]} returns — 로그수익률 배열
+ * @param {number} [maxBreaks=3] — 최대 변환점 수
+ * @param {number} [minSegment=30] — 최소 구간 길이
+ * @returns {{breakpoints: Array<{index:number, leftMean:number, rightMean:number,
+ *            leftStd:number, rightStd:number, bicDelta:number}>}}
+ */
+function calcBinarySegmentation(returns, maxBreaks, minSegment) {
+  if (maxBreaks === undefined || maxBreaks === null) maxBreaks = 3;
+  if (minSegment === undefined || minSegment === null) minSegment = 30;
+
+  var empty = { breakpoints: [] };
+  if (!returns || returns.length < 2 * minSegment) return empty;
+
+  var len = returns.length;
+
+  // 구간 [start, end)의 BIC 계산
+  // BIC = n * log(max(RSS/n, 1e-12)) + 2 * log(n)
+  function segmentBIC(start, end) {
+    var n = end - start;
+    if (n <= 1) return 0;
+    var sum = 0;
+    for (var i = start; i < end; i++) sum += returns[i];
+    var mean = sum / n;
+    var rss = 0;
+    for (var i = start; i < end; i++) {
+      var d = returns[i] - mean;
+      rss += d * d;
+    }
+    return n * Math.log(Math.max(rss / n, 1e-12)) + 2 * Math.log(n);
+  }
+
+  // 구간 통계 계산 헬퍼
+  function segmentStats(start, end) {
+    var n = end - start;
+    if (n <= 0) return { mean: 0, std: 0 };
+    var sum = 0;
+    for (var i = start; i < end; i++) sum += returns[i];
+    var mean = sum / n;
+    var sumSq = 0;
+    for (var i = start; i < end; i++) {
+      var d = returns[i] - mean;
+      sumSq += d * d;
+    }
+    return { mean: mean, std: Math.sqrt(sumSq / n) };
+  }
+
+  // 초기 구간 목록: 전체 [0, len)
+  var segments = [{ start: 0, end: len }];
+  var breakpoints = [];
+
+  for (var iter = 0; iter < maxBreaks; iter++) {
+    var bestDelta = 0;     // BIC 개선량 (양수 = 개선)
+    var bestSplit = -1;    // 분할 위치
+    var bestSegIdx = -1;   // 분할 대상 구간 인덱스
+
+    // 각 구간에서 최적 분할점 탐색
+    for (var s = 0; s < segments.length; s++) {
+      var seg = segments[s];
+      var segLen = seg.end - seg.start;
+      if (segLen < 2 * minSegment) continue; // 분할 불가능한 짧은 구간
+
+      var parentBIC = segmentBIC(seg.start, seg.end);
+
+      // 최소 구간 길이를 보장하는 범위 내에서 분할점 탐색
+      for (var k = seg.start + minSegment; k <= seg.end - minSegment; k++) {
+        var leftBIC = segmentBIC(seg.start, k);
+        var rightBIC = segmentBIC(k, seg.end);
+        var delta = parentBIC - (leftBIC + rightBIC); // 양수 = 분할이 개선
+
+        if (delta > bestDelta) {
+          bestDelta = delta;
+          bestSplit = k;
+          bestSegIdx = s;
+        }
+      }
+    }
+
+    // BIC 개선 없으면 조기 종료
+    if (bestDelta <= 0 || bestSegIdx < 0) break;
+
+    // 변환점 기록 (좌/우 구간 통계 포함)
+    var parentSeg = segments[bestSegIdx];
+    var leftStats = segmentStats(parentSeg.start, bestSplit);
+    var rightStats = segmentStats(bestSplit, parentSeg.end);
+
+    breakpoints.push({
+      index: bestSplit,
+      leftMean: leftStats.mean,
+      rightMean: rightStats.mean,
+      leftStd: leftStats.std,
+      rightStd: rightStats.std,
+      bicDelta: bestDelta
+    });
+
+    // 구간 분할: 부모 구간을 좌/우 두 구간으로 교체
+    segments.splice(bestSegIdx, 1,
+      { start: parentSeg.start, end: bestSplit },
+      { start: bestSplit, end: parentSeg.end }
+    );
+  }
+
+  // 인덱스 순으로 정렬
+  breakpoints.sort(function(a, b) { return a.index - b.index; });
+
+  return { breakpoints: breakpoints };
+}
+
+// ══════════════════════════════════════════════════════
 //  IndicatorCache — Lazy Evaluation 지표 캐시
 //  필요한 지표만 최초 접근 시 계산, 캔들 변경 시 invalidate
 // ══════════════════════════════════════════════════════
@@ -1035,6 +1476,75 @@ class IndicatorCache {
           if (cl[i - 1] > 0) rets.push((cl[i] - cl[i - 1]) / cl[i - 1]);
         }
         this._cache[key] = calcHillEstimator(rets, k);
+      }
+    }
+    return this._cache[key];
+  }
+
+  /** EWMA 조건부 변동성 배열 — RiskMetrics lambda=0.94 [B] */
+  ewmaVol(lambda) {
+    var lam = (lambda !== undefined && lambda !== null) ? lambda : 0.94;
+    var key = 'ewmaVol_' + lam;
+    if (!(key in this._cache)) {
+      this._cache[key] = calcEWMAVol(this.closes, lam);
+    }
+    return this._cache[key];
+  }
+
+  /** 변동성 레짐 분류 배열 — 'low'/'mid'/'high'/null [B] */
+  volRegime(lambda) {
+    var lam = (lambda !== undefined && lambda !== null) ? lambda : 0.94;
+    var key = 'volRegime_' + lam;
+    if (!(key in this._cache)) {
+      this._cache[key] = classifyVolRegime(this.ewmaVol(lam));
+    }
+    return this._cache[key];
+  }
+
+  // ── 구조적 변환점 접근자 ──────────────────────────────
+
+  /** Online CUSUM 변환점 — Page (1954), Roberts (1966) slack */
+  cusum(threshold) {
+    var thr = (threshold !== undefined && threshold !== null) ? threshold : 2.5;
+    var key = 'cusum_' + thr;
+    if (!(key in this._cache)) {
+      var cl = this.closes;
+      if (cl.length < 2) {
+        this._cache[key] = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false };
+      } else {
+        var rets = [];
+        for (var i = 1; i < cl.length; i++) {
+          if (cl[i] > 0 && cl[i - 1] > 0) {
+            rets.push(Math.log(cl[i] / cl[i - 1]));
+          } else {
+            rets.push(0);
+          }
+        }
+        this._cache[key] = calcOnlineCUSUM(rets, thr);
+      }
+    }
+    return this._cache[key];
+  }
+
+  /** 이진 분할 구조적 변환점 — Bai-Perron (1998) */
+  binarySegmentation(maxBreaks, minSegment) {
+    var mb = (maxBreaks !== undefined && maxBreaks !== null) ? maxBreaks : 3;
+    var ms = (minSegment !== undefined && minSegment !== null) ? minSegment : 30;
+    var key = 'binSeg_' + mb + '_' + ms;
+    if (!(key in this._cache)) {
+      var cl = this.closes;
+      if (cl.length < 2) {
+        this._cache[key] = { breakpoints: [] };
+      } else {
+        var rets = [];
+        for (var i = 1; i < cl.length; i++) {
+          if (cl[i] > 0 && cl[i - 1] > 0) {
+            rets.push(Math.log(cl[i] / cl[i - 1]));
+          } else {
+            rets.push(0);
+          }
+        }
+        this._cache[key] = calcBinarySegmentation(rets, mb, ms);
       }
     }
     return this._cache[key];

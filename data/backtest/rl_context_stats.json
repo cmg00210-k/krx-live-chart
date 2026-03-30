@@ -1,6 +1,6 @@
 {
   "n_samples": 47759,
-  "n_complete": 42759,
+  "n_complete": 42294,
   "features": {
     "resid_sign": {
       "mean": -0.124751,
@@ -24,11 +24,11 @@
       "pct_zero": 5.6
     },
     "ewma_vol": {
-      "mean": 0.08941,
-      "std": 0.957572,
-      "min": -1.8608,
+      "mean": 0.116332,
+      "std": 0.986187,
+      "min": -1.905,
       "max": 3.0,
-      "pct_zero": 10.5
+      "pct_zero": 11.4
     },
     "pred_magnitude": {
       "mean": 1.029461,
@@ -66,25 +66,25 @@
       "pct_zero": 0.0
     },
     "raw_hurst": {
-      "mean": 0.042018,
-      "std": 0.932004,
+      "mean": 0.118719,
+      "std": 1.025451,
       "min": -3.0,
       "max": 3.0,
-      "pct_zero": 10.5
+      "pct_zero": 11.4
     },
     "move_atr": {
-      "mean": -0.004229,
-      "std": 0.882494,
-      "min": -1.4965,
+      "mean": -0.005712,
+      "std": 0.897719,
+      "min": -1.5,
       "max": 3.0,
-      "pct_zero": 10.5
+      "pct_zero": 11.4
     },
     "jeffrey_div": {
-      "mean": -0.066999,
-      "std": 0.449599,
-      "min": -0.9963,
+      "mean": -0.020008,
+      "std": 0.600743,
+      "min": -0.9999,
       "max": 3.0,
-      "pct_zero": 10.9
+      "pct_zero": 11.9
     }
   },
   "feature_residual_correlation": {
@@ -101,7 +101,7 @@
       "p_value": 0.0
     },
     "ewma_vol": {
-      "spearman_r": -0.080832,
+      "spearman_r": -0.087179,
       "p_value": 0.0
     },
     "pred_magnitude": {
@@ -125,37 +125,37 @@
       "p_value": 0.436269
     },
     "raw_hurst": {
-      "spearman_r": 0.003597,
-      "p_value": 0.431888
+      "spearman_r": -0.022463,
+      "p_value": 1e-06
     },
     "move_atr": {
-      "spearman_r": -0.020098,
-      "p_value": 1.1e-05
+      "spearman_r": -0.019798,
+      "p_value": 1.5e-05
     },
     "jeffrey_div": {
-      "spearman_r": -0.026643,
+      "spearman_r": -0.042789,
       "p_value": 0.0
     }
   },
   "high_correlations": {},
   "normalization": {
     "ewma_vol": {
-      "mean": 0.026411,
-      "std": 0.019188
+      "mean": 0.02644,
+      "std": 0.019218
     },
     "raw_hurst": {
-      "mean": 0.947134,
-      "std": 0.075901
+      "mean": 0.611995,
+      "std": 0.133399
     },
     "pred_std": 1.409038,
     "move_atr": {
-      "mean": 1.735149,
-      "std": 1.526166
+      "mean": 1.737511,
+      "std": 1.528832
     },
     "jeffrey_div": {
-      "mean": 425.762508,
-      "std": 46780.910964
+      "mean": 430.947923,
+      "std": 47065.912859
     }
   },
-  "elapsed_seconds": 37.0
+  "elapsed_seconds": 36.7
 }
