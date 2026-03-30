@@ -64,6 +64,7 @@ EXCLUDE_EXACT = {
     os.path.join("data", "backtest", "raw_results.ndjson"),
     os.path.join("data", "backtest", "batch_log.txt"),
     os.path.join("data", "backtest", "wr_5year.txt"),
+    os.path.join("data", "historical_mcap.json"),  # 13MB, unused by JS runtime
 }
 
 # ---------------------------------------------------------------------------
