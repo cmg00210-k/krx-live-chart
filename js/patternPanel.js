@@ -195,6 +195,86 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '거래량이 평균 이하이면 유동성 부족에 의한 왜곡 가능. 하락 추세 말기에 나타나면 클라이맥스 매도(바닥 경고)로 해석될 수 있음.'
   },
 
+  longLeggedDoji: {
+    nameKo: '긴다리도지',
+    category: '캔들스틱 (중립)',
+    candles: 1,
+    academicDesc: '시가와 종가가 거의 동일하며, 위아래 모두 긴 꼬리를 가진 도지. 장중 큰 폭의 상승과 하락이 동시에 발생했으나 결국 시가 근처로 복귀. 극도의 우유부단 신호.',
+    psychology: '매수세와 매도세가 장중 격렬하게 충돌했으나 어느 쪽도 승리하지 못함. 추세 전환의 전조이며, 이후 방향은 확인봉으로 결정. Nison (1991): "among the most important of the doji."',
+    bulkowskiWinRate: 45,
+    invalidation: '거래량이 평균 이하이면 유동성 부족에 의한 우연적 형성. 양쪽 꼬리의 비대칭이 크면 단순 도지로 재분류.'
+  },
+
+  bullishBeltHold: {
+    nameKo: '강세띠두름',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '하락 추세에서 시가=저가(또는 극근접)인 큰 양봉. 시가에서 갭 반전 후 종가까지 매수세가 지배. Morris (2006): 마루보주보다 덜 극단적이나 강력한 반전 신호.',
+    psychology: '장 시작과 동시에 매수세가 완전히 장악하여 한 번도 시가 아래로 밀리지 않음. 하락 추세의 급격한 심리 전환을 의미.',
+    bulkowskiWinRate: 51,
+    invalidation: '선행 추세가 하락이 아닌 경우 무효. 마루보주(body 85%+) 조건 충족 시 마루보주로 분류됨.'
+  },
+
+  bearishBeltHold: {
+    nameKo: '약세띠두름',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '상승 추세에서 시가=고가(또는 극근접)인 큰 음봉. 시가에서 갭 반전 후 종가까지 매도세가 지배. Morris (2006): 강한 하락 반전 신호.',
+    psychology: '장 시작과 동시에 매도세가 완전히 장악하여 한 번도 시가 위로 올리지 못함. 상승 추세의 급격한 심리 붕괴.',
+    bulkowskiWinRate: 57,
+    invalidation: '선행 추세가 상승이 아닌 경우 무효. 마루보주 조건 충족 시 마루보주로 분류됨.'
+  },
+
+  bullishHaramiCross: {
+    nameKo: '강세잉태십자',
+    category: '캔들스틱 (반전)',
+    candles: 2,
+    academicDesc: '하락 추세에서 큰 음봉 뒤에 도지가 음봉 몸통 내에 완전히 포함. 일반 잉태형보다 강한 반전 신호. Nison (1991): "considered a more significant reversal signal than a regular harami."',
+    psychology: '전일 강한 매도세 이후, 당일 매수세와 매도세가 완벽히 균형을 이루어 도지 형성. 방향성이 0으로 수렴 = 매도 모멘텀 완전 소멸.',
+    bulkowskiWinRate: 46,
+    invalidation: '도지 봉의 거래량이 극히 적으면 유동성 부족 신호. 확인봉(다음 봉 양봉) 없이 단독 사용 시 신뢰도 하락.'
+  },
+
+  bearishHaramiCross: {
+    nameKo: '약세잉태십자',
+    category: '캔들스틱 (반전)',
+    candles: 2,
+    academicDesc: '상승 추세에서 큰 양봉 뒤에 도지가 양봉 몸통 내에 완전히 포함. 일반 잉태형보다 강한 하락 반전 신호. Nison (1991): harami cross.',
+    psychology: '전일 강한 매수세 이후, 당일 완벽한 균형(도지) = 매수 모멘텀 소멸. 이익 실현 압력이 추가 매수 의지를 정확히 상쇄.',
+    bulkowskiWinRate: 58,
+    invalidation: '도지 봉의 거래량이 극히 적으면 유동성 부족. 확인봉(다음 봉 음봉) 없으면 신뢰도 하락.'
+  },
+
+  stickSandwich: {
+    nameKo: '스틱샌드위치',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '음봉 → 양봉 → 음봉의 3봉 구조에서 1봉과 3봉의 종가가 거의 동일. 동일 가격 수준에서 2회 지지 확인. Bulkowski (2008): 강세 반전 패턴.',
+    psychology: '같은 가격에서 반복적으로 매수세가 유입되어 바닥을 형성. 중간 양봉의 반등 시도가 실패했으나, 동일 종가 방어는 해당 수준이 강력한 가치 인식 영역임을 확인.',
+    bulkowskiWinRate: 52,
+    invalidation: '두 음봉의 종가 차이가 클수록 신뢰도 하락. 하락 추세가 아닌 횡보에서 출현하면 의미 약화. 거래량 감소 동반 시 무효.'
+  },
+
+  abandonedBabyBullish: {
+    nameKo: '강세버림받은아기',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '하락 추세에서 긴 음봉 → 갭 하락 도지(고가가 전일 저가보다 낮음) → 갭 상승 양봉. 도지가 양쪽으로 갭에 의해 분리된 극히 희귀한 강력 반전 패턴.',
+    psychology: '1일차 강한 하락 후, 2일차에 갭 하락하며 매도 절정 도달. 그러나 도지 형성으로 추가 하락 실패. 3일차에 갭 상승하며 매수세가 완전히 주도권 장악.',
+    bulkowskiWinRate: 52,
+    invalidation: 'KRX 시장은 연속매매 구조로 갭 발생이 미국보다 드물어 출현 빈도가 매우 낮음(n~137). 갭 조건 미충족 시 샛별형으로 분류.'
+  },
+
+  abandonedBabyBearish: {
+    nameKo: '약세버림받은아기',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '상승 추세에서 긴 양봉 → 갭 상승 도지(저가가 전일 고가보다 높음) → 갭 하락 음봉. 도지가 양쪽으로 갭에 의해 분리된 극히 희귀한 하락 반전 패턴.',
+    psychology: '1일차 강한 상승 후, 2일차에 갭 상승하며 매수 절정 도달. 그러나 도지 형성으로 추가 상승 실패. 3일차에 갭 하락하며 매도세가 완전히 주도.',
+    bulkowskiWinRate: 65,
+    invalidation: 'KRX 갭 발생 빈도가 낮아 출현 극히 희귀(n~71). 갭 조건 미충족 시 석별형으로 분류.'
+  },
+
   ascendingTriangle: {
     nameKo: '상승삼각형',
     category: '차트패턴 (지속)',

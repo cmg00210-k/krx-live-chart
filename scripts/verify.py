@@ -92,6 +92,11 @@ CANONICAL_PATTERNS = {
     "tweezerBottom", "tweezerTop",
     "morningStar", "eveningStar",
     "bullishMarubozu", "bearishMarubozu",
+    "longLeggedDoji",
+    "bullishBeltHold", "bearishBeltHold",
+    "bullishHaramiCross", "bearishHaramiCross",
+    "stickSandwich",
+    "abandonedBabyBullish", "abandonedBabyBearish",
     "ascendingTriangle", "descendingTriangle",
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
@@ -100,7 +105,7 @@ CANONICAL_PATTERNS = {
 }
 
 # Neutral direction - not required in BULLISH_TYPES or BEARISH_TYPES
-NEUTRAL_PATTERNS = {"symmetricTriangle", "channel"}
+NEUTRAL_PATTERNS = {"symmetricTriangle", "channel", "longLeggedDoji"}
 
 # Chart patterns - appear in CHART_PATTERNS + _VIZ_CHART_TYPES
 CHART_PATTERNS_SET = {
@@ -155,6 +160,9 @@ def check_patterns(strict=False):
     expand = {
         "Engulfing":      ["bullishEngulfing",      "bearishEngulfing"],
         "Marubozu":       ["bullishMarubozu",        "bearishMarubozu"],
+        "BeltHold":       ["bullishBeltHold",        "bearishBeltHold"],
+        "HaramiCross":    ["bullishHaramiCross",     "bearishHaramiCross"],
+        "AbandonedBaby":  ["abandonedBabyBullish",   "abandonedBabyBearish"],
     }
     derived = set()
     for call in detect_calls:

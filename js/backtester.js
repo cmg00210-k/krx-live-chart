@@ -76,6 +76,14 @@ class PatternBacktester {
       tweezerTop:             { name: '족집게천장', signal: 'sell' },
       bullishMarubozu:        { name: '양봉마루보주', signal: 'buy'  },
       bearishMarubozu:        { name: '음봉마루보주', signal: 'sell' },
+      longLeggedDoji:         { name: '긴다리도지', signal: 'neutral' },
+      bullishBeltHold:        { name: '강세띠두름', signal: 'buy'  },
+      bearishBeltHold:        { name: '약세띠두름', signal: 'sell' },
+      bullishHaramiCross:     { name: '강세잉태십자', signal: 'buy'  },
+      bearishHaramiCross:     { name: '약세잉태십자', signal: 'sell' },
+      stickSandwich:          { name: '스틱샌드위치', signal: 'buy'  },
+      abandonedBabyBullish:   { name: '강세버림받은아기', signal: 'buy'  },
+      abandonedBabyBearish:   { name: '약세버림받은아기', signal: 'sell' },
       channel:                { name: '채널',           signal: 'neutral' },
     };
 
@@ -180,7 +188,10 @@ class PatternBacktester {
       || (typeof currentStock !== 'undefined' && currentStock && currentStock.market ? currentStock.market : '');
     if (mkt && mkt.toUpperCase() === 'KOSDAQ') marketType = 1;
 
-    // Dim 9: raw_hurst (R/S analysis, z-scored) — reuse calcHurst from indicators.js
+    // Dim 9: raw_hurst (R/S analysis on log-returns, z-scored) — reuse calcHurst from indicators.js
+    // [D][L:BAY] Fallback mu/sigma for returns-based H (Anis & Lloyd 1976 finite-sample bias).
+    // Staleness guard: rl_policy.json may have old price-level stats (mean>0.80).
+    // Returns-based H centers ~0.55-0.65; price-level H centers ~0.95 (spurious).
     var rawHurst = 0;
     if (candles && candles.length >= 40 && typeof calcHurst === 'function') {
       var hCloses = [];
@@ -189,8 +200,10 @@ class PatternBacktester {
       var hVal = calcHurst(hCloses);
       if (hVal != null && isFinite(hVal)) {
         var hNorm = this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.raw_hurst;
-        var hMean = hNorm ? hNorm.mean : 0.946613;
-        var hStd = hNorm ? hNorm.std : 0.075216;
+        // Staleness guard: price-level H has mean>0.80; returns-based H has mean<0.80
+        var hStale = hNorm && hNorm.mean > 0.80;
+        var hMean = (hNorm && !hStale) ? hNorm.mean : 0.6;
+        var hStd = (hNorm && !hStale) ? hNorm.std : 0.12;
         rawHurst = Math.max(-3, Math.min(3, (hVal - hMean) / Math.max(hStd, 1e-6)));
       }
     }
@@ -809,18 +822,45 @@ class PatternBacktester {
           weights.push(Math.pow(lambda, returns.length - 1 - ri));
         }
 
-        var reg = calcWLSRegression(X, returns, weights, 2.0);
+        // Column-wise std normalization (j=0 intercept excluded)
+        // [B][L:GS] Hoerl & Kennard (1970) require standardized features for uniform shrinkage.
+        // Without this, atrNorm (scale ~0.02) receives ~278x stronger penalty than confidence (scale ~0.5).
+        // Marquardt (1970): variance normalization is minimum requirement for Ridge.
+        var scales = [1]; // intercept: no scaling
+        for (var sj = 1; sj < 5; sj++) {
+          var sSum = 0, sSum2 = 0;
+          for (var si = 0; si < X.length; si++) { sSum += X[si][sj]; sSum2 += X[si][sj] * X[si][sj]; }
+          var sMean = sSum / X.length;
+          var sVar = sSum2 / X.length - sMean * sMean;
+          var sSd = Math.sqrt(Math.max(0, sVar));
+          if (sSd < 1e-10) sSd = 1; // constant feature guard
+          scales.push(sSd);
+          for (var si = 0; si < X.length; si++) X[si][sj] /= sSd;
+        }
+
+        // [C][L:GS] Ridge λ=1.0 (post-standardization). Hoerl, Kennard & Baldwin (1975).
+        // Pre-standardization λ=2.0 caused 278x unequal shrinkage; now uniform across features.
+        var reg = calcWLSRegression(X, returns, weights, 1.0);
         if (reg) {
+          // Reverse-transform coefficients to original scale (Friedman, Hastie & Tibshirani 2010)
+          for (var rj = 1; rj < reg.coeffs.length; rj++) {
+            reg.coeffs[rj] /= scales[rj];
+          }
+
           stats.regression = {
             labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
-            tStats: reg.tStats.map(function(t) { return +t.toFixed(2); }),
+            // HC3 heteroskedasticity-robust tStats (White 1980, MacKinnon & White 1985)
+            // OLS tStats may be inconsistent under financial return heteroskedasticity.
+            // HC3 with (1-h_ii)^2 jackknife correction is optimal for n=30-300 (Long & Ervin 2000).
+            tStats: reg.hcTStats.map(function(t) { return +t.toFixed(2); }),
           };
 
           // 최근 패턴에 대한 기대수익률 예측
           if (validOccs.length > 0) {
             var latest = validOccs[validOccs.length - 1];
+            // Prediction uses original-scale features × reverse-transformed coefficients
             var xNew = [
               1,
               (latest.confidencePred || latest.confidence || 50) / 100,
@@ -853,10 +893,13 @@ class PatternBacktester {
             }
 
             // 95% 신뢰구간: SE = sqrt(sigma^2 * (1 + x' (X'WX)^-1 x))
+            // invXtWX is in standardized space; transform xNew to match
+            var xStd = [xNew[0]]; // intercept unchanged
+            for (var si = 1; si < xNew.length; si++) xStd.push(xNew[si] / scales[si]);
             var xInvx = 0;
-            for (var ii = 0; ii < xNew.length; ii++) {
-              for (var jj = 0; jj < xNew.length; jj++) {
-                xInvx += xNew[ii] * reg.invXtWX[ii][jj] * xNew[jj];
+            for (var ii = 0; ii < xStd.length; ii++) {
+              for (var jj = 0; jj < xStd.length; jj++) {
+                xInvx += xStd[ii] * reg.invXtWX[ii][jj] * xStd[jj];
               }
             }
             var se = Math.sqrt(reg.sigmaHat2 * (1 + xInvx));

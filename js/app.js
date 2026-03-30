@@ -59,7 +59,11 @@ var _VIZ_CANDLE_TYPES = new Set([
   'morningStar','eveningStar',
   'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
   'tweezerBottom','tweezerTop',
-  'bullishMarubozu','bearishMarubozu'
+  'bullishMarubozu','bearishMarubozu',
+  'longLeggedDoji','bullishBeltHold','bearishBeltHold',
+  'bullishHaramiCross','bearishHaramiCross',
+  'stickSandwich',
+  'abandonedBabyBullish','abandonedBabyBearish'
 ]);
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([
@@ -1409,7 +1413,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=20');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=21');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;

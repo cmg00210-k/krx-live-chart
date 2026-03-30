@@ -34,8 +34,8 @@ let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
 // ── 적응형 가중치 — 백테스트 WLS 계수에서 추출 ────
 let _learnedWeights = {};
 
-// ── 승률 맵 — 백테스트 결과에서 패턴별 5일 승률 캐시 ────
-// { [patternType]: { winRate: number, sampleSize: number } }
+// ── 승률 맵 — 백테스트 결과에서 패턴별 5일 승률 + CI95 캐시 ────
+// { [patternType]: { winRate, sampleSize, ci95Lower?, ci95Upper?, expectedReturn? } }
 // backtest 메시지 처리 후 갱신, analyze 결과 패턴에 부착
 let _winRateMap = {};
 
@@ -98,10 +98,20 @@ function _extractWinRateMap(backtestResults) {
     if (!bt || !bt.horizons) continue;
     var h5 = bt.horizons[5];
     if (h5 && h5.n >= 10) {
-      _winRateMap[pType] = {
+      var entry = {
         winRate: h5.winRate,
         sampleSize: h5.n,
       };
+      // CI95 + expectedReturn: WLS 회귀 예측의 95% 신뢰구간
+      // 예측 영역 opacity 변조에 사용 — 넓은 CI = 낮은 확신 = 투명
+      if (h5.ci95Lower != null && h5.ci95Upper != null) {
+        entry.ci95Lower = h5.ci95Lower;
+        entry.ci95Upper = h5.ci95Upper;
+      }
+      if (h5.expectedReturn != null) {
+        entry.expectedReturn = h5.expectedReturn;
+      }
+      _winRateMap[pType] = entry;
     }
   }
 }
@@ -133,9 +143,17 @@ function _attachWinRates(patterns) {
       // 중립(50)으로의 지수 감쇠: 오래된 엣지 추정치는 서서히 무의미해진다
       p.backtestWinRate = +(50 + (entry.winRate - 50) * winRateDecay).toFixed(1);
       p.backtestSampleSize = entry.sampleSize;
+      // CI95 부착: 예측 영역 opacity 변조용 (patternRenderer._buildForecastZone)
+      // ci95는 return % 단위이므로 주가 무관, 감쇠 불필요 (폭만 사용)
+      p.backtestCi95Lower = entry.ci95Lower != null ? entry.ci95Lower : null;
+      p.backtestCi95Upper = entry.ci95Upper != null ? entry.ci95Upper : null;
+      p.backtestExpectedReturn = entry.expectedReturn != null ? entry.expectedReturn : null;
     } else {
       p.backtestWinRate = null;
       p.backtestSampleSize = null;
+      p.backtestCi95Lower = null;
+      p.backtestCi95Upper = null;
+      p.backtestExpectedReturn = null;
     }
   }
 }

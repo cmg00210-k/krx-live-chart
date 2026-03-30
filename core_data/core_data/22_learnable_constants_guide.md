@@ -85,7 +85,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 23 | rsiOversold weight | ±1.5 | B | BAY | [1, 2.5] | Wilder (1978) |
 | 24 | volumeBreakout weight | ±2 | B | BAY | [1, 3] | Caginalp (1998) |
 | 25 | entropy floor | 0.80 | D | GS | [0.70, 0.95] | Shannon (1948) basis |
-| 26 | HMM vol floor | 0.85 | D | GS | [0.70, 0.85] | Hamilton (1989) |
+| 26 | HMM vol floor | 0.70 | D | GS | [0.70, 0.85] | Hamilton (1989) |
 | 27 | MAX_CUMULATIVE_ADJ | 15 | D | GS | [10, 20] | No basis |
 | 28 | composite window | 5 | C | GS | [3, 7] | 1 KRX week |
 | 29 | StochRSI COOLDOWN | 7 | D | GS | [5, 10] | Empirical |

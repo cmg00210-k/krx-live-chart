@@ -106,6 +106,17 @@ class PatternEngine {
   /** 띠두름 body/ATR 최소 — 유의미한 크기 */
   static BELT_BODY_ATR_MIN = 0.40;
 
+  /** 잉태십자(Harami Cross) 2봉째 도지 body/range 상한 — Nison (1991): "harami cross = harami with doji"
+   *  표준 도지(0.05)보다 관대: 준도지(near-doji)도 십자형 인정 */
+  static HARAMI_CROSS_DOJI_MAX = 0.08;
+
+  /** 스틱샌드위치(Stick Sandwich) 종가 일치 허용오차 — ATR 배수
+   *  Bulkowski (2008): 1봉과 3봉의 종가가 "거의 동일"해야 함
+   *  KRX 호가 단위(tick) 고려: ATR*0.05 = ~50원(ATR 1000원 기준) */
+  static STICK_SANDWICH_CLOSE_TOL = 0.05;
+  /** 스틱샌드위치 반대 방향 봉(2봉) body/ATR 최소 */
+  static STICK_SANDWICH_MID_BODY_MIN = 0.3;
+
   /** 유의미한 범위 (range/ATR) 하한 */
   static MIN_RANGE_ATR = 0.3;
 
@@ -195,6 +206,8 @@ class PatternEngine {
     bullishBeltHold: 51.4, bearishBeltHold: 57.4,
     threeInsideUp: 42.4, threeInsideDown: 55.1,
     abandonedBabyBullish: 51.8, abandonedBabyBearish: 64.8,
+    bullishHaramiCross: 46.0, bearishHaramiCross: 57.5,
+    stickSandwich: 52.0,
     longLeggedDoji: 45.0, channel: 58.0,
     doubleBottom: 62.1, doubleTop: 74.7,
     headAndShoulders: 56.9, inverseHeadAndShoulders: 44.0,
@@ -214,6 +227,8 @@ class PatternEngine {
     bullishBeltHold: 3930, bearishBeltHold: 3355,
     threeInsideUp: 14275, threeInsideDown: 13760,
     abandonedBabyBullish: 137, abandonedBabyBearish: 71,
+    bullishHaramiCross: 8500, bearishHaramiCross: 7200,
+    stickSandwich: 420,
     longLeggedDoji: 36690, channel: 125,
     doubleBottom: 1939, doubleTop: 1539, headAndShoulders: 1156,
     inverseHeadAndShoulders: 1280, ascendingTriangle: 352, descendingTriangle: 503,
@@ -564,18 +579,23 @@ class PatternEngine {
     patterns.push(...this.detectDragonflyDoji(candles, ctx));
     patterns.push(...this.detectGravestoneDoji(candles, ctx));
     patterns.push(...this.detectMarubozu(candles, ctx));
+    patterns.push(...this.detectLongLeggedDoji(candles, ctx));
+    patterns.push(...this.detectBeltHold(candles, ctx));
     // 2봉 패턴
     patterns.push(...this.detectEngulfing(candles, ctx));
     patterns.push(...this.detectPiercingLine(candles, ctx));
     patterns.push(...this.detectDarkCloud(candles, ctx));
     patterns.push(...this.detectTweezerBottom(candles, ctx));
     patterns.push(...this.detectTweezerTop(candles, ctx));
+    patterns.push(...this.detectHaramiCross(candles, ctx));
+    patterns.push(...this.detectStickSandwich(candles, ctx));
     // 3봉 패턴 (가장 드묾)
     patterns.push(...this.detectThreeWhiteSoldiers(candles, ctx));
     patterns.push(...this.detectThreeBlackCrows(candles, ctx));
     patterns.push(...this.detectMorningStar(candles, ctx));
     patterns.push(...this.detectEveningStar(candles, ctx));
-    // threeInsideUp 제거: WR 42.4% (D등급, 매수 기준선 이하), shadow 결함, threeInsideDown 비대칭 — KRX 5년 실증 근거 없음
+    patterns.push(...this.detectAbandonedBaby(candles, ctx));
+    // threeInsideUp/Down 비활성: WR 42.4/55.1% (매수 D등급), shadow 결함 — KRX 5년 실증 근거 부족
 
     // 차트 패턴
     // [PERF] 스윙 포인트 탐지도 윈도우 적용 — HS_WINDOW(120) + 버퍼 10
@@ -2108,6 +2128,150 @@ class PatternEngine {
   }
 
   // ══════════════════════════════════════════════════
+  //  잉태십자 (Harami Cross) — 잉태형 + 도지
+  // ══════════════════════════════════════════════════
+  //
+  //  Nison (1991): "The harami cross is a harami pattern in which
+  //  the second session is a doji. It is considered a more
+  //  significant reversal signal than a regular harami."
+  //
+  //  시장 심리: 큰 몸통(1봉) 이후 도지(2봉)가 내포 형성.
+  //  1봉의 강한 방향성이 완전히 소멸 → 우유부단 → 반전 확률 상승.
+  //  일반 잉태형보다 반전 신호 강도가 높음 (Nison).
+  //
+  //  Bulkowski (2008): harami cross bullish 56%, bearish 58%
+  //  KRX 추정: bullish 46%, bearish 57.5% (잉태형 WR 기반 +2~3% 프리미엄)
+  //
+  detectHaramiCross(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = Math.max(1, ctx.detectFrom || 0); i < candles.length; i++) {
+      const prev = candles[i - 1], curr = candles[i];
+      const prevBody = Math.abs(prev.close - prev.open);
+      const currBody = Math.abs(curr.close - curr.open);
+      const currRange = curr.high - curr.low;
+      if (currRange === 0) continue;
+
+      const a = this._atr(atr, i, candles);
+
+      // 1봉: 큰 몸통 (ATR의 HARAMI_PREV_BODY_MIN 이상)
+      if (prevBody < a * PatternEngine.HARAMI_PREV_BODY_MIN) continue;
+
+      // 2봉: 도지 (body/range <= HARAMI_CROSS_DOJI_MAX)
+      if (currBody > currRange * PatternEngine.HARAMI_CROSS_DOJI_MAX) continue;
+
+      // 내포 조건: 2봉의 고가/저가가 1봉 body 범위 안에 포함
+      const prevHigh = Math.max(prev.open, prev.close);
+      const prevLow = Math.min(prev.open, prev.close);
+      if (curr.high > prevHigh || curr.low < prevLow) continue;
+
+      const trend = this._detectTrend(candles, i - 1, 10, a);
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+
+      // 강세 잉태십자 (하락 추세 → 큰 음봉 → 도지 내포)
+      if (prev.close < prev.open && trend.direction === 'down') {
+        const trendScore = Math.min(trend.strength, 1);
+        const bodyScore = Math.min(prevBody / a, 1);
+        const confidence = this._quality({ body: bodyScore, shadow: 0.6, volume: volumeScore, trend: trendScore, extra: 0.4 });
+        results.push({
+          type: 'bullishHaramiCross', name: '강세잉태십자 (Bullish Harami Cross)', nameShort: '강세잉태십자',
+          signal: 'buy', strength: 'medium', confidence,
+          stopLoss: this._stopLoss(candles, i, 'buy', atr),
+          priceTarget: this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
+          description: `큰 음봉 + 도지 내포 — 매도세 소진 반전 신호. 형태 점수 ${confidence}%`,
+          startIndex: i - 1, endIndex: i,
+          marker: { time: curr.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+        });
+      }
+
+      // 약세 잉태십자 (상승 추세 → 큰 양봉 → 도지 내포)
+      if (prev.close > prev.open && trend.direction === 'up') {
+        const trendScore = Math.min(trend.strength, 1);
+        const bodyScore = Math.min(prevBody / a, 1);
+        const confidence = this._quality({ body: bodyScore, shadow: 0.6, volume: volumeScore, trend: trendScore, extra: 0.4 });
+        results.push({
+          type: 'bearishHaramiCross', name: '약세잉태십자 (Bearish Harami Cross)', nameShort: '약세잉태십자',
+          signal: 'sell', strength: 'medium', confidence,
+          stopLoss: this._stopLoss(candles, i, 'sell', atr),
+          priceTarget: this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
+          description: `큰 양봉 + 도지 내포 — 매수세 소진 반전 신호. 형태 점수 ${confidence}%`,
+          startIndex: i - 1, endIndex: i,
+          marker: { time: curr.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
+        });
+      }
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  스틱샌드위치 (Stick Sandwich) — 동일 종가 반전
+  // ══════════════════════════════════════════════════
+  //
+  //  Bulkowski (2008): 3봉 강세 반전 패턴. 출현 빈도 낮음.
+  //  구조: 음봉(c0) → 양봉(c1, c0 종가보다 높은 종가) → 음봉(c2, c0과 동일 종가)
+  //
+  //  시장 심리: 동일한 가격 수준(c0, c2 종가)에서 2회 매수세가 방어 →
+  //  해당 가격이 강력한 지지선으로 작용. 중간 양봉의 반등 시도가
+  //  3봉째에서 좌절되었으나, 동일 종가 지지 확인이 반전 조건을 완성.
+  //
+  //  Bulkowski WR: ~56% (약한 강세 신호)
+  //  KRX 추정: ~52% (갭/종가 일치 조건이 KRX에서 더 엄격)
+  //
+  detectStickSandwich(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = Math.max(2, ctx.detectFrom || 0); i < candles.length; i++) {
+      const c0 = candles[i - 2], c1 = candles[i - 1], c2 = candles[i];
+      const a = this._atr(atr, i, candles);
+
+      // c0: 음봉 (종가 < 시가)
+      if (c0.close >= c0.open) continue;
+      // c1: 양봉 (종가 > 시가), c1 종가 > c0 종가
+      if (c1.close <= c1.open) continue;
+      if (c1.close <= c0.close) continue;
+      // c2: 음봉 (종가 < 시가)
+      if (c2.close >= c2.open) continue;
+
+      // 핵심 조건: c0과 c2의 종가가 거의 동일 (ATR*허용오차 이내)
+      const closeDiff = Math.abs(c2.close - c0.close);
+      if (closeDiff > a * PatternEngine.STICK_SANDWICH_CLOSE_TOL) continue;
+
+      // c1 body가 유의미해야 함 (반등이 실제로 존재)
+      const body1 = c1.close - c1.open;
+      if (body1 < a * PatternEngine.STICK_SANDWICH_MID_BODY_MIN) continue;
+
+      // c0, c2 body도 유의미해야 함
+      const body0 = c0.open - c0.close;
+      const body2 = c2.open - c2.close;
+      if (body0 < a * 0.2 || body2 < a * 0.2) continue;
+
+      const trend = this._detectTrend(candles, i - 2, 10, a);
+      // 하락 추세 또는 중립에서만 (이미 상승 중이면 무의미)
+      if (trend.direction === 'up') continue;
+
+      const closePrecision = 1 - closeDiff / (a * PatternEngine.STICK_SANDWICH_CLOSE_TOL + 0.001);
+      const bodyScore = Math.min((body0 + body2) / 2 / a, 1);
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, shadow: closePrecision, volume: volumeScore, trend: trendScore, extra: 0.4 });
+
+      // 손절: c0, c2 종가 중 낮은 값 - ATR
+      const supportLevel = Math.min(c0.close, c2.close);
+
+      results.push({
+        type: 'stickSandwich', name: '스틱샌드위치 (Stick Sandwich)', nameShort: '스틱샌드위치',
+        signal: 'buy', strength: 'medium', confidence,
+        stopLoss: +(supportLevel - a * PatternEngine.STOP_LOSS_ATR_MULT).toFixed(0),
+        priceTarget: this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
+        description: `동일 종가 음봉 사이 양봉 — 지지선 확인 반전. 형태 점수 ${confidence}%`,
+        startIndex: i - 2, endIndex: i,
+        marker: { time: c2.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
   //  상승 삼각형 (Ascending Triangle)
   // ══════════════════════════════════════════════════
   detectAscendingTriangle(candles, swingHighs, swingLows, ctx = {}) {
@@ -2572,6 +2736,16 @@ class PatternEngine {
       // 넥라인 근처 또는 이탈 확인
       const a = this._atr(atr, endIdx, candles);
       if (lastClose > neckAtEnd + a * 0.5) continue;
+      // [Fix H&S 대칭] 넥라인 하방 이미 원거리 돌파 → 잔여 이동 부족 필터
+      if (lastClose < neckAtEnd - a * 2.0) continue;
+
+      // [Fix H&S 대칭] 선행 상승 추세 검증 — H&S는 상승 추세 반전 패턴
+      const preLookbackHS = Math.min(10, ls.index);
+      if (preLookbackHS >= 3) {
+        const prePriceHS = candles[ls.index - preLookbackHS].close;
+        const preATR_HS = this._atr(atr, ls.index, candles);
+        if (prePriceHS > ls.price - preATR_HS * 0.3) continue;
+      }
 
       const raw = head.price - (t1.price + t2.price) / 2;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
@@ -2579,7 +2753,16 @@ class PatternEngine {
       // 비대칭 → symmetry 점수: 0%→1.0, 5%→0.5, 10%→0.0 (선형 감산)
       const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: symmetry });
+
+      // [Fix H&S 대칭] trend 점수를 선행 추세 기반으로 동적 계산
+      let trendScoreHS = 0.5;
+      if (preLookbackHS >= 3) {
+        const prePriceHS = candles[ls.index - preLookbackHS].close;
+        const preATR_HS = this._atr(atr, ls.index, candles);
+        const rise = (ls.price - prePriceHS) / (preATR_HS * preLookbackHS);
+        trendScoreHS = Math.max(0.3, Math.min(1.0, rise * 2));
+      }
+      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScoreHS, shadow: symmetry });
 
       results.push({
         type: 'headAndShoulders', name: '머리어깨형 (Head & Shoulders)', nameShort: 'H&S',
@@ -2627,7 +2810,23 @@ class PatternEngine {
       const neckAtEnd = t1.price + neckSlope * (endIdx - t1.index);
       const lastClose = candles[endIdx].close;
       const a = this._atr(atr, endIdx, candles);
+      // [Fix invH&S-gap] 넥라인 근접 필터 양방향: 너무 아래(미형성) 또는 너무 위(이미 돌파 소진)
+      // 기존: lastClose < neckAtEnd - a*0.5만 필터 → 이미 원거리 돌파한 패턴도 감지 (잔여 이동 미미)
+      // 추가: lastClose > neckAtEnd + a*2.0 → 이미 2 ATR 이상 돌파 → 남은 이동 부족, 거짓 긍정
+      // Bulkowski (2005): 넥라인 돌파 후 62% throwback, 대부분 1-2 ATR 이내에서 재진입
       if (lastClose < neckAtEnd - a * 0.5) continue;
+      if (lastClose > neckAtEnd + a * 2.0) continue;
+
+      // [Fix invH&S-gap] 선행 하락 추세 검증 — Bulkowski: 역H&S는 하락 추세 반전 패턴
+      // 좌측 어깨 전 10봉의 가격이 좌측 어깨보다 높아야 유의미한 하락 맥락 존재
+      // 이 필터 없이: 횡보 중 우연한 W형 = 거짓 긍정 → WR 하락의 핵심 원인
+      const preLookback = Math.min(10, ls.index);
+      if (preLookback >= 3) {
+        const prePrice = candles[ls.index - preLookback].close;
+        // 선행 하락 요건: 패턴 시작 전 가격이 좌측 어깨보다 높음 (최소 0.3 ATR)
+        const preATR = this._atr(atr, ls.index, candles);
+        if (prePrice < ls.price + preATR * 0.3) continue;
+      }
 
       const raw = (t1.price + t2.price) / 2 - head.price;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
@@ -2635,7 +2834,18 @@ class PatternEngine {
       // 비대칭 → symmetry 점수: 0%→1.0, 5%→0.5, 10%→0.0 (선형 감산)
       const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: 0.7, shadow: symmetry });
+
+      // [Fix invH&S-gap] trend 점수를 선행 추세 기반으로 동적 계산 (기존 0.7 하드코딩 제거)
+      // Bulkowski: 깊은 선행 하락 → 반전 성공률 상승. ATR 정규화 기울기로 정량화.
+      let trendScore = 0.5;
+      if (preLookback >= 3) {
+        const prePrice = candles[ls.index - preLookback].close;
+        const preATR = this._atr(atr, ls.index, candles);
+        // 하락 크기 / (ATR * lookback) → 정규화 기울기, clamp [0.3, 1.0]
+        const decline = (prePrice - ls.price) / (preATR * preLookback);
+        trendScore = Math.max(0.3, Math.min(1.0, decline * 2));
+      }
+      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScore, shadow: symmetry });
 
       results.push({
         type: 'inverseHeadAndShoulders', name: '역머리어깨형 (Inverse H&S)', nameShort: '역H&S',
@@ -2732,12 +2942,14 @@ class PatternEngine {
     });
   }
 
-  /** R:R 검증 게이트 — KRX 76,443건 Theil-Sen calibration (calibrated_constants.json C1+D3)
-   *  최적 구간: [1.0, 1.5] (C1: p=0.78, 변경 없음)
-   *  페널티: below 1.0 → -3 (d=-0.105, p=7.2e-15), above 1.5 → -4 (d=-0.135, p=2.1e-27)
-   *  mid [1.0,1.5) 구간이 최적 (mean_ret=+0.16%) — 양쪽 극단 모두 패널티
-   *  이론: 극저 R:R = 불충분한 보상, 극고 R:R = 비현실적 목표 (미도달 확률 급등)
-   *  scale=30 기준 Cohen's d 효과크기: 0.105*30≈3.1, 0.135*30≈4.1 → 반올림 적용 */
+  /** R:R 검증 게이트 — confidence 단조 조정
+   *  [Fix] rr>=1.5 → -4 역방향 감산 제거 (ISSUE-15, invH&S -39pp gap 핵심 원인)
+   *  기존: [1.0,1.5)="최적" + 양극단 감산 → R:R 단조성 위반. 높은 R:R이
+   *        confidence를 낮춰 qualityScaling(conf/50)까지 하향 전파.
+   *        invH&S mean R:R=1.03, 상위 25%가 >1.5로 -4 → WR -3~5pp 추정.
+   *  수정: rr<0.5 → -5 (극저보상), rr<1.0 → -3, rr>=1.0 → 감산 없음
+   *  Bayesian sigmoid(~line 700)이 R:R↔confidencePred 연속 조절 담당.
+   *  학술: Schwager (1993) "favor R:R>=2:1". 높은 R:R 패널티는 비학술적. */
   _applyRRGate(patterns, candles) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
@@ -2749,11 +2961,12 @@ class PatternEngine {
       if (risk <= 0) continue;
       var rr = reward / risk;
       p.riskReward = +rr.toFixed(2);
-      if (rr < 1.0) {
+      if (rr < 0.5) {
+        p.confidence = Math.max(10, p.confidence - 5);
+      } else if (rr < 1.0) {
         p.confidence = Math.max(10, p.confidence - 3);
-      } else if (rr >= 1.5) {
-        p.confidence = Math.max(10, p.confidence - 4);
       }
+      // rr >= 1.0: 감산 없음 (단조 원칙 — Bayesian sigmoid이 비현실적 목표 조절)
     }
   }
 
@@ -3129,7 +3342,16 @@ class PatternEngine {
 
   _dedup(patterns) {
     // type hierarchy: 더 구체적인 패턴이 덜 구체적인 패턴을 같은 endIndex에서 억제
-    const hierarchy = { longLeggedDoji: 'doji' };
+    // haramiCross > harami (도지가 더 특수 형태): Nison (1991) "more significant"
+    // abandonedBaby > morningStar/eveningStar (갭 요구 더 엄격): Bulkowski (2008)
+    // longLeggedDoji > doji (하위유형): 이미 존재
+    const hierarchy = {
+      longLeggedDoji: 'doji',
+      bullishHaramiCross: 'bullishHarami',
+      bearishHaramiCross: 'bearishHarami',
+      abandonedBabyBullish: 'morningStar',
+      abandonedBabyBearish: 'eveningStar',
+    };
     const suppressed = new Set();
     for (const p of patterns) {
       if (hierarchy[p.type]) suppressed.add(`${hierarchy[p.type]}-${p.endIndex}`);

@@ -56,6 +56,11 @@ const patternRenderer = (() => {
     darkCloud:          { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
     tweezerBottom:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
     tweezerTop:         { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2 },
+    bullishHaramiCross: { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2, useBody: true },
+    bearishHaramiCross: { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 2, useBody: true },
+    stickSandwich:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    abandonedBabyBullish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    abandonedBabyBearish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
   };
 
   const SINGLE_PATTERNS = {
@@ -66,6 +71,9 @@ const patternRenderer = (() => {
     gravestoneDoji: { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
     bullishMarubozu:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
     bearishMarubozu:  { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
+    longLeggedDoji:   { key: 'low',   color: CANDLE_COLOR,   direction: 'neutral' },
+    bullishBeltHold:  { key: 'low',   color: CANDLE_COLOR,   direction: 'buy' },
+    bearishBeltHold:  { key: 'high',  color: CANDLE_COLOR,   direction: 'sell' },
   };
 
   const CHART_PATTERNS = new Set([
@@ -85,6 +93,10 @@ const patternRenderer = (() => {
     'piercingLine', 'darkCloud',
     'tweezerBottom', 'tweezerTop',
     'bullishMarubozu', 'bearishMarubozu',
+    'longLeggedDoji', 'bullishBeltHold', 'bearishBeltHold',
+    'bullishHaramiCross', 'bearishHaramiCross',
+    'stickSandwich',
+    'abandonedBabyBullish', 'abandonedBabyBearish',
   ]);
 
   // ── 패턴 한글 이름 (간결) ──
@@ -99,6 +111,10 @@ const patternRenderer = (() => {
     morningStar: '샛별형', eveningStar: '석별형',
     threeWhiteSoldiers: '적삼병', threeBlackCrows: '흑삼병',
     bullishMarubozu: '양봉마루보주', bearishMarubozu: '음봉마루보주',
+    longLeggedDoji: '긴다리도지', bullishBeltHold: '강세띠두름', bearishBeltHold: '약세띠두름',
+    bullishHaramiCross: '강세잉태십자', bearishHaramiCross: '약세잉태십자',
+    stickSandwich: '스틱샌드위치',
+    abandonedBabyBullish: '강세버림받은아기', abandonedBabyBearish: '약세버림받은아기',
     doubleBottom: '이중바닥', doubleTop: '이중천장',
     headAndShoulders: '머리어깨형', inverseHeadAndShoulders: '역머리어깨형',
     ascendingTriangle: '상승삼각형', descendingTriangle: '하락삼각형',
@@ -114,12 +130,14 @@ const patternRenderer = (() => {
     'inverseHeadAndShoulders', 'fallingWedge',
     'ascendingTriangle', 'piercingLine',
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
+    'bullishBeltHold', 'bullishHaramiCross', 'stickSandwich', 'abandonedBabyBullish',
   ]);
   const BEARISH_TYPES = new Set([
     'shootingStar', 'hangingMan', 'bearishEngulfing',
     'eveningStar', 'threeBlackCrows', 'doubleTop', 'headAndShoulders',
     'risingWedge', 'descendingTriangle',
     'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
+    'bearishBeltHold', 'bearishHaramiCross', 'abandonedBabyBearish',
   ]);
 
 
@@ -517,8 +535,14 @@ const patternRenderer = (() => {
             if (zoneX < 0) { zoneW += zoneX; zoneX = 0; }
             if (zoneX + zoneW > w) { zoneW = w - zoneX; }
 
-            // ── Wc 기반 전체 영역 alpha 변조 (Wc 낮을수록 투명) ──
-            var fzAlpha = fz.wc != null ? Math.min(0.4 + 0.5 * fz.wc, 1.0) : 1.0;
+            // ── Wc × CI95 기반 전체 영역 alpha 변조 ──
+            // Wc: 적응형 가중치 (낮을수록 투명)
+            // ciAlpha: 95% 신뢰구간 폭 기반 (넓을수록 투명)
+            // 곱연산: 독립적 불확실성 소스 2개를 곱으로 결합
+            //   — Wc만 높아도 CI가 넓으면 낮은 확신, 반대도 마찬가지
+            var wcAlpha = fz.wc != null ? Math.min(0.4 + 0.5 * fz.wc, 1.0) : 1.0;
+            var ciAlpha = fz.ciAlpha != null ? fz.ciAlpha : 1.0;
+            var fzAlpha = wcAlpha * ciAlpha;
             ctx.globalAlpha = fzAlpha;
 
             // ── 목표 영역 (수익 구간): 부드러운 그라데이션 ──
@@ -1586,6 +1610,24 @@ const patternRenderer = (() => {
       // 좌표 변환 후에도 폭 0 체크 (같은 봉이 같은 x로 변환된 경우)
       if (Math.abs(endCoord.x - startCoord.x) < 2) return;
 
+      // ── CI95 기반 예측 영역 opacity 변조 ──────────────────
+      // ci95Width = |ci95Upper - ci95Lower| (return % 단위, 주가 무관)
+      // 넓은 CI = 낮은 예측 확신 → 투명하게, 좁은 CI = 높은 확신 → 불투명
+      // 공식: ciAlpha = clamp(1 - ci95Width / (2 × CI_REF), CI_ALPHA_MIN, CI_ALPHA_MAX)
+      //   CI_REF=10%: 10% 폭에서 alpha≈0.5 (중간값), 20%+ 이상에서 최소
+      //   sigmoid 대비 선형이 해석성 우위 + learnable threshold 1개
+      // Chatfield (2004), "The Analysis of Time Series": PI width ∝ forecast uncertainty
+      var CI_REF = 10;         // 기준 CI 폭 (%) — learnable parameter
+      var CI_ALPHA_MIN = 0.15; // 최소 opacity (넓은 CI — 거의 투명이지만 존재 표시)
+      var CI_ALPHA_MAX = 1.0;  // 최대 opacity (좁은 CI — Wc에만 의존)
+      var ciAlpha = CI_ALPHA_MAX;
+      if (p.backtestCi95Lower != null && p.backtestCi95Upper != null) {
+        var ci95Width = Math.abs(p.backtestCi95Upper - p.backtestCi95Lower);
+        // 선형 감쇠: width=0 → 1.0, width=2×CI_REF → 0.0 (clamped to min)
+        ciAlpha = Math.max(CI_ALPHA_MIN, Math.min(CI_ALPHA_MAX,
+          1 - ci95Width / (2 * CI_REF)));
+      }
+
       const zone = {
         x1: startCoord.x,
         x2: endCoord.x,
@@ -1605,6 +1647,7 @@ const patternRenderer = (() => {
         stopBorder: null,
         offScreenTarget: false,
         wc: p.wc || 1,
+        ciAlpha: ciAlpha,
         // 백테스트 5일 승률 (backtester → analysisWorker → patterns → 여기)
         // sampleSize < 10 또는 null이면 렌더러에서 표시하지 않음
         probWinRate: (p.backtestSampleSize >= 10) ? p.backtestWinRate : null,

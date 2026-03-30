@@ -405,7 +405,7 @@ class SignalEngine {
     if (_hmmBeh && _hmmBeh.daily && _hmmBeh.daily.length > 0) {
       var _lastR = _hmmBeh.daily[_hmmBeh.daily.length - 1];
       if (_lastR && _lastR.bull_prob > 0.5) {
-        var volScale = 0.85 + 0.15 * (1 - _lastR.bull_prob); // bull_prob=1→0.85, 0.5→0.925
+        var volScale = 0.70 + 0.30 * (1 - _lastR.bull_prob); // [D][L:GS] bull_prob=1→0.70, 0.5→0.85, range [0.70, 0.85]
         for (var vi = 0; vi < signals.length; vi++) {
           if (signals[vi].confidence) {
             signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * volScale));

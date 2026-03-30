@@ -157,21 +157,34 @@ function calcKalman(closes, Q = 0.01, R = 1.0) {
   return result;
 }
 
-/** 허스트 지수 (Hurst Exponent) — R/S 분석
- *  현재 내부적으로 사용되지 않음. 향후 추세 지속성 분석용으로 유지.
+/** 허스트 지수 (Hurst Exponent) — R/S 분석 (log-returns 기반)
+ *  Mandelbrot (1963) "The Variation of Certain Speculative Prices";
+ *  Peters (1994) "Fractal Market Analysis", Ch.4 — R/S는 정상성(stationarity)을
+ *  만족하는 수익률 시계열에 적용해야 함. 가격 수준(I(1) 비정상)은 H를 +0.4 상향 편향.
+ *  Anis & Lloyd (1976) 유한표본 보정은 미적용 (James-Stein 수축이 대체).
+ *
  *  H > 0.5: 추세 지속성, H < 0.5: 평균 회귀, H ≈ 0.5: 랜덤워크
+ *  @param {number[]} closes — 종가 배열 (내부에서 log-returns로 변환)
+ *  @param {number} minWindow — R/S 블록 최소 크기 [C] 교정 가능
  */
 function calcHurst(closes, minWindow = 10) {
-  if (closes.length < minWindow * 4) return null;
+  // log-returns: r_t = ln(P_{t+1} / P_t). 배열 길이 = closes.length - 1
+  if (closes.length < minWindow * 4 + 1) return null;
+
+  const returns = [];
+  for (let i = 0; i < closes.length - 1; i++) {
+    if (closes[i] <= 0 || closes[i + 1] <= 0) return null; // 음수/0 가격 방어
+    returns.push(Math.log(closes[i + 1] / closes[i]));
+  }
 
   const logRS = [];
   const logN = [];
 
-  for (let w = minWindow; w <= Math.floor(closes.length / 2); w = Math.floor(w * 1.5)) {
-    const numBlocks = Math.floor(closes.length / w);
+  for (let w = minWindow; w <= Math.floor(returns.length / 2); w = Math.floor(w * 1.5)) {
+    const numBlocks = Math.floor(returns.length / w);
     let rsSum = 0;
     for (let b = 0; b < numBlocks; b++) {
-      const block = closes.slice(b * w, (b + 1) * w);
+      const block = returns.slice(b * w, (b + 1) * w);
       const mean = block.reduce((a, v) => a + v, 0) / w;
       const devs = block.map(v => v - mean);
       const cumDevs = [];
@@ -187,7 +200,7 @@ function calcHurst(closes, minWindow = 10) {
   }
 
   if (logRS.length < 2) return null;
-  // 선형 회귀로 기울기(H) 추정
+  // 선형 회귀로 기울기(H) 추정 — log(R/S) = H * log(n) + c
   const n = logRS.length;
   let sx = 0, sy = 0, sxy = 0, sx2 = 0;
   for (let i = 0; i < n; i++) {
