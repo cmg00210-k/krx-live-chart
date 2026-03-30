@@ -59,11 +59,11 @@ function _makeCacheKey(candles, timeframe) {
 // importScripts 경로는 Worker 파일(js/) 기준 상대 경로
 try {
   importScripts(
-    'colors.js?v=12',
-    'indicators.js?v=19',
-    'patterns.js?v=35',
-    'signalEngine.js?v=28',
-    'backtester.js?v=30'
+    'colors.js?v=13',
+    'indicators.js?v=20',
+    'patterns.js?v=36',
+    'signalEngine.js?v=29',
+    'backtester.js?v=31'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -359,7 +359,10 @@ self.onmessage = function (e) {
           // [Signal Backtest] 시그널 백테스트 자동 실행 — optional enhancement
           var autoSignalResults = null;
           try {
+            var _t0sig = performance.now();
             autoSignalResults = backtester.backtestAllSignals(analyzeCandles);
+            console.log('[Perf] Signal backtest (auto): ' + (performance.now() - _t0sig).toFixed(1) + 'ms, ' +
+              Object.keys(autoSignalResults || {}).length + ' signals');
             _extractSignalWinRateMap(autoSignalResults);
           } catch (e) { /* silent — signal backtest is optional enhancement */ }
           self.postMessage({
@@ -425,7 +428,10 @@ self.onmessage = function (e) {
       // [Signal Backtest] 시그널 백테스트 실행 — optional enhancement
       var signalResults = null;
       try {
+        var _t0sig = performance.now();
         signalResults = backtester.backtestAllSignals(candles);
+        console.log('[Perf] Signal backtest (explicit): ' + (performance.now() - _t0sig).toFixed(1) + 'ms, ' +
+          Object.keys(signalResults || {}).length + ' signals');
         _extractSignalWinRateMap(signalResults);
       } catch (sigErr) { /* silent — signal backtest is optional enhancement */ }
 

@@ -1227,6 +1227,18 @@ function renderPatternCards(patterns) {
         <span class="pp-conf-val">${confVal}%</span>
       </div>`;
 
+    // reliability 배지 (Signal Backtest Tier A/B/C/D)
+    let badgeHtml = '';
+    const _wr = p.backtestWR != null ? p.backtestWR : p.backtestWinRate;
+    const _n  = p.backtestN  != null ? p.backtestN  : p.backtestSampleSize;
+    const _tier = p.reliabilityTier || null;
+    if (_wr != null && _n != null && _tier) {
+      const _tc = { A:KRX_COLORS.TIER_A, B:KRX_COLORS.TIER_B, C:KRX_COLORS.TIER_C, D:KRX_COLORS.TIER_D }[_tier] || KRX_COLORS.TIER_D;
+      badgeHtml = '<div style="display:flex;align-items:center;gap:4px;margin:2px 0;font-size:10px;">' +
+        '<span style="background:' + _tc + '30;color:' + _tc + ';border:1px solid ' + _tc + '50;border-radius:3px;padding:0 4px;font-weight:700;">' + _tier + '</span>' +
+        '<span style="color:rgba(255,255,255,0.6);">WR ' + _wr.toFixed(0) + '% (n=' + _n + ')</span></div>';
+    }
+
     // 손절/목표
     let riskHtml = '';
     if (p.stopLoss || p.priceTarget) {
@@ -1244,6 +1256,7 @@ function renderPatternCards(patterns) {
         </div>
         ${categoryHtml}
         ${confBarHtml}
+        ${badgeHtml}
         ${academicHtml}
         ${psychologyHtml}
         ${riskHtml}

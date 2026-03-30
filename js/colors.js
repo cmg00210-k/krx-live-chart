@@ -78,6 +78,12 @@ const KRX_COLORS = Object.freeze({
   DRAW_BLUE:   '#2962FF',     // TradingView 관례
   DRAW_CYAN:   '#26C6DA',     // 선택 핸들
 
+  // ── Reliability Tier 배지 색상 ──
+  TIER_A: '#2ecc71',   // green — high reliability
+  TIER_B: '#3498db',   // blue — moderate
+  TIER_C: '#f39c12',   // amber — low
+  TIER_D: '#95a5a6',   // gray — insufficient
+
   // ── Visible 고/저점 색상 ──
   VIS_HIGH_FILL: (a) => `rgba(224,80,80,${a})`,      // 고점 (빨강 계열)
   VIS_LOW_FILL:  (a) => `rgba(100,200,255,${a})`,    // 저점 (하늘색 — 볼륨 파랑과 구분)
