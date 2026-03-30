@@ -326,6 +326,9 @@ let _dragDebounceTimer = null;  // 드래그 분석 150ms 디바운스
 let _dragClampFrom = 0;        // 드래그 분석 인덱스 오프셋 (Worker 결과 보정용)
 let _ohlcRafId = 0;            // [FIX] crosshair OHLC 바 RAF 디바운스 ID
 let _workerRestartCount = 0;   // [FIX] Worker 에러 시 재시작 카운터 (최대 3회)
+let _lastBacktestVersion = -1; // 백테스트 결과 중복 처리 방지 — version 추적
+let _lastBacktestLen = -1;     // 백테스트 결과 중복 처리 방지 — candleLength 추적
+var _signalBacktestResults = null; // [Signal Backtest] 시그널 백테스트 결과 저장 (Worker → app)
 
 // 차트 패턴 구조선 보존 대상 타입 (이중바닥, 삼각형 등 넓은 구간에 걸치는 패턴)
 const _CHART_PATTERN_TYPES = new Set([
@@ -1536,6 +1539,12 @@ function _initAnalysisWorker() {
 
       // ── 백테스트 결과 (적응형 가중치 + 승률 맵 + AMH 기준시점 갱신) ──
       if (msg.type === 'backtestResult') {
+        // Dedup: skip if same version and candle length already processed
+        // Handles both auto-triggered (from analyze cache miss) and explicit backtest results
+        if (_lastBacktestVersion === msg.version && _lastBacktestLen === msg.candleLength) return;
+        _lastBacktestVersion = msg.version;
+        _lastBacktestLen = msg.candleLength;
+
         if (msg.learnedWeights) {
           adaptiveWeights = msg.learnedWeights;
           // [AMH] 백테스트 기준시점도 함께 전달 (다음 analyze에서 Worker가 주입)
@@ -1543,6 +1552,10 @@ function _initAnalysisWorker() {
             adaptiveWeights._backtestEpochMs = msg.backtestEpochMs;
           }
           console.log('[Adaptive] 학습 가중치 업데이트:', Object.keys(adaptiveWeights).length, '패턴');
+        }
+        // [Signal Backtest] 시그널 백테스트 결과 저장
+        if (msg.signalResults) {
+          _signalBacktestResults = msg.signalResults;
         }
         return;
       }

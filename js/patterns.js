@@ -535,7 +535,8 @@ class PatternEngine {
     PatternEngine._currentMarket = (opts && opts.market) ? opts.market : null;
     // indicators.js 전역 함수 직접 호출 (불필요한 래퍼 제거)
     const closes = candles.map(c => c.close);
-    const hurst = calcHurst(closes);
+    var hurstResult = calcHurst(closes);
+    var hurst = hurstResult ? hurstResult.H : null;
     // f(hurst): James-Stein shrinkage — 데이터 부족 시 H→0.5(랜덤워크) 수축
     let hurstWeight = 1.0;
     if (hurst != null && isFinite(hurst)) {

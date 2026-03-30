@@ -235,7 +235,8 @@ class PatternBacktester {
       var hCloses = [];
       var hStart = Math.max(0, candles.length - 80);
       for (var h = hStart; h < candles.length; h++) hCloses.push(candles[h].close);
-      var hVal = calcHurst(hCloses);
+      var hResult = calcHurst(hCloses);
+      var hVal = hResult ? hResult.H : null;
       if (hVal != null && isFinite(hVal)) {
         var hNorm = this._rlPolicy && this._rlPolicy.normalization && this._rlPolicy.normalization.raw_hurst;
         // Staleness guard: price-level H has mean>0.80; returns-based H has mean<0.80
@@ -360,6 +361,31 @@ class PatternBacktester {
     // 탐색적 패턴 분석에서 Holm은 과도하게 보수적 — BH가 검정력 우위
     // Benjamini & Hochberg (1995), JRSS-B 57(1):289-300
     this._applyBHFDR(results);
+
+    // [Expert Consensus] Reliability Tier — CFA + Statistical + Theory consensus
+    for (var tierKey in results) {
+      var tierResult = results[tierKey];
+      if (!tierResult || !tierResult.horizons) { tierResult.reliabilityTier = 'D'; continue; }
+      var h5 = tierResult.horizons[5];
+      if (!h5 || h5.n < 10) { tierResult.reliabilityTier = 'D'; continue; }
+
+      var isAdjSig = h5.adjustedSignificant;
+      var isSig = h5.significant;
+      var alpha = h5.wrAlpha || 0;
+      var nSample = h5.n;
+      var exp = h5.expectancy || 0;
+      var pf = h5.profitFactor || 0;
+
+      if (isAdjSig && alpha >= 5 && nSample >= 100 && exp > 0 && pf >= 1.3) {
+        tierResult.reliabilityTier = 'A';
+      } else if (isSig && alpha >= 3 && nSample >= 30 && exp > 0) {
+        tierResult.reliabilityTier = 'B';
+      } else if (alpha > 0 && nSample >= 30) {
+        tierResult.reliabilityTier = 'C';
+      } else {
+        tierResult.reliabilityTier = 'D';
+      }
+    }
 
     return results;
   }
@@ -758,6 +784,8 @@ class PatternBacktester {
     for (const h of horizons) {
       const returns = [];
       const validOccs = [];  // 유효한 발생 이력 (회귀용)
+      const maeArr = [];  // Max Adverse Excursion per trade
+      const mfeArr = [];  // Max Favorable Excursion per trade
 
       for (const occ of occurrences) {
         const exitIdx = occ.idx + h;
@@ -769,10 +797,20 @@ class PatternBacktester {
         const entryPrice = candles[entryIdx].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
+        // [Expert Consensus] MAE/MFE — Sweeney (1993), path risk
+        var minRet = 0, maxRet = 0;
+        for (var pi = entryIdx; pi <= exitIdx; pi++) {
+          var pathRet = (candles[pi].close - entryPrice) / entryPrice * 100;
+          if (pathRet < minRet) minRet = pathRet;
+          if (pathRet > maxRet) maxRet = pathRet;
+        }
+
         const exitPrice = candles[exitIdx].close;
         const ret = (exitPrice - entryPrice) / entryPrice * 100 - this._horizonCost(h); // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
         validOccs.push(occ);
+        maeArr.push(minRet);
+        mfeArr.push(maxRet);
       }
 
       if (returns.length === 0) {
@@ -783,6 +821,29 @@ class PatternBacktester {
       const n = returns.length;
       const sorted = [...returns].sort((a, b) => a - b);
 
+      // [Expert Consensus] MAE/MFE statistics — path risk assessment
+      var maeSorted = [...maeArr].sort(function(a, b) { return a - b; });
+      var mfeSorted = [...mfeArr].sort(function(a, b) { return a - b; });
+      var medianMAE = n > 0 ? (n % 2 === 0 ? (maeSorted[n/2-1] + maeSorted[n/2]) / 2 : maeSorted[Math.floor(n/2)]) : 0;
+      var medianMFE = n > 0 ? (n % 2 === 0 ? (mfeSorted[n/2-1] + mfeSorted[n/2]) / 2 : mfeSorted[Math.floor(n/2)]) : 0;
+      var mae5 = n >= 20 ? maeSorted[Math.floor(n * 0.05)] : maeSorted[0] || 0;  // 5th percentile (worst)
+      var mfe95 = n >= 20 ? mfeSorted[Math.floor(n * 0.95)] : mfeSorted[n - 1] || 0;  // 95th percentile (best)
+
+      // [Expert Consensus] Max Drawdown — CFA Level III, cumulative equity path
+      var cumRet = 0, peak = 0, maxDD = 0;
+      for (var di = 0; di < returns.length; di++) {
+        cumRet += returns[di];
+        if (cumRet > peak) peak = cumRet;
+        var dd = peak - cumRet;
+        if (dd > maxDD) maxDD = dd;
+      }
+
+      // [Expert Consensus] CVaR (Expected Shortfall) 5% — Basel Committee coherent risk
+      var cvarIdx = Math.max(1, Math.floor(n * 0.05));
+      var cvarSum = 0;
+      for (var ci = 0; ci < cvarIdx; ci++) cvarSum += sorted[ci];
+      var cvar5 = cvarIdx > 0 ? cvarSum / cvarIdx : sorted[0] || 0;
+
       // 기본 통계
       const sum = returns.reduce((a, b) => a + b, 0);
       const mean = sum / n;
@@ -791,6 +852,15 @@ class PatternBacktester {
         : sorted[Math.floor(n / 2)];
       const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1 || 1);
       const stdDev = Math.sqrt(variance);
+
+      // [Expert Consensus] Sortino Ratio — Sortino & van der Meer (1991)
+      // Penalizes only downside deviation, more appropriate for asymmetric returns
+      const downsideReturns = returns.filter(r => r < 0);
+      const downsideVariance = downsideReturns.length > 1
+        ? downsideReturns.reduce((a, r) => a + r * r, 0) / downsideReturns.length
+        : 0;
+      const downsideDev = Math.sqrt(downsideVariance);
+      const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(252 / Math.max(1, h))).toFixed(2) : null;
 
       // 승률 (방향에 따라 다름)
       let wins;
@@ -804,20 +874,54 @@ class PatternBacktester {
       }
       const winRate = (wins / n) * 100;
 
-      // [Phase I] Bootstrap CI for win rate — Efron (1979), core_data/15 §6.4
-      // B=500 percentile method, Worker-safe 성능 (~50ms)
+      // [Expert Consensus] Cohen's h — effect size independent of sample size
+      // h = 2 * arcsin(sqrt(p_obs)) - 2 * arcsin(sqrt(p_null))
+      // Using 50% as default null; wrNull (if computed) provides better estimate
+      var cohensH = +(2 * Math.asin(Math.sqrt(Math.max(0, Math.min(1, winRate / 100)))) - 2 * Math.asin(Math.sqrt(0.5))).toFixed(3);
+
+      // [Expert Consensus] Null WR & Alpha — correct H₀ for market drift
+      // Sullivan, Timmermann & White (1999): unconditional base rate as null
+      var nullWR = this._computeNullWR(candles, h);
+      var wrNull = patternSignal === 'sell' ? nullWR.sellNull : nullWR.buyNull;
+      var wrAlpha = +(winRate - wrNull).toFixed(1);
+
+      // [Expert Consensus] Information Ratio — Grinold & Kahn (2000)
+      // IR = mean_excess / tracking_error, annualized
+      var excessReturns = [];
+      var nullMeanApprox = (wrNull - 50) / 50 * Math.abs(mean || 0.1);
+      for (var iri = 0; iri < returns.length; iri++) {
+        excessReturns.push(returns[iri] - nullMeanApprox);
+      }
+      var exSum = excessReturns.reduce(function(a, b) { return a + b; }, 0);
+      var exMean = exSum / n;
+      var exVar = excessReturns.reduce(function(a, r) { return a + (r - exMean) * (r - exMean); }, 0) / (n - 1 || 1);
+      var trackingError = Math.sqrt(exVar);
+      var informationRatio = trackingError > 0 ? +(exMean / trackingError * Math.sqrt(252 / Math.max(1, h))).toFixed(2) : null;
+
+      // [Expert Consensus] Regime-Conditioned WR — Lo (2004) AMH
+      var regimeWR = this._computeRegimeWR(candles, validOccs, h, patternSignal);
+
+      // [Expert Consensus] Block Bootstrap — Kunsch (1989), Carlstein (1986)
+      // i.i.d. bootstrap violates temporal dependence in pattern returns.
+      // Block resampling preserves within-cluster correlation.
       var winRateCI = null;
-      if (n >= 10) {
+      if (n >= 30) {
         var B = 500, bootWR = [];
+        var blockSize = Math.max(2, Math.round(Math.sqrt(n)));
+        var nBlocks = Math.ceil(n / blockSize);
         for (var bi = 0; bi < B; bi++) {
-          var wins_b = 0;
-          for (var si = 0; si < n; si++) {
-            var idx = Math.floor(Math.random() * n);
-            if ((patternSignal === 'buy' && returns[idx] > 0) ||
-                (patternSignal === 'sell' && returns[idx] < 0) ||
-                (patternSignal === 'neutral' && returns[idx] > 0)) wins_b++;
+          var wins_b = 0, count_b = 0;
+          for (var blk = 0; blk < nBlocks && count_b < n; blk++) {
+            var startIdx = Math.floor(Math.random() * n);
+            for (var bj = 0; bj < blockSize && count_b < n; bj++) {
+              var idx = (startIdx + bj) % n;
+              if ((patternSignal === 'buy' && returns[idx] > 0) ||
+                  (patternSignal === 'sell' && returns[idx] < 0) ||
+                  (patternSignal === 'neutral' && returns[idx] > 0)) wins_b++;
+              count_b++;
+            }
           }
-          bootWR.push(wins_b / n * 100);
+          bootWR.push(count_b > 0 ? (wins_b / count_b * 100) : 50);
         }
         bootWR.sort(function(a, b2) { return a - b2; });
         winRateCI = [
@@ -837,6 +941,15 @@ class PatternBacktester {
       const avgLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0) / lossReturns.length) : 0;
       const riskReward = avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? 999.99 : 0);
 
+      // ── [Expert Consensus] Expectancy, Profit Factor, Kelly f* ──
+      // Kelly (1956), Lopez de Prado (2018): WR alone is insufficient
+      const expectancy = (wins / n) * avgWin - ((n - wins) / n) * avgLoss;
+      const grossProfit = winReturns.length ? winReturns.reduce((a, b) => a + b, 0) : 0;
+      const grossLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0)) : 0;
+      const profitFactor = grossLoss > 0 ? +(grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? 999.99 : 0);
+      const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : (avgWin > 0 ? 999.99 : 0);
+      const kellyFraction = payoffRatio > 0 ? +((((wins / n) * payoffRatio) - ((n - wins) / n)) / payoffRatio).toFixed(4) : 0;
+
       // t-검정: H0: mean = 0 (fat-tail 보정 Cornish-Fisher 임계값, 95% 양측)
       // Cont (2001): 금융 수익률 K > 3 → 유효 df 축소로 꼬리 위험 반영
       const tStat = stdDev > 0 && n > 1 ? mean / (stdDev / Math.sqrt(n)) : 0;
@@ -844,10 +957,14 @@ class PatternBacktester {
       const tCritical = this._tCritFatTail(df, returns, 0.05);
       const significant = Math.abs(tStat) > tCritical;
 
-      // 표본 수 경고
+      // [Expert Consensus] Harvey-Liu-Zhu (2016) stricter threshold for multiple testing
+      var hlzSignificant = Math.abs(tStat) > 3.0;
+
+      // [Expert Consensus] CFA: n<100 unreliable, n<400 caution (95% CI ±5pp)
       let sampleWarning = '';
-      if (n < 10) sampleWarning = 'insufficient';
-      else if (n < 30) sampleWarning = 'caution';
+      if (n < 30) sampleWarning = 'insufficient';
+      else if (n < 100) sampleWarning = 'low';
+      else if (n < 400) sampleWarning = 'caution';
       else sampleWarning = 'adequate';
 
       const stats = {
@@ -857,13 +974,29 @@ class PatternBacktester {
         stdDev: +stdDev.toFixed(2),
         winRate: +winRate.toFixed(1),
         winRateCI: winRateCI,
+        wrNull: wrNull,
+        wrAlpha: wrAlpha,
+        informationRatio,
+        regimeWR,
         maxLoss: +maxLoss.toFixed(2),
         maxGain: +maxGain.toFixed(2),
         avgWin: +avgWin.toFixed(2),
         avgLoss: +avgLoss.toFixed(2),
         riskReward,
+        medianMAE: +medianMAE.toFixed(2),
+        mae5: +mae5.toFixed(2),
+        medianMFE: +medianMFE.toFixed(2),
+        mfe95: +mfe95.toFixed(2),
+        maxDrawdown: +maxDD.toFixed(2),
+        cvar5: +cvar5.toFixed(2),
+        sortinoRatio,
+        cohensH,
+        expectancy: +expectancy.toFixed(2),
+        profitFactor,
+        kellyFraction,
         tStat: +tStat.toFixed(2),
         significant,
+        hlzSignificant,
         adjustedSignificant: false, // Holm-Bonferroni 보정 후 backtestAll()에서 갱신
         sampleWarning,
       };
@@ -1004,11 +1137,100 @@ class PatternBacktester {
    */
   _emptyHorizonStats() {
     return {
-      n: 0, mean: 0, median: 0, stdDev: 0, winRate: 0,
+      n: 0, mean: 0, median: 0, stdDev: 0, winRate: 0, winRateCI: null, wrNull: 50, wrAlpha: 0,
+      informationRatio: null, regimeWR: null,
       maxLoss: 0, maxGain: 0, avgWin: 0, avgLoss: 0,
-      riskReward: 0, tStat: 0, significant: false, adjustedSignificant: false,
+      riskReward: 0, medianMAE: 0, mae5: 0, medianMFE: 0, mfe95: 0,
+      maxDrawdown: 0, cvar5: 0,
+      sortinoRatio: null, cohensH: 0,
+      expectancy: 0, profitFactor: 0, kellyFraction: 0,
+      tStat: 0, significant: false, hlzSignificant: false, adjustedSignificant: false,
       sampleWarning: 'insufficient',
     };
+  }
+
+  /**
+   * [Expert Consensus] 시장 드리프트 감안 Null WR — Sullivan, Timmermann & White (1999)
+   * 패턴 무관 무작위 진입 시 h-day 수익률 양수 비율 (buy null) 및 음수 비율 (sell null)
+   * @param {Array} candles — 전체 캔들 배열
+   * @param {number} h — horizon (일)
+   * @returns {{ buyNull: number, sellNull: number, totalObs: number }}
+   */
+  _computeNullWR(candles, h) {
+    var lastClose = candles.length > 0 ? candles[candles.length - 1].close : 0;
+    var cacheKey = candles.length + '_' + h + '_' + lastClose;
+    if (!this._nullWRCache) this._nullWRCache = {};
+    if (this._nullWRCache[cacheKey]) return this._nullWRCache[cacheKey];
+
+    var buyWins = 0, sellWins = 0, total = 0;
+    var cost = this._horizonCost(h);
+    for (var i = 0; i < candles.length - h - 1; i++) {
+      var entryPrice = candles[i + 1].open || candles[i].close;
+      if (!entryPrice || entryPrice === 0) continue;
+      var exitPrice = candles[i + h].close;
+      var ret = (exitPrice - entryPrice) / entryPrice * 100 - cost;
+      if (ret > 0) buyWins++;
+      if (ret < 0) sellWins++;
+      total++;
+    }
+
+    var result;
+    if (total === 0) {
+      result = { buyNull: 50, sellNull: 50, totalObs: 0 };
+    } else {
+      result = {
+        buyNull: +(buyWins / total * 100).toFixed(1),
+        sellNull: +(sellWins / total * 100).toFixed(1),
+        totalObs: total
+      };
+    }
+    this._nullWRCache[cacheKey] = result;
+    return result;
+  }
+
+  /**
+   * [Expert Consensus] Regime-Conditioned WR — Lo (2004) AMH
+   * Split win rate by Hurst weight regime, n>=30 guard
+   * @param {Array} candles — OHLCV candles
+   * @param {Array} occurrences — valid occurrences with idx
+   * @param {number} h — horizon
+   * @param {string} patternSignal — 'buy'/'sell'/'neutral'
+   * @returns {Object|null} { trending, reverting, neutral } each { wr, n } or null
+   */
+  _computeRegimeWR(candles, occurrences, h, patternSignal) {
+    if (!occurrences || occurrences.length < 30) return null;
+    var cost = this._horizonCost(h);
+    var buckets = { trending: { wins: 0, n: 0 }, reverting: { wins: 0, n: 0 }, neutral: { wins: 0, n: 0 } };
+
+    for (var i = 0; i < occurrences.length; i++) {
+      var occ = occurrences[i];
+      var exitIdx = occ.idx + h;
+      if (exitIdx >= candles.length) continue;
+      var entryIdx = occ.idx + 1;
+      if (entryIdx >= candles.length) continue;
+      var entryPrice = candles[entryIdx].open || candles[occ.idx].close;
+      if (!entryPrice || entryPrice === 0) continue;
+      var exitPrice = candles[exitIdx].close;
+      var ret = (exitPrice - entryPrice) / entryPrice * 100 - cost;
+
+      // Classify regime by hw stored on occurrence
+      var hw = occ.hw || 1.0;
+      var bucket = hw > 1.1 ? 'trending' : hw < 0.9 ? 'reverting' : 'neutral';
+      buckets[bucket].n++;
+      if ((patternSignal === 'buy' && ret > 0) || (patternSignal === 'sell' && ret < 0) || (patternSignal === 'neutral' && ret > 0)) {
+        buckets[bucket].wins++;
+      }
+    }
+
+    var result = {};
+    for (var key in buckets) {
+      if (buckets[key].n >= 30) {
+        result[key] = { wr: +(buckets[key].wins / buckets[key].n * 100).toFixed(1), n: buckets[key].n };
+      } else {
+        result[key] = null;  // n<30 guard
+      }
+    }
+    return result;
   }
 
 
@@ -1105,7 +1327,288 @@ class PatternBacktester {
     this._analyzeCache = null;
     this._atrCache = null;
     this._vmaCache = null;
+    this._nullWRCache = null;
     this._resultCache.clear();
+    this._signalAnalysisCache = null;
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  7. 시그널 백테스팅
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * signalEngine.analyze()를 전체 캔들에 한 번 실행하여
+   * 모든 시그널 타입의 발생 이력을 인덱스별로 수집하고 캐시한다.
+   *
+   * 캐시 키: 캔들 수 + 마지막 캔들 time (candle 변경 시 자동 무효화)
+   *
+   * @param {Array} candles — OHLCV 배열
+   * @param {string} signalType — 조회할 시그널 타입 (또는 '__init__' for 캐시 초기화만)
+   * @returns {Object[]} — 해당 시그널 타입의 발생 이력 배열
+   */
+  _collectSignalOccurrences(candles, signalType) {
+    var lastTime = candles.length > 0 ? (candles[candles.length - 1].time || '') : '';
+    var cacheKey = candles.length + '_' + lastTime;
+
+    if (!this._signalAnalysisCache || this._signalAnalysisCache.key !== cacheKey) {
+      // ATR 캐시 재사용 (패턴 백테스트가 선행된 경우 이미 존재)
+      if (!this._atrCache || this._atrCache._candles !== candles) {
+        this._atrCache = {
+          _candles: candles,
+          atr: (typeof calcATR === 'function') ? calcATR(candles, 14) : null,
+        };
+      }
+      // VMA 캐시 재사용
+      if (!this._vmaCache || this._vmaCache._candles !== candles) {
+        var volumes = candles.map(function(c) { return c.volume || 0; });
+        this._vmaCache = {
+          _candles: candles,
+          vma: (typeof calcMA === 'function') ? calcMA(volumes, 20) : null,
+        };
+      }
+
+      // patternEngine.analyze() — 복합 시그널 매칭에 필요
+      // _analyzeCache 재사용: 패턴 백테스트가 선행된 경우 중복 실행 방지
+      var patterns = [];
+      if (this._analyzeCache && this._analyzeCache._candles === candles) {
+        patterns = this._analyzeCache.patterns || [];
+      } else if (typeof patternEngine !== 'undefined') {
+        patterns = patternEngine.analyze(candles) || [];
+        this._analyzeCache = { _candles: candles, patterns: patterns };
+      }
+
+      // signalEngine.analyze() 한 번 실행 — IndicatorCache 내부 생성
+      var sigResult = { signals: [], cache: null, stats: {} };
+      if (typeof signalEngine !== 'undefined') {
+        sigResult = signalEngine.analyze(candles, patterns) || sigResult;
+      }
+
+      var atr = this._atrCache.atr;
+      var vma = this._vmaCache.vma;
+
+      // 모든 시그널을 타입별로 인덱싱
+      // individual: s.type (e.g. 'goldenCross')
+      // composite: s.compositeId (e.g. 'buy_goldenCrossRsi'), s.type === 'composite'
+      var signalMap = {};
+      var allSignals = sigResult.signals || [];
+
+      for (var i = 0; i < allSignals.length; i++) {
+        var s = allSignals[i];
+        var idx = s.index;
+        if (idx === undefined || idx === null) continue;
+
+        // 타입 결정: 복합 시그널은 compositeId, 개별 시그널은 type
+        var sType = (s.type === 'composite' && s.compositeId) ? s.compositeId : s.type;
+        if (!sType) continue;
+
+        if (!signalMap[sType]) signalMap[sType] = [];
+
+        // volumeRatio, atrNorm: WLS 회귀 특성값
+        var volumeRatio = 1;
+        if (vma && vma[idx] && vma[idx] > 0 && candles[idx] && candles[idx].volume) {
+          volumeRatio = candles[idx].volume / vma[idx];
+        }
+        var atrNorm = 0.02;
+        if (atr && atr[idx] && candles[idx] && candles[idx].close > 0) {
+          atrNorm = atr[idx] / candles[idx].close;
+        }
+
+        // _computeStats 호환 발생 이력 객체
+        // hw=1: 시그널은 Hurst 가중치 없음 → _computeRegimeWR에서 'neutral' 버킷
+        signalMap[sType].push({
+          idx: idx,
+          confidence: s.confidence || 50,
+          confidencePred: s.confidencePred || s.confidence || 50,
+          trendStrength: 0,      // 시그널은 추세 강도 미측정 (WLS 절편 흡수)
+          volumeRatio: volumeRatio,
+          atrNorm: atrNorm,
+          hw: 1.0,               // Hurst 가중치 없음 (신호 자체가 레짐 지표)
+        });
+      }
+
+      this._signalAnalysisCache = { key: cacheKey, map: signalMap };
+    }
+
+    if (signalType === '__init__') return [];
+    return this._signalAnalysisCache.map[signalType] || [];
+  }
+
+  /**
+   * 특정 시그널 타입의 과거 발생 이력에서 N일 후 수익률 통계 계산
+   *
+   * 패턴 백테스트와 동일한 _computeStats() 엔진을 재사용한다.
+   * 결과 포맷은 backtest()와 동일 (38 stats per horizon).
+   *
+   * @param {Array} candles — OHLCV 배열
+   * @param {string} signalType — 시그널 타입 문자열
+   * @param {Object} [options] — { horizons: [1,3,5,10,20] }
+   * @returns {{ signalType, name, signal, sampleSize, horizons: Object }}
+   */
+  backtestSignal(candles, signalType, options) {
+    if (!candles || candles.length < 50) {
+      return { signalType: signalType, name: signalType, signal: 'neutral', sampleSize: 0, horizons: {} };
+    }
+    var horizons = (options && options.horizons) ? options.horizons : this.HORIZONS;
+
+    var occs = this._collectSignalOccurrences(candles, signalType);
+    if (!occs || occs.length === 0) {
+      return { signalType: signalType, name: signalType, signal: 'neutral', sampleSize: 0, horizons: {} };
+    }
+
+    var sigDir = this._resolveSignalDirection(signalType);
+    var horizonStats = this._computeStats(candles, occs, horizons, sigDir, signalType);
+
+    return {
+      signalType: signalType,
+      name: signalType,
+      signal: sigDir,
+      sampleSize: occs.length,
+      horizons: horizonStats,
+    };
+  }
+
+  /**
+   * 시그널 타입 → 방향('buy'/'sell'/'neutral') 조회
+   * COMPOSITE_SIGNAL_DEFS 및 알려진 개별 시그널 맵에서 조회.
+   * 알 수 없으면 이름 패턴에서 추론.
+   *
+   * @param {string} signalType
+   * @returns {string} 'buy' | 'sell' | 'neutral'
+   */
+  _resolveSignalDirection(signalType) {
+    // 1. COMPOSITE_SIGNAL_DEFS에서 조회 (정의가 전역 변수로 존재하는 경우)
+    if (typeof COMPOSITE_SIGNAL_DEFS !== 'undefined') {
+      for (var di = 0; di < COMPOSITE_SIGNAL_DEFS.length; di++) {
+        if (COMPOSITE_SIGNAL_DEFS[di].id === signalType) {
+          return COMPOSITE_SIGNAL_DEFS[di].signal || 'neutral';
+        }
+      }
+    }
+
+    // 2. 알려진 개별 시그널 방향 맵 (signalEngine._weights 기준)
+    var KNOWN_DIR = {
+      goldenCross: 'buy',          deadCross: 'sell',
+      maAlignment_bull: 'buy',     maAlignment_bear: 'sell',
+      macdBullishCross: 'buy',     macdBearishCross: 'sell',
+      macdBullishDivergence: 'buy', macdBearishDivergence: 'sell',
+      macdHiddenBullishDivergence: 'buy', macdHiddenBearishDivergence: 'sell',
+      rsiOversold: 'buy',          rsiOverbought: 'sell',
+      rsiOversoldExit: 'buy',      rsiOverboughtExit: 'sell',
+      rsiBullishDivergence: 'buy', rsiBearishDivergence: 'sell',
+      rsiHiddenBullishDivergence: 'buy', rsiHiddenBearishDivergence: 'sell',
+      bbLowerBounce: 'buy',        bbUpperBreak: 'sell',
+      bbSqueeze: 'neutral',
+      ichimokuBullishCross: 'buy', ichimokuBearishCross: 'sell',
+      ichimokuCloudBreakout: 'buy', ichimokuCloudBreakdown: 'sell',
+      stochRsiOversold: 'buy',     stochRsiOverbought: 'sell',
+      stochasticOversold: 'buy',   stochasticOverbought: 'sell',
+      hurstTrending: 'neutral',    hurstMeanReverting: 'neutral',
+      kalmanUpturn: 'buy',         kalmanDownturn: 'sell',
+      volumeBreakout: 'buy',       volumeSelloff: 'sell',
+      volumeExhaustion: 'neutral',
+    };
+    if (KNOWN_DIR[signalType]) return KNOWN_DIR[signalType];
+
+    // 3. 이름 패턴에서 추론 (알 수 없는 복합 시그널)
+    var lc = signalType.toLowerCase();
+    if (lc.indexOf('buy') !== -1 || lc.indexOf('bull') !== -1 || lc.indexOf('golden') !== -1) return 'buy';
+    if (lc.indexOf('sell') !== -1 || lc.indexOf('bear') !== -1 || lc.indexOf('dead') !== -1) return 'sell';
+    return 'neutral';
+  }
+
+  /**
+   * 전체 시그널 타입 일괄 백테스트
+   * + BH-FDR 다중비교 보정 (_applyBHFDR 재사용)
+   * + Reliability Tier 분류 (신호는 패턴보다 완화된 기준 적용)
+   *
+   * 성능: signalEngine.analyze() 1회 (~10-20ms) + _computeStats() ~25회 (~2-5ms each)
+   * 합계: ~60-125ms. 3초 Worker 스로틀 내 완납 가능.
+   *
+   * @param {Array} candles — OHLCV 배열
+   * @returns {{ [signalType]: backtestSignalResult }}
+   */
+  backtestAllSignals(candles) {
+    if (!candles || candles.length < 50) return {};
+
+    // signalEngine 분석 실행 및 캐시 워밍
+    this._collectSignalOccurrences(candles, '__init__');
+    if (!this._signalAnalysisCache || !this._signalAnalysisCache.map) return {};
+
+    var signalMap = this._signalAnalysisCache.map;
+
+    // 백테스트 대상: 핵심 개별 16개 (높은 발화 빈도 + 학문적 근거)
+    var BACKTEST_SIGNALS = [
+      'goldenCross', 'deadCross',
+      'macdBullishCross', 'macdBearishCross',
+      'rsiOversoldExit', 'rsiOverboughtExit',
+      'bbLowerBounce', 'bbSqueeze',
+      'volumeBreakout', 'volumeSelloff',
+      'ichimokuBullishCross', 'ichimokuBearishCross',
+      'ichimokuCloudBreakout', 'ichimokuCloudBreakdown',
+      'stochasticOversold', 'stochasticOverbought',
+    ];
+
+    // 발견된 복합 시그널 자동 추가 (buy_* / sell_* / strong* 접두어)
+    for (var sType in signalMap) {
+      if (BACKTEST_SIGNALS.indexOf(sType) === -1) {
+        if (sType.indexOf('buy_') === 0 || sType.indexOf('sell_') === 0 ||
+            sType.indexOf('strong') === 0) {
+          BACKTEST_SIGNALS.push(sType);
+        }
+      }
+    }
+
+    var results = {};
+
+    for (var i = 0; i < BACKTEST_SIGNALS.length; i++) {
+      var st = BACKTEST_SIGNALS[i];
+      var occs = signalMap[st];
+      if (!occs || occs.length < 5) continue;  // 최소 5회 발생 (신호 빈도 고려)
+
+      var sigDir = this._resolveSignalDirection(st);
+      var horizonStats = this._computeStats(candles, occs, this.HORIZONS, sigDir, st);
+
+      results[st] = {
+        signalType: st,
+        name: st,
+        signal: sigDir,
+        sampleSize: occs.length,
+        horizons: horizonStats,
+      };
+    }
+
+    // BH-FDR 다중비교 보정 (패턴 백테스트와 동일 엔진)
+    this._applyBHFDR(results);
+
+    // Reliability Tier — 신호는 패턴보다 완화된 기준 (n<100 현실 반영)
+    for (var tierKey in results) {
+      var tr = results[tierKey];
+      if (!tr || !tr.horizons) { tr.reliabilityTier = 'D'; continue; }
+      var h5 = tr.horizons[5];
+      if (!h5 || h5.n < 5) { tr.reliabilityTier = 'D'; continue; }
+
+      var isAdjSig = h5.adjustedSignificant;
+      var isSig = h5.significant;
+      var alpha = h5.wrAlpha || 0;
+      var nSample = h5.n;
+      var exp = h5.expectancy || 0;
+
+      // Tier A: BH 보정 유의 + wrAlpha>=3 + n>=50 + 양의 기대수익
+      if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0) {
+        tr.reliabilityTier = 'A';
+      // Tier B: raw 유의 + wrAlpha>=2 + n>=20 + 양의 기대수익
+      } else if (isSig && alpha >= 2 && nSample >= 20 && exp > 0) {
+        tr.reliabilityTier = 'B';
+      // Tier C: wrAlpha>0 + n>=20
+      } else if (alpha > 0 && nSample >= 20) {
+        tr.reliabilityTier = 'C';
+      } else {
+        tr.reliabilityTier = 'D';
+      }
+    }
+
+    return results;
   }
 }
 

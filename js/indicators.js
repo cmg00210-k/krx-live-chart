@@ -202,11 +202,20 @@ function calcHurst(closes, minWindow = 10) {
   if (logRS.length < 2) return null;
   // 선형 회귀로 기울기(H) 추정 — log(R/S) = H * log(n) + c
   const n = logRS.length;
-  let sx = 0, sy = 0, sxy = 0, sx2 = 0;
-  for (let i = 0; i < n; i++) {
-    sx += logN[i]; sy += logRS[i]; sxy += logN[i] * logRS[i]; sx2 += logN[i] * logN[i];
+  var sx = 0, sy = 0, sxy = 0, sx2 = 0;
+  for (var ri = 0; ri < n; ri++) {
+    sx += logN[ri]; sy += logRS[ri]; sxy += logN[ri] * logRS[ri]; sx2 += logN[ri] * logN[ri];
   }
-  return (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+  var slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+
+  // R-squared for Hurst regression quality
+  var sy2 = 0;
+  for (var rj = 0; rj < n; rj++) sy2 += logRS[rj] * logRS[rj];
+  var ssTot = sy2 - sy * sy / n;
+  var ssReg = ssTot > 0 ? (n * sxy - sx * sy) * (n * sxy - sx * sy) / (n * (n * sx2 - sx * sx)) : 0;
+  var rSquared = ssTot > 0 ? ssReg / ssTot : 0;
+
+  return { H: slope, rSquared: rSquared };
 }
 
 /** Hill 꼬리 지수 추정량 — Hill (1975)
@@ -1444,7 +1453,7 @@ class IndicatorCache {
     return this._cache[key];
   }
 
-  /** 허스트 지수 (현재 미사용 — 향후 추세 지속성 분석용) */
+  /** 허스트 지수 — { H: number, rSquared: number } 또는 null */
   hurst(minWindow = 10) {
     const key = `hurst_${minWindow}`;
     if (!(key in this._cache)) {

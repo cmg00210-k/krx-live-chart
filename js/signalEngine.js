@@ -344,6 +344,12 @@ class SignalEngine {
     // CCI 레짐 필터 — Lambert (1980): |CCI| 기반 추세/횡보 판별 (ADX와 직교)
     this._applyCCIFilter(signals, cache);
 
+    // [Expert Consensus] CUSUM breakpoint discount — Page (1954), Roberts (1966)
+    this._applyCUSUMDiscount(signals, candles, cache);
+
+    // [Expert Consensus] Binary Segmentation regime discount — Bai & Perron (1998)
+    this._applyBinSegDiscount(signals, candles, cache);
+
     // OLS 추세 확인 → 순방향 confidence boost — Lo & MacKinlay (1999)
     // R² > 0.50 = 강한 추세: 추세 방향 시그널에 +5 boost
     // [Phase0-B] OLS 상한 95→90 통일: ADX/CCI와 동일 상한 적용
@@ -657,11 +663,16 @@ class SignalEngine {
     // C-5 CZW: Hurst 레짐 연동 RSI confidence
     // H>0.6(추세): RSI 역행 위험 → confidence 하향
     // H<0.4(반지속): RSI 반전 유효 → confidence 상향
-    const H = cache.hurst();
+    var hurstObj = cache.hurst();
+    const H = hurstObj ? hurstObj.H : null;
+    const hurstR2 = hurstObj ? hurstObj.rSquared : null;
+    // [Hurst R² quality gate] R/S 회귀 품질이 낮으면 Hurst 영향 축소
+    const hurstQuality = (hurstR2 !== null && hurstR2 < 0.70) ? hurstR2 / 0.70 : 1.0;
     const hBase = (H !== null && H !== undefined && !isNaN(H))
-      ? Math.round(65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2)))
+      ? Math.round((65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2))) * hurstQuality + 55 * (1 - hurstQuality))
       : 55;  // H 없으면 기본 55
-    // hBase: H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
+    // hBase: R²≥0.70 → H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
+    //        R²<0.70 → neutral(55)로 블렌딩 (예: R²=0.35 → 50% Hurst + 50% neutral)
     const entryConf = Math.max(40, hBase - 10);  // 진입은 탈출보다 10 낮음
     const exitBuyConf = Math.max(50, hBase);
     const exitSellConf = Math.max(48, hBase - 2);
@@ -1081,8 +1092,16 @@ class SignalEngine {
    */
   _detectHurstSignal(candles, cache) {
     const signals = [];
-    const H = cache.hurst();  // 단일 스칼라 값 (null 가능)
+    var hurstObj = cache.hurst();  // { H, rSquared } 또는 null
+    const H = hurstObj ? hurstObj.H : null;
     if (H === null || H === undefined) return signals;
+
+    const hurstR2 = hurstObj ? hurstObj.rSquared : null;
+    // [Hurst R² gate] R/S 회귀가 불안정하면 레짐 시그널 발생하지 않음
+    if (hurstR2 !== null && hurstR2 < 0.50) return signals;
+
+    // R² 0.50-0.70: confidence 비례 축소 / R² ≥ 0.70: 전체 confidence
+    var rQual = (hurstR2 !== null && hurstR2 < 0.70) ? (hurstR2 / 0.70) : 1.0;
 
     // 마지막 캔들 인덱스에 레짐 시그널 배치 (전체 시계열 요약)
     const lastIdx = candles.length - 1;
@@ -1094,7 +1113,7 @@ class SignalEngine {
         nameShort: '허스트 추세 레짐',
         signal: 'neutral',
         strength: 'weak',
-        confidence: 55,
+        confidence: Math.round(55 * rQual),
         index: lastIdx,
         time: candles[lastIdx].time,
         description: `허스트 지수 ${H.toFixed(2)} (>0.6) — 추세 지속 가능성 높음, 추세추종 전략 유리`,
@@ -1106,7 +1125,7 @@ class SignalEngine {
         nameShort: '허스트 회귀 레짐',
         signal: 'neutral',
         strength: 'weak',
-        confidence: 55,
+        confidence: Math.round(55 * rQual),
         index: lastIdx,
         time: candles[lastIdx].time,
         description: `허스트 지수 ${H.toFixed(2)} (<0.4) — 평균 회귀 가능성 높음, 역추세 전략 유리`,
@@ -1355,6 +1374,74 @@ class SignalEngine {
       var absCCI = Math.abs(cciVal);
       var adj = SignalEngine._interpIsotonic(absCCI, bp);
       sig.confidence = Math.max(30, Math.min(90, sig.confidence + adj));
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  CUSUM Breakpoint Discount — Page (1954), Roberts (1966)
+  //  구조적 변동점 근처 시그널 신뢰도 감산: 레짐 전환 시
+  //  과거 관계식이 무효화될 수 있으므로 30봉에 걸쳐 선형 회복
+  //  discount: 0.70 (변동점) → 1.0 (30봉 후)
+  // ══════════════════════════════════════════════════════
+
+  _applyCUSUMDiscount(signals, candles, cache) {
+    if (!signals || signals.length === 0) return;
+    var cusumResult = cache.cusum(2.5);
+    if (!cusumResult || !cusumResult.isRecent || !cusumResult.breakpoints || cusumResult.breakpoints.length === 0) return;
+
+    var lastBP = cusumResult.breakpoints[cusumResult.breakpoints.length - 1];
+    var lastIdx = candles.length - 1;
+    var barsSince = lastIdx - lastBP.index;
+
+    // Linear recovery: 0.70 at breakpoint → 1.0 after 30 bars
+    if (barsSince >= 30) return;  // fully recovered
+    var discount = 0.70 + 0.30 * (barsSince / 30);
+
+    for (var i = 0; i < signals.length; i++) {
+      if (signals[i].confidence) {
+        signals[i].confidence = Math.max(10, Math.round(signals[i].confidence * discount));
+      }
+    }
+  }
+
+
+  // ══════════════════════════════════════════════════════
+  //  Binary Segmentation Regime Discount — Bai & Perron (1998)
+  //  구조적 변환점(regime shift) 근처 역추세 시그널 신뢰도 감산.
+  //  rightMean > leftMean = 상승 레짐 → sell 신호 할인 (반대도 동일).
+  //  CUSUM보다 약한 할인 (0.85 vs 0.70): BinSeg는 방향별 선택적.
+  //  breakpoint index는 returns 배열 기준 (candle index ≈ bp.index + 1).
+  // ══════════════════════════════════════════════════════
+
+  _applyBinSegDiscount(signals, candles, cache) {
+    if (!signals || signals.length === 0) return;
+    var bsResult = cache.binarySegmentation(3, 30);
+    if (!bsResult || !bsResult.breakpoints || bsResult.breakpoints.length === 0) return;
+
+    // Use the most recent breakpoint
+    var lastBP = bsResult.breakpoints[bsResult.breakpoints.length - 1];
+    var barsSince = (candles.length - 1) - lastBP.index;
+
+    // Only apply if breakpoint is recent (within 30 bars)
+    if (barsSince > 30) return;
+
+    // Determine new regime direction from mean shift
+    var regimeDir = (lastBP.rightMean > lastBP.leftMean) ? 'up' : 'down';
+
+    // Discount factor: 0.85 at breakpoint → 1.0 after 30 bars (linear recovery)
+    var discount = 0.85 + 0.15 * (barsSince / 30);
+
+    for (var i = 0; i < signals.length; i++) {
+      var s = signals[i];
+      if (!s.confidence) continue;
+
+      // Only discount COUNTER-TREND signals (opposing the new regime)
+      var isCounter = (regimeDir === 'up' && s.signal === 'sell') ||
+                      (regimeDir === 'down' && s.signal === 'buy');
+      if (isCounter) {
+        s.confidence = Math.max(10, Math.round(s.confidence * discount));
+      }
     }
   }
 

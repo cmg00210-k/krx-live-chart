@@ -14,7 +14,7 @@
 //    ← { type: 'result', patterns, signals, stats, version, source }
 //
 //    → { type: 'backtest', candles, version }
-//    ← { type: 'backtestResult', results, candleLength, version }
+//    ← { type: 'backtestResult', results, learnedWeights, backtestEpochMs, candleLength, version }
 //
 //    ← { type: 'ready' }   Worker 초기화 완료
 //    ← { type: 'error', message, version }   처리 중 에러
@@ -38,6 +38,11 @@ let _learnedWeights = {};
 // { [patternType]: { winRate, sampleSize, ci95Lower?, ci95Upper?, expectedReturn? } }
 // backtest 메시지 처리 후 갱신, analyze 결과 패턴에 부착
 let _winRateMap = {};
+
+// ── 시그널 승률 맵 — backtestAllSignals 결과에서 시그널별 5일 승률 캐시 ────
+// { [signalType]: { wr, n, tier, expectancy } }
+// backtest 메시지 처리 후 갱신, analyze 결과 시그널에 부착
+var _signalWinRateMap = {};
 
 // ── 백테스트 기준시점 — AMH 시변성 감쇠 계산용 ────────
 // Lo (2004) AMH: 패턴 알파는 exp(-λ×days) 속도로 감쇠.
@@ -77,7 +82,8 @@ function _extractLearnedWeights(backtestResults) {
     var bt = backtestResults[pType];
     if (!bt || !bt.horizons) continue;
     var h5 = bt.horizons[5];
-    if (h5 && h5.regression && h5.regression.rSquared > 0.01 && h5.n >= 30) {
+    // [Expert Consensus] Campbell-Thompson (2008) R²_OOS >= 0.03 standard
+    if (h5 && h5.regression && h5.regression.rSquared >= 0.03 && h5.n >= 30) {
       _learnedWeights[pType] = {
         beta: h5.regression.coeffs,
         rSquared: h5.regression.rSquared,
@@ -112,6 +118,25 @@ function _extractWinRateMap(backtestResults) {
         entry.expectedReturn = h5.expectedReturn;
       }
       _winRateMap[pType] = entry;
+    }
+  }
+}
+
+// ── 시그널 백테스트 결과 → 시그널 승률 맵 추출 ────────────
+// horizons[5] (5일 승률)을 시그널별로 캐시.
+// n < 5이면 신뢰도 부족으로 저장하지 않음 (패턴 기준 10보다 완화 — 신호 희소성 반영).
+function _extractSignalWinRateMap(signalResults) {
+  if (!signalResults) return;
+  _signalWinRateMap = {};  // 종목 전환 시 이전 종목 데이터 오염 방지
+  for (var sType in signalResults) {
+    var sr = signalResults[sType];
+    if (sr && sr.horizons && sr.horizons[5] && sr.horizons[5].n >= 5) {
+      _signalWinRateMap[sType] = {
+        wr: sr.horizons[5].winRate,
+        n: sr.horizons[5].n,
+        tier: sr.reliabilityTier || 'D',
+        expectancy: sr.horizons[5].expectancy || 0,
+      };
     }
   }
 }
@@ -186,6 +211,7 @@ self.onmessage = function (e) {
       // drag 이벤트에서 동일 visible 구간 반복 요청 시 효과적
       const cacheKey = _makeCacheKey(analyzeCandles, msg.timeframe);
       let patterns, signals, stats;
+      var _cacheMiss = false;  // 캐시 미스 여부 — auto-backtest 트리거 판단용
 
       // 적응형 가중치 주입 (이전 백테스트에서 학습)
       if (msg.learnedWeights) {
@@ -210,6 +236,7 @@ self.onmessage = function (e) {
         signals = _analyzeCache.signals;
         stats = _analyzeCache.stats;
       } else {
+        _cacheMiss = true;
         // 캐시 미스: 새로 분석
         // [PERF] UI 분석: lookback 윈도우 제한 (HS_WINDOW=120 + S/R 버퍼 + 지표 warm-up)
         // 분봉(5m/1m)에서 8-20x 속도향상. 백테스트는 별도 전체 분석.
@@ -240,14 +267,112 @@ self.onmessage = function (e) {
       // 이전 백테스트에서 캐시된 승률을 패턴에 부착 (첫 분석 시 빈 맵 → null 부착)
       _attachWinRates(patterns);
 
+      // [Signal Backtest] 이전 backtestAllSignals에서 캐시된 승률을 시그널에 부착
+      // 첫 분석 시에는 빈 맵 → 부착 스킵 (백테스트 완료 후 다음 analyze 시 활성화)
+      if (_signalWinRateMap && Object.keys(_signalWinRateMap).length > 0) {
+        for (var si = 0; si < signals.length; si++) {
+          var sKey = signals[si].compositeId || signals[si].type;
+          var swm = _signalWinRateMap[sKey];
+          if (swm) {
+            signals[si].backtestWR = swm.wr;
+            signals[si].backtestN = swm.n;
+            signals[si].reliabilityTier = swm.tier;
+            signals[si].backtestExpectancy = swm.expectancy;
+          }
+        }
+      }
+
+      // [Expert Consensus] Pattern-Signal Agreement Score
+      // Cross-validate most recent pattern direction vs signal sentiment
+      var agreementScore = null;
+      if (patterns && patterns.length > 0 && stats && stats.sentiment !== undefined) {
+        var recentPattern = null;
+        var lastIdx = analyzeCandles.length - 1;
+        // Find most recent pattern (within last 5 bars)
+        for (var pi = patterns.length - 1; pi >= 0; pi--) {
+          var pIdx = patterns[pi].endIndex || patterns[pi].startIndex || 0;
+          if (lastIdx - pIdx <= 5) { recentPattern = patterns[pi]; break; }
+        }
+
+        if (recentPattern) {
+          var patDir = recentPattern.signal; // 'buy', 'sell', 'neutral'
+          var sigSentiment = stats.sentiment || 0; // -100 to +100
+
+          // Determine agreement
+          var patBuy = (patDir === 'buy');
+          var patSell = (patDir === 'sell');
+          var sigBuy = (sigSentiment >= 25);
+          var sigSell = (sigSentiment <= -25);
+
+          if ((patBuy && sigBuy) || (patSell && sigSell)) {
+            // Agreement: boost both
+            agreementScore = { status: 'agree', boost: 5 };
+            recentPattern.confidence = Math.min(100, (recentPattern.confidence || 50) + 5);
+            if (recentPattern.confidencePred) {
+              recentPattern.confidencePred = Math.min(95, recentPattern.confidencePred + 3);
+            }
+          } else if ((patBuy && sigSell) || (patSell && sigBuy)) {
+            // Conflict: discount the weaker one
+            agreementScore = { status: 'conflict', penalty: -10 };
+            var patConf = recentPattern.confidencePred || recentPattern.confidence || 50;
+            var sigConf = Math.abs(sigSentiment);
+            if (patConf < sigConf) {
+              // Pattern is weaker — discount pattern
+              recentPattern.confidence = Math.max(10, (recentPattern.confidence || 50) - 10);
+              recentPattern.conflictFlag = true;
+            } else {
+              // Signal sentiment is weaker — flag but don't modify (signals already posted)
+              agreementScore.weakerSide = 'signal';
+            }
+          } else {
+            agreementScore = { status: 'neutral' };
+          }
+        }
+      }
+
       self.postMessage({
         type: 'result',
         patterns: patterns,
         signals: signals,
         stats: stats,
+        agreementScore: agreementScore,
         version: version,
         source: msg.source || 'full',
       });
+
+      // [Expert Consensus] Worker auto-trigger — eliminates 1 round-trip latency
+      // Only on cache miss (new stock) with sufficient data
+      if (_cacheMiss && analyzeCandles && analyzeCandles.length >= 50 && typeof backtester !== 'undefined') {
+        try {
+          backtester._currentMarket = msg.market || '';
+          var autoResults = backtester.backtestAll(analyzeCandles);
+          // Extract learned weights for next analyze cycle
+          _extractLearnedWeights(autoResults);
+          _extractWinRateMap(autoResults);
+          // [AMH] 백테스트 기준시점 기록 (Lo 2004 시변 효율성)
+          if (analyzeCandles.length > 0) {
+            var lastTime = analyzeCandles[analyzeCandles.length - 1].time;
+            _backtestEpochMs = (typeof lastTime === 'string')
+              ? new Date(lastTime).getTime()
+              : lastTime * 1000;
+          }
+          // [Signal Backtest] 시그널 백테스트 자동 실행 — optional enhancement
+          var autoSignalResults = null;
+          try {
+            autoSignalResults = backtester.backtestAllSignals(analyzeCandles);
+            _extractSignalWinRateMap(autoSignalResults);
+          } catch (e) { /* silent — signal backtest is optional enhancement */ }
+          self.postMessage({
+            type: 'backtestResult',
+            results: autoResults,
+            signalResults: autoSignalResults,
+            learnedWeights: _learnedWeights,
+            backtestEpochMs: _backtestEpochMs,
+            candleLength: analyzeCandles.length,
+            version: msg.version,
+          });
+        } catch (btErr) { /* silent — app.js will send explicit backtest if needed */ }
+      }
 
     } catch (err) {
       self.postMessage({
@@ -297,9 +422,17 @@ self.onmessage = function (e) {
           : lastTime * 1000;
       }
 
+      // [Signal Backtest] 시그널 백테스트 실행 — optional enhancement
+      var signalResults = null;
+      try {
+        signalResults = backtester.backtestAllSignals(candles);
+        _extractSignalWinRateMap(signalResults);
+      } catch (sigErr) { /* silent — signal backtest is optional enhancement */ }
+
       self.postMessage({
         type: 'backtestResult',
         results: results,
+        signalResults: signalResults,
         learnedWeights: _learnedWeights,
         backtestEpochMs: _backtestEpochMs,
         candleLength: candles.length,
