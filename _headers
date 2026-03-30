@@ -9,3 +9,6 @@
 
 /css/*
   Cache-Control: public, max-age=60, must-revalidate
+
+/data/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400

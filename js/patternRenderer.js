@@ -1614,10 +1614,10 @@ const patternRenderer = (() => {
       // ci95Width = |ci95Upper - ci95Lower| (return % 단위, 주가 무관)
       // 넓은 CI = 낮은 예측 확신 → 투명하게, 좁은 CI = 높은 확신 → 불투명
       // 공식: ciAlpha = clamp(1 - ci95Width / (2 × CI_REF), CI_ALPHA_MIN, CI_ALPHA_MAX)
-      //   CI_REF=10%: 10% 폭에서 alpha≈0.5 (중간값), 20%+ 이상에서 최소
+      //   CI_REF=5.5%: 5.5% 폭에서 alpha≈0.5 (중간값), 11%+ 이상에서 최소
       //   sigmoid 대비 선형이 해석성 우위 + learnable threshold 1개
       // Chatfield (2004), "The Analysis of Time Series": PI width ∝ forecast uncertainty
-      var CI_REF = 10;         // 기준 CI 폭 (%) — learnable parameter
+      var CI_REF = 5.5;        // [D][L:GS] 기준 CI 폭 (%), pred_std=1.41 → E[CI]=2*1.96*1.41≈5.5%
       var CI_ALPHA_MIN = 0.15; // 최소 opacity (넓은 CI — 거의 투명이지만 존재 표시)
       var CI_ALPHA_MAX = 1.0;  // 최대 opacity (좁은 CI — Wc에만 의존)
       var ciAlpha = CI_ALPHA_MAX;

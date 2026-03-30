@@ -323,8 +323,16 @@ class KRXDataService {
         candles = this._demoGenerateCandles(stock, timeframe);
       }
     } else if (KRX_API_CONFIG.mode === 'file' && timeframe !== '1d') {
-      // file 모드 + 분봉: 보간 분봉 JSON 우선 시도 → 없으면 일봉 폴백
+      // file 모드 + 분봉: 보간 분봉 JSON 우선 시도 → 없으면 리샘플링 또는 일봉 폴백
       candles = await this._fileGetIntradayCandles(stock, timeframe);
+      if (candles.length === 0 && timeframe === '15m') {
+        // 15m 파일 없음 → 5m에서 클라이언트 리샘플링 (3봉 합산)
+        // KRX 390min/5min = 78봉/일, 78/3 = 26봉/일 = 정확히 15m
+        var candles5m = await this._fileGetIntradayCandles(stock, '5m');
+        if (candles5m.length >= 3) {
+          candles = this._resampleCandles(candles5m, 3);
+        }
+      }
       if (candles.length === 0) {
         // 분봉 파일 없음 → 일봉 캐시 재사용 (워터마크로 안내)
         var dailyKey = stock.code + '-1d';
@@ -629,6 +637,35 @@ class KRXDataService {
       // 분봉 파일 없음 — 조용히 빈 배열 반환 (일봉 폴백으로 진행)
       return [];
     }
+  }
+
+  /**
+   * N개 캔들을 1개로 합산 (OHLCV 리샘플링)
+   * 5m→15m: factor=3, 5m→30m: factor=6
+   * @param {Array} candles - 원본 캔들 배열 (시간순)
+   * @param {number} factor - 합산 봉 수
+   * @returns {Array} 리샘플링된 캔들 배열
+   */
+  _resampleCandles(candles, factor) {
+    var result = [];
+    for (var i = 0; i + factor <= candles.length; i += factor) {
+      var group = candles.slice(i, i + factor);
+      var hi = group[0].high, lo = group[0].low, vol = 0;
+      for (var g = 0; g < group.length; g++) {
+        if (group[g].high > hi) hi = group[g].high;
+        if (group[g].low < lo) lo = group[g].low;
+        vol += group[g].volume || 0;
+      }
+      result.push({
+        time: group[0].time,
+        open: group[0].open,
+        high: hi,
+        low: lo,
+        close: group[group.length - 1].close,
+        volume: vol,
+      });
+    }
+    return result;
   }
 
   // ══════════════════════════════════════════════════
