@@ -55,6 +55,16 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '선행 추세가 하락이 아닌 경우 해머 의미 상실. 다음 봉의 확인(양봉 마감) 없이 단독 사용 시 오류율 증가.'
   },
 
+  invertedHammer: {
+    nameKo: '역해머',
+    category: '캔들스틱 (반전)',
+    candles: 1,
+    academicDesc: '하락 추세 말기에 나타나는 짧은 몸통 + 긴 윗꼬리 봉. 윗꼬리가 몸통의 2배 이상이며, 아래꼬리가 거의 없음. 해머의 거울상으로, 매수세의 초기 시도를 보여주나 해머보다 신뢰도가 낮음.',
+    psychology: '하락 추세 중 매수세가 장중 상승을 시도했으나 매도 압력에 밀려 종가가 하락. 그러나 매수 시도 자체가 매도세 약화의 초기 징후. Nison (1991): 확인봉(다음 봉 양봉) 필수.',
+    bulkowskiWinRate: 50,
+    invalidation: '선행 추세가 하락이 아닌 경우 무효. 확인봉(다음 봉 양봉 마감) 없이 단독 사용 시 신뢰도 매우 낮음(~40%). 유성형과 형태 동일하나 맥락(하락 vs 상승)으로 구분.'
+  },
+
   hangingMan: {
     nameKo: '교수형',
     category: '캔들스틱 (반전)',
@@ -73,6 +83,26 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     psychology: '매수세가 상승을 시도했으나 고가에서 강한 매도벽에 부딪혀 좌절. 추세 전환의 강력한 초기 신호.',
     bulkowskiWinRate: 63,
     invalidation: '다음 봉의 확인(음봉 마감) 필요. 거래량이 평균 이하이면 단순 변동으로 해석.'
+  },
+
+  doji: {
+    nameKo: '도지',
+    category: '캔들스틱 (중립)',
+    candles: 1,
+    academicDesc: '시가와 종가가 거의 동일한 봉(body/range <= 5%). 매수세와 매도세가 균형을 이루어 방향성이 결정되지 않은 상태. Nison (1991): "the market is at a turning point."',
+    psychology: '장중 가격 변동이 있었으나 결국 시가 근처로 복귀. 기존 추세의 모멘텀이 소진되고 있음을 시사. 추세 말기에 출현 시 반전 가능성 상승.',
+    bulkowskiWinRate: 42,
+    invalidation: '횡보 구간에서 빈번하게 출현하며, 추세가 없는 상황에서는 의미 없음. 확인봉 없이 단독 사용 시 신뢰도 매우 낮음. 거래량이 평균 이하이면 무시.'
+  },
+
+  spinningTop: {
+    nameKo: '팽이형',
+    category: '캔들스틱 (중립)',
+    candles: 1,
+    academicDesc: '도지보다는 실체가 있으나 작고(body 5~30%), 양쪽 꼬리가 실체 이상으로 긴 봉. 매수/매도 어느 쪽도 우위를 점하지 못한 우유부단 상태. Nison (1991): "spinning tops represent indecision."',
+    psychology: '장중 매수세와 매도세가 번갈아 우위를 점했으나 결국 비등비등하게 마감. 추세 지속 후 출현 시 모멘텀 약화 신호. 단독으로는 방향성 없으나 다른 패턴과 복합 시 유효.',
+    bulkowskiWinRate: 43,
+    invalidation: '횡보 구간에서 매우 빈번(n=559K). 추세 없는 상황에서는 소음. 확인봉 없이 단독 매매 신호로 부적합.'
   },
 
   bullishEngulfing: {
@@ -95,6 +125,26 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '장악 봉 거래량 감소 시 신뢰도 하락. 지지선 근처에서는 하락 지속 실패 가능.'
   },
 
+  bullishHarami: {
+    nameKo: '상승잉태형',
+    category: '캔들스틱 (반전)',
+    candles: 2,
+    academicDesc: '하락 추세에서 큰 음봉 뒤에 작은 양봉이 전일 몸통 내에 완전히 포함. 매도 모멘텀 약화의 신호. Nison (1991): "harami means pregnant in Japanese."',
+    psychology: '전일 강한 매도세 이후, 당일 가격 변동이 전일 범위 내에 갇힘. 매도 에너지가 소진되고 있으나 아직 매수 전환은 확정되지 않음. 확인봉 필요.',
+    bulkowskiWinRate: 53,
+    invalidation: '확인봉(다음 봉 양봉 마감) 없이 단독 사용 시 신뢰도 낮음. 내포 봉의 body가 너무 작으면(도지급) 잉태십자로 분류.'
+  },
+
+  bearishHarami: {
+    nameKo: '하락잉태형',
+    category: '캔들스틱 (반전)',
+    candles: 2,
+    academicDesc: '상승 추세에서 큰 양봉 뒤에 작은 음봉이 전일 몸통 내에 완전히 포함. 매수 모멘텀 약화의 신호. Nison (1991): 내포(containment) 구조.',
+    psychology: '전일 강한 매수세 이후, 당일 가격 변동이 전일 범위 내에 갇힘. 매수 에너지 소진 징후이나 확인봉 없이는 단순 조정 가능성.',
+    bulkowskiWinRate: 53,
+    invalidation: '확인봉(다음 봉 음봉 마감) 없이 단독 사용 시 신뢰도 낮음. 상승 추세가 아닌 횡보에서 출현하면 의미 약화.'
+  },
+
   morningStar: {
     nameKo: '샛별형',
     category: '캔들스틱 (반전)',
@@ -113,6 +163,26 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     psychology: '1일차의 강한 상승 후, 2일차에 매수세가 소진되어 우유부단한 봉 형성. 3일차에 매도세가 지배하며 추세를 반전.',
     bulkowskiWinRate: 72,
     invalidation: '3봉의 종가가 1봉 몸통의 50% 이상을 하락시키지 못하면 약한 신호. 거래량 감소 시 무효.'
+  },
+
+  threeInsideUp: {
+    nameKo: '상승삼내형',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '하락 추세에서 큰 음봉(1봉) + 내포 양봉(2봉, 잉태형) + 확인 양봉(3봉, 1봉 시가 상향 돌파). 잉태형에 확인봉이 추가되어 강한 상승 반전 패턴. Nison (1991): "three inside up confirms the harami."',
+    psychology: '1일차 강한 매도세 이후, 2일차에 가격이 전일 범위 내에 갇히며 매도 모멘텀 소진. 3일차에 매수세가 1일차 시가를 돌파하며 추세 전환 확정. 미확인 잉태형(2봉)의 불확실성을 3봉이 해소.',
+    bulkowskiWinRate: 55,
+    invalidation: '3봉의 종가가 1봉 시가를 돌파하지 못하면 무효. 거래량 감소 추세이면 신뢰도 하락. 횡보 구간에서 출현 시 의미 약화.'
+  },
+
+  threeInsideDown: {
+    nameKo: '하락삼내형',
+    category: '캔들스틱 (반전)',
+    candles: 3,
+    academicDesc: '상승 추세에서 큰 양봉(1봉) + 내포 음봉(2봉, 잉태형) + 확인 음봉(3봉, 1봉 시가 하향 돌파). 잉태형에 확인봉이 추가되어 강한 하락 반전 패턴. Nison (1991): "three inside down confirms the bearish harami."',
+    psychology: '1일차 강한 매수세 이후, 2일차에 가격이 전일 범위 내에 갇히며 매수 모멘텀 소진. 3일차에 매도세가 1일차 시가를 하향 돌파하며 추세 전환 확정.',
+    bulkowskiWinRate: 55,
+    invalidation: '3봉의 종가가 1봉 시가를 돌파하지 못하면 무효. 거래량 감소 추세이면 신뢰도 하락.'
   },
 
   piercingLine: {
@@ -1076,6 +1146,7 @@ function renderPatternCards(patterns) {
 
     // 백테스트 통계 (있으면)
     let statsHtml = '';
+    let scorecardHtml = '';
     if (typeof backtester !== 'undefined' && candles && candles.length >= 50) {
       const bt = backtester.backtest(candles, p.type);
       if (bt && bt.sampleSize > 0) {
@@ -1190,6 +1261,86 @@ function renderPatternCards(patterns) {
               <span class="pp-stat-value" title="Bulkowski (2005)">${meta.bulkowskiWinRate}%</span>
             </div>` : '') +
           `</div>`;
+
+        // [Phase 1] 예측 정확도 스코어카드
+        if (h5 && h5.n >= 10 && h5.patternScore != null) {
+          const grade = h5.patternGrade || 'F';
+          const score = h5.patternScore || 0;
+          const da = h5.directionalAccuracy || 0;
+          const hitRate = h5.targetHitRate;
+          const mae = h5.predictionMAE;
+
+          // 등급 색상 — KRX_COLORS 기반 (TIER_A/B/C/D + DOWN for F)
+          const _gcMap = {
+            A: KRX_COLORS.TIER_A, B: KRX_COLORS.TIER_B,
+            C: KRX_COLORS.TIER_C, D: KRX_COLORS.TIER_D,
+            F: KRX_COLORS.DOWN,
+          };
+          const gc = _gcMap[grade] || _gcMap.F;
+
+          // 소표본 경고
+          const nWarning = h5.n < 30 ? ' <span style="font-size:9px;color:rgba(255,255,255,0.4);">(데이터 부족 주의)</span>' : '';
+
+          // D/F 등급 투자자 경고 — 7-agent 학술 검증 consensus
+          var _dfWarning = '';
+          if (grade === 'F') {
+            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:rgba(224,80,80,0.08);border:1px solid rgba(224,80,80,0.2);border-radius:3px;font-size:9px;color:rgba(224,80,80,0.8);line-height:1.3;">통계적 유의성 미달 — 독립 매매 근거로 부적합</div>';
+          } else if (grade === 'D') {
+            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:rgba(255,180,50,0.06);border:1px solid rgba(255,180,50,0.15);border-radius:3px;font-size:9px;color:rgba(255,180,50,0.7);line-height:1.3;">예측력 제한 — 다른 지표와 함께 참고</div>';
+          }
+
+          // CONTEXT_ONLY 패턴 추가 경고
+          var _ctxWarning = '';
+          if (p._contextOnly) {
+            _ctxWarning = '<div style="margin-top:3px;font-size:9px;color:rgba(255,255,255,0.35);font-style:italic;">표본 부족 또는 KRX 시장 구조 부적합 — 맥락 참고용</div>';
+          }
+
+          scorecardHtml = `
+            <div class="pp-scorecard" style="margin:6px 0;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:4px;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                <span style="background:${gc}25;color:${gc};border:1px solid ${gc}50;border-radius:4px;padding:1px 6px;font-weight:700;font-size:14px;line-height:1.4;">${grade}</span>
+                <span style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">\uC608\uCE21 \uC815\uD655\uB3C4 ${Math.round(score)}\uC810</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:rgba(255,255,255,0.55);">
+                <div style="display:flex;justify-content:space-between;">
+                  <span>\uBC29\uD5A5 \uC801\uC911</span>
+                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">${da.toFixed(0)}%</span>
+                </div>` +
+                (hitRate != null ? `
+                <div style="display:flex;justify-content:space-between;">
+                  <span>\uBAA9\uD45C \uB3C4\uB2EC</span>
+                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">${hitRate.toFixed(0)}%</span>
+                </div>` : '') +
+                (mae != null ? `
+                <div style="display:flex;justify-content:space-between;">
+                  <span>\uD3C9\uADE0 \uC624\uCC28</span>
+                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">\u00B1${mae.toFixed(1)}%</span>
+                </div>` : '') + `
+                <div style="display:flex;justify-content:space-between;">
+                  <span>5\uC77C \uAE30\uC900</span>
+                  <span style="color:rgba(255,255,255,0.5);">${h5.n}\uD68C${nWarning}</span>
+                </div>
+              </div>` +
+              // [Phase 3] MZ 회귀 + Calibration 요약 (n>=20 시 표시)
+              (h5.mzRegression ? (function() {
+                var mz = h5.mzRegression;
+                var slopeOk = Math.abs(mz.slope - 1) < 0.5;
+                var biasOk = Math.abs(mz.bias) < 3;
+                var slopeColor = slopeOk ? 'rgba(255,255,255,0.8)' : KRX_COLORS.DOWN;
+                var biasColor = biasOk ? 'rgba(255,255,255,0.8)' : KRX_COLORS.DOWN;
+                var calText = h5.calibrationCoverage != null ? h5.calibrationCoverage.toFixed(0) + '%' : '--';
+                return '<div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:rgba(255,255,255,0.45);">' +
+                  '<div style="margin-bottom:2px;font-weight:600;color:rgba(255,255,255,0.55);">예측 진단 (Mincer-Zarnowitz)</div>' +
+                  '<div style="display:flex;justify-content:space-between;"><span>기울기 (\u03B2)</span><span style="color:' + slopeColor + ';">' + mz.slope + (slopeOk ? '' : ' \u26A0') + '</span></div>' +
+                  '<div style="display:flex;justify-content:space-between;"><span>편향 (bias)</span><span style="color:' + biasColor + ';">' + (mz.bias >= 0 ? '+' : '') + mz.bias + '%' + (biasOk ? '' : ' \u26A0') + '</span></div>' +
+                  '<div style="display:flex;justify-content:space-between;"><span>R\u00B2</span><span>' + mz.rSquared + '</span></div>' +
+                  '<div style="display:flex;justify-content:space-between;"><span>추적오차 (TE)</span><span>\u00B1' + mz.trackingError + '%</span></div>' +
+                  '<div style="display:flex;justify-content:space-between;"><span>90% 커버리지</span><span>' + calText + '</span></div>' +
+                  '</div>';
+              })() : '') +
+              _dfWarning + _ctxWarning + `
+            </div>`;
+        }
       }
     }
 
@@ -1257,6 +1408,7 @@ function renderPatternCards(patterns) {
         ${categoryHtml}
         ${confBarHtml}
         ${badgeHtml}
+        ${scorecardHtml}
         ${academicHtml}
         ${psychologyHtml}
         ${riskHtml}

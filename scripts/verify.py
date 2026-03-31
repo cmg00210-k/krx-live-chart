@@ -85,14 +85,16 @@ def info(msg):
 # detectSupportResistance -> support/resistance (excluded from checklist).
 CANONICAL_PATTERNS = {
     "threeWhiteSoldiers", "threeBlackCrows",
-    "hammer", "hangingMan", "shootingStar",
-    "dragonflyDoji", "gravestoneDoji",
+    "hammer", "invertedHammer", "hangingMan", "shootingStar",
+    "doji", "dragonflyDoji", "gravestoneDoji", "longLeggedDoji",
+    "spinningTop",
     "bullishEngulfing", "bearishEngulfing",
+    "bullishHarami", "bearishHarami",
     "piercingLine", "darkCloud",
     "tweezerBottom", "tweezerTop",
     "morningStar", "eveningStar",
+    "threeInsideUp", "threeInsideDown",
     "bullishMarubozu", "bearishMarubozu",
-    "longLeggedDoji",
     "bullishBeltHold", "bearishBeltHold",
     "bullishHaramiCross", "bearishHaramiCross",
     "stickSandwich",
@@ -105,7 +107,7 @@ CANONICAL_PATTERNS = {
 }
 
 # Neutral direction - not required in BULLISH_TYPES or BEARISH_TYPES
-NEUTRAL_PATTERNS = {"symmetricTriangle", "channel", "longLeggedDoji"}
+NEUTRAL_PATTERNS = {"symmetricTriangle", "channel", "longLeggedDoji", "doji", "spinningTop"}
 
 # Chart patterns - appear in CHART_PATTERNS + _VIZ_CHART_TYPES
 CHART_PATTERNS_SET = {
@@ -159,6 +161,7 @@ def check_patterns(strict=False):
     detect_calls = set(re.findall(r"this\.detect(\w+)\(", patterns_src))
     expand = {
         "Engulfing":      ["bullishEngulfing",      "bearishEngulfing"],
+        "Harami":         ["bullishHarami",          "bearishHarami"],
         "Marubozu":       ["bullishMarubozu",        "bearishMarubozu"],
         "BeltHold":       ["bullishBeltHold",        "bearishBeltHold"],
         "HaramiCross":    ["bullishHaramiCross",     "bearishHaramiCross"],
@@ -166,7 +169,7 @@ def check_patterns(strict=False):
     }
     derived = set()
     for call in detect_calls:
-        if call == "SupportResistance":
+        if call in ("SupportResistance", "ValuationSR"):
             continue
         if call in expand:
             derived.update(expand[call])
@@ -228,11 +231,12 @@ def check_patterns(strict=False):
         if not missing:
             ok(f"{name} ({len(actual)} entries)")
 
-    # Single-candle candle patterns
+    # Single-candle candle patterns (1-candle glow/stripe rendering in SINGLE_PATTERNS)
     single_expected = {
-        "hammer", "shootingStar",
-        "dragonflyDoji", "gravestoneDoji",
+        "hammer", "invertedHammer", "hangingMan", "shootingStar",
+        "doji", "dragonflyDoji", "gravestoneDoji", "longLeggedDoji", "spinningTop",
         "bullishMarubozu", "bearishMarubozu",
+        "bullishBeltHold", "bearishBeltHold",
     }
     # Multi-candle candle patterns
     zone_expected = CANDLE_PATTERNS_SET - single_expected

@@ -52,18 +52,38 @@ function _deactivateOscillator(ind) {
 
 // ── 시각화 레이어 토글 (4카테고리) ──
 var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
+// D/F 등급 패턴 억제 목록 — 7-agent 학술 검증 consensus (2026-04-05)
+// SUPPRESS: WR<50% 또는 50%과 통계적 구분 불가. 개인투자자 오해 유발 위험.
+// 감지는 계속 실행(백테스트 데이터 수집), UI 표시만 기본 off.
+var _SUPPRESS_PATTERNS = new Set([
+  'longLeggedDoji',      // WR 45%, neutral, 확증편향 최고위험 (CFA+Statistical+Macro consensus)
+  'bullishHaramiCross',  // WR 46%, buy 역시그널 (CFA+Statistical consensus)
+  'bullishBeltHold',     // WR 51.4%, p=0.17 50%과 구분불가 (CFA+Statistical consensus)
+  'spinningTop',         // WR 43%, n=559K 노이즈, Bulkowski 미분류 (FinTheory+Macro consensus)
+  'doji',                // WR 42%, 독립 예측력 없음 — Nison "confirmation required" (FinTheory consensus)
+]);
+// CONTEXT-ONLY: 표시하되 경고 배지 부착 (n 극소 또는 KRX 구조 부적합)
+var _CONTEXT_ONLY_PATTERNS = new Set([
+  'abandonedBabyBullish',  // n=137, KRX gap 희소 (CFA+Statistical+Derivatives consensus)
+  'abandonedBabyBearish',  // n=71, KRX gap 희소 (CFA+Statistical consensus)
+  'stickSandwich',         // n=420, WR 52% 50%포함 (CFA+Statistical consensus)
+]);
 // 캔들 패턴 타입 Set (필터링용)
 var _VIZ_CANDLE_TYPES = new Set([
-  'threeWhiteSoldiers','threeBlackCrows','hammer','hangingMan',
-  'shootingStar','bullishEngulfing','bearishEngulfing',
-  'morningStar','eveningStar',
-  'piercingLine','darkCloud','dragonflyDoji','gravestoneDoji',
+  'hammer','invertedHammer','hangingMan','shootingStar',
+  'doji','dragonflyDoji','gravestoneDoji','longLeggedDoji','spinningTop',
+  'bullishEngulfing','bearishEngulfing',
+  'bullishHarami','bearishHarami',
+  'piercingLine','darkCloud',
   'tweezerBottom','tweezerTop',
+  'morningStar','eveningStar',
+  'threeWhiteSoldiers','threeBlackCrows',
+  'threeInsideUp','threeInsideDown',
   'bullishMarubozu','bearishMarubozu',
-  'longLeggedDoji','bullishBeltHold','bearishBeltHold',
+  'bullishBeltHold','bearishBeltHold',
   'bullishHaramiCross','bearishHaramiCross',
   'stickSandwich',
-  'abandonedBabyBullish','abandonedBabyBearish'
+  'abandonedBabyBullish','abandonedBabyBearish',
 ]);
 // 차트 패턴 타입 Set
 var _VIZ_CHART_TYPES = new Set([
@@ -71,11 +91,17 @@ var _VIZ_CHART_TYPES = new Set([
   'doubleBottom','doubleTop','headAndShoulders','inverseHeadAndShoulders','channel'
 ]);
 
-/** 시각화 토글에 따라 패턴 배열 필터링 */
+/** 시각화 토글에 따라 패턴 배열 필터링
+ *  SUPPRESS 패턴은 기본 필터링 (감지는 유지, UI 표시만 억제)
+ *  CONTEXT_ONLY 패턴은 표시하되 p._contextOnly 플래그 부착 */
 function _filterPatternsForViz(patterns) {
   if (!patterns || !patterns.length) return patterns;
   return patterns.filter(function(p) {
     var t = p.type;
+    // SUPPRESS: UI 표시 기본 off (백테스트 데이터 수집은 계속)
+    if (_SUPPRESS_PATTERNS.has(t)) return false;
+    // CONTEXT_ONLY: 표시하되 플래그 부착 (patternPanel에서 경고 배지 표시)
+    if (_CONTEXT_ONLY_PATTERNS.has(t)) p._contextOnly = true;
     if (t === 'support' || t === 'resistance') return vizToggles.chart;
     if (_VIZ_CANDLE_TYPES.has(t)) return vizToggles.candle;
     if (_VIZ_CHART_TYPES.has(t)) return vizToggles.chart;
@@ -1447,6 +1473,8 @@ function _initAnalysisWorker() {
 
           const clampFrom = _dragClampFrom;
           const dragPatterns = msg.patterns;
+          // [M-1] _srLevels 복원 — structured clone으로 소실된 배열 속성
+          if (msg.srLevels) dragPatterns._srLevels = msg.srLevels;
           const dragSignals = msg.signals;
 
           // 인덱스 오프셋 보정: Worker는 visible 구간만 분석했으므로
@@ -1486,6 +1514,8 @@ function _initAnalysisWorker() {
         if (msg.version !== _workerVersion) return;
 
         detectedPatterns = msg.patterns;
+        // [M-1] _srLevels 복원 — structured clone으로 소실된 배열 속성
+        if (msg.srLevels) detectedPatterns._srLevels = msg.srLevels;
         detectedSignals = msg.signals;
         // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
         _applyMarketContextToPatterns(detectedPatterns);
@@ -2117,7 +2147,7 @@ function _injectWcToSignals(signals, patterns) {
 function _analyzeOnMainThread() {
   const analyzeCandles = (_realtimeMode && candles.length > 1) ? candles.slice(0, -1) : candles;
   // 캔들 패턴 + 복합 시그널 분석 (signalEngine이 IndicatorCache를 공유)
-  detectedPatterns = patternEngine.analyze(analyzeCandles);
+  detectedPatterns = patternEngine.analyze(analyzeCandles, { timeframe: currentTimeframe, market: currentStock && currentStock.market ? currentStock.market : '' });
   const result = signalEngine.analyze(analyzeCandles, detectedPatterns);
   detectedSignals = result.signals;
   // [Phase I] Prospect theory loss aversion boost — Kahneman & Tversky (1979)
@@ -2155,7 +2185,7 @@ function _analyzeOnMainThread() {
  * visibleCandles만 분석 후 인덱스 오프셋 보정
  */
 function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
-  const visiblePatterns = patternEngine.analyze(visibleCandles);
+  const visiblePatterns = patternEngine.analyze(visibleCandles, { timeframe: currentTimeframe, market: currentStock && currentStock.market ? currentStock.market : '' });
 
   // 인덱스 오프셋 보정: visibleCandles[0]이 candles[clampFrom]
   visiblePatterns.forEach(p => {
@@ -3943,11 +3973,15 @@ function _getPatternKo(type) {
 
 /** 패턴 방향 판별 */
 function _getPatternDirection(p) {
-  var bull = ['hammer','bullishEngulfing','bullishHarami','piercingLine','morningStar',
-    'threeWhiteSoldiers','tweezerBottom','bullishMarubozu','invertedHammer',
+  var bull = ['hammer','invertedHammer','bullishEngulfing','bullishHarami','piercingLine','morningStar',
+    'threeWhiteSoldiers','threeInsideUp','tweezerBottom','bullishMarubozu',
+    'bullishBeltHold','bullishHaramiCross','stickSandwich',
+    'abandonedBabyBullish','dragonflyDoji',
     'doubleBottom','inverseHeadAndShoulders','ascendingTriangle','fallingWedge'];
-  var bear = ['shootingStar','bearishEngulfing','bearishHarami','darkCloud','eveningStar',
-    'threeBlackCrows','tweezerTop','bearishMarubozu','hangingMan',
+  var bear = ['shootingStar','hangingMan','bearishEngulfing','bearishHarami','darkCloud','eveningStar',
+    'threeBlackCrows','threeInsideDown','tweezerTop','bearishMarubozu',
+    'bearishBeltHold','bearishHaramiCross',
+    'abandonedBabyBearish','gravestoneDoji',
     'doubleTop','headAndShoulders','descendingTriangle','risingWedge'];
   if (bull.indexOf(p.type) !== -1) return 'bullish';
   if (bear.indexOf(p.type) !== -1) return 'bearish';

@@ -10,7 +10,7 @@
 //  backtester)가 Worker 스코프 내에 자동 생성된다.
 //
 //  메시지 프로토콜:
-//    → { type: 'analyze', candles, realtimeMode, version, source? }
+//    → { type: 'analyze', candles, realtimeMode, version, source?, timeframe?, market? }
 //    ← { type: 'result', patterns, signals, stats, version, source }
 //
 //    → { type: 'backtest', candles, version }
@@ -61,9 +61,9 @@ try {
   importScripts(
     'colors.js?v=13',
     'indicators.js?v=20',
-    'patterns.js?v=36',
+    'patterns.js?v=37',
     'signalEngine.js?v=29',
-    'backtester.js?v=31'
+    'backtester.js?v=32'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -244,8 +244,11 @@ self.onmessage = function (e) {
         var detectFrom = Math.max(0, analyzeCandles.length - uiWindow);
         // 1) 캔들 패턴 분석
         // [Phase C-1] 밸류에이션 S/R: financialData가 있으면 opts에 포함
+        // [TF-AWARE] 타임프레임 전달 — 패턴 활성화/ATR fallback 분기
         var analyzeOpts = { detectFrom: detectFrom };
         if (msg.financialData) analyzeOpts.financialData = msg.financialData;
+        if (msg.timeframe) analyzeOpts.timeframe = msg.timeframe;
+        if (msg.market) analyzeOpts.market = msg.market;
         patterns = patternEngine.analyze(analyzeCandles, analyzeOpts);
 
         // 2) 지표 시그널 + 복합 시그널 분석
@@ -307,7 +310,7 @@ self.onmessage = function (e) {
           if ((patBuy && sigBuy) || (patSell && sigSell)) {
             // Agreement: boost both
             agreementScore = { status: 'agree', boost: 5 };
-            recentPattern.confidence = Math.min(100, (recentPattern.confidence || 50) + 5);
+            recentPattern.confidence = Math.min(90, (recentPattern.confidence || 50) + 5);
             if (recentPattern.confidencePred) {
               recentPattern.confidencePred = Math.min(95, recentPattern.confidencePred + 3);
             }
@@ -333,6 +336,7 @@ self.onmessage = function (e) {
       self.postMessage({
         type: 'result',
         patterns: patterns,
+        srLevels: patterns._srLevels || [],  // 배열 비-열거형 속성은 structured clone 소실 → 별도 전송
         signals: signals,
         stats: stats,
         agreementScore: agreementScore,
@@ -342,10 +346,16 @@ self.onmessage = function (e) {
 
       // [Expert Consensus] Worker auto-trigger — eliminates 1 round-trip latency
       // Only on cache miss (new stock) with sufficient data
-      if (_cacheMiss && analyzeCandles && analyzeCandles.length >= 50 && typeof backtester !== 'undefined') {
+      // [TF-AWARE] 1m/5m 분봉은 HORIZONS가 분 단위가 되어 무의미 → 백테스트 비실행
+      var _autoTf = msg.timeframe || '1d';
+      if (_cacheMiss && _autoTf !== '1m' && _autoTf !== '5m' && analyzeCandles && analyzeCandles.length >= 50 && typeof backtester !== 'undefined') {
         try {
           backtester._currentMarket = msg.market || '';
+          // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 '1d'로 리셋 방지
+          var _savedTf = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
           var autoResults = backtester.backtestAll(analyzeCandles);
+          // [H-2] restore _currentTimeframe after backtester's internal analyze()
+          if (_savedTf != null && typeof PatternEngine !== 'undefined') PatternEngine._currentTimeframe = _savedTf;
           // Extract learned weights for next analyze cycle
           _extractLearnedWeights(autoResults);
           _extractWinRateMap(autoResults);
@@ -392,6 +402,15 @@ self.onmessage = function (e) {
     try {
       const { candles, version } = msg;
 
+      // [TF-AWARE] 분봉(5m 이하)에서는 백테스트 비실행 — HORIZONS [1,3,5,10,20]일이
+      // 분봉에서는 [5~100분]이 되어 거래비용 > 기대수익, 통계적 무의미
+      var _btTf = msg.timeframe || '1d';
+      if (_btTf === '1m' || _btTf === '5m') {
+        self.postMessage({ type: 'backtestResult', results: {}, learnedWeights: _learnedWeights,
+          backtestEpochMs: _backtestEpochMs, candleLength: candles ? candles.length : 0, version: version });
+        return;
+      }
+
       // [PERF] 이전 analyze 결과가 동일 캔들이면
       // backtester의 _analyzeCache를 미리 채워서 중복 patternEngine.analyze() 방지
       //
@@ -411,7 +430,10 @@ self.onmessage = function (e) {
       }
 
       backtester._currentMarket = msg.market || '';
+      // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 리셋 방지
+      var _savedTf2 = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
       const results = backtester.backtestAll(candles);
+      if (_savedTf2 != null && typeof PatternEngine !== 'undefined') PatternEngine._currentTimeframe = _savedTf2;
       _extractLearnedWeights(results);
       // 승률 맵 갱신 (다음 analyze 호출 시 패턴에 자동 부착됨)
       _extractWinRateMap(results);

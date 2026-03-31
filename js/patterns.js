@@ -133,10 +133,44 @@ class PatternEngine {
   /** 손절가 ATR 배수 (기본) */
   static STOP_LOSS_ATR_MULT = 2;
 
-  /** ATR fallback: 가격의 2%
+  /** ATR fallback: 가격의 2% (일봉 기준)
    *  [D-Heuristic] ATR(14) 불가 시 근사값. KRX 대형주 일봉 median ATR/close ≈ 2.1%.
    *  주기적으로 실제 median ATR/close 비율 대조 권장. */
   static ATR_FALLBACK_PCT = 0.02;
+
+  /** 타임프레임별 ATR fallback — 분봉 ATR/close 비율은 일봉 대비 작음
+   *  5m: ~0.3-0.5%, 15m: ~0.5-0.7%, 30m: ~0.7-1.0%, 1h: ~1.0-1.5%
+   *  주봉/월봉: √5≈2.24×일봉, √22≈4.69×일봉 (random walk scaling) */
+  static ATR_FALLBACK_BY_TF = Object.freeze({
+    '1m': 0.002, '5m': 0.004, '15m': 0.006, '30m': 0.008,
+    '1h': 0.012, '1d': 0.020, '1w': 0.044, '1M': 0.090,
+  });
+
+  /** 타임프레임별 패턴 활성화 맵
+   *  CFA + Chart Expert 합의: 분봉은 제한적, 일봉은 전수, 주봉/월봉은 차트 패턴 중심
+   *  candle: 'all' | 'limited' | Set of types | null (비실행)
+   *  chart: 'all' | 'all_except_hs' | Set of types | null
+   *  sr: boolean (지지/저항 탐지 여부) */
+  static TF_PATTERN_MAP = Object.freeze({
+    '1m':  { candle: null, chart: null, sr: false },
+    '5m':  { candle: new Set(['hammer','shootingStar','bullishEngulfing','bearishEngulfing',
+              'bullishMarubozu','bearishMarubozu','piercingLine','darkCloud']), chart: null, sr: false },
+    '15m': { candle: 'all', chart: new Set(['ascendingTriangle','descendingTriangle',
+              'symmetricTriangle','risingWedge','fallingWedge','channel']), sr: true },
+    '30m': { candle: 'all', chart: new Set(['ascendingTriangle','descendingTriangle',
+              'symmetricTriangle','risingWedge','fallingWedge','channel',
+              'doubleBottom','doubleTop']), sr: true },
+    '1h':  { candle: 'all', chart: 'all_except_hs', sr: true },
+    '1d':  { candle: 'all', chart: 'all', sr: true },
+    '1w':  { candle: 'limited', chart: 'all', sr: true },
+    '1M':  { candle: null, chart: new Set(['doubleBottom','doubleTop','channel']), sr: true },
+  });
+
+  /** 주봉 캔들 패턴 제한 목록 — 장악형/마루보주/관통형/먹구름만 (주봉에서 유의미) */
+  static _WEEKLY_CANDLE_TYPES = new Set([
+    'bullishEngulfing','bearishEngulfing','bullishMarubozu','bearishMarubozu',
+    'piercingLine','darkCloud','hammer','shootingStar',
+  ]);
 
   /** 캔들스틱 패턴 목표가 ATR 배수 — KRX 76,443건 Theil-Sen calibration (calibrated_constants.json D1)
    *  strong: 1.88 (n=55,469, CI95=[1.86,1.91]), medium: 2.31 (n=5,403, CI95=[2.23,2.39]),
@@ -427,8 +461,9 @@ class PatternEngine {
     const r2 = ssTot > 0 ? Math.max(0, Math.min(1 - ssRes / ssTot, 1)) : 0;
 
     // --- ATR 기반 정규화: 나머지 엔진과 일관된 변동성 기준 사용 ---
-    // atrVal이 없으면 가격 평균의 2%를 fallback (ATR_FALLBACK_PCT = 0.02 일관)
-    const divisor = (atrVal && atrVal > 0 ? atrVal : (sy / n * PatternEngine.ATR_FALLBACK_PCT)) || 1e-10;
+    // atrVal이 없으면 가격 평균의 N%를 fallback (타임프레임별 ATR_FALLBACK_BY_TF)
+    var _fbPct = PatternEngine.ATR_FALLBACK_BY_TF[PatternEngine._currentTimeframe || '1d'] || PatternEngine.ATR_FALLBACK_PCT;
+    const divisor = (atrVal && atrVal > 0 ? atrVal : (sy / n * _fbPct)) || 1e-10;
     const norm = slope / divisor;
     const T = PatternEngine.TREND_THRESHOLD;
     // strength에 R² 반영: (0.5 + 0.5·R²) → R²=1 영향 없음, R²=0 → 50% 감쇄 (floor)
@@ -499,7 +534,7 @@ class PatternEngine {
    *  넓은 손절 = whipsaw 감소, 심리적 손실 감내 여유 증가. */
   _stopLoss(candles, idx, signal, atr, mult = PatternEngine.STOP_LOSS_ATR_MULT) {
     const p = candles[idx].close;
-    const a = atr[idx] || p * PatternEngine.ATR_FALLBACK_PCT;
+    const a = this._atr(atr, idx, candles);
     var adjMult = mult * PatternEngine.PROSPECT_STOP_WIDEN;
     return signal === 'buy' ? +(p - a * adjMult).toFixed(0)
          : signal === 'sell' ? +(p + a * adjMult).toFixed(0) : null;
@@ -513,16 +548,19 @@ class PatternEngine {
    *  [GAP-3] Prospect Theory 목표가 압축 — disposition effect로 목표 보수적 설정 */
   _candleTarget(candles, idx, signal, strength, atr, hw, mw) {
     const entry = candles[idx].close;
-    const a = atr[idx] || entry * PatternEngine.ATR_FALLBACK_PCT;
+    const a = this._atr(atr, idx, candles);
     const mult = PatternEngine.CANDLE_TARGET_ATR[strength] || 0.7;
     const w = (hw || 1) * (mw || 1) * PatternEngine.PROSPECT_TARGET_COMPRESS;
     return signal === 'buy'  ? +(entry + a * mult * w).toFixed(0)
          : signal === 'sell' ? +(entry - a * mult * w).toFixed(0) : null;
   }
 
-  /** ATR 값 (fallback 포함) */
+  /** ATR 값 (fallback 포함, 타임프레임 인식) */
   _atr(atr, idx, candles) {
-    return atr[idx] || candles[idx].close * PatternEngine.ATR_FALLBACK_PCT;
+    if (atr[idx]) return atr[idx];
+    var tf = PatternEngine._currentTimeframe || '1d';
+    var pct = PatternEngine.ATR_FALLBACK_BY_TF[tf] || PatternEngine.ATR_FALLBACK_PCT;
+    return candles[idx].close * pct;
   }
 
   // ══════════════════════════════════════════════════
@@ -533,6 +571,10 @@ class PatternEngine {
     if (!candles || candles.length < 10) return [];
     // [FLAG-3] 시장별 AMH lambda 설정 — opts.market = 'KOSPI'|'KOSDAQ'
     PatternEngine._currentMarket = (opts && opts.market) ? opts.market : null;
+    // [TF-AWARE] 타임프레임 인식 — 패턴 활성화/ATR fallback 분기
+    const _timeframe = (opts && opts.timeframe) || '1d';
+    const _tfMap = PatternEngine.TF_PATTERN_MAP[_timeframe] || PatternEngine.TF_PATTERN_MAP['1d'];
+    PatternEngine._currentTimeframe = _timeframe;
     // indicators.js 전역 함수 직접 호출 (불필요한 래퍼 제거)
     const closes = candles.map(c => c.close);
     var hurstResult = calcHurst(closes);
@@ -618,82 +660,111 @@ class PatternEngine {
     const ctx = { atr: atr14, vma: calcMA(candles.map(c => c.volume), 20), hurstWeight, volWeight, meanRevWeight, regimeWeight, dynamicATRCap, candles, detectFrom: _detectFrom };
     const patterns = [];
 
-    // 캔들 패턴 — KRX 5년 실증 통계적 유의성 기준 선별
-    // 비활성: doji(WR~50%), invertedHammer(D등급), harami(확인캔들 의존), spinningTop(IC=0)
+    // [TF-AWARE] 캔들 패턴 — 타임프레임별 활성화 맵 적용
+    // _tfMap.candle: 'all' | 'limited' | Set | null
+    var _candleEnabled = _tfMap.candle;
+    var _canAll = (_candleEnabled === 'all');
+    var _canLimited = (_candleEnabled === 'limited');  // 주봉용
+    var _canSet = (_candleEnabled instanceof Set);
+    // 캔들 패턴 실행 여부 판단 헬퍼
+    var _cc = function(type) {
+      if (_canAll) return true;
+      if (_canLimited) return PatternEngine._WEEKLY_CANDLE_TYPES.has(type);
+      if (_canSet) return _candleEnabled.has(type);
+      return false;
+    };
+
     // 1봉 패턴
-    patterns.push(...this.detectHammer(candles, ctx));
-    patterns.push(...this.detectHangingMan(candles, ctx));
-    patterns.push(...this.detectShootingStar(candles, ctx));
-    patterns.push(...this.detectDragonflyDoji(candles, ctx));
-    patterns.push(...this.detectGravestoneDoji(candles, ctx));
-    patterns.push(...this.detectMarubozu(candles, ctx));
-    patterns.push(...this.detectLongLeggedDoji(candles, ctx));
-    patterns.push(...this.detectBeltHold(candles, ctx));
+    if (_cc('hammer'))         patterns.push(...this.detectHammer(candles, ctx));
+    if (_cc('invertedHammer')) patterns.push(...this.detectInvertedHammer(candles, ctx));
+    if (_cc('hangingMan'))     patterns.push(...this.detectHangingMan(candles, ctx));
+    if (_cc('shootingStar'))   patterns.push(...this.detectShootingStar(candles, ctx));
+    if (_cc('doji'))           patterns.push(...this.detectDoji(candles, ctx));
+    if (_cc('dragonflyDoji'))  patterns.push(...this.detectDragonflyDoji(candles, ctx));
+    if (_cc('gravestoneDoji')) patterns.push(...this.detectGravestoneDoji(candles, ctx));
+    if (_cc('longLeggedDoji')) patterns.push(...this.detectLongLeggedDoji(candles, ctx));
+    if (_cc('spinningTop'))    patterns.push(...this.detectSpinningTop(candles, ctx));
+    if (_cc('bullishMarubozu')) patterns.push(...this.detectMarubozu(candles, ctx));
+    if (_cc('beltHold'))       patterns.push(...this.detectBeltHold(candles, ctx));
     // 2봉 패턴
-    patterns.push(...this.detectEngulfing(candles, ctx));
-    patterns.push(...this.detectPiercingLine(candles, ctx));
-    patterns.push(...this.detectDarkCloud(candles, ctx));
-    patterns.push(...this.detectTweezerBottom(candles, ctx));
-    patterns.push(...this.detectTweezerTop(candles, ctx));
-    patterns.push(...this.detectHaramiCross(candles, ctx));
-    patterns.push(...this.detectStickSandwich(candles, ctx));
-    // 3봉 패턴 (가장 드묾)
-    patterns.push(...this.detectThreeWhiteSoldiers(candles, ctx));
-    patterns.push(...this.detectThreeBlackCrows(candles, ctx));
-    patterns.push(...this.detectMorningStar(candles, ctx));
-    patterns.push(...this.detectEveningStar(candles, ctx));
-    patterns.push(...this.detectAbandonedBaby(candles, ctx));
-    // threeInsideUp/Down 비활성: WR 42.4/55.1% (매수 D등급), shadow 결함 — KRX 5년 실증 근거 부족
+    if (_cc('bullishEngulfing')) patterns.push(...this.detectEngulfing(candles, ctx));
+    if (_cc('bullishHarami'))  patterns.push(...this.detectHarami(candles, ctx));
+    if (_cc('piercingLine'))   patterns.push(...this.detectPiercingLine(candles, ctx));
+    if (_cc('darkCloud'))      patterns.push(...this.detectDarkCloud(candles, ctx));
+    if (_cc('tweezerBottom'))  patterns.push(...this.detectTweezerBottom(candles, ctx));
+    if (_cc('tweezerTop'))     patterns.push(...this.detectTweezerTop(candles, ctx));
+    if (_cc('haramiCross'))    patterns.push(...this.detectHaramiCross(candles, ctx));
+    if (_cc('stickSandwich'))  patterns.push(...this.detectStickSandwich(candles, ctx));
+    // 3봉 패턴
+    if (_cc('threeWhiteSoldiers')) patterns.push(...this.detectThreeWhiteSoldiers(candles, ctx));
+    if (_cc('threeBlackCrows'))   patterns.push(...this.detectThreeBlackCrows(candles, ctx));
+    if (_cc('morningStar'))    patterns.push(...this.detectMorningStar(candles, ctx));
+    if (_cc('eveningStar'))    patterns.push(...this.detectEveningStar(candles, ctx));
+    if (_cc('threeInsideUp'))  patterns.push(...this.detectThreeInsideUp(candles, ctx));
+    if (_cc('threeInsideDown'))patterns.push(...this.detectThreeInsideDown(candles, ctx));
+    if (_cc('abandonedBaby'))  patterns.push(...this.detectAbandonedBaby(candles, ctx));
 
-    // 차트 패턴
-    // [PERF] 스윙 포인트 탐지도 윈도우 적용 — HS_WINDOW(120) + 버퍼 10
+    // [PERF] 스윙 포인트 탐지 — 차트 패턴 + S/R 모두 사용
     const swingFrom = Math.max(0, (_detectFrom || 0) - PatternEngine.HS_WINDOW - 10);
-    const swH = this._findSwingHighs(candles, 3, swingFrom);
-    const swL = this._findSwingLows(candles, 3, swingFrom);
-    patterns.push(...this.detectDoubleBottom(candles, swL, ctx));
-    patterns.push(...this.detectDoubleTop(candles, swH, ctx));
-    patterns.push(...this.detectAscendingTriangle(candles, swH, swL, ctx));
-    patterns.push(...this.detectDescendingTriangle(candles, swH, swL, ctx));
-    patterns.push(...this.detectRisingWedge(candles, swH, swL, ctx));
-    patterns.push(...this.detectFallingWedge(candles, swH, swL, ctx));
-    patterns.push(...this.detectSymmetricTriangle(candles, swH, swL, ctx));
-    patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
-    patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
-    patterns.push(...this.detectChannel(candles, swH, swL, ctx));
+    const swH = (_tfMap.chart || _tfMap.sr) ? this._findSwingHighs(candles, 3, swingFrom) : [];
+    const swL = (_tfMap.chart || _tfMap.sr) ? this._findSwingLows(candles, 3, swingFrom) : [];
 
-    // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop
-    for (let ni = 0; ni < patterns.length; ni++) {
-      const pt = patterns[ni].type;
-      if (pt === 'headAndShoulders' || pt === 'inverseHeadAndShoulders' ||
-          pt === 'doubleBottom' || pt === 'doubleTop') {
-        this._checkNecklineBreak(candles, patterns[ni], atr14);
-      }
-    }
+    // [TF-AWARE] 차트 패턴 — 타임프레임별 활성화 맵 적용
+    // _tfMap.chart: 'all' | 'all_except_hs' | Set | null
+    var _chartEnabled = _tfMap.chart;
+    if (_chartEnabled) {
+      var _chAll = (_chartEnabled === 'all');
+      var _chExHS = (_chartEnabled === 'all_except_hs');
+      var _chSet = (_chartEnabled instanceof Set);
+      var _chk = function(type) {
+        if (_chAll) return true;
+        if (_chExHS) return type !== 'headAndShoulders' && type !== 'inverseHeadAndShoulders';
+        if (_chSet) return _chartEnabled.has(type);
+        return false;
+      };
+      if (_chk('doubleBottom'))         patterns.push(...this.detectDoubleBottom(candles, swL, ctx));
+      if (_chk('doubleTop'))            patterns.push(...this.detectDoubleTop(candles, swH, ctx));
+      if (_chk('ascendingTriangle'))    patterns.push(...this.detectAscendingTriangle(candles, swH, swL, ctx));
+      if (_chk('descendingTriangle'))   patterns.push(...this.detectDescendingTriangle(candles, swH, swL, ctx));
+      if (_chk('risingWedge'))          patterns.push(...this.detectRisingWedge(candles, swH, swL, ctx));
+      if (_chk('fallingWedge'))         patterns.push(...this.detectFallingWedge(candles, swH, swL, ctx));
+      if (_chk('symmetricTriangle'))    patterns.push(...this.detectSymmetricTriangle(candles, swH, swL, ctx));
+      if (_chk('headAndShoulders'))     patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
+      if (_chk('inverseHeadAndShoulders')) patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
+      if (_chk('channel'))              patterns.push(...this.detectChannel(candles, swH, swL, ctx));
 
-    // 삼각형/쐐기 돌파 확인 — ascending/descending/symmetric triangle, rising/falling wedge
-    for (let ni = 0; ni < patterns.length; ni++) {
-      const pt = patterns[ni].type;
-      if (pt === 'ascendingTriangle' || pt === 'descendingTriangle' ||
-          pt === 'symmetricTriangle' || pt === 'risingWedge' || pt === 'fallingWedge') {
-        this._checkTriangleBreakout(candles, patterns[ni], atr14);
+      // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop
+      for (let ni = 0; ni < patterns.length; ni++) {
+        const pt = patterns[ni].type;
+        if (pt === 'headAndShoulders' || pt === 'inverseHeadAndShoulders' ||
+            pt === 'doubleBottom' || pt === 'doubleTop') {
+          this._checkNecklineBreak(candles, patterns[ni], atr14);
+        }
       }
-    }
 
-    // 넥라인/삼각형 미확인 패턴 confidence 감산 — Bulkowski (2005)
-    for (let ni = 0; ni < patterns.length; ni++) {
-      const p = patterns[ni];
-      // 넥라인 패턴: necklineBreakConfirmed === false 일 때만 감산 (undefined인 캔들 패턴 방어)
-      if (p.necklineBreakConfirmed === false) {
-        p.confidence = Math.max(10, p.confidence - PatternEngine.NECKLINE_UNCONFIRMED_PENALTY);
+      // 삼각형/쐐기 돌파 확인 — ascending/descending/symmetric triangle, rising/falling wedge
+      for (let ni = 0; ni < patterns.length; ni++) {
+        const pt = patterns[ni].type;
+        if (pt === 'ascendingTriangle' || pt === 'descendingTriangle' ||
+            pt === 'symmetricTriangle' || pt === 'risingWedge' || pt === 'fallingWedge') {
+          this._checkTriangleBreakout(candles, patterns[ni], atr14);
+        }
       }
-      // 삼각형/쐐기 패턴: breakoutConfirmed === false 일 때만 감산
-      if (p.breakoutConfirmed === false) {
-        p.confidence = Math.max(10, p.confidence - PatternEngine.TRIANGLE_UNCONFIRMED_PENALTY);
-      }
-    }
 
-    // 지지/저항 + 컨플루언스
-    const sr = this.detectSupportResistance(candles, swH, swL, ctx);
+      // 넥라인/삼각형 미확인 패턴 confidence 감산 — Bulkowski (2005)
+      for (let ni = 0; ni < patterns.length; ni++) {
+        const p = patterns[ni];
+        if (p.necklineBreakConfirmed === false) {
+          p.confidence = Math.max(10, p.confidence - PatternEngine.NECKLINE_UNCONFIRMED_PENALTY);
+        }
+        if (p.breakoutConfirmed === false) {
+          p.confidence = Math.max(10, p.confidence - PatternEngine.TRIANGLE_UNCONFIRMED_PENALTY);
+        }
+      }
+    } // end if (_chartEnabled)
+
+    // [TF-AWARE] 지지/저항 + 컨플루언스 — _tfMap.sr로 활성화 제어
+    const sr = _tfMap.sr ? this.detectSupportResistance(candles, swH, swL, ctx) : [];
 
     // 밸류에이션 기반 S/R 병합 — opts.financialData가 유효한 bps/eps를 포함할 때
     // Rothschild & Stiglitz (1976): 펀더멘털 밸류에이션 앵커가 기술적 S/R 레이어에 추가됨
@@ -1255,7 +1326,8 @@ class PatternEngine {
           const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
           let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
           // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
-          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
+          // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
+          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 90);
           results.push({
             type: 'bullishEngulfing', name: '상승장악형 (Bullish Engulfing)', nameShort: '상승장악',
             signal: 'buy', strength: 'strong', confidence,
@@ -1278,7 +1350,8 @@ class PatternEngine {
           const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
           let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
           // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
-          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 100);
+          // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
+          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 90);
           results.push({
             type: 'bearishEngulfing', name: '하락장악형 (Bearish Engulfing)', nameShort: '하락장악',
             signal: 'sell', strength: 'strong', confidence,
@@ -1877,7 +1950,8 @@ class PatternEngine {
       const purity = Math.min((body / range - PatternEngine.MARUBOZU_BODY_RATIO) / Math.max(1 - PatternEngine.MARUBOZU_BODY_RATIO, 0.001), 1);
       let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: purity });
       // [ACC] 거래량 확인: 전일 대비 1.2배 이상이면 +10% (Nison 거래량 원칙)
-      if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 100);
+      // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
+      if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 90);
 
       // 손절가/목표가: body 높이 기반 (마루보주는 body ≈ range)
       const stopLoss = isBullish
@@ -2999,8 +3073,9 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
   detectSupportResistance(candles, swingHighs, swingLows, ctx = {}) {
     const { atr = [] } = ctx;
-    // [Fix] 하드코딩 0.02 → ATR_FALLBACK_PCT 상수 사용 (재교정 시 일관성 보장)
-    const lastATR = atr[candles.length - 1] || candles[candles.length - 1].close * PatternEngine.ATR_FALLBACK_PCT;
+    // [Fix] 타임프레임 인식 ATR fallback
+    var _srFbPct = PatternEngine.ATR_FALLBACK_BY_TF[PatternEngine._currentTimeframe || '1d'] || PatternEngine.ATR_FALLBACK_PCT;
+    const lastATR = atr[candles.length - 1] || candles[candles.length - 1].close * _srFbPct;
     const tol = lastATR * 0.5;
 
     const pts = [
@@ -3159,11 +3234,10 @@ class PatternEngine {
 
     patterns.forEach(p => {
       if (p.confidence == null || p.endIndex == null) return;
-      // [Fix] || 1 → ATR_FALLBACK_PCT 기반 정상 폴백
-      // 이전: atr[p.endIndex] || 1 — 삼성전자(60,000원)에서 허용오차가 1원으로 줄어
-      //        stopLoss ↔ S/R 거리 비교가 항상 실패 → 컨플루언스 부스트가 무음 비활성화
+      // [Fix] 타임프레임 인식 ATR fallback
       const _cls = ctxCandles[p.endIndex] ? ctxCandles[p.endIndex].close : null;
-      const a = atr[p.endIndex] || (_cls ? _cls * PatternEngine.ATR_FALLBACK_PCT : null);
+      var _cfFbPct = PatternEngine.ATR_FALLBACK_BY_TF[PatternEngine._currentTimeframe || '1d'] || PatternEngine.ATR_FALLBACK_PCT;
+      const a = atr[p.endIndex] || (_cls ? _cls * _cfFbPct : null);
       if (!a) return;
       let boost = 0;
 
@@ -3180,7 +3254,8 @@ class PatternEngine {
       }
 
       if (boost > 0) {
-        p.confidence = Math.min(100, p.confidence + Math.round(boost));
+        // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
+        p.confidence = Math.min(90, p.confidence + Math.round(boost));
         p.confluence = true;
       }
     });
@@ -3255,7 +3330,8 @@ class PatternEngine {
     const results = [];
     if (!swH || swH.length < 2 || !swL || swL.length < 2) return results;
     const len = candles.length;
-    const atr = (ctx.atr && ctx.atr[len - 1]) || candles[len - 1].close * PatternEngine.ATR_FALLBACK_PCT;
+    var _chFbPct = PatternEngine.ATR_FALLBACK_BY_TF[PatternEngine._currentTimeframe || '1d'] || PatternEngine.ATR_FALLBACK_PCT;
+    const atr = (ctx.atr && ctx.atr[len - 1]) || candles[len - 1].close * _chFbPct;
     if (atr <= 0) return results;
     // [Batch 2-4] weight 추출 — 다른 차트 패턴과 일관성 (Issue C 수정)
     const hw = ctx.hurstWeight || 1;
@@ -3587,12 +3663,19 @@ class PatternEngine {
   _dedup(patterns) {
     // type hierarchy: 더 구체적인 패턴이 덜 구체적인 패턴을 같은 endIndex에서 억제
     // haramiCross > harami (도지가 더 특수 형태): Nison (1991) "more significant"
+    // threeInside > harami (3봉 확인 완료가 2봉 미확인보다 우선): Nison (1991)
     // abandonedBaby > morningStar/eveningStar (갭 요구 더 엄격): Bulkowski (2008)
-    // longLeggedDoji > doji (하위유형): 이미 존재
+    // longLeggedDoji > doji (하위유형)
+    // gravestoneDoji > doji (더 구체적 도지 하위유형): Nison (1991)
+    // dragonflyDoji > doji (더 구체적 도지 하위유형): Nison (1991)
     const hierarchy = {
       longLeggedDoji: 'doji',
+      gravestoneDoji: 'doji',
+      dragonflyDoji: 'doji',
       bullishHaramiCross: 'bullishHarami',
       bearishHaramiCross: 'bearishHarami',
+      threeInsideUp: 'bullishHarami',
+      threeInsideDown: 'bearishHarami',
       abandonedBabyBullish: 'morningStar',
       abandonedBabyBearish: 'eveningStar',
     };

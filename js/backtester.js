@@ -84,6 +84,13 @@ class PatternBacktester {
       stickSandwich:          { name: '스틱샌드위치', signal: 'buy'  },
       abandonedBabyBullish:   { name: '강세버림받은아기', signal: 'buy'  },
       abandonedBabyBearish:   { name: '약세버림받은아기', signal: 'sell' },
+      invertedHammer:         { name: '역해머',         signal: 'buy'  },
+      doji:                   { name: '도지',           signal: 'neutral' },
+      bullishHarami:          { name: '상승잉태형',     signal: 'buy'  },
+      bearishHarami:          { name: '하락잉태형',     signal: 'sell' },
+      spinningTop:            { name: '팽이형',         signal: 'neutral' },
+      threeInsideUp:          { name: '상승삼내형',     signal: 'buy'  },
+      threeInsideDown:        { name: '하락삼내형',     signal: 'sell' },
       channel:                { name: '채널',           signal: 'neutral' },
     };
 
@@ -759,7 +766,10 @@ class PatternBacktester {
         volumeRatio: volumeRatio,
         atrNorm: atrNorm,
         wc: p.wc != null ? p.wc : ((p.hw || 1) * (p.mw || 1)),
+        hw: p.hw || 1.0, // [C-2 FIX] regimeWR이 hw 기반 trending/reverting 분류에 사용 — 누락 시 항상 neutral
         momentum60: momentum60,
+        priceTarget: (p.priceTarget != null && isFinite(p.priceTarget)) ? p.priceTarget : null,
+        patternSignal: p.signal || null,
       });
     }
     return occurrences;
@@ -786,6 +796,9 @@ class PatternBacktester {
       const validOccs = [];  // 유효한 발생 이력 (회귀용)
       const maeArr = [];  // Max Adverse Excursion per trade
       const mfeArr = [];  // Max Favorable Excursion per trade
+      var targetHits = 0, targetTotal = 0;  // 목표가 도달 비율
+      var predErrors = [];  // 예측 오차 (|predicted - actual| %) for MAE
+      var predActualPairs = [];  // [Phase 2] (predicted%, actual%) 쌍 — 산점도/Calibration용
 
       for (const occ of occurrences) {
         const exitIdx = occ.idx + h;
@@ -811,6 +824,26 @@ class PatternBacktester {
         validOccs.push(occ);
         maeArr.push(minRet);
         mfeArr.push(maxRet);
+
+        // [Phase 1] 목표가 도달률 + 예측 오차 — priceTarget 존재 시만 계산
+        if (occ.priceTarget != null && entryPrice > 0) {
+          targetTotal++;
+          var occSignal = occ.patternSignal || patternSignal;
+          if (occSignal === 'buy') {
+            // 매수: 최고가(MFE)가 목표가에 도달했는지
+            var targetDist = (occ.priceTarget - entryPrice) / entryPrice * 100;
+            if (targetDist > 0 && maxRet >= targetDist) targetHits++;
+          } else if (occSignal === 'sell') {
+            // 매도: 최저가(MAE 반전)가 목표가에 도달했는지
+            var targetDist = (entryPrice - occ.priceTarget) / entryPrice * 100;
+            if (targetDist > 0 && Math.abs(minRet) >= targetDist) targetHits++;
+          }
+          // 예측 오차: |predicted return - actual return|
+          var predictedRet = (occ.priceTarget - entryPrice) / entryPrice * 100;
+          var actualRet = (exitPrice - entryPrice) / entryPrice * 100;
+          predErrors.push(Math.abs(predictedRet - actualRet));
+          predActualPairs.push({ predicted: +predictedRet.toFixed(2), actual: +actualRet.toFixed(2) });
+        }
       }
 
       if (returns.length === 0) {
@@ -826,8 +859,21 @@ class PatternBacktester {
       var mfeSorted = [...mfeArr].sort(function(a, b) { return a - b; });
       var medianMAE = n > 0 ? (n % 2 === 0 ? (maeSorted[n/2-1] + maeSorted[n/2]) / 2 : maeSorted[Math.floor(n/2)]) : 0;
       var medianMFE = n > 0 ? (n % 2 === 0 ? (mfeSorted[n/2-1] + mfeSorted[n/2]) / 2 : mfeSorted[Math.floor(n/2)]) : 0;
-      var mae5 = n >= 20 ? maeSorted[Math.floor(n * 0.05)] : maeSorted[0] || 0;  // 5th percentile (worst)
-      var mfe95 = n >= 20 ? mfeSorted[Math.floor(n * 0.95)] : mfeSorted[n - 1] || 0;  // 95th percentile (best)
+      // [M-1 FIX] Standard percentile with linear interpolation — Hyndman & Fan (1996) Type 7.
+      // Old: Math.floor(n*0.05) gives off-by-one at small n (e.g. n=20 → idx=1, should interpolate).
+      // New: index = (n-1)*p, then linear interpolation between floor and ceil.
+      var mae5, mfe95;
+      if (n >= 2) {
+        var idx5 = (n - 1) * 0.05;
+        var lo5 = Math.floor(idx5), hi5 = Math.min(Math.ceil(idx5), n - 1), frac5 = idx5 - lo5;
+        mae5 = maeSorted[lo5] + frac5 * (maeSorted[hi5] - maeSorted[lo5]);
+        var idx95 = (n - 1) * 0.95;
+        var lo95 = Math.floor(idx95), hi95 = Math.min(Math.ceil(idx95), n - 1), frac95 = idx95 - lo95;
+        mfe95 = mfeSorted[lo95] + frac95 * (mfeSorted[hi95] - mfeSorted[lo95]);
+      } else {
+        mae5 = maeSorted[0] || 0;
+        mfe95 = mfeSorted[n - 1] || 0;
+      }
 
       // [Expert Consensus] Max Drawdown — CFA Level III, cumulative equity path
       var cumRet = 0, peak = 0, maxDD = 0;
@@ -855,9 +901,11 @@ class PatternBacktester {
 
       // [Expert Consensus] Sortino Ratio — Sortino & van der Meer (1991)
       // Penalizes only downside deviation, more appropriate for asymmetric returns
-      const downsideReturns = returns.filter(r => r < 0);
-      const downsideVariance = downsideReturns.length > 1
-        ? downsideReturns.reduce((a, r) => a + r * r, 0) / downsideReturns.length
+      // [H-1 FIX] Denominator = sqrt(sum(min(r,0)^2) / N_total), NOT / N_negative.
+      // Per Sortino & van der Meer (1991): downside deviation uses total sample count
+      // to avoid overestimating risk when few negative returns exist.
+      const downsideVariance = n > 1
+        ? returns.reduce((a, r) => a + (r < 0 ? r * r : 0), 0) / n
         : 0;
       const downsideDev = Math.sqrt(downsideVariance);
       const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(252 / Math.max(1, h))).toFixed(2) : null;
@@ -874,23 +922,30 @@ class PatternBacktester {
       }
       const winRate = (wins / n) * 100;
 
-      // [Expert Consensus] Cohen's h — effect size independent of sample size
-      // h = 2 * arcsin(sqrt(p_obs)) - 2 * arcsin(sqrt(p_null))
-      // Using 50% as default null; wrNull (if computed) provides better estimate
-      var cohensH = +(2 * Math.asin(Math.sqrt(Math.max(0, Math.min(1, winRate / 100)))) - 2 * Math.asin(Math.sqrt(0.5))).toFixed(3);
-
       // [Expert Consensus] Null WR & Alpha — correct H₀ for market drift
       // Sullivan, Timmermann & White (1999): unconditional base rate as null
+      // (Moved before Cohen's h so wrNull is available for proper null hypothesis)
       var nullWR = this._computeNullWR(candles, h);
       var wrNull = patternSignal === 'sell' ? nullWR.sellNull : nullWR.buyNull;
       var wrAlpha = +(winRate - wrNull).toFixed(1);
 
+      // [Expert Consensus] Cohen's h — effect size independent of sample size
+      // h = 2 * arcsin(sqrt(p_obs)) - 2 * arcsin(sqrt(p_null))
+      // [M-3 FIX] Use wrNull/100 (market-drift-corrected null) instead of hardcoded 0.5.
+      // Cohen (1988): effect size relative to proper null hypothesis.
+      var pNull = Math.max(0.001, Math.min(0.999, wrNull / 100));
+      var cohensH = +(2 * Math.asin(Math.sqrt(Math.max(0, Math.min(1, winRate / 100)))) - 2 * Math.asin(Math.sqrt(pNull))).toFixed(3);
+
       // [Expert Consensus] Information Ratio — Grinold & Kahn (2000)
       // IR = mean_excess / tracking_error, annualized
+      // [H-2 FIX] Null mean computed independently from unconditional market returns.
+      // Old code: nullMeanApprox = (wrNull-50)/50 * |mean| — circular (derives benchmark from own mean).
+      // New: compute actual unconditional h-day mean return from _computeNullWR data.
+      // This is the true benchmark: "what would random entry yield on average?"
+      var nullMeanReturn = this._computeNullMeanReturn(candles, h);
       var excessReturns = [];
-      var nullMeanApprox = (wrNull - 50) / 50 * Math.abs(mean || 0.1);
       for (var iri = 0; iri < returns.length; iri++) {
-        excessReturns.push(returns[iri] - nullMeanApprox);
+        excessReturns.push(returns[iri] - nullMeanReturn);
       }
       var exSum = excessReturns.reduce(function(a, b) { return a + b; }, 0);
       var exMean = exSum / n;
@@ -906,6 +961,14 @@ class PatternBacktester {
       // Block resampling preserves within-cluster correlation.
       var winRateCI = null;
       if (n >= 30) {
+        // Winsorize at 1st/99th percentile before bootstrap (Wilcox 2005)
+        // KRX ±30% limit-up/down produces extreme kurtosis; unwinsorized
+        // bootstrap CIs are too wide due to heavy-tail resampling.
+        var sortedForClip = returns.slice().sort(function(a, b2) { return a - b2; });
+        var clipLo = sortedForClip[Math.max(0, Math.floor(n * 0.01))];
+        var clipHi = sortedForClip[Math.min(n - 1, Math.floor(n * 0.99))];
+        var clippedReturns = returns.map(function(r) { return Math.max(clipLo, Math.min(clipHi, r)); });
+
         var B = 500, bootWR = [];
         var blockSize = Math.max(2, Math.round(Math.sqrt(n)));
         var nBlocks = Math.ceil(n / blockSize);
@@ -915,9 +978,9 @@ class PatternBacktester {
             var startIdx = Math.floor(Math.random() * n);
             for (var bj = 0; bj < blockSize && count_b < n; bj++) {
               var idx = (startIdx + bj) % n;
-              if ((patternSignal === 'buy' && returns[idx] > 0) ||
-                  (patternSignal === 'sell' && returns[idx] < 0) ||
-                  (patternSignal === 'neutral' && returns[idx] > 0)) wins_b++;
+              if ((patternSignal === 'buy' && clippedReturns[idx] > 0) ||
+                  (patternSignal === 'sell' && clippedReturns[idx] < 0) ||
+                  (patternSignal === 'neutral' && clippedReturns[idx] > 0)) wins_b++;
               count_b++;
             }
           }
@@ -948,7 +1011,11 @@ class PatternBacktester {
       const grossLoss = lossReturns.length ? Math.abs(lossReturns.reduce((a, b) => a + b, 0)) : 0;
       const profitFactor = grossLoss > 0 ? +(grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? 999.99 : 0);
       const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : (avgWin > 0 ? 999.99 : 0);
-      const kellyFraction = payoffRatio > 0 ? +((((wins / n) * payoffRatio) - ((n - wins) / n)) / payoffRatio).toFixed(4) : 0;
+      // [H-3 FIX] Kelly (1956): clamp to [0, 1.0]. Negative Kelly = don't bet.
+      // Raw Kelly > 1.0 implies leveraged positions — inappropriate for unleveraged equity.
+      // Half-Kelly (f*/2) is industry standard; raw clamped here, downstream can halve.
+      const kellyRaw = payoffRatio > 0 ? (((wins / n) * payoffRatio) - ((n - wins) / n)) / payoffRatio : 0;
+      const kellyFraction = +Math.max(0, Math.min(1.0, kellyRaw)).toFixed(4);
 
       // t-검정: H0: mean = 0 (fat-tail 보정 Cornish-Fisher 임계값, 95% 양측)
       // Cont (2001): 금융 수익률 K > 3 → 유효 df 축소로 꼬리 위험 반영
@@ -966,6 +1033,99 @@ class PatternBacktester {
       else if (n < 100) sampleWarning = 'low';
       else if (n < 400) sampleWarning = 'caution';
       else sampleWarning = 'adequate';
+
+      // [Phase 1] 방향 적중률 (DA) — patternSignal 기준 승률과 동일
+      var directionalAccuracy = +winRate.toFixed(1);
+
+      // [Phase 1] 목표가 도달률 — priceTarget 데이터가 있는 발생에 한해 계산
+      var targetHitRate = targetTotal >= 5 ? +((targetHits / targetTotal) * 100).toFixed(1) : null;
+
+      // [Phase 1] 예측 MAE — |predicted return - actual return| 평균
+      var predictionMAE = predErrors.length >= 5
+        ? +(predErrors.reduce(function(a, b) { return a + b; }, 0) / predErrors.length).toFixed(2)
+        : null;
+
+      // [Phase 1] 패턴 종합 점수 (0-100)
+      // DA * 0.30 + targetHitRate * 0.25 + (100 - MAE*10) * 0.25 + min(PF*20, 100) * 0.20
+      var _da = directionalAccuracy || 0;
+      var _thr = targetHitRate != null ? targetHitRate : _da;  // fallback: DA 대용
+      var _maeScore = predictionMAE != null ? Math.max(0, 100 - predictionMAE * 10) : 50;  // fallback: 중립
+      var _pfScore = Math.min((profitFactor || 0) * 20, 100);
+      var patternScore = +Math.max(0, Math.min(100,
+        _da * 0.30 + _thr * 0.25 + _maeScore * 0.25 + _pfScore * 0.20
+      )).toFixed(1);
+
+      var patternGrade;
+      if (patternScore >= 80) patternGrade = 'A';
+      else if (patternScore >= 65) patternGrade = 'B';
+      else if (patternScore >= 50) patternGrade = 'C';
+      else if (patternScore >= 35) patternGrade = 'D';
+      else patternGrade = 'F';
+
+      // [Phase 3] Mincer-Zarnowitz 회귀 + Calibration 진단
+      // Mincer & Zarnowitz (1969): actual = α + β × predicted, H₀: α=0, β=1
+      var mzRegression = null;
+      var calibrationCoverage = null;
+      if (predActualPairs.length >= 20) {
+        var _pN = predActualPairs.length;
+        var _sx = 0, _sy = 0, _sxy = 0, _sx2 = 0, _sy2 = 0;
+        for (var _pi = 0; _pi < _pN; _pi++) {
+          var _px = predActualPairs[_pi].predicted, _py = predActualPairs[_pi].actual;
+          _sx += _px; _sy += _py; _sxy += _px * _py; _sx2 += _px * _px; _sy2 += _py * _py;
+        }
+        var _pmx = _sx / _pN, _pmy = _sy / _pN;
+        var _denom = _sx2 - _pN * _pmx * _pmx;
+        if (Math.abs(_denom) > 1e-10) {
+          var _slope = (_sxy - _pN * _pmx * _pmy) / _denom;
+          var _intercept = _pmy - _slope * _pmx;
+          // R² = 1 - SS_res / SS_tot
+          var _ssRes = 0, _ssTot = 0;
+          for (var _pi = 0; _pi < _pN; _pi++) {
+            var _pred = _intercept + _slope * predActualPairs[_pi].predicted;
+            _ssRes += (predActualPairs[_pi].actual - _pred) * (predActualPairs[_pi].actual - _pred);
+            _ssTot += (predActualPairs[_pi].actual - _pmy) * (predActualPairs[_pi].actual - _pmy);
+          }
+          var _r2 = _ssTot > 0 ? Math.max(0, 1 - _ssRes / _ssTot) : 0;
+          // Tracking Error (std of prediction errors)
+          var _errSum = 0, _errSum2 = 0;
+          for (var _pi = 0; _pi < _pN; _pi++) {
+            var _err = predActualPairs[_pi].predicted - predActualPairs[_pi].actual;
+            _errSum += _err; _errSum2 += _err * _err;
+          }
+          var _bias = _errSum / _pN;
+          var _teVar = _errSum2 / _pN - _bias * _bias;
+          var _te = Math.sqrt(Math.max(0, _teVar));
+
+          mzRegression = {
+            slope: +_slope.toFixed(3), intercept: +_intercept.toFixed(3),
+            rSquared: +_r2.toFixed(3), bias: +_bias.toFixed(2), trackingError: +_te.toFixed(2),
+            n: _pN,
+          };
+        }
+
+        // Calibration: 예측구간 커버리지 (Gneiting & Raftery 2007)
+        // [FIX] 이전 구현은 actual의 P5/P95를 actual 자신에 대해 검사 → 항상 ~90% (동어반복).
+        // 수정: 시간순 전반부(training) 잔차 분포의 P5/P95로 후반부(test) 커버리지 측정.
+        // 보정이 잘 된 모델이면 ~90%, 과적합이면 <80%, 과소적합이면 >95%.
+        var _halfN = Math.floor(_pN / 2);
+        if (_halfN >= 10) {
+          var _trainResids = [];
+          for (var _ri = 0; _ri < _halfN; _ri++) {
+            _trainResids.push(predActualPairs[_ri].actual - predActualPairs[_ri].predicted);
+          }
+          _trainResids.sort(function(a, b) { return a - b; });
+          var _trN = _trainResids.length;
+          var _rp5Idx = Math.floor((_trN - 1) * 0.05);
+          var _rp95Idx = Math.min(Math.ceil((_trN - 1) * 0.95), _trN - 1);
+          var _resLo = _trainResids[_rp5Idx], _resHi = _trainResids[_rp95Idx];
+          var _inRange = 0, _testN = _pN - _halfN;
+          for (var _ci = _halfN; _ci < _pN; _ci++) {
+            var _resid = predActualPairs[_ci].actual - predActualPairs[_ci].predicted;
+            if (_resid >= _resLo && _resid <= _resHi) _inRange++;
+          }
+          calibrationCoverage = +(_inRange / _testN * 100).toFixed(1);
+        }
+      }
 
       const stats = {
         n,
@@ -999,6 +1159,14 @@ class PatternBacktester {
         hlzSignificant,
         adjustedSignificant: false, // Holm-Bonferroni 보정 후 backtestAll()에서 갱신
         sampleWarning,
+        directionalAccuracy,
+        targetHitRate,
+        predictionMAE,
+        patternScore,
+        patternGrade,
+        mzRegression,       // [Phase 3] Mincer-Zarnowitz 산점도 회귀 (slope, intercept, R², bias, TE)
+        calibrationCoverage, // [Phase 3] 90% 예측구간 커버리지 (Gneiting & Raftery 2007)
+        predActualPairs: predActualPairs.length >= 10 ? predActualPairs : null, // [Phase 2/3] 산점도용 (predicted, actual) 쌍
       };
 
       // ── Phase A: 단순 OLS 진단 (return = alpha + beta * confidence) ──
@@ -1055,6 +1223,35 @@ class PatternBacktester {
         // [C][L:GCV] Ridge λ auto-selected via GCV (Golub, Heath & Wahba 1979). Fallback λ=1.0.
         var optLambda = selectRidgeLambdaGCV(X, returns, weights, 5);
         var reg = calcWLSRegression(X, returns, weights, optLambda);
+
+        // ── Huber-IRLS re-weighting (Huber 1964, Street, Carroll & Ruppert 1988) ──
+        // KRX 5-day returns have excess kurtosis (fat tails from limit-up/down ±30%).
+        // Standard WLS is not robust to outliers; IRLS down-weights |resid| > delta.
+        // Delta = 1.345 * MAD-sigma ≈ 5.8 for KRX 5-day return distribution.
+        if (reg && reg.coeffs) {
+          var HUBER_DELTA = 5.8;
+          var HUBER_ITERS = 5;
+          for (var hIter = 0; hIter < HUBER_ITERS; hIter++) {
+            var huberWeights = [];
+            var changed = false;
+            for (var ri = 0; ri < returns.length; ri++) {
+              // Compute prediction in standardized space (X already scaled)
+              var pred = 0;
+              for (var hj = 0; hj < reg.coeffs.length; hj++) pred += X[ri][hj] * reg.coeffs[hj];
+              var resid = returns[ri] - pred;
+              var absR = Math.abs(resid);
+              var hw = absR > HUBER_DELTA ? HUBER_DELTA / absR : 1.0;
+              huberWeights.push(hw * weights[ri]);
+              if (absR > HUBER_DELTA) changed = true;
+            }
+            if (!changed) break; // All residuals within delta — converged
+            // Re-fit WLS with Huber-adjusted weights
+            var huberReg = calcWLSRegression(X, returns, huberWeights, optLambda);
+            if (!huberReg || !huberReg.coeffs) break;
+            reg = huberReg;
+          }
+        }
+
         if (reg) {
           // Reverse-transform coefficients to original scale (Friedman, Hastie & Tibshirani 2010)
           for (var rj = 1; rj < reg.coeffs.length; rj++) {
@@ -1146,6 +1343,9 @@ class PatternBacktester {
       expectancy: 0, profitFactor: 0, kellyFraction: 0,
       tStat: 0, significant: false, hlzSignificant: false, adjustedSignificant: false,
       sampleWarning: 'insufficient',
+      directionalAccuracy: 0, targetHitRate: null, predictionMAE: null,
+      patternScore: 0, patternGrade: 'F',
+      mzRegression: null, calibrationCoverage: null, predActualPairs: null,
     };
   }
 
@@ -1157,7 +1357,9 @@ class PatternBacktester {
    * @returns {{ buyNull: number, sellNull: number, totalObs: number }}
    */
   _computeNullWR(candles, h) {
-    var lastClose = candles.length > 0 ? candles[candles.length - 1].close : 0;
+    // [M-5 FIX] Round lastClose to integer — KRX prices are integer KRW.
+    // Raw float can cause cache misses due to floating-point precision differences.
+    var lastClose = candles.length > 0 ? Math.round(candles[candles.length - 1].close) : 0;
     var cacheKey = candles.length + '_' + h + '_' + lastClose;
     if (!this._nullWRCache) this._nullWRCache = {};
     if (this._nullWRCache[cacheKey]) return this._nullWRCache[cacheKey];
@@ -1185,6 +1387,37 @@ class PatternBacktester {
       };
     }
     this._nullWRCache[cacheKey] = result;
+    return result;
+  }
+
+  /**
+   * [H-2 FIX] Unconditional h-day mean return — independent benchmark for IR.
+   * Grinold & Kahn (2000): benchmark must be independent of the strategy being evaluated.
+   * Computes the mean h-day return across all candle windows (the "random entry" baseline).
+   * Cached alongside _computeNullWR for efficiency.
+   * @param {Array} candles — OHLCV candles
+   * @param {number} h — horizon
+   * @returns {number} — mean h-day return (%) after transaction costs
+   */
+  _computeNullMeanReturn(candles, h) {
+    var lastClose = candles.length > 0 ? candles[candles.length - 1].close : 0;
+    var cacheKey = candles.length + '_' + h + '_' + Math.round(lastClose) + '_mean';
+    if (!this._nullMeanCache) this._nullMeanCache = {};
+    if (this._nullMeanCache[cacheKey] !== undefined) return this._nullMeanCache[cacheKey];
+
+    var sum = 0, total = 0;
+    var cost = this._horizonCost(h);
+    for (var i = 0; i < candles.length - h - 1; i++) {
+      var entryPrice = candles[i + 1].open || candles[i].close;
+      if (!entryPrice || entryPrice === 0) continue;
+      var exitPrice = candles[i + h].close;
+      var ret = (exitPrice - entryPrice) / entryPrice * 100 - cost;
+      sum += ret;
+      total++;
+    }
+
+    var result = total > 0 ? sum / total : 0;
+    this._nullMeanCache[cacheKey] = result;
     return result;
   }
 
@@ -1328,6 +1561,7 @@ class PatternBacktester {
     this._atrCache = null;
     this._vmaCache = null;
     this._nullWRCache = null;
+    this._nullMeanCache = null;
     this._resultCache.clear();
     this._signalAnalysisCache = null;
   }
@@ -1497,7 +1731,7 @@ class PatternBacktester {
       rsiOversoldExit: 'buy',      rsiOverboughtExit: 'sell',
       rsiBullishDivergence: 'buy', rsiBearishDivergence: 'sell',
       rsiHiddenBullishDivergence: 'buy', rsiHiddenBearishDivergence: 'sell',
-      bbLowerBounce: 'buy',        bbUpperBreak: 'sell',
+      bbLowerBounce: 'buy',        bbUpperBreak: 'neutral',  // [M-6 fix] signalEngine emits 'neutral' (weight 0) — match here
       bbSqueeze: 'neutral',
       ichimokuBullishCross: 'buy', ichimokuBearishCross: 'sell',
       ichimokuCloudBreakout: 'buy', ichimokuCloudBreakdown: 'sell',
@@ -1593,9 +1827,12 @@ class PatternBacktester {
       var alpha = h5.wrAlpha || 0;
       var nSample = h5.n;
       var exp = h5.expectancy || 0;
+      var pf = h5.profitFactor || 0;
 
-      // Tier A: BH 보정 유의 + wrAlpha>=3 + n>=50 + 양의 기대수익
-      if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0) {
+      // [M-2 FIX] Tier A: add profitFactor >= 1.1 gate (pattern tier A uses >= 1.3).
+      // Signal tier uses lower threshold since signals have smaller samples & shorter lookback.
+      // Ensures tier A requires demonstrable edge, not just statistical significance.
+      if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0 && pf >= 1.1) {
         tr.reliabilityTier = 'A';
       // Tier B: raw 유의 + wrAlpha>=2 + n>=20 + 양의 기대수익
       } else if (isSig && alpha >= 2 && nSample >= 20 && exp > 0) {
