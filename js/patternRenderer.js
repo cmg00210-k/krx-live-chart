@@ -196,10 +196,10 @@ const patternRenderer = (() => {
             ctx.fillStyle = g.fill;
             ctx.fillRect(rx, ry, glowW, rh);
 
-            // 실선 테두리 (alpha 0.5 — 가시성 향상)
+            // 실선 테두리 (alpha 0.25 — 캔들 가시성 우선)
             ctx.strokeStyle = g.border;
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.5;
+            ctx.globalAlpha = 0.25;
             ctx.beginPath();
             ctx.rect(rx, ry, glowW, rh);
             ctx.stroke();
@@ -213,10 +213,10 @@ const patternRenderer = (() => {
             if (br.x1 == null || br.y1 == null || br.x2 == null || br.y2 == null) return;
             // 완전히 화면 밖이면 스킵
             if (br.x2 < 0 || br.x1 > w) return;
-            const rx = Math.min(br.x1, br.x2) - 3;
-            const ry = Math.min(br.y1, br.y2) - 2;
-            const rw = Math.abs(br.x2 - br.x1) + 6;
-            const rh = Math.abs(br.y2 - br.y1) + 4;
+            const rx = Math.min(br.x1, br.x2) - 1;
+            const ry = Math.min(br.y1, br.y2) - 1;
+            const rw = Math.abs(br.x2 - br.x1) + 2;
+            const rh = Math.abs(br.y2 - br.y1) + 2;
             const radius = 4;
 
             // 균일 반투명 채우기 (연보라)
@@ -225,10 +225,10 @@ const patternRenderer = (() => {
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.fill();
 
-            // 실선 테두리 (연보라, alpha 0.5 — 가시성 향상)
+            // 실선 테두리 (연보라, alpha 0.25 — 캔들 가시성 우선)
             ctx.strokeStyle = br.border;
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.5;
+            ctx.globalAlpha = 0.25;
             ctx.beginPath();
             _roundRect(ctx, rx, ry, rw, rh, radius);
             ctx.stroke();
@@ -575,7 +575,7 @@ const patternRenderer = (() => {
             //   — Wc만 높아도 CI가 넓으면 낮은 확신, 반대도 마찬가지
             var wcAlpha = fz.wc != null ? Math.min(0.4 + 0.5 * fz.wc, 1.0) : 1.0;
             var ciAlpha = fz.ciAlpha != null ? fz.ciAlpha : 1.0;
-            var fzAlpha = wcAlpha * ciAlpha;
+            var fzAlpha = Math.max(0.18, wcAlpha * ciAlpha);
             ctx.globalAlpha = fzAlpha;
 
             // ── 목표 영역 (수익 구간): 부드러운 그라데이션 ──
@@ -624,7 +624,7 @@ const patternRenderer = (() => {
                         wrColor = KRX_COLORS.DOWN;
                       }
                       ctx.save();
-                      ctx.font = "700 9px 'Pretendard', sans-serif";
+                      ctx.font = "700 10px 'Pretendard', sans-serif";
                       ctx.textAlign = 'center';
                       ctx.textBaseline = 'middle';
                       const wrm = ctx.measureText(wrText);
@@ -744,7 +744,7 @@ const patternRenderer = (() => {
                 ctx.arc(barX, fz.yEntry, 2.5, 0, Math.PI * 2);
                 ctx.fill();
                 // R:R 텍스트 라벨
-                ctx.font = "700 9px 'Pretendard', sans-serif";
+                ctx.font = "700 10px 'Pretendard', sans-serif";
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 const rrText = 'R:R ' + (fz.rrRatio >= 10 ? fz.rrRatio.toFixed(0) : fz.rrRatio.toFixed(1));
@@ -948,11 +948,11 @@ const patternRenderer = (() => {
       const lo = toXY(c.time, c.low);
       if (hi.x == null || hi.y == null || lo.y == null) return;
 
-      // 캔들 패턴: 연보라 수직 스트라이프 (채우기 0.12 — 가시성 향상)
+      // 캔들 패턴: 연보라 수직 스트라이프 (채우기 0.06 — 캔들 가시성 우선)
       const isNeutral = cfg.direction === 'neutral';
       const fillColor = isNeutral
-        ? KRX_COLORS.PTN_NEUTRAL_FILL(0.12)
-        : KRX_COLORS.PTN_CANDLE_FILL(0.12);
+        ? KRX_COLORS.PTN_NEUTRAL_FILL(0.06)
+        : KRX_COLORS.PTN_CANDLE_FILL(0.06);
       const borderColor = isNeutral
         ? CANDLE_NEUTRAL
         : CANDLE_COLOR;
@@ -961,7 +961,7 @@ const patternRenderer = (() => {
         x: hi.x,
         y1: hi.y,
         y2: lo.y,
-        width: 18,
+        width: 14,
         fill: fillColor,
         border: borderColor,
       });
@@ -993,11 +993,11 @@ const patternRenderer = (() => {
       const br = toXY(candles[ei].time, lower);
       if (tl.x == null || tl.y == null || br.x == null || br.y == null) return;
 
-      // 캔들 패턴: 균일 연보라 채우기 (0.12 — 가시성 향상)
+      // 캔들 패턴: 균일 연보라 채우기 (0.06 — 캔들 가시성 우선)
       brackets.push({
         x1: tl.x, y1: tl.y,
         x2: br.x, y2: br.y,
-        fill: KRX_COLORS.PTN_CANDLE_FILL(0.12),
+        fill: KRX_COLORS.PTN_CANDLE_FILL(0.06),
         border: CANDLE_COLOR,
       });
     }

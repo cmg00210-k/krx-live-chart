@@ -2403,6 +2403,31 @@ html, body {
 .sf-check input[type="checkbox"]:not(:checked) + .sf-dot { opacity: 0.25; }
 .sf-check input[type="checkbox"]:not(:checked) ~ span:last-child { opacity: 0.4; }
 
+/* ── sf-dot 색상 (viz 레이어) ── */
+input[data-viz="signal"]    + .sf-dot { background: var(--accent); }
+input[data-viz="chart"]     + .sf-dot { background: #96DCC8; }
+input[data-viz="candle"]    + .sf-dot { background: #B388FF; }
+input[data-viz="forecast"]  + .sf-dot { background: #808080; }
+
+/* ── sf-dot 색상 (시그널 카테고리) ── */
+input[data-cat="ma"]        + .sf-dot { background: #FFD93D; }
+input[data-cat="macd"]      + .sf-dot { background: #2962ff; }
+input[data-cat="rsi"]       + .sf-dot { background: #ff9800; }
+input[data-cat="bb"]        + .sf-dot { background: #FF8C42; }
+input[data-cat="volume"]    + .sf-dot { background: #78909C; }
+input[data-cat="stochastic"]+ .sf-dot { background: #AB47BC; }
+input[data-cat="composite"] + .sf-dot { background: var(--accent); }
+
+/* ── signal-filter-title 구분선 ── */
+#signal-filter-title { margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 6px; }
+
+/* ── 시드 데이터 경고 배너 ── */
+#fin-seed-warning {
+  padding: 3px 8px; margin: 0 0 4px 0;
+  background: rgba(255,180,50,0.12); border: 1px solid rgba(255,180,50,0.25);
+  border-radius: 4px; font-size: 10px; color: rgba(255,180,50,0.7); text-align: center;
+}
+
 /* ═══ 시각화 레이어 토글 ═══════════════════════════ */
 .vz-check { gap: 4px; }
 .vz-check input[type="checkbox"]:not(:checked) ~ * { opacity: 0.4; }
@@ -2417,7 +2442,7 @@ html, body {
 #active-pattern-hud {
   position: absolute;
   top: 36px;
-  right: 68px;
+  right: 82px;
   z-index: 20;
   background: rgba(13, 13, 13, 0.88);
   border: 1px solid var(--border);
@@ -2810,11 +2835,11 @@ html, body {
   display: flex; align-items: center; gap: 3px;
   font-family: var(--font-mono); font-size: var(--fs-body);
   pointer-events: none;
-  background: rgba(19,23,34,0.92);
+  background: rgba(19,23,34,0.75);
   padding: var(--sp-1) var(--sp-3); border-radius: var(--radius);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(42,46,57,0.3);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(42,46,57,0.2);
   line-height: 1.4;
   max-width: calc(100% - var(--draw-toolbar-w) - var(--sp-4));  /* [FIX] 드로잉 툴바 + 여백 고려, 차트 영역 밖 넘침 방지 */
   overflow: hidden;
@@ -3299,7 +3324,7 @@ html, body {
   #chart-wrap #pattern-history-bar { margin-left: 0; }
   #chart-wrap .sub-chart-label { left: var(--sp-2); }  /* 툴바 숨김 시 라벨 위치 복원 */
   /* HUD: 모바일에서 축소 + 우측 여백 줄임 */
-  #active-pattern-hud { right: 50px; min-width: 100px; font-size: 10px; padding: 3px 6px; }
+  #active-pattern-hud { right: 64px; min-width: 100px; font-size: 10px; padding: 3px 6px; }
 
   #main {
     grid-template-columns: 1fr;

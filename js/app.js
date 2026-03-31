@@ -1601,7 +1601,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=23');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=29');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -3833,54 +3833,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 
-// ══════════════════════════════════════════════════════
-//  스크린샷 내보내기
-// ══════════════════════════════════════════════════════
-document.getElementById('screenshot-btn')?.addEventListener('click', function() {
-  var chartWrap = document.getElementById('chart-wrap');
-  if (!chartWrap) return;
-
-  var allCanvases = chartWrap.querySelectorAll('canvas');
-  if (!allCanvases.length) {
-    showToast('캡처할 차트가 없습니다', 'warning');
-    return;
-  }
-
-  // 전체 chart-wrap 영역을 하나의 이미지로 합성
-  var rect = chartWrap.getBoundingClientRect();
-  var dpr = window.devicePixelRatio || 1;
-  var outCanvas = document.createElement('canvas');
-  outCanvas.width = rect.width * dpr;
-  outCanvas.height = rect.height * dpr;
-  var ctx = outCanvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-
-  // 배경색 채우기
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-main').trim() || '#141414';
-  ctx.fillRect(0, 0, rect.width, rect.height);
-
-  // 각 canvas를 상대 위치에 그리기 (메인 + RSI + MACD 서브차트 포함)
-  allCanvases.forEach(function(c) {
-    var cRect = c.getBoundingClientRect();
-    try {
-      ctx.drawImage(c, cRect.left - rect.left, cRect.top - rect.top, cRect.width, cRect.height);
-    } catch (e) { /* cross-origin canvas 무시 */ }
-  });
-
-  // 워터마크
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = "12px 'Pretendard', sans-serif";
-  ctx.fillText('CheeseStock — ' + (currentStock ? currentStock.name : '') + ' ' + currentTimeframe, 10, rect.height - 10);
-
-  // 다운로드
-  var link = document.createElement('a');
-  // [FIX] KST 날짜로 파일명 생성 (UTC→KST 보정)
-  var _kstNow = new Date(Date.now() + 9 * 3600000);
-  link.download = (currentStock ? currentStock.code : 'chart') + '_' + currentTimeframe + '_' + _kstNow.toISOString().slice(0, 10) + '.png';
-  link.href = outCanvas.toDataURL('image/png');
-  link.click();
-  showToast('스크린샷 저장 완료', 'success');
-});
+// [REMOVED] 스크린샷 내보내기 — screenshot-btn 미구현으로 dead code 제거 (2026-04-06 audit)
 
 
 // ══════════════════════════════════════════════════════
@@ -4231,7 +4184,7 @@ async function _startScreenerScan() {
   var screenerWorker = null;
   var workerReady = false;
   try {
-    screenerWorker = new Worker('js/screenerWorker.js?v=1');
+    screenerWorker = new Worker('js/screenerWorker.js?v=10');
   } catch (workerErr) {
     console.warn('[Screener] Worker 생성 실패, 메인 스레드 폴백:', workerErr.message);
   }

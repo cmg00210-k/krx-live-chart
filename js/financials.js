@@ -147,7 +147,7 @@ function _clearAllFinancials() {
     var el = document.getElementById(ids[i]);
     if (el) {
       el.textContent = '\u2014';  // em dash
-      el.className = '';
+      el.classList.remove('up', 'down', 'neutral', 'fin-good', 'fin-bad', 'fin-warn');
     }
   }
 

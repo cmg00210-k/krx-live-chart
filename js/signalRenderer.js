@@ -17,9 +17,9 @@ const signalRenderer = (() => {
 
   // ── 색상 (KRX_COLORS 참조) ──
   const BUY_COLOR   = KRX_COLORS.UP;
-  const BUY_FILL    = KRX_COLORS.UP_FILL(0.10);
+  const BUY_FILL    = KRX_COLORS.UP_FILL(0.07);
   const SELL_COLOR   = KRX_COLORS.DOWN;
-  const SELL_FILL    = KRX_COLORS.DOWN_FILL(0.10);
+  const SELL_FILL    = KRX_COLORS.DOWN_FILL(0.07);
 
   // 최근 N봉 이내 시그널만 표시 (차트 혼잡 방지)
   const RECENT_BAR_LIMIT = 50;
@@ -56,7 +56,7 @@ const signalRenderer = (() => {
           const bx = Math.min(b.x1, b.x2);
           const bw = Math.abs(b.x2 - b.x1);
           ctx.fillStyle = b.fill;
-          ctx.fillRect(bx, 0, Math.max(bw, 2), h);
+          ctx.fillRect(bx, h * 0.15, Math.max(bw, 2), h * 0.65);
         });
 
         // ── 2. 다이버전스 라인 (점선) ──
@@ -115,7 +115,7 @@ const signalRenderer = (() => {
           const padV = 2;   // 상하 패딩
           const boxW = textW + padH * 2;
           const boxH = 12 + padV * 2;  // 10px 폰트 + 패딩
-          const labelY = h * 0.80;     // 차트 높이의 80% 위치 (볼륨 히스토그램 상단)
+          const labelY = h * 0.73;     // 차트 높이의 73% 위치 (볼륨 히스토그램 상단보다 위)
           const MIN_LABEL_GAP = 30;    // 라벨 간 최소 간격 (px)
 
           let prevLabelX = -Infinity;

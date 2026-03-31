@@ -1295,7 +1295,7 @@ const sidebarManager = (() => {
     if (!_open) document.getElementById('main').classList.add('sidebar-collapsed');
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
-      sidebar.classList.remove('sb-compact', 'sb-detailed', 'sb-minimal', 'sb-analysis');
+      sidebar.classList.remove('sb-minimal', 'sb-analysis');
       if (_viewMode === 'analysis') sidebar.classList.add('sb-analysis');
       // 'default' 모드에는 클래스 없음
     }
