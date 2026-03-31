@@ -226,7 +226,9 @@ const signalRenderer = (() => {
       const series = src._series;
       const ts = src._chart.timeScale();
       const lastIdx = candles.length - 1;
-      const cutoff = lastIdx - RECENT_BAR_LIMIT;
+      // [Phase3-A] Zoom-aware cutoff: 줌인 시 visible 범위 전체 포함
+      const effectiveLimit = Math.max(RECENT_BAR_LIMIT, src._visibleBars || 0);
+      const cutoff = lastIdx - effectiveLimit;
 
       const vbands = [];
 
@@ -281,7 +283,9 @@ const signalRenderer = (() => {
       const series = src._series;
       const ts = src._chart.timeScale();
       const lastIdx = candles.length - 1;
-      const cutoff = lastIdx - RECENT_BAR_LIMIT;
+      // [Phase3-A] Zoom-aware cutoff: 줌인 시 visible 범위 전체 포함
+      const effectiveLimit = Math.max(RECENT_BAR_LIMIT, src._visibleBars || 0);
+      const cutoff = lastIdx - effectiveLimit;
 
       const diamonds = [];
       const stars = [];
@@ -473,8 +477,9 @@ const signalRenderer = (() => {
 
     paneViews() { return [this._bgView, this._fgView]; }
 
-    setSignals(candles, signals) {
+    setSignals(candles, signals, visibleBars) {
       this._signals = { candles, signals };
+      this._visibleBars = visibleBars || 0;
       if (this._requestUpdate) this._requestUpdate();
     }
 
@@ -497,7 +502,9 @@ const signalRenderer = (() => {
     if (!cm.volumeSeries || !candles || !candles.length) return;
 
     const lastIdx = candles.length - 1;
-    const cutoff = lastIdx - RECENT_BAR_LIMIT;
+    // [Phase3-A] Zoom-aware cutoff
+    const vbLimit = (_primitive && _primitive._visibleBars) ? Math.max(RECENT_BAR_LIMIT, _primitive._visibleBars) : RECENT_BAR_LIMIT;
+    const cutoff = lastIdx - vbLimit;
 
     // 거래량 급증 인덱스 수집
     const volBreakoutSet = new Set();
@@ -576,8 +583,13 @@ const signalRenderer = (() => {
       return;
     }
 
+    // [Phase3-A] visible range에서 봉 수 계산 → zoom-aware cutoff
+    var visibleBars = 0;
+    var vr = cm.mainChart.timeScale().getVisibleLogicalRange();
+    if (vr) visibleBars = Math.ceil(vr.to - vr.from);
+
     // primitive에 시그널 데이터 설정
-    _primitive.setSignals(candles, signals);
+    _primitive.setSignals(candles, signals, visibleBars);
 
     // 거래량 급증 강조 (volumeSeries 색상 변경 — vol 지표 활성 시에만)
     if (opts && opts.volumeActive) {

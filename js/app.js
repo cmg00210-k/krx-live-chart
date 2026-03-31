@@ -109,12 +109,133 @@ function _filterPatternsForViz(patterns) {
   });
 }
 
+// ══════════════════════════════════════════════════════
+//  [Phase1] Active Pattern HUD + PriceLine 앵커
+//  줌인 시에도 목표가/손절가/R:R을 항상 표시
+// ══════════════════════════════════════════════════════
+
+/** 패턴 outcome 계산 (active/hit/failed) */
+function _getPatternOutcome(p, cndls) {
+  if (p.priceTarget == null && p.stopLoss == null) return null;
+  var ei = p.endIndex;
+  if (ei == null || ei >= cndls.length - 1) return 'active';
+  var isBuy = p.signal === 'buy';
+  for (var ci = ei + 1; ci < cndls.length; ci++) {
+    if (p.priceTarget != null) {
+      if (isBuy && cndls[ci].high >= p.priceTarget) return 'hit';
+      if (!isBuy && cndls[ci].low <= p.priceTarget) return 'hit';
+    }
+    if (p.stopLoss != null) {
+      if (isBuy && cndls[ci].low <= p.stopLoss) return 'failed';
+      if (!isBuy && cndls[ci].high >= p.stopLoss) return 'failed';
+    }
+  }
+  return 'active';
+}
+
+/** Active Pattern HUD 업데이트 — 줌 무관 DOM 오버레이 */
+function _updateActivePatternHUD(patterns) {
+  var hud = document.getElementById('active-pattern-hud');
+  if (!hud) return;
+
+  // active 패턴 중 최고 confidence 찾기
+  var active = null;
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    if (p.priceTarget == null && p.stopLoss == null) continue;
+    var oc = _getPatternOutcome(p, candles);
+    if (oc === 'active') { active = p; break; }
+  }
+
+  if (!active) { hud.style.display = 'none'; return; }
+
+  var meta = typeof PATTERN_ACADEMIC_META !== 'undefined' ? PATTERN_ACADEMIC_META[active.type] : null;
+  var name = meta ? meta.nameKo : active.type;
+  var isBuy = active.signal === 'buy';
+
+  document.getElementById('aph-name').textContent = name;
+  var dirEl = document.getElementById('aph-dir');
+  dirEl.textContent = isBuy ? 'BUY' : 'SELL';
+  dirEl.className = 'aph-dir ' + (isBuy ? 'buy' : 'sell');
+
+  var entry = active.endIndex != null && active.endIndex < candles.length
+    ? candles[active.endIndex].close : null;
+
+  var targetEl = document.getElementById('aph-target');
+  targetEl.textContent = active.priceTarget != null
+    ? '\u2191 ' + active.priceTarget.toLocaleString('ko-KR') : '';
+
+  var stopEl = document.getElementById('aph-stop');
+  stopEl.textContent = active.stopLoss != null
+    ? '\u2193 ' + active.stopLoss.toLocaleString('ko-KR') : '';
+
+  var rrEl = document.getElementById('aph-rr');
+  if (entry && active.priceTarget != null && active.stopLoss != null) {
+    var reward = Math.abs(active.priceTarget - entry);
+    var risk = Math.abs(active.stopLoss - entry);
+    rrEl.textContent = risk > 0 ? 'R:R ' + (reward / risk).toFixed(1) : '';
+  } else {
+    rrEl.textContent = '';
+  }
+
+  hud.style.display = '';
+}
+
+/** 목표가/손절가 PriceLine 우측 축 앵커 업데이트 */
+function _updateTargetPriceLines(patterns) {
+  if (!chartManager || !chartManager.candleSeries) return;
+
+  // LINE 모드: _priceLine 시리즈 사용, 기본: candleSeries
+  var plSeries = (chartType === 'line' && chartManager.indicatorSeries && chartManager.indicatorSeries._priceLine)
+    ? chartManager.indicatorSeries._priceLine : chartManager.candleSeries;
+
+  // 기존 라인 제거 (이전 series에서 제거 시도, 실패 시 무시)
+  _activePriceLines.forEach(function(pl) {
+    try { plSeries.removePriceLine(pl); } catch (e) {}
+    try { chartManager.candleSeries.removePriceLine(pl); } catch (e) {}
+  });
+  _activePriceLines = [];
+
+  // active 패턴 중 최고 confidence 찾기
+  var active = null;
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    if (p.priceTarget == null && p.stopLoss == null) continue;
+    var oc = _getPatternOutcome(p, candles);
+    if (oc === 'active') { active = p; break; }
+  }
+  if (!active) return;
+
+  if (active.priceTarget != null) {
+    _activePriceLines.push(plSeries.createPriceLine({
+      price: active.priceTarget,
+      color: KRX_COLORS.FZ_TARGET_BORDER,
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: '\ubaa9\ud45c',
+    }));
+  }
+  if (active.stopLoss != null) {
+    _activePriceLines.push(plSeries.createPriceLine({
+      price: active.stopLoss,
+      color: KRX_COLORS.PTN_INVALID,
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: '\uc190\uc808',
+    }));
+  }
+}
+
 /** 렌더러 호출 통합 — 7+개 호출 사이트를 1곳으로 집약 */
 function _renderOverlays() {
-  var vizPatterns = _filterPatternsForViz(detectedPatterns);
-  // 예측 영역 OFF 시 stop/target/priceTarget 제거
+  var hudPatterns = _filterPatternsForViz(detectedPatterns);
+  // 예측 영역 OFF 시 Canvas 렌더러에만 stop/target/priceTarget 제거
+  // HUD와 PriceLine은 forecast 토글과 독립 — 줌인 시에도 항상 표시
+  var vizPatterns = hudPatterns;
   if (!vizToggles.forecast) {
-    vizPatterns = vizPatterns.map(function(p) {
+    vizPatterns = hudPatterns.map(function(p) {
       if (p.priceTarget != null || p.stopLoss != null) {
         var copy = Object.assign({}, p);
         copy.priceTarget = null;
@@ -135,6 +256,9 @@ function _renderOverlays() {
     });
   }
   chartManager.setHoverData(candles, vizPatterns, filtSigs);
+  // [Phase1] Active Pattern HUD + PriceLine — forecast 토글 무관, 항상 업데이트
+  _updateActivePatternHUD(hudPatterns);
+  _updateTargetPriceLines(hudPatterns);
 }
 let candles = [];
 let tickTimer = null;
@@ -153,6 +277,7 @@ var _bondsLatest = null;     // 채권 데이터 캐시 (bonds_latest.json — �
 var _lastAdvLevel = 0;       // 최근 Worker 분석의 ADV 유동성 등급 (signalEngine.calcADVLevel)
 var _lastVrpRegime = 'neutral';  // 최근 Worker 분석의 VRP 레짐 (signalEngine.calcVRPRegime)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
+let _lastActivePattern = null;     // [Fix-1] 전체 분석의 active 패턴 보존 (드래그 시 HUD 소실 방지)
 
 // ══════════════════════════════════════════════════════
 //  [FIX-TRUST] 데이터 출처 워터마크 헬퍼
@@ -350,6 +475,7 @@ let _prevPatternCount = -1;    // 패턴 toast 중복 방지용
 let _dragVersion = 0;          // 드래그 분석 stale 결과 무시용
 let _dragDebounceTimer = null;  // 드래그 분석 150ms 디바운스
 let _dragClampFrom = 0;        // 드래그 분석 인덱스 오프셋 (Worker 결과 보정용)
+let _activePriceLines = [];    // [Phase1-B] 목표가/손절가 PriceLine 참조 (줌 무관 우측 축 앵커)
 let _ohlcRafId = 0;            // [FIX] crosshair OHLC 바 RAF 디바운스 ID
 let _workerRestartCount = 0;   // [FIX] Worker 에러 시 재시작 카운터 (최대 3회)
 let _lastBacktestVersion = -1; // 백테스트 결과 중복 처리 방지 — version 추적
@@ -438,6 +564,22 @@ function _mergeChartPatternStructLines(dragPatterns) {
       merged.push(chartP);
     }
   });
+  // [Fix-1] Active 패턴 보존: 드래그 재분석에서 소실된 active 패턴을 병합
+  // HUD/PriceLine이 줌인 시에도 유지되도록 함
+  if (_lastActivePattern) {
+    var ap = _lastActivePattern;
+    var alreadyPresent = merged.some(function (p) {
+      return p.type === ap.type &&
+             Math.abs((p.startIndex || 0) - (ap.startIndex || 0)) < 3;
+    });
+    if (!alreadyPresent) {
+      // outcome 재확인: 여전히 active인지 검증
+      var oc = _getPatternOutcome(ap, candles);
+      if (oc === 'active') {
+        merged.push(ap);
+      }
+    }
+  }
   return merged;
 }
 
@@ -449,6 +591,15 @@ function _saveChartPatternStructLines(patterns) {
   _chartPatternStructLines = patterns
     .filter(function (p) { return _CHART_PATTERN_TYPES.has(p.type); })
     .slice();  // 복사본 저장
+
+  // [Fix-1] Active 패턴 보존: priceTarget/stopLoss가 있고 아직 active인 최고 confidence 패턴
+  _lastActivePattern = null;
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    if (p.priceTarget == null && p.stopLoss == null) continue;
+    var oc = _getPatternOutcome(p, candles);
+    if (oc === 'active') { _lastActivePattern = p; break; }
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -2418,9 +2569,11 @@ async function selectStock(code) {
   _dragVersion++;
   if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
   _chartPatternStructLines = [];
+  _lastActivePattern = null;
   detectedPatterns = [];
   detectedSignals = [];
   signalStats = null;
+  _activePriceLines = [];
   _prevPrice = null;
   _prevPatternCount = -1;
   if (typeof backtester !== 'undefined') backtester.invalidateCache();
@@ -2964,6 +3117,10 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     _dragVersion++;
     if (_dragDebounceTimer) { clearTimeout(_dragDebounceTimer); _dragDebounceTimer = null; }
     _chartPatternStructLines = [];
+    _lastActivePattern = null;
+    detectedPatterns = [];
+    detectedSignals = [];
+    _activePriceLines = [];
     _prevPrice = null;
     _prevPatternCount = -1;
 

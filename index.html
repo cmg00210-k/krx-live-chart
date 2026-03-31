@@ -20,7 +20,7 @@
   <link rel="prefetch" href="data/index.json">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=12">
+  <link rel="stylesheet" href="css/style.css?v=13">
   <script defer src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"
     integrity="sha384-ExNwjbclSLY2LS3S2c6aDJDjpBHGZLct23WX65fLzj0ob1bRrCh9H90WThES5wQA"
     crossorigin="anonymous"></script>
@@ -320,6 +320,18 @@
           <span id="ohlc-macd" class="ohlc-label" style="display:none"><span class="ohlc-key">MACD</span> <span id="ohlc-macd-val" class="ohlc-val">&mdash;</span></span>
         </div>
         <div id="main-chart-container"></div>
+        <!-- Active Pattern HUD (줌인 시에도 항상 표시) -->
+        <div id="active-pattern-hud" style="display:none">
+          <div class="aph-row">
+            <span class="aph-name" id="aph-name"></span>
+            <span class="aph-dir" id="aph-dir"></span>
+          </div>
+          <div class="aph-metrics">
+            <span class="aph-target" id="aph-target"></span>
+            <span class="aph-stop" id="aph-stop"></span>
+            <span class="aph-rr" id="aph-rr"></span>
+          </div>
+        </div>
         <!-- 패턴/시그널 호버 툴팁 -->
         <div id="pattern-tooltip" class="pattern-tooltip"></div>
         <!-- 패턴 요약 바 + 상세 팝업 -->
@@ -659,19 +671,19 @@
   <!-- ?v= 캐시 버스팅: 코드 배포 시 숫자를 올리면 CDN/브라우저 캐시 즉시 무효화 -->
   <script defer src="js/colors.js?v=13"></script>
   <script defer src="js/data.js?v=10"></script>
-  <script defer src="js/api.js?v=12"></script>
+  <script defer src="js/api.js?v=13"></script>
   <script defer src="js/realtimeProvider.js?v=10"></script>
-  <script defer src="js/indicators.js?v=20"></script>
+  <script defer src="js/indicators.js?v=21"></script>
   <script defer src="js/patterns.js?v=37"></script>
-  <script defer src="js/signalEngine.js?v=29"></script>
+  <script defer src="js/signalEngine.js?v=30"></script>
   <script defer src="js/chart.js?v=12"></script>
-  <script defer src="js/patternRenderer.js?v=18"></script>
-  <script defer src="js/signalRenderer.js?v=10"></script>
+  <script defer src="js/patternRenderer.js?v=19"></script>
+  <script defer src="js/signalRenderer.js?v=11"></script>
   <script defer src="js/backtester.js?v=32"></script>
   <script defer src="js/sidebar.js?v=11"></script>
-  <script defer src="js/patternPanel.js?v=18"></script>
+  <script defer src="js/patternPanel.js?v=19"></script>
   <script defer src="js/financials.js?v=12"></script>
   <script defer src="js/drawingTools.js?v=10"></script>
-  <script defer src="js/app.js?v=28"></script>
+  <script defer src="js/app.js?v=29"></script>
 </body>
 </html>

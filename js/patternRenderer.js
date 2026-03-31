@@ -483,8 +483,23 @@ const patternRenderer = (() => {
             const boxY = labelY - boxH / 2;
             const radius = 3;
 
-            // ── pill 배경: 살짝 투명한 다크 ──
-            ctx.fillStyle = lb.bgColor || KRX_COLORS.TAG_BG(0.88);
+            // [Phase2-B] Active 패턴: 배경 틴트 + 두꺼운 테두리, Expired: 흐린 배경
+            var isActive = lb.outcome === 'active';
+            var isExpired = lb.outcome === 'hit' || lb.outcome === 'failed';
+            // [Phase2-C] Aging decay: expired 패턴은 alpha 감소 (decayAlpha는 labels에 전달)
+            var agingAlpha = lb.decayAlpha != null ? lb.decayAlpha : 1.0;
+
+            // ── pill 배경 ──
+            ctx.globalAlpha = agingAlpha;
+            if (isActive) {
+              // Active: 방향 색상 틴트 배경 (KRX_COLORS 기반)
+              var isBuyLabel = BULLISH_TYPES.has(lb._patternType || '');
+              ctx.fillStyle = isBuyLabel
+                ? BUY_FILL
+                : (typeof CANDLE_FILL === 'function' ? CANDLE_FILL(0.12) : CANDLE_FILL);
+            } else {
+              ctx.fillStyle = lb.bgColor || KRX_COLORS.TAG_BG(0.88);
+            }
             ctx.beginPath();
             _roundRect(ctx, boxX, boxY, boxW, boxH, radius);
             ctx.fill();
@@ -495,24 +510,30 @@ const patternRenderer = (() => {
             _roundRect(ctx, boxX, boxY, 3, boxH, [radius, 0, 0, radius]);
             ctx.fill();
 
-            // ── 테두리 (Wc 높을수록 두껍고 불투명) ──
-            var wcAlpha = lb.wc != null ? Math.min(0.3 + 0.5 * lb.wc, 1.0) : 0.65;
+            // ── 테두리 (Active: 두껍고 불투명, Expired: 흐림) ──
             ctx.strokeStyle = lb.color;
-            ctx.lineWidth = lb.wc != null ? Math.max(0.5, Math.min(lb.wc * 1.2, 2.0)) : 0.8;
-            ctx.globalAlpha = wcAlpha;
+            if (isActive) {
+              ctx.lineWidth = 1.8;
+              ctx.globalAlpha = 1.0;
+            } else {
+              var wcAlpha = lb.wc != null ? Math.min(0.3 + 0.5 * lb.wc, 1.0) : 0.65;
+              ctx.lineWidth = lb.wc != null ? Math.max(0.5, Math.min(lb.wc * 1.2, 2.0)) : 0.8;
+              ctx.globalAlpha = wcAlpha * agingAlpha;
+            }
             ctx.beginPath();
             _roundRect(ctx, boxX, boxY, boxW, boxH, radius);
             ctx.stroke();
-            ctx.globalAlpha = 1;
+            ctx.globalAlpha = agingAlpha;
 
             // ── 텍스트 ──
             ctx.fillStyle = lb.color;
             ctx.fillText(lb.text, lb.x + 1.5, labelY);
 
             // ── 적중 상태 도트 (Active=금색◌ / Hit=빨강● / Failed=파랑●) ──
+            ctx.globalAlpha = 1;
             if (lb.outcome) {
               const dotX = boxX + boxW + 5;
-              const dotR = 3.5;
+              const dotR = isActive ? 4.5 : 3.5;
               ctx.beginPath();
               ctx.arc(dotX, labelY, dotR, 0, Math.PI * 2);
               if (lb.outcome === 'hit') {
@@ -522,9 +543,9 @@ const patternRenderer = (() => {
                 ctx.fillStyle = KRX_COLORS.DOWN;
                 ctx.fill();
               } else {
-                // active: 빈 원 (진행 중)
+                // active: 두꺼운 빈 원 + 금색 (진행 중 강조)
                 ctx.strokeStyle = KRX_COLORS.ACCENT;
-                ctx.lineWidth = 1.2;
+                ctx.lineWidth = 2.0;
                 ctx.stroke();
               }
             }
@@ -1490,6 +1511,15 @@ const patternRenderer = (() => {
         }
       }
 
+      // [Phase2-C] Pattern aging decay: active=면제, hit/failed=10봉 후 fade
+      var decayAlpha = 1.0;
+      if (outcome === 'hit' || outcome === 'failed') {
+        var age = candles.length - 1 - ei;
+        if (age > 10) {
+          decayAlpha = Math.max(0.25, 1.0 - (age - 10) * 0.05);
+        }
+      }
+
       labels.push({
         x: coordX.x,
         y: labelYVal,
@@ -1501,6 +1531,8 @@ const patternRenderer = (() => {
         confidence: p.confidence,
         outcome: outcome,
         wc: p.wc || 1,
+        decayAlpha: decayAlpha,
+        _patternType: p.type,
       });
     }
 
@@ -1611,16 +1643,32 @@ const patternRenderer = (() => {
       const isBuy = _isBullish(p);
 
       // Forecast Zone 너비: 패턴 끝 → 오른쪽 8봉 연장
-      // 패턴이 마지막 봉이면 fzEnd === fzStart → 폭 0 → skip
       const fzStart = ei;
       const fzEnd = Math.min(ei + 8, candles.length - 1);
-      if (fzEnd <= fzStart) return;   // 마지막 봉 패턴: 예측 영역 미표시
 
       const startCoord = toXY(candles[fzStart].time, entry);
-      const endCoord = toXY(candles[fzEnd].time, entry);
-      if (startCoord.x == null || endCoord.x == null) return;
+      var fzX1, fzX2;
+
+      if (fzEnd <= fzStart) {
+        // [UX-FIX] 마지막 봉 패턴: 차트 우측 끝까지 미래 영역 연장
+        if (startCoord.x == null) return;
+        fzX1 = startCoord.x;
+        // timeScale 우측 끝 좌표 (마지막 봉 x + 봉 간격 * 8)
+        var lastCoord = toXY(candles[candles.length - 1].time, entry);
+        var barWidth = candles.length >= 2
+          ? Math.abs((lastCoord.x || 0) - (toXY(candles[candles.length - 2].time, entry).x || 0))
+          : 8;
+        fzX2 = fzX1 + barWidth * 8;
+      } else {
+        var endCoord = toXY(candles[fzEnd].time, entry);
+        // [Phase2-A] null-safe: 패턴이 화면 밖이면 x1=0 fallback (줌인 시 zone 유지)
+        fzX1 = startCoord.x != null ? startCoord.x : 0;
+        fzX2 = endCoord.x != null ? endCoord.x : null;
+        // endCoord가 완전히 null이면 표시 불가
+        if (fzX2 == null) return;
+      }
       // 좌표 변환 후에도 폭 0 체크 (같은 봉이 같은 x로 변환된 경우)
-      if (Math.abs(endCoord.x - startCoord.x) < 2) return;
+      if (Math.abs(fzX2 - fzX1) < 2) return;
 
       // ── CI95 기반 예측 영역 opacity 변조 ──────────────────
       // ci95Width = |ci95Upper - ci95Lower| (return % 단위, 주가 무관)
@@ -1641,9 +1689,12 @@ const patternRenderer = (() => {
       }
 
       const zone = {
-        x1: startCoord.x,
-        x2: endCoord.x,
-        yEntry: startCoord.y,
+        x1: fzX1,
+        x2: fzX2,
+        // [Fix-2] yEntry fallback: startCoord.y가 null이면 priceToCoordinate 직접 호출
+        // y는 가격축에만 의존하므로 아무 time으로 호출해도 동일
+        yEntry: startCoord.y != null ? startCoord.y
+          : (candles.length > 0 ? toXY(candles[0].time, entry).y : null),
         yTarget: null,
         yStop: null,
         entry: entry,
@@ -1903,11 +1954,19 @@ const patternRenderer = (() => {
       return;
     }
 
-    // 신뢰도 순 정렬, 최대 MAX_PATTERNS개
+    // [Phase3-B] Zoom-adaptive MAX_PATTERNS: 줌인 시 패턴 수 축소 + active 우선
+    var visibleBars = to - from;
+    var effectiveMax = visibleBars <= 50 ? 1 : (visibleBars <= 200 ? 2 : MAX_PATTERNS);
+
+    // Active 패턴(outcome=active)을 우선 정렬 → 줌인 시 active가 최우선 표시
     var sorted = visiblePatterns.slice().sort(function(a, b) {
+      // active 패턴 우선 (priceTarget/stopLoss 있고 아직 미결)
+      var aHasTarget = (a.priceTarget != null || a.stopLoss != null) ? 1 : 0;
+      var bHasTarget = (b.priceTarget != null || b.stopLoss != null) ? 1 : 0;
+      if (bHasTarget !== aHasTarget) return bHasTarget - aHasTarget;
       return (b.confidence || 0) - (a.confidence || 0);
     });
-    _primitive.setPatterns(candles, sorted.slice(0, MAX_PATTERNS), extendedStructLines);
+    _primitive.setPatterns(candles, sorted.slice(0, effectiveMax), extendedStructLines);
   }
 
   function cleanup() {

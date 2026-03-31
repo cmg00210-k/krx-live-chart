@@ -183,6 +183,7 @@ function calcHurst(closes, minWindow = 10) {
   for (let w = minWindow; w <= Math.floor(returns.length / 2); w = Math.floor(w * 1.5)) {
     const numBlocks = Math.floor(returns.length / w);
     let rsSum = 0;
+    let validBlocks = 0;  // [M-9 fix] S=0 블록 제외 — 분모를 유효 블록 수로 교정
     for (let b = 0; b < numBlocks; b++) {
       const block = returns.slice(b * w, (b + 1) * w);
       const mean = block.reduce((a, v) => a + v, 0) / w;
@@ -192,10 +193,10 @@ function calcHurst(closes, minWindow = 10) {
       for (const d of devs) { cum += d; cumDevs.push(cum); }
       const R = Math.max(...cumDevs) - Math.min(...cumDevs);
       const S = Math.sqrt(devs.reduce((a, d) => a + d * d, 0) / w);
-      if (S > 0) rsSum += R / S;
+      if (S > 0) { rsSum += R / S; validBlocks++; }
     }
-    if (rsSum <= 0) continue; // flat-price stocks: S=0 → log(-Inf) 방지
-    logRS.push(Math.log(rsSum / numBlocks));
+    if (validBlocks <= 0 || rsSum <= 0) continue; // flat-price stocks: S=0 → log(-Inf) 방지
+    logRS.push(Math.log(rsSum / validBlocks));
     logN.push(Math.log(w));
   }
 
@@ -206,13 +207,15 @@ function calcHurst(closes, minWindow = 10) {
   for (var ri = 0; ri < n; ri++) {
     sx += logN[ri]; sy += logRS[ri]; sxy += logN[ri] * logRS[ri]; sx2 += logN[ri] * logN[ri];
   }
-  var slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
+  var denom = n * sx2 - sx * sx;
+  if (denom === 0) return null;  // degenerate: all logN identical (shouldn't happen but guard NaN)
+  var slope = (n * sxy - sx * sy) / denom;
 
   // R-squared for Hurst regression quality
   var sy2 = 0;
   for (var rj = 0; rj < n; rj++) sy2 += logRS[rj] * logRS[rj];
   var ssTot = sy2 - sy * sy / n;
-  var ssReg = ssTot > 0 ? (n * sxy - sx * sy) * (n * sxy - sx * sy) / (n * (n * sx2 - sx * sx)) : 0;
+  var ssReg = ssTot > 0 ? (n * sxy - sx * sy) * (n * sxy - sx * sy) / (n * denom) : 0;
   var rSquared = ssTot > 0 ? ssReg / ssTot : 0;
 
   return { H: slope, rSquared: rSquared };

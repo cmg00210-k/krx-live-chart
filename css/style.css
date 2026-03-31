@@ -2413,6 +2413,52 @@ html, body {
 
 /* ═══ 패턴 요약 바 (차트 하단) ═══════════════════ */
 
+/* ═══ ACTIVE PATTERN HUD (줌인 시 목표가/손절가 항상 표시) ═══ */
+#active-pattern-hud {
+  position: absolute;
+  top: 36px;
+  right: 68px;
+  z-index: 20;
+  background: rgba(13, 13, 13, 0.88);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 5px 10px;
+  min-width: 130px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.aph-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 3px;
+}
+.aph-name {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-body);
+  color: var(--text);
+}
+.aph-dir {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius);
+}
+.aph-dir.buy { background: rgba(224,80,80,0.18); color: var(--up); }
+.aph-dir.sell { background: rgba(80,134,220,0.18); color: var(--down); }
+.aph-metrics {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.aph-target, .aph-stop, .aph-rr {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-feature-settings: "tnum";
+}
+.aph-target { color: var(--fin-good); }
+.aph-stop { color: rgba(255,107,53,0.9); }
+.aph-rr { color: var(--accent); font-weight: 700; }
+
 #pattern-summary-wrap {
   flex-shrink: 0; position: relative;
 }
@@ -2424,6 +2470,15 @@ html, body {
   border-top: 1px solid var(--border);
   font-size: var(--fs-caption);
   box-shadow: 0 -1px 0 rgba(0,0,0,0.15);
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+#pattern-summary-bar.has-active-buy {
+  background: rgba(150,220,200,0.06);
+  border-top-color: rgba(150,220,200,0.3);
+}
+#pattern-summary-bar.has-active-sell {
+  background: rgba(179,136,255,0.06);
+  border-top-color: rgba(179,136,255,0.3);
 }
 .psb-icon { font-size: 8px; color: var(--accent); line-height: 1; }
 .psb-text {
@@ -3243,6 +3298,8 @@ html, body {
   #chart-wrap #pattern-summary-wrap { margin-left: 0; }
   #chart-wrap #pattern-history-bar { margin-left: 0; }
   #chart-wrap .sub-chart-label { left: var(--sp-2); }  /* 툴바 숨김 시 라벨 위치 복원 */
+  /* HUD: 모바일에서 축소 + 우측 여백 줄임 */
+  #active-pattern-hud { right: 50px; min-width: 100px; font-size: 10px; padding: 3px 6px; }
 
   #main {
     grid-template-columns: 1fr;

@@ -1828,8 +1828,10 @@ class SignalEngine {
 
       const w = this._weights[s.type] || 0;
       if (s.source === 'composite') {
-        // 복합 시그널: tier별 가중치
-        const tierWeight = s.tier === 1 ? 4 : s.tier === 2 ? 2.5 : 1.5;
+        // 복합 시그널: AMH crowding discount (Lo 2004, Pedersen 2009)
+        // Tier-1 patterns are most crowded → lowest weight (alpha decay)
+        // Tier-3 patterns retain alpha → highest weight
+        const tierWeight = s.tier === 1 ? 1.5 : s.tier === 2 ? 2.5 : 3.5;
         if (s.signal === 'buy')  buyWeight  += tierWeight;
         if (s.signal === 'sell') sellWeight += tierWeight;
       } else {

@@ -284,12 +284,13 @@ class KRXDataService {
 
     // ── L1: 메모리 캐시 확인 ──
     const cached = this.cache[key];
-    // [OPT] 분봉 캐시 TTL 5분으로 증가 (불필요한 재생성 방지)
-    const TTL = timeframe === '1d' ? 3600000 : 300000; // 일봉 1시간, 분봉 5분
+    // 타임프레임별 캐시 TTL — 주봉/월봉은 일봉과 동일 수준, 분봉만 5분
+    const TTL = (timeframe === '1d' || timeframe === '1w' || timeframe === '1M')
+      ? 3600000 : 300000; // 일봉/주봉/월봉 1시간, 분봉 5분
     if (cached && (Date.now() - cached.lastUpdate) < TTL) return cached.candles;
 
-    // ── L2: IndexedDB 캐시 확인 (일봉만 — 분봉은 실시간성 필요) ──
-    if (timeframe === '1d') {
+    // ── L2: IndexedDB 캐시 확인 (일봉/주봉/월봉 — 분봉은 실시간성 필요) ──
+    if (timeframe === '1d' || timeframe === '1w' || timeframe === '1M') {
       try {
         const idbData = await _idb.get(key);
         if (idbData && idbData.candles && idbData.candles.length > 0) {
@@ -394,8 +395,8 @@ class KRXDataService {
       this.cache[key] = cacheEntry;
       this._pruneCache();  // 캐시 크기 제한 확인
 
-      // IndexedDB에 비동기 저장 (일봉만 — fire-and-forget, await 안 함)
-      if (timeframe === '1d') {
+      // IndexedDB에 비동기 저장 (일봉/주봉/월봉 — fire-and-forget, await 안 함)
+      if (timeframe === '1d' || timeframe === '1w' || timeframe === '1M') {
         _idb.set(key, cacheEntry);
       }
     }
@@ -542,7 +543,9 @@ class KRXDataService {
     });
 
     // 메모리 상한 적용 (최신 데이터 유지)
-    var maxLen = timeframe === '1d' ? MAX_CANDLES_DAILY : MAX_CANDLES_INTRADAY;
+    // 주봉/월봉은 일봉 리샘플링 결과이므로 일봉 상한 적용
+    var maxLen = (timeframe === '1d' || timeframe === '1w' || timeframe === '1M')
+      ? MAX_CANDLES_DAILY : MAX_CANDLES_INTRADAY;
     if (validated.length > maxLen) {
       validated = validated.slice(validated.length - maxLen);
     }

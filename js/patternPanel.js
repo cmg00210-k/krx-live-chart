@@ -565,6 +565,17 @@ function updatePatternSummaryBar(patterns) {
     icon.style.color = top.signal === 'buy' ? 'var(--up)' :
                         top.signal === 'sell' ? 'var(--down)' : 'var(--accent)';
   }
+
+  // [Phase1-C] Active 패턴 방향 틴트 (줌인 시 시각적 맥락 유지)
+  bar.classList.remove('has-active-buy', 'has-active-sell');
+  var hasActive = patterns.some(function(p) {
+    return (p.priceTarget != null || p.stopLoss != null) &&
+           typeof _getPatternOutcome === 'function' &&
+           _getPatternOutcome(p, typeof candles !== 'undefined' ? candles : []) === 'active';
+  });
+  if (hasActive) {
+    bar.classList.add(top.signal === 'buy' ? 'has-active-buy' : 'has-active-sell');
+  }
 }
 
 // ══════════════════════════════════════════════════════
