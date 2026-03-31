@@ -24,11 +24,11 @@ CZW_sell = (2-hw) * mw      [0.36 ~ 1.4]  ← D등급, 개선 대상
 
 | 이론 | KRX 적용성 | CZW 기여 | 파일 |
 |------|-----------|---------|------|
-| APT (Ross 1976) | HIGH | MRA를 APT 특수 케이스로 재해석, 추가 팩터 | theory/apt_factor_model.md |
-| Fama-French 3/5 | MEDIUM | SMB/HML 팩터 (시총/PBR 데이터 있음) | theory/apt_factor_model.md |
-| 행동재무학 계량화 | HIGH | 공포-탐욕 지수, 처분효과, 군집행동 | theory/behavioral_quantification.md |
-| 다중회귀 확장 | HIGH | 비선형항, Quantile regression, LASSO | theory/regression_extensions.md |
-| 정보이론 | MEDIUM | Shannon entropy, Mutual Information | theory/information_theory.md |
+| APT (Ross 1976) | HIGH | MRA를 APT 특수 케이스로 재해석, 추가 팩터 | core_data/23_apt_factor_model.md |
+| Fama-French 3/5 | MEDIUM | SMB/HML 팩터 (시총/PBR 데이터 있음) | core_data/23_apt_factor_model.md |
+| 행동재무학 계량화 | HIGH | 공포-탐욕 지수, 처분효과, 군집행동 | core_data/24_behavioral_quantification.md |
+| 다중회귀 확장 | HIGH | 비선형항, Quantile regression, LASSO | core_data/17_regression_backtesting.md |
+| 정보이론 | MEDIUM | Shannon entropy, Mutual Information | core_data/13_information_geometry.md |
 
 ## 데이터 학습 등급 분류
 
@@ -60,11 +60,12 @@ sell hw=(2-hw), 슬리피지=0
 ## 폴더 구조
 
 ```
-czw/
+(root)/
 ├── README.md              ← 이 파일
-├── theory/                학술 근거 문서
-├── scripts/               Python 분석 스크립트
-└── simulation/            시뮬레이션 결과
+├── core_data/             학술 이론 문서 (01~24)
+├── scripts/               Python 분석/교정 스크립트
+├── docs/                  설계 문서, 시나리오
+└── data/backtest/         교정 결과, 백테스트 출력
 ```
 
 ## 실행 계획

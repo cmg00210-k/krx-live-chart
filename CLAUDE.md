@@ -96,6 +96,6 @@ Start: `server\start_server.bat`. Full setup in `docs/developer-setup.md`.
 ## Reference
 
 - `.claude/rules/` — Detailed rules for architecture, colors, rendering, patterns, financial, scripts, UI layout
-- `core_data/` — 17 academic documents (math, finance theory, pattern algorithms). Not loaded at runtime.
+- `core_data/` — 24 academic documents (math, finance theory, pattern algorithms, APT, behavioral). Not loaded at runtime.
 - `pattern_impl/` — 5 implementation bridge documents (theory→code mapping).
 - `docs/` — Developer setup, QA checklist (100+ items). Note: `docs/deployment.md` describes old Lightsail setup — current deployment uses Cloudflare Pages.
