@@ -3,18 +3,40 @@
 """
 rl_residuals.py — Stage B-1: Walk-Forward MRA Residual Extraction Pipeline
 
-Extracts per-sample residuals from the 20-col Ridge MRA using strict walk-forward:
-  - 60-day train, 20-day test windows (no overlap, no look-ahead)
-  - Ridge lambda=2.0 (from Stage A-1 optimal)
-  - 12 original features + 5 APT factors (Phase 4-1)
+Extracts per-sample residuals from a 13-feature Huber+Ridge MRA using strict walk-forward:
+  - 60-day train, 10-day test windows (no overlap, no look-ahead)
+  - Huber-IRLS + Ridge lambda=2.0 (robust to kurtosis=116.7, Huber 1964)
+  - Y-winsorization at 1st/99th percentile before fitting
+  - 8 core features + 5 APT/momentum factors = 13 total
   - Each test sample gets: y_predicted, y_actual, residual = y_actual - y_predicted
 
-APT Factors (Phase 4-1, Ross 1976):
-  12. momentum_60d   — 60-day return (Jegadeesh & Titman 1993)
-  13. beta_60d       — rolling beta vs market (Sharpe 1964)
-  14. value_inv_pbr  — 1/PBR (Fama & French 1993)
-  15. log_size       — log(marketCap) (Fama & French 1993)
-  16. liquidity_20d  — 20-day avg turnover (Amihud 2002)
+Feature set (13, refined from 20 — unstable/redundant features dropped):
+  Core (8):
+    hw, vw, mw, confidence_norm, signal_dir, market_type,
+    tier1_indicator (dummy: tier==1, crowding discount),
+    tier3_indicator (dummy: tier==3, alpha premium)
+  APT/momentum (5):
+    momentum_60d, log_size, liquidity_20d, stock_ret_5d, market_ret_5d
+
+Dropped features and CFA justification:
+  - rw: beta range -17.2 to +4.7, CV=4.60, extreme instability
+  - log_confidence: rho>0.95 with confidence_norm (monotonic transform, redundant)
+  - pattern_tier (continuous 1-3): replaced by tier1/tier3 dummies
+    → Allows asymmetric coefficients (tier1 crowding penalty vs tier3 alpha premium)
+    → Tier-2 absorbed into intercept as reference category (standard dummy coding)
+  - hw_x_signal: beta range 7.02, interaction noise in small panels
+  - vw_x_signal: 3 sign flips across 8 WF periods
+  - conf_x_signal: marginal after removing other interactions
+  - beta_60d: mean beta ~0, CV=41.0, pure noise
+  - value_inv_pbr: mean beta ~0, CV=5.31, noisy
+  - market_ret_0d: nested within market_ret_5d (multicollinearity)
+
+Robustness upgrades (Phase 7):
+  - Huber loss (delta=5.8 = 1.345*MAD_sigma) via IRLS replaces pure Ridge
+    → L2 for |r|<=delta, L1 for outliers. Handles fat-tailed KRX returns.
+  - Y-winsorization clips training targets at [1st, 99th] percentile
+  - WF test window 10d: faster adaptation to regime changes.
+  - Stein shrinkage per-feature after >= 4 periods (Efron 2010)
 
 Output:
   data/backtest/rl_residuals.csv     — per-sample residuals with metadata + features
@@ -25,14 +47,16 @@ References:
   - Phase 4-1: mra_apt_extended.py (IC 0.100, +0.043 OOS)
   - Stage B plan: project_stage_b_rl_plan.md (LinUCB input)
   - Li et al. (2010) LinUCB, core_data/11_RL §7.3
+  - Huber (1964) "Robust Estimation of a Location Parameter"
+  - Feature selection: CFA research — Tier-1 Simpson paradox, Huber IC=0.051
 
 Usage:
     python scripts/rl_residuals.py
     python scripts/rl_residuals.py --horizon 5       (default: 5)
     python scripts/rl_residuals.py --train-days 60   (default: 60)
-    python scripts/rl_residuals.py --test-days 20    (default: 20)
+    python scripts/rl_residuals.py --test-days 10    (default: 10)
     python scripts/rl_residuals.py --lambda 2.0      (default: 2.0)
-    python scripts/rl_residuals.py --12col            (use 12-col only, skip APT)
+    python scripts/rl_residuals.py --8col             (use 8 core features only, skip APT)
 """
 
 import csv
@@ -51,7 +75,6 @@ BACKTEST_DIR = ROOT / "data" / "backtest"
 DATA_DIR = ROOT / "data"
 CSV_PATH = BACKTEST_DIR / "wc_return_pairs.csv"
 INDEX_PATH = DATA_DIR / "index.json"
-FIN_DIR = DATA_DIR / "financials"
 HIST_MCAP_PATH = DATA_DIR / "historical_mcap.json"
 OUT_CSV = BACKTEST_DIR / "rl_residuals.csv"
 OUT_JSON = BACKTEST_DIR / "rl_residuals_summary.json"
@@ -62,21 +85,20 @@ TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
          "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
-# 12 original feature names (Stage A-1)
-FEATURE_NAMES_12 = [
-    "hw", "vw", "mw", "rw", "confidence_norm", "signal_dir",
-    "market_type", "log_confidence", "pattern_tier",
-    "hw_x_signal", "vw_x_signal", "conf_x_signal",
+# 8 core feature names (refined from 12 — dropped unstable/redundant)
+FEATURE_NAMES_CORE = [
+    "hw", "vw", "mw", "confidence_norm", "signal_dir",
+    "market_type", "tier1_indicator", "tier3_indicator",
 ]
 
-# 5 APT factors (Phase 4-1) + 3 short-term momentum (Phase 5-2)
+# 5 APT/momentum factors (refined from 8 — dropped beta_60d, value_inv_pbr, market_ret_0d)
 APT_NAMES = [
-    "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
-    "stock_ret_5d", "market_ret_0d", "market_ret_5d",
+    "momentum_60d", "log_size", "liquidity_20d",
+    "stock_ret_5d", "market_ret_5d",
 ]
 
-# Full 20 features (default)
-FEATURE_NAMES = FEATURE_NAMES_12 + APT_NAMES
+# Full 13 features (default)
+FEATURE_NAMES = FEATURE_NAMES_CORE + APT_NAMES
 
 
 # ──────────────────────────────────────────────
@@ -103,27 +125,6 @@ def _load_historical_mcap():
         return {}
     with open(HIST_MCAP_PATH, encoding="utf-8") as f:
         return json.load(f)
-
-
-def _load_financials():
-    """Load financials → {code: total_equity}."""
-    result = {}
-    if not FIN_DIR.exists():
-        return result
-    for fp in FIN_DIR.glob("*.json"):
-        try:
-            with open(fp, encoding="utf-8") as f:
-                d = json.load(f)
-            annual = d.get("annual")
-            if annual and isinstance(annual, list):
-                for a in annual:
-                    eq = a.get("total_equity")
-                    if eq and eq > 0:
-                        result[d["code"]] = eq
-                        break
-        except Exception:
-            pass
-    return result
 
 
 def _load_ohlcv_all(index_info):
@@ -189,16 +190,21 @@ def _compute_market_returns(ohlcv, index_info, top_n=100):
     return mkt_returns
 
 
-def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_mcap=None):
-    """Compute 8 APT factors per sample. Returns np.array (n, 8) with NaN for missing.
-    Cols 0-4: Phase 4-1 original (momentum_60d, beta_60d, value_inv_pbr, log_size, liquidity_20d)
-    Cols 5-7: Phase 5-2 short-term (stock_ret_5d, market_ret_0d, market_ret_5d)
+def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, hist_mcap=None):
+    """Compute 5 APT/momentum factors per sample. Returns np.array (n, 5) with NaN for missing.
+
+    Cols: momentum_60d, log_size, liquidity_20d, stock_ret_5d, market_ret_5d
+
+    Dropped (feature selection, CFA research):
+      - beta_60d: mean beta ~0, CV=41.0, pure noise
+      - value_inv_pbr: mean beta ~0, CV=5.31, noisy (financials param removed)
+      - market_ret_0d: nested within market_ret_5d (multicollinearity)
 
     hist_mcap: {code: {date: mcap_억원}} — point-in-time market cap (Phase 6 look-ahead fix).
     Falls back to index_info (current mcap) when hist_mcap unavailable for a date.
     """
     n = len(rows)
-    factors = np.full((n, 8), np.nan)
+    factors = np.full((n, 5), np.nan)
 
     # Pre-compute rolling 5-day market returns
     mkt_dates_sorted = sorted(mkt_returns.keys())
@@ -226,25 +232,12 @@ def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_
         if idx is None:
             continue
 
-        # momentum_60d
+        # Col 0: momentum_60d (Jegadeesh & Titman 1993)
         if idx >= 60:
             cur = series[idx][1]
             past = series[idx - 60][1]
             if past > 0:
                 factors[i, 0] = (cur / past - 1.0) * 100
-
-        # beta_60d
-        if idx >= 60:
-            sr, mr = [], []
-            for j in range(max(1, idx - 59), idx + 1):
-                dt_j = series[j][0]
-                if series[j - 1][1] > 0 and dt_j in mkt_returns:
-                    sr.append((series[j][1] - series[j - 1][1]) / series[j - 1][1])
-                    mr.append(mkt_returns[dt_j])
-            if len(sr) >= 20:
-                var_m = np.var(mr, ddof=1)
-                if var_m > 1e-12:
-                    factors[i, 1] = np.cov(sr, mr, ddof=1)[0, 1] / var_m
 
         # Point-in-time market cap (Phase 6: look-ahead bias fix)
         # Priority: hist_mcap[code][date] > index_info[code][marketCap] (fallback)
@@ -254,39 +247,28 @@ def _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_
         if mcap == 0:
             mcap = index_info.get(code, {}).get("marketCap", 0)
 
-        # value_inv_pbr
-        equity = financials.get(code)
-        if mcap > 0 and equity and equity > 0:
-            pbr = (mcap * 1e8) / equity
-            if pbr > 0.01:
-                factors[i, 2] = 1.0 / pbr
-
-        # log_size
+        # Col 1: log_size (Fama & French 1993)
         if mcap > 0:
-            factors[i, 3] = math.log(mcap)
+            factors[i, 1] = math.log(mcap)
 
-        # liquidity_20d
+        # Col 2: liquidity_20d (Amihud 2002)
         if idx >= 20 and mcap > 0:
             vols = [series[j][2] for j in range(idx - 19, idx + 1)]
             avg_vol = np.mean(vols)
             cur_price = series[idx][1]
             if cur_price > 0 and avg_vol > 0:
-                factors[i, 4] = (avg_vol * cur_price) / (mcap * 1e8) * 100
+                factors[i, 2] = (avg_vol * cur_price) / (mcap * 1e8) * 100
 
-        # stock_ret_5d (Phase 5-2: short-term stock momentum, Jegadeesh & Titman 1993)
+        # Col 3: stock_ret_5d (Jegadeesh & Titman 1993, short-term momentum)
         if idx >= 5:
             cur = series[idx][1]
             past5 = series[idx - 5][1]
             if past5 > 0:
-                factors[i, 5] = (cur / past5 - 1.0) * 100
+                factors[i, 3] = (cur / past5 - 1.0) * 100
 
-        # market_ret_0d (Phase 5-2: daily market return, CAPM Sharpe 1964)
-        if date in mkt_returns:
-            factors[i, 6] = mkt_returns[date] * 100
-
-        # market_ret_5d (Phase 5-2: 5-day cumulative market return, Lo 2004 AMH)
+        # Col 4: market_ret_5d (Lo 2004 AMH, 5-day cumulative)
         if date in mkt_ret_5d:
-            factors[i, 7] = mkt_ret_5d[date]
+            factors[i, 4] = mkt_ret_5d[date]
 
     return factors
 
@@ -326,8 +308,12 @@ def _zscore_by_date(factors, dates):
 # ──────────────────────────────────────────────
 
 def load_and_engineer(horizon, use_apt=True):
-    """Load CSV, derive features, return X (n x 20 or 12), y (n,), dates[], meta[].
-    When use_apt=True (default), adds 8 APT factors from OHLCV/index/financials.
+    """Load CSV, derive features, return X (n x 13 or 8), y (n,), dates[], meta[].
+    When use_apt=True (default), adds 5 APT/momentum factors from OHLCV/index/financials.
+
+    Core features (8): hw, vw, mw, confidence_norm, signal_dir, market_type,
+                        tier1_indicator, tier3_indicator
+    APT/momentum (5): momentum_60d, log_size, liquidity_20d, stock_ret_5d, market_ret_5d
     """
     col = f"ret_{horizon}"
     rows = []
@@ -342,7 +328,6 @@ def load_and_engineer(horizon, use_apt=True):
                 hw = float(row["hw"]) if row.get("hw") else 1.0
                 vw = float(row["vw"]) if row.get("vw") else 1.0
                 mw = float(row["mw"]) if row.get("mw") else 1.0
-                rw = float(row["rw"]) if row.get("rw") else 1.0
                 conf = float(row["confidence"]) if row.get("confidence") else 50.0
             except ValueError:
                 continue
@@ -355,27 +340,29 @@ def load_and_engineer(horizon, use_apt=True):
 
             ptype = row.get("type", "")
             if ptype in TIER1:
-                tier = 1.0
+                tier = 1
             elif ptype in TIER2:
-                tier = 2.0
+                tier = 2
             elif ptype in TIER3:
-                tier = 3.0
+                tier = 3
             else:
-                tier = 2.0
+                tier = 2
 
-            log_conf = math.log(max(conf, 1.0))
             conf_norm = conf / 100.0
 
+            # Tier dummy coding: tier2 = reference category (absorbed into intercept)
+            # tier1_indicator: allows negative coefficient for crowding discount
+            # tier3_indicator: allows positive coefficient for alpha premium
+            tier1_ind = 1.0 if tier == 1 else 0.0
+            tier3_ind = 1.0 if tier == 3 else 0.0
+
             rows.append({
-                "hw": hw, "vw": vw, "mw": mw, "rw": rw,
+                "hw": hw, "vw": vw, "mw": mw,
                 "confidence_norm": conf_norm,
                 "signal_dir": sig_dir,
                 "market_type": mkt_type,
-                "log_confidence": log_conf,
-                "pattern_tier": tier,
-                "hw_x_signal": hw * sig_dir,
-                "vw_x_signal": vw * sig_dir,
-                "conf_x_signal": conf_norm * sig_dir,
+                "tier1_indicator": tier1_ind,
+                "tier3_indicator": tier3_ind,
                 "ret": ret,
                 "date": row.get("date", ""),
                 "code": row.get("code", ""),
@@ -385,17 +372,17 @@ def load_and_engineer(horizon, use_apt=True):
             })
 
     n = len(rows)
-    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_12
+    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_CORE
 
-    # Build base 12-col matrix
-    X12 = np.zeros((n, len(FEATURE_NAMES_12)))
+    # Build core 8-col matrix
+    X_core = np.zeros((n, len(FEATURE_NAMES_CORE)))
     y = np.zeros(n)
     dates = []
     meta = []
 
     for i, r in enumerate(rows):
-        for j, fname in enumerate(FEATURE_NAMES_12):
-            X12[i, j] = r[fname]
+        for j, fname in enumerate(FEATURE_NAMES_CORE):
+            X_core[i, j] = r[fname]
         y[i] = r["ret"]
         dates.append(r["date"])
         meta.append({
@@ -406,24 +393,22 @@ def load_and_engineer(horizon, use_apt=True):
         })
 
     if not use_apt:
-        return X12, y, dates, meta
+        return X_core, y, dates, meta
 
     # Load APT auxiliary data
-    print("  -> Loading APT auxiliary data (index, financials, OHLCV, hist_mcap)...")
+    print("  -> Loading APT auxiliary data (index, OHLCV, hist_mcap)...")
     index_info = _load_index()
-    financials = _load_financials()
     ohlcv = _load_ohlcv_all(index_info)
     hist_mcap = _load_historical_mcap()
-    print(f"     Index: {len(index_info)}, Financials: {len(financials)}, "
-          f"OHLCV: {len(ohlcv)}, HistMcap: {len(hist_mcap)}")
+    print(f"     Index: {len(index_info)}, OHLCV: {len(ohlcv)}, HistMcap: {len(hist_mcap)}")
 
     if not ohlcv:
-        print("  -> [WARN] No OHLCV data, falling back to 12-col")
-        return X12, y, dates, meta
+        print("  -> [WARN] No OHLCV data, falling back to 8-col core")
+        return X_core, y, dates, meta
 
     # Compute market returns + APT factors
     mkt_returns = _compute_market_returns(ohlcv, index_info, top_n=100)
-    apt_raw = _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, financials, hist_mcap)
+    apt_raw = _compute_apt_factors(rows, ohlcv, mkt_returns, index_info, hist_mcap)
 
     # Coverage report
     for j, fname in enumerate(APT_NAMES):
@@ -431,13 +416,13 @@ def load_and_engineer(horizon, use_apt=True):
         print(f"     {fname}: {valid:,}/{n:,} ({valid/n*100:.1f}%)")
 
     apt_z = _zscore_by_date(apt_raw, dates)
-    X = np.column_stack([X12, apt_z])
+    X = np.column_stack([X_core, apt_z])
 
     return X, y, dates, meta
 
 
 # ──────────────────────────────────────────────
-# Ridge Regression (closed-form, same as mra_extended.py)
+# Regression: Ridge (initial) + Huber-IRLS (robust, primary)
 # ──────────────────────────────────────────────
 
 def ridge_fit(X, y, lam):
@@ -448,6 +433,49 @@ def ridge_fit(X, y, lam):
     penalty = lam * np.eye(p + 1)
     penalty[0, 0] = 0
     beta = np.linalg.solve(XtX + penalty, X1.T @ y)
+    return beta
+
+
+def huber_ridge_fit(X, y, lam, delta=5.8, max_iter=15, tol=1e-6):
+    """Huber + Ridge via IRLS (Huber 1964, robust to kurtosis=116.7).
+
+    L2 loss for |r| <= delta, L1 for |r| > delta.
+    Delta = 1.345 * MAD-based sigma ≈ 5.8 for KRX 5-day returns.
+
+    Args:
+        X: (n, p) feature matrix (WITHOUT intercept column)
+        y: (n,) target vector
+        lam: Ridge penalty
+        delta: Huber transition threshold (default 5.8 = 1.345 * IQR/1.349)
+        max_iter: IRLS iterations
+        tol: convergence tolerance
+    Returns:
+        beta: (p+1,) with intercept at index 0
+    """
+    n, p = X.shape
+    X1 = np.column_stack([np.ones(n), X])
+    penalty = lam * np.eye(p + 1)
+    penalty[0, 0] = 0  # don't penalize intercept
+
+    # Initial Ridge estimate
+    beta = np.linalg.solve(X1.T @ X1 + penalty, X1.T @ y)
+
+    for _ in range(max_iter):
+        resid = y - X1 @ beta
+        w = np.ones(n)
+        outlier_mask = np.abs(resid) > delta
+        w[outlier_mask] = delta / np.abs(resid[outlier_mask])
+
+        # Weighted Ridge: (X'WX + lambda*I)^-1 X'Wy
+        sw = np.sqrt(w)
+        Xw = X1 * sw[:, None]
+        yw = y * sw
+        beta_new = np.linalg.solve(Xw.T @ Xw + penalty, Xw.T @ yw)
+
+        if np.max(np.abs(beta_new - beta)) < tol:
+            break
+        beta = beta_new
+
     return beta
 
 
@@ -462,7 +490,7 @@ def predict(X, beta):
 # Walk-Forward Residual Extraction (core of B-1)
 # ──────────────────────────────────────────────
 
-def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=20, lam=2.0):
+def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=10, lam=2.0):
     """
     Strict walk-forward: train on T days, predict next T' days.
     Returns per-sample residuals with full metadata.
@@ -498,7 +526,11 @@ def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=20, lam=2
         X_tr, y_tr = X[train_idx], y[train_idx]
         X_te, y_te = X[test_idx], y[test_idx]
 
-        beta = ridge_fit(X_tr, y_tr, lam)
+        # Winsorize training targets at 1st/99th percentile (kurtosis=116.7 guard)
+        y_lo, y_hi = np.percentile(y_tr, [1, 99])
+        y_tr = np.clip(y_tr, y_lo, y_hi)
+
+        beta = huber_ridge_fit(X_tr, y_tr, lam)
 
         # Empirical Bayes per-feature shrinkage (cf. Efron 2010 "Large-Scale Inference")
         # Inspired by Stein shrinkage but applied per-feature (not vector-norm).
@@ -820,9 +852,9 @@ def main():
     args = sys.argv[1:]
     horizon = 5
     train_days = 60
-    test_days = 20
+    test_days = 10
     lam = 2.0
-    use_apt = True  # default: 20-col with APT + short-term momentum factors
+    use_apt = True  # default: 13-col (8 core + 5 APT/momentum)
 
     i = 0
     while i < len(args):
@@ -834,7 +866,8 @@ def main():
             test_days = int(args[i + 1]); i += 2
         elif args[i] == "--lambda" and i + 1 < len(args):
             lam = float(args[i + 1]); i += 2
-        elif args[i] == "--12col":
+        elif args[i] in ("--8col", "--12col"):
+            # --8col: 8 core features only (no APT). --12col kept for backward compat.
             use_apt = False; i += 1
         else:
             i += 1
@@ -843,8 +876,8 @@ def main():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest first.")
         sys.exit(1)
 
-    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_12
-    mode_label = f"{len(feature_names)}-col" + (" + APT" if use_apt else "")
+    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_CORE
+    mode_label = f"{len(feature_names)}-col" + (" (core + APT)" if use_apt else " (core only)")
 
     print("=" * 60)
     print(f"Stage B-1: Walk-Forward MRA Residual Extraction ({mode_label})")
@@ -855,9 +888,9 @@ def main():
     print(f"\n[1/4] Loading CSV + engineering {len(feature_names)} features...")
     X, y, dates, meta = load_and_engineer(horizon, use_apt=use_apt)
     n, p = X.shape
-    # Update feature_names to match actual dimension (APT may fall back to 12)
-    if p == len(FEATURE_NAMES_12):
-        feature_names = FEATURE_NAMES_12
+    # Update feature_names to match actual dimension (APT may fall back to core-only)
+    if p == len(FEATURE_NAMES_CORE):
+        feature_names = FEATURE_NAMES_CORE
     else:
         feature_names = FEATURE_NAMES
     print(f"  -> {n:,} samples, {p} features, {len(set(dates))} unique dates")
@@ -934,7 +967,7 @@ def main():
             "ridge_lambda": lam,
             "n_features": p,
             "feature_names": feature_names,
-            "apt_enabled": use_apt and p > len(FEATURE_NAMES_12),
+            "apt_enabled": use_apt and p > len(FEATURE_NAMES_CORE),
         },
         "analysis": analysis,
         "period_stats": [{k: v for k, v in ps.items() if k != "beta"} for ps in period_stats],

@@ -79,12 +79,12 @@ TIER3 = {"spinningTop", "doji", "fallingWedge"}
 # ──────────────────────────────────────────────
 
 def compute_hurst(closes, min_window=10):
-    """Rescaled Range (R/S) analysis for Hurst exponent.
-    Matches indicators.js calcHurst() logic.
+    """Rescaled Range (R/S) analysis on log-returns for Hurst exponent.
+    Matches indicators.js calcHurst() logic (returns-based, not raw price).
     Returns H in [0, 1] or None if insufficient data.
     """
     n = len(closes)
-    if n < min_window * 4:
+    if n < min_window * 4 + 1:
         return None
 
     windows = []
@@ -105,7 +105,13 @@ def compute_hurst(closes, min_window=10):
             continue
         rs_vals = []
         for b in range(n_blocks):
-            block = closes[b * w:(b + 1) * w]
+            block_prices = closes[b * w:(b + 1) * w]
+            if len(block_prices) < 2:
+                continue
+            # Log-returns within block (matches JS calcHurst)
+            block = np.diff(np.log(np.maximum(block_prices, 1e-10)))
+            if len(block) < 2:
+                continue
             mean_b = np.mean(block)
             devs = np.cumsum(block - mean_b)
             R = np.max(devs) - np.min(devs)

@@ -51,7 +51,7 @@ CRITICAL_THRESHOLD = 19500  # red: immediate action needed
 EXCLUDE_DIRS = {
     "scripts", "core_data", "pattern_impl", "docs", "server",
     ".claude", ".git", "deploy",  # never recurse into deploy/ itself
-    "czw",                         # research/dev directory, not needed at runtime
+    # czw/ removed — calibration data moved to data/backtest/
     os.path.join("data", "backtest", "results"),
 }
 

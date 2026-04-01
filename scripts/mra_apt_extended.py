@@ -21,7 +21,7 @@ Academic Basis:
   - Fama & French (1993): 3-factor model (MKT, SMB, HML)
   - Jegadeesh & Titman (1993): Momentum factor
   - Amihud (2002): Illiquidity as priced factor
-  - czw/theory/apt_factor_model.md
+  - core_data/23_apt_factor_model.md
 
 Output:
   data/backtest/mra_apt_results.json     — full comparison report
