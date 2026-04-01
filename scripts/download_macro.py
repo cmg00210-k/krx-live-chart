@@ -32,6 +32,7 @@ import json
 import time
 import argparse
 from datetime import datetime, timedelta
+import urllib.parse
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -197,6 +198,11 @@ UIP_W_DXY = 0.25
 # v1→v2: 기존 5개 비례 축소 + Taylor gap(#142 w6=0.10) 추가
 MCS_W = {"pmi": 0.225, "csi": 0.180, "export": 0.225, "yield_curve": 0.135, "epu_inv": 0.135, "taylor_gap": 0.100}
 
+# [STAT-B] Inertial Taylor Rule — Woodford (2003), Clarida-Galí-Gertler (1999)
+# Central banks smooth rate changes: i_t = ρ*i_{t-1} + (1-ρ)*i_taylor
+# BOK empirical ρ ≈ 0.8 (Shin & Kim, 2014, BOK Working Paper)
+TAYLOR_RHO = 0.8  # interest rate smoothing parameter (#167)
+
 VERBOSE = False
 
 
@@ -248,10 +254,11 @@ def fetch_ecos_series(api_key, stat_code, item_code, freq="M",
         start_dt = today - timedelta(days=365 * 2 + 90)
         start_ym = start_dt.strftime("%Y%m")
 
-    # item_code에 '/'가 포함된 경우 다중 코드 (예: "C0000/AA" → 2개 항목)
+    # [C-10 FIX] URL-encode item_code to prevent '/' from being interpreted as path separator
+    safe_item_code = urllib.parse.quote(item_code, safe='')
     url = (
         f"{ECOS_BASE}/StatisticSearch/{api_key}/json/kr/1/{limit}/"
-        f"{stat_code}/{freq}/{start_ym}/{end_ym}/{item_code}"
+        f"{stat_code}/{freq}/{start_ym}/{end_ym}/{safe_item_code}"
     )
     vlog(f"ECOS URL: {url}")
 
@@ -921,9 +928,10 @@ def calc_mcs(all_data, latest):
         available["epu_inv"] = False
     vlog(f"MCS epu_inv: vix={vix}, norm={components.get('epu_inv')}")
 
-    # 6. Taylor_gap_norm — 테일러 갭 정규화 (Doc30 §4.3, 상수 #135-#142)
+    # 6. Taylor_gap_norm — 테일러 갭 정규화 (Doc30 §4.3, 상수 #135-#142, #167 TAYLOR_RHO)
     #    Taylor Rule: i* = r* + pi + a_pi*(pi-pi*) + a_y*output_gap + a_e*delta_e
-    #    Taylor gap = bok_rate - i* (bp)
+    #    Inertial smoothing: i_inertial = ρ*bok_rate + (1-ρ)*i_taylor (Woodford 2003)
+    #    Taylor gap = bok_rate - i_inertial (bp)
     #    [1-E#16] Sign convention: positive gap = hawkish (actual > implied) = BAD for stocks
     #    MCS is "higher = better for stocks", so we INVERT the gap:
     #    Normalized: clip((-gap_bp + 100) / 200, 0, 1)
@@ -938,11 +946,14 @@ def calc_mcs(all_data, latest):
         i_taylor = calc_taylor_implied_rate(
             pi=cpi_yoy_val, y_gap=output_gap, delta_e=exchange_rate_change
         )
-        taylor_gap_bp = (bok_r - i_taylor) * 100  # %p → bp
+        # [STAT-B] Inertial smoothing — Woodford (2003), Clarida-Galí-Gertler (1999)
+        # i_inertial = ρ*i_{t-1} + (1-ρ)*i_taylor, using bok_rate as i_{t-1}
+        i_inertial = TAYLOR_RHO * bok_r + (1 - TAYLOR_RHO) * i_taylor
+        taylor_gap_bp = (bok_r - i_inertial) * 100  # %p → bp
         # [1-E#16] INVERTED: hawkish (positive gap) → low norm → reduces MCS (bad for stocks)
         components["taylor_gap"] = _clip01((-taylor_gap_bp + 100) / 200)
         available["taylor_gap"] = True
-        vlog(f"MCS taylor: i*={i_taylor:.2f}, gap={bok_r - i_taylor:.2f}%p, norm={components['taylor_gap']:.4f}")
+        vlog(f"MCS taylor: i*={i_taylor:.2f}, i_inertial={i_inertial:.2f}, gap={bok_r - i_inertial:.2f}%p, norm={components['taylor_gap']:.4f}")
     else:
         available["taylor_gap"] = False
 
@@ -1086,8 +1097,9 @@ def build_latest(all_data):
         if isinstance(v, float):
             latest[k] = round(v, 4) if k == "foreigner_signal" else round(v, 2)
 
-    # -- Taylor Rule Gap (Doc30 §4.1, 상수 #135-#138, #143 Ball 1999) --
+    # -- Taylor Rule Gap (Doc30 §4.1, 상수 #135-#138, #143 Ball 1999, #167 TAYLOR_RHO) --
     # [1-E#20] DRY: uses calc_taylor_implied_rate() helper
+    # [STAT-B] Inertial smoothing: i_inertial = ρ*bok_rate + (1-ρ)*i_taylor (Woodford 2003)
     bok_rate_val = latest.get("bok_rate")
     cpi_yoy_val = latest.get("cpi_yoy")
     cli_val = latest.get("korea_cli")
@@ -1097,10 +1109,14 @@ def build_latest(all_data):
         i_taylor = calc_taylor_implied_rate(
             pi=cpi_yoy_val, y_gap=output_gap, delta_e=exchange_rate_change
         )
+        # Inertial smoothing — gap is vs smoothed target, not raw Taylor
+        i_inertial = TAYLOR_RHO * bok_rate_val + (1 - TAYLOR_RHO) * i_taylor
         latest["taylor_implied_rate"] = round(i_taylor, 4)
-        latest["taylor_gap"] = round(bok_rate_val - i_taylor, 4)  # %p, positive=hawkish
+        latest["taylor_inertial_rate"] = round(i_inertial, 4)
+        latest["taylor_gap"] = round(bok_rate_val - i_inertial, 4)  # %p, positive=hawkish
     else:
         latest["taylor_implied_rate"] = None
+        latest["taylor_inertial_rate"] = None
         latest["taylor_gap"] = None
 
     # -- MCS v2 (Doc30 §4.3) — latest dict 완성 후 계산 --
@@ -1293,13 +1309,15 @@ def print_summary(latest, source_stats):
         else:
             log(f"  {label:16s}: (수집 실패)")
 
-    # -- Taylor Rule Gap (Doc30 §4.1) --
+    # -- Taylor Rule Gap (Doc30 §4.1, #167 inertial smoothing) --
     log("-" * 55)
     tg = latest.get("taylor_gap")
     ti = latest.get("taylor_implied_rate")
+    ti_inertial = latest.get("taylor_inertial_rate")
     if tg is not None and ti is not None:
         stance = "완화적(dovish)" if tg < -0.25 else ("긴축적(hawkish)" if tg > 0.25 else "중립")
         log(f"  {'Taylor i*':16s}: {ti:.2f}%")
+        log(f"  {'Inertial i*':16s}: {ti_inertial:.2f}% (ρ={TAYLOR_RHO})")
         log(f"  {'Taylor gap':16s}: {tg:+.2f}%p ({stance})")
     else:
         log(f"  {'Taylor gap':16s}: (계산 불가)")
@@ -1493,3 +1511,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ══════════════════════════════════════════════════════════════
+# DESIGN: Korean FF3 Factor Construction — Fama & French (1993)
+# Status: NOT IMPLEMENTED — design only
+#
+# Data sources:
+#   - Market: KOSPI total return index (ECOS or KRX)
+#   - Rf: CD 91-day rate / 250 (daily)
+#   - Size: market_cap from data/index.json (prevClose × listed_shares)
+#   - Value: BPS from data/financials/{code}.json → PBR = price/BPS
+#
+# Construction (annual June rebalancing):
+#   1. At June end, sort all KOSPI+KOSDAQ by market_cap → median split → S/B
+#   2. Sort by PBR → bottom 30% (High BM) / top 30% (Low BM)
+#   3. Form 6 portfolios: S/H, S/M, S/L, B/H, B/M, B/L
+#   4. SMB = avg(S/H, S/M, S/L) - avg(B/H, B/M, B/L)
+#   5. HML = avg(S/H, B/H) - avg(S/L, B/L)
+#   6. Save daily factor returns to data/macro/ff3_factors.json
+#
+# Dependencies:
+#   - data/index.json must have market_cap or (prevClose + shares)
+#   - data/financials/*.json must have BPS for PBR calculation
+#   - Rebalancing requires ~2,700 stock data (June snapshot)
+#
+# Constant: #167 TAYLOR_RHO = 0.8 (added above)
+# New constants (proposed):
+#   #168 FF3_SIZE_BREAKPOINT = 0.50 (median market cap)
+#   #169 FF3_VALUE_BREAKPOINT_HIGH = 0.30 (top 30% book-to-market)
+#   #170 FF3_VALUE_BREAKPOINT_LOW = 0.30 (bottom 30% book-to-market)
+#   #171 FF3_REBALANCE_MONTH = 6 (June)
+# ══════════════════════════════════════════════════════════════

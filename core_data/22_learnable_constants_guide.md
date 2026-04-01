@@ -102,7 +102,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 26 | HMM vol floor | 0.70 | D | GS | [0.70, 0.85] | Hamilton (1989) |
 | 27 | MAX_CUMULATIVE_ADJ | 15 | D | GS | [10, 20] | No basis |
 | 28 | composite window | 5 | C | GS | [3, 7] | 1 KRX week |
-| 29 | StochRSI COOLDOWN | 7 | D | GS | [5, 10] | Empirical |
+| 29 | StochRSI COOLDOWN | 5 | D | GS | [3, 10] | Matched to RSI_COOLDOWN (Phase 0327). Stochastic COOLDOWN = 7 (separate) |
 | 30 | vol z-score threshold | 2.0 | B | GS | [1.5, 2.5] | Ane & Geman (2000) |
 
 ### Indicators (indicators.js)
@@ -116,7 +116,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 35 | Ichimoku 9/26/52/26 | std | A | MAN | fixed | Hosoda (1968) |
 | 36 | Kalman Q | 0.01 | D | GS | [0.001, 0.1] | Heuristic defaults, Mehra (1970) adaptive framework |
 | 37 | Kalman R | 1.0 | D | GS | [0.1, 10] | Heuristic defaults, Mehra (1970) adaptive framework |
-| 38 | bbEVT factor | 0.15 | D | GS | [0.05, 0.30] | No published source |
+| 38 | bbEVT factor | 0.45 | D | GS | [0.15, 0.60] | Phase0-#7 recalibrated (was 0.15) |
 | 39 | Hurst minWindow | 10 | B | GS | [8, 20] | Di Matteo (2005) |
 | 40 | CCI constant | 0.015 | A | MAN | fixed | Lambert (1980) |
 
@@ -124,7 +124,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 
 | # | Constant | Value | Tier | Learn | Range | Academic Source |
 |---|----------|-------|------|-------|-------|----------------|
-| 41 | Ridge lambda | 2.0 | C | GS | [0.5, 10] | Hoerl & Kennard (1970) |
+| 41 | Ridge lambda | GCV auto | B | GCV | [0.1, 50] | GCV auto-select (Golub et al. 1979), fallback 1.0 |
 | 42 | WLS decay lambda | 0.995 | C | GS | [0.990, 0.999] | Lo (2004) AMH |
 | 43 | KRX_COMMISSION | 0.03% | A | MAN | fixed | KRX regulation |
 | 44 | KRX_TAX | 0.18% | C | MAN | [0.15, 0.30] | KRX regulation. Tax rates change by legislation. KOSPI: 0.03%+농특세0.15%=0.18%, KOSDAQ: 0.18% (2025). 2026 예정: 0.15%. |
@@ -139,14 +139,14 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 
 | # | Constant | Value | Tier | Learn | Range | Academic Source |
 |---|----------|-------|------|-------|-------|----------------|
-| 135 | TAYLOR_R_STAR | 1.0% | C | MAN | [0.5, 2.0] | BOK (2023) neutral real rate |
-| 136 | TAYLOR_PI_STAR | 2.0% | A | MAN | fixed | BOK official inflation target |
-| 137 | TAYLOR_A_PI | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) |
-| 138 | TAYLOR_A_Y | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) |
-| 139 | CLI_TO_GAP_SCALE | 0.50 | C | GS | [0.20, 0.80] | Empirical CLI→gap mapping |
-| 140 | TAYLOR_GAP_CONF_MAX_ADJ | 0.05 | D | GS | [0.02, 0.10] | Design parameter |
-| 141 | TAYLOR_GAP_DEAD_BAND | 0.25 | D | GS | [0.10, 0.50] | Rudebusch (2002) uncertainty |
-| 142 | MCS_V2_TAYLOR_WEIGHT | 0.10 | C | GCV | [0.05, 0.20] | Doc30 §4.3 MCS v2 |
+| 135 | TAYLOR_R_STAR | 1.0% | C | MAN | [0.5, 2.0] | BOK (2023) neutral real rate — `scripts/download_macro.py` |
+| 136 | TAYLOR_PI_STAR | 2.0% | A | MAN | fixed | BOK official inflation target — `scripts/download_macro.py` |
+| 137 | TAYLOR_A_PI | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) — `scripts/download_macro.py` |
+| 138 | TAYLOR_A_Y | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) — `scripts/download_macro.py` |
+| 139 | CLI_TO_GAP_SCALE | 0.50 | C | GS | [0.20, 0.80] | Empirical CLI→gap mapping — `scripts/download_macro.py` |
+| 140 | TAYLOR_GAP_CONF_MAX_ADJ | 0.05 | D | GS | [0.02, 0.10] | Design parameter — `scripts/download_macro.py` |
+| 141 | TAYLOR_GAP_DEAD_BAND | 0.25 | D | GS | [0.10, 0.50] | Rudebusch (2002) uncertainty — `scripts/download_macro.py` |
+| 142 | MCS_V2_TAYLOR_WEIGHT | 0.10 | C | GCV | [0.05, 0.20] | Doc30 §4.3 MCS v2 — `scripts/download_macro.py` |
 | 143 | MCS_PMI_NORM_LOW | 35 | C | GS | [30, 40] | PMI contraction zone |
 | 144 | MCS_PMI_NORM_RANGE | 30 | C | GS | [25, 35] | PMI expansion range |
 
@@ -168,11 +168,11 @@ R²를 과소 추정하게 만든다. 25_capm_delta_covariance.md §5 참조.
 |---|----------|-------|------|-------|-------|----------------|
 | 150 | VPE_MIN_QUARTERS | 3 | C | MAN | [2, 4] | Statistical minimum for trend |
 | 151 | CAPM_RF_ANNUAL | 3.689% | B | MAN | [1.0, 7.0] | ECOS KTB 10Y (2025) |
-| 152 | CAPM_ERP | 6.0% | B | MAN | [4.0, 9.0] | Damodaran (2025) ERP |
-| 153 | WACC_TAX_RATE | 22% | A | MAN | fixed | Korean corporate tax code |
-| 154 | WACC_RD_FALLBACK | 4.0% | B | MAN | [2.0, 8.0] | AA- corporate bond rate |
-| 155 | CAPM_BETA_CLAMP_MAX | 3.0 | B | MAN | [2.0, 5.0] | Extreme beta outlier cap |
-| 156 | CAPM_BETA_CLAMP_MIN | 0.0 | B | MAN | [-0.5, 0.0] | Negative beta floor |
+| 152 | CAPM_ERP | 6.0% | B | MAN | [4.0, 9.0] | PROPOSED — NOT IMPLEMENTED. Damodaran (2025) ERP |
+| 153 | WACC_TAX_RATE | 22% | A | MAN | fixed | PROPOSED — NOT IMPLEMENTED. Korean corporate tax code |
+| 154 | WACC_RD_FALLBACK | 4.0% | B | MAN | [2.0, 8.0] | PROPOSED — NOT IMPLEMENTED. AA- corporate bond rate |
+| 155 | CAPM_BETA_CLAMP_MAX | 3.0 | B | MAN | [2.0, 5.0] | PROPOSED — NOT IMPLEMENTED. Extreme beta outlier cap |
+| 156 | CAPM_BETA_CLAMP_MIN | 0.0 | B | MAN | [-0.5, 0.0] | PROPOSED — NOT IMPLEMENTED. Negative beta floor |
 
 ### Microstructure (patterns.js, signalEngine.js)
 
@@ -180,8 +180,8 @@ R²를 과소 추정하게 만든다. 25_capm_delta_covariance.md §5 참조.
 |---|----------|-------|------|-------|-------|----------------|
 | 162 | ILLIQ_WINDOW | 20 | B | GS | [10, 30] | Amihud (2002) daily ILLIQ |
 | 163 | ILLIQ_CONF_DISCOUNT_BASE | 0.85 | C | GS | [0.70, 0.95] | Design — max discount factor |
-| 164 | ILLIQ_HIGH_THRESHOLD | 0.100 | C | GCV | [0.050, 0.200] | KRX small-cap empirical |
-| 165 | ILLIQ_LOW_THRESHOLD | 0.010 | C | GCV | [0.005, 0.020] | KRX large-cap empirical |
+| 164 | ILLIQ_HIGH_THRESHOLD | 0.100 | C | GCV | [0.050, 0.200] | KRX small-cap empirical (log10 scale, code: LOG_HIGH) |
+| 165 | ILLIQ_LOW_THRESHOLD | 0.010 | C | GCV | [0.005, 0.020] | KRX large-cap empirical (log10 scale, code: LOG_LOW) |
 
 > **ILLIQ Scale Note:** 코드 내 ILLIQ 임계값(#164, #165)은 log-transformed 값을 사용한다.
 > Amihud (2002) 원논문의 raw ILLIQ 값은 x10^6 스케일이며 직접 비교할 수 없다.

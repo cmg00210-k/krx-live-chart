@@ -64,7 +64,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     description: '데드크로스 + MACD/RSI 보조 확인 — 하락 추세 전환 신호',
   },
 
-  // Tier 2 (CS-A): 패턴+지표 복합 — pattern_impl/03 Priority A (Nison 1991 + Bollinger 1992 + Murphy 1999)
+  // Tier 2 (CS-A): 패턴+지표 복합 — pattern_impl/03 Priority A (Nison 1991 + Bollinger 2001 + Murphy 1999)
   {
     id: 'buy_hammerBBVol',
     nameShort: '매수: 해머+BB하단+거래량',
@@ -289,7 +289,7 @@ class SignalEngine {
       stochasticOversold: 1.5, stochasticOverbought: -1.5,
       // 허스트 지수 (레짐 필터 — 방향 중립)
       hurstTrending: 0, hurstMeanReverting: 0,
-      // 칼만 필터 (composite condition 전용 — Harvey 1989, 독립 시그널 아님)
+      // 칼만 필터 (composite condition 전용 — A. Harvey 1989, 독립 시그널 아님)
       kalmanUpturn: 0, kalmanDownturn: 0,
       // 거래량
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
@@ -894,7 +894,7 @@ class SignalEngine {
       const currWidth = bb[i].upper - bb[i].lower;
       if (currWidth <= 0) continue;
 
-      // [Phase1-FIX] Bollinger (2002) 표준: bandwidth percentile 기반 squeeze 판정
+      // [Phase1-FIX] Bollinger (2001) 표준: bandwidth percentile 기반 squeeze 판정
       // 기존 "최소값의 2배" → lookback 구간 내 백분위 정렬
       const widths = [];
       for (let j = i - lookback; j < i; j++) {
@@ -916,7 +916,7 @@ class SignalEngine {
           const aboveUpper = c.close > bb[i].upper;
           const belowLower = c.close < bb[i].lower;
           const bullish = aboveUpper || (!belowLower && c.close > c.open);
-          // [A-4] squeeze 지속기간 측정 — Bollinger(2002): 장기 squeeze 후 breakout이 더 강력
+          // [A-4] squeeze 지속기간 측정 — Bollinger (2001): 장기 squeeze 후 breakout이 더 강력
           let squeezeBars = 0;
           for (let j = i - 1; j >= Math.max(0, i - 50); j--) {
             if (bb[j] && bb[j].upper !== null) {
@@ -1717,7 +1717,7 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
-  //  칼만 필터 방향 전환 — Kalman (1960), Harvey (1989)
+  //  칼만 필터 방향 전환 — Kalman (1960), A. Harvey (1989, structural time series / state space)
   //  composite condition 전용 (독립 시그널 아님)
   //  Q=0.1, R=1.0 → 정상상태 K≈0.095, EMA(≈20) 상당 반응속도
   // ══════════════════════════════════════════════════════

@@ -60,10 +60,10 @@ function _makeCacheKey(candles, timeframe) {
 try {
   importScripts(
     'colors.js?v=13',
-    'indicators.js?v=22',
-    'patterns.js?v=39',
-    'signalEngine.js?v=31',
-    'backtester.js?v=33'
+    'indicators.js?v=23',
+    'patterns.js?v=40',
+    'signalEngine.js?v=32',
+    'backtester.js?v=34'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });

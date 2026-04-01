@@ -1249,7 +1249,7 @@ function renderPatternCards(patterns) {
               <span class="pp-stat-value ${rrCls}" title="평균이익 +${h5.avgWin}% / 평균손실 -${h5.avgLoss}%">${h5.riskReward}</span>
             </div>`;
           }
-          var krxCost = (typeof backtester !== 'undefined' && backtester.KRX_COST) ? backtester.KRX_COST : 0.36;
+          var krxCost = (typeof backtester !== 'undefined' && backtester.KRX_COST) ? backtester.KRX_COST : 0.31;
           var netReturn = +(h5.mean - krxCost).toFixed(1);
           var netCls = netReturn > 0 ? 'up' : netReturn < 0 ? 'dn' : '';
           var netSign = netReturn >= 0 ? '+' : '';

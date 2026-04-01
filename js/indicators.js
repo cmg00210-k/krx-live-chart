@@ -3,6 +3,12 @@
 //  chart.js에서 분리 (Phase 1)
 // ══════════════════════════════════════════════════════
 
+/** KRX 연간 거래일 수 — KRX 공식 기준 ~250일/년
+ *  US market convention uses 252 (NYSE). KRX has fewer holidays.
+ *  Used for: annualization of volatility, Sharpe, returns, CAPM beta.
+ *  Worker-compatible (plain const, importScripts accessible). */
+const KRX_TRADING_DAYS = 250;
+
 // ── 기술적 지표 계산 함수 ──────────────────────────────
 
 /** 단순 이동평균 (SMA) */
@@ -375,11 +381,11 @@ function calcGPDFit(returns, quantile) {
  *
  * @param {number[]} stockCloses - 종목 종가 배열 (오래→최신)
  * @param {number[]} marketCloses - 시장 지수 종가 배열 (동일 날짜 정렬)
- * @param {number} [window=250] - 사용할 최근 거래일 수
+ * @param {number} [window=KRX_TRADING_DAYS] - 사용할 최근 거래일 수
  * @returns {{ beta, alpha, rSquared, thinTrading }} 또는 null
  */
 function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
-  var w = window || 250;
+  var w = window || KRX_TRADING_DAYS;
   if (!stockCloses || !marketCloses) return null;
   var n = Math.min(stockCloses.length, marketCloses.length);
   if (n < 60) return null;  // 최소 60일 (3개월)
@@ -390,7 +396,7 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
   // [C-2A] rfAnnual: KTB 10Y (bonds_latest.json). beta 불변, alpha만 보정.
   var sr = [], mr = [];
   var zeroVolDays = 0;
-  var rfDaily = (rfAnnual && rfAnnual > 0) ? Math.pow(1 + rfAnnual / 100, 1 / 250) - 1 : 0;
+  var rfDaily = (rfAnnual && rfAnnual > 0) ? Math.pow(1 + rfAnnual / 100, 1 / KRX_TRADING_DAYS) - 1 : 0;
   for (var i = startIdx + 1; i < n; i++) {
     var sc = stockCloses[i], sp = stockCloses[i - 1];
     var mc = marketCloses[i], mp = marketCloses[i - 1];
@@ -456,7 +462,7 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
 
   return {
     beta: +beta.toFixed(3),
-    alpha: +(alphaFinal * 252).toFixed(4),  // 연율화 Jensen's alpha (SW-corrected)
+    alpha: +(alphaFinal * KRX_TRADING_DAYS).toFixed(4),  // 연율화 Jensen's alpha (SW-corrected)
     rSquared: +rSq.toFixed(3),
     thinTrading: thinTrading,
     nObs: T,
@@ -2032,10 +2038,10 @@ class IndicatorCache {
    * 로그수익률 중 ATR 기반 임계값 초과를 점프로 분류, 연율화 빈도 산출
    * 미사용 — EVT/리스크 모듈 활성화 시 재활용 후보
    * @param {number} idx — 캔들 인덱스
-   * @param {number} lookback — 점프 관측 기간 (기본 252, ~1년)
+   * @param {number} lookback — 점프 관측 기간 (기본 KRX_TRADING_DAYS, ~1년)
    * @returns {{ lambda: number, isJump: boolean, jumpCount: number }|null}
    */
-  jumpIntensity(idx, lookback = 252) {
+  jumpIntensity(idx, lookback = KRX_TRADING_DAYS) {
     const key = `jump_${lookback}`;
     if (!(key in this._cache)) {
       const closes = this.closes;
@@ -2102,8 +2108,8 @@ class IndicatorCache {
 
           const windowLen = i - windowStart + 1;
           const isJump = Math.abs(logReturns[i]) > threshold;
-          // 연율화 점프 빈도: λ = (jumpCount / windowLen) * 252
-          const lambda = windowLen > 0 ? (jumpCount / windowLen) * 252 : 0;
+          // 연율화 점프 빈도: λ = (jumpCount / windowLen) * KRX_TRADING_DAYS
+          const lambda = windowLen > 0 ? (jumpCount / windowLen) * KRX_TRADING_DAYS : 0;
 
           result[i] = { lambda, isJump, jumpCount };
         }
@@ -2228,8 +2234,8 @@ class IndicatorCache {
           let rvHat = beta[0] + beta[1] * rvD[i] + beta[2] * rvW[i] + beta[3] * rvM[i];
           if (rvHat < 0) rvHat = 0; // 음수 분산 방어
 
-          // 연율화: HAR_RV_ann = sqrt(RV_hat * 252) * 100 (%)
-          const harRVann = Math.sqrt(rvHat * 252) * 100;
+          // 연율화: HAR_RV_ann = sqrt(RV_hat * KRX_TRADING_DAYS) * 100 (%)
+          const harRVann = Math.sqrt(rvHat * KRX_TRADING_DAYS) * 100;
 
           result[i] = {
             harRV: harRVann,

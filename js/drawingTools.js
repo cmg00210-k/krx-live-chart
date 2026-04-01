@@ -880,7 +880,7 @@ const drawingTools = (() => {
   function _timeToUnix(t) {
     if (typeof t === 'number') return t;
     if (typeof t === 'string') {
-      const d = new Date(t + 'T00:00:00');
+      const d = new Date(t + 'T00:00:00+09:00');  // KST explicit — KRX daily candles
       return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
     }
     return null;

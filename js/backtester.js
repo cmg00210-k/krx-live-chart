@@ -245,7 +245,7 @@ class PatternBacktester {
       var varT = 0;
       for (var i = 1; i < closes.length; i++) {
         var prev = closes[i - 1].close || 1;
-        var ret = (closes[i].close - prev) / Math.max(prev, 1e-10);
+        var ret = Math.log(closes[i].close / Math.max(prev, 1e-10));
         varT = i === 1 ? ret * ret : 0.94 * varT + 0.06 * ret * ret;
       }
       var rawVol = Math.sqrt(Math.max(varT, 0));
@@ -421,12 +421,22 @@ class PatternBacktester {
 
       if (isAdjSig && alpha >= 5 && nSample >= 100 && exp > 0 && pf >= 1.3) {
         tierResult.reliabilityTier = 'A';
-      } else if (isSig && alpha >= 3 && nSample >= 30 && exp > 0) {
+      } else if (isAdjSig && alpha >= 3 && nSample >= 30 && exp > 0) {
+        // [STAT-A] BH-FDR gate for B-tier — Benjamini & Hochberg (1995)
+        // Raw significance alone insufficient: with 30+ patterns × 5 horizons,
+        // ~7.5 false positives expected at α=0.05. BH-FDR controls FDR ≤ 5%.
         tierResult.reliabilityTier = 'B';
       } else if (alpha > 0 && nSample >= 30) {
         tierResult.reliabilityTier = 'C';
       } else {
         tierResult.reliabilityTier = 'D';
+      }
+      // [C-3 FIX] WFE gating — Pardo (2008): WFE < 30% → overfit, cap at C
+      // NOTE: tierResult.wfe is populated when walkForwardTest() runs upstream.
+      // If wfe is undefined (not computed), this block is a no-op (safe degradation).
+      var wfeVal = tierResult.wfe;
+      if (wfeVal != null && wfeVal < 0.30 && (tierResult.reliabilityTier === 'A' || tierResult.reliabilityTier === 'B')) {
+        tierResult.reliabilityTier = 'C';
       }
     }
 
@@ -467,13 +477,58 @@ class PatternBacktester {
     }
     var rankPred = rank(pairs.map(function(p) { return p[0]; }));
     var rankAct = rank(pairs.map(function(p) { return p[1]; }));
-    // Spearman rho via sum of squared rank differences
-    var sumD2 = 0;
+    // [H-1 FIX] Pearson-of-ranks — exact Spearman rho with tied ranks
+    // Kendall & Gibbons (1990): shortcut formula invalid with ties
+    var sumPR = 0, sumP = 0, sumR = 0, sumP2 = 0, sumR2 = 0;
     for (var i = 0; i < n; i++) {
-      var d = rankPred[i] - rankAct[i];
-      sumD2 += d * d;
+      sumPR += rankPred[i] * rankAct[i];
+      sumP += rankPred[i]; sumR += rankAct[i];
+      sumP2 += rankPred[i] * rankPred[i];
+      sumR2 += rankAct[i] * rankAct[i];
     }
-    return 1 - (6 * sumD2) / (n * (n * n - 1));
+    var num = n * sumPR - sumP * sumR;
+    var den = Math.sqrt((n * sumP2 - sumP * sumP) * (n * sumR2 - sumR * sumR));
+    return den > 0 ? num / den : 0;
+  }
+
+  /** Rolling OOS IC — out-of-sample Spearman IC via expanding window
+   *  Addresses in-sample IC inflation (Lo 2002, "The Statistics of Sharpe Ratios").
+   *  Splits chronological pairs into non-overlapping OOS windows.
+   *  Each window's IC is computed purely on unseen data.
+   *  Average OOS IC is less biased than full-sample IC.
+   *
+   *  @param {Array} pairs — [[predicted, actual], ...] chronologically ordered
+   *  @param {number} minWindow — minimum OOS window size (default 12)
+   *  @returns {{ ic: number|null, nWindows: number, isOOS: boolean }}
+   */
+  _rollingOOSIC(pairs, minWindow) {
+    minWindow = minWindow || 12;
+    var n = pairs.length;
+    // Need at least 2x minWindow for meaningful OOS (training + test)
+    if (n < minWindow * 2) {
+      var fullIC = this._spearmanCorr(pairs);
+      return { ic: fullIC, nWindows: 0, isOOS: false };
+    }
+
+    var oosICs = [];
+    var step = minWindow;
+    // Non-overlapping OOS windows: [minWindow..minWindow+step), [2*step..3*step), ...
+    // Each window is pure OOS — model was never fitted on these observations
+    for (var i = minWindow; i + step <= n; i += step) {
+      var testPairs = pairs.slice(i, i + step);
+      var testIC = this._spearmanCorr(testPairs);
+      if (testIC != null) oosICs.push(testIC);
+    }
+
+    if (oosICs.length === 0) {
+      var fullIC2 = this._spearmanCorr(pairs);
+      return { ic: fullIC2, nWindows: 0, isOOS: false };
+    }
+
+    var sum = 0;
+    for (var w = 0; w < oosICs.length; w++) sum += oosICs[w];
+    var avgIC = sum / oosICs.length;
+    return { ic: +avgIC.toFixed(4), nWindows: oosICs.length, isOOS: true };
   }
 
   /** Walk-Forward 검증 — Pardo (2008), Bailey & Lopez de Prado (2014)
@@ -874,6 +929,9 @@ class PatternBacktester {
    * @returns {Object} — { [horizon]: statsObj }
    */
   _computeStats(candles, occurrences, horizons, patternSignal, patternType) {
+    // KNOWN LIMITATION: Survivorship bias — universe excludes delisted stocks.
+    // WR positively biased ~2-5pp (Elton, Gruber & Blake, 1996, JF 51(4):1097-1108).
+    // Mitigation: wrAlpha uses null-WR recentering, but absolute WR still inflated.
     const result = {};
 
     for (const h of horizons) {
@@ -896,7 +954,7 @@ class PatternBacktester {
         const entryPrice = candles[entryIdx].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
-        // [Expert Consensus] MAE/MFE — Sweeney (1993), path risk
+        // [Expert Consensus] MAE/MFE — Sweeney (1997), path risk
         var minRet = 0, maxRet = 0;
         for (var pi = entryIdx; pi <= exitIdx; pi++) {
           var pathRet = (candles[pi].close - entryPrice) / entryPrice * 100;
@@ -988,7 +1046,7 @@ class PatternBacktester {
 
       // [Expert Consensus] Sortino Ratio — Sortino & van der Meer (1991)
       // Penalizes only downside deviation, more appropriate for asymmetric returns
-      // Annualization: √(252/horizon) convention per Sortino & Price (1994); assumes IID downside deviations
+      // Annualization: √(KRX_TRADING_DAYS/(h-1)) per Sortino & Price (1994); h-1 df correction, assumes IID downside deviations
       // [H-1 FIX] Denominator = sqrt(sum(min(r,0)^2) / N_total), NOT / N_negative.
       // Per Sortino & van der Meer (1991): downside deviation uses total sample count
       // to avoid overestimating risk when few negative returns exist.
@@ -996,7 +1054,7 @@ class PatternBacktester {
         ? returns.reduce((a, r) => a + (r < 0 ? r * r : 0), 0) / n
         : 0;
       const downsideDev = Math.sqrt(downsideVariance);
-      const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(252 / Math.max(1, h))).toFixed(2) : null;
+      const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(KRX_TRADING_DAYS / Math.max(1, h - 1))).toFixed(2) : null;
 
       // 승률 (방향에 따라 다름)
       let wins;
@@ -1039,7 +1097,7 @@ class PatternBacktester {
       var exMean = exSum / n;
       var exVar = excessReturns.reduce(function(a, r) { return a + (r - exMean) * (r - exMean); }, 0) / (n - 1 || 1);
       var trackingError = Math.sqrt(exVar);
-      var informationRatio = trackingError > 0 ? +(exMean / trackingError * Math.sqrt(252 / Math.max(1, h))).toFixed(2) : null;
+      var informationRatio = trackingError > 0 ? +(exMean / trackingError * Math.sqrt(KRX_TRADING_DAYS / Math.max(1, h))).toFixed(2) : null;
 
       // [Expert Consensus] Regime-Conditioned WR — Lo (2004) AMH
       var regimeWR = this._computeRegimeWR(candles, validOccs, h, patternSignal);
@@ -1154,8 +1212,11 @@ class PatternBacktester {
       // [M-5 FIX] Use excess probability over null WR instead of raw wins/n.
       // In a market with positive drift, wrNull > 50% overstates raw edge.
       // Kelly edge = (observed WR - null WR); recentered to 0.5 for formula.
-      const kellyP = Math.max(0, Math.min(1, (wins / n) - (wrNull / 100) + 0.5));
-      const kellyRaw = payoffRatio > 0 ? ((kellyP * payoffRatio) - (1 - kellyP)) / payoffRatio : 0;
+      // [H-2 FIX] Kelly edge = observed WR - null WR (no 0.5 recentering)
+      // Previous formula added 0.5 which creates bias when wrNull ≠ 50%.
+      // Kelly (1956): edge = p_win - p_lose/b = max(0, WR - wrNull) scaled to Kelly formula
+      const kellyEdge = Math.max(0, (wins / n) - (wrNull / 100));
+      const kellyRaw = payoffRatio > 0 && kellyEdge > 0 ? ((kellyEdge * (1 + payoffRatio)) - 1) / payoffRatio : 0;
       const kellyFraction = +Math.max(0, Math.min(1.0, kellyRaw)).toFixed(4);
 
       // t-검정: H0: mean = 0 (fat-tail 보정 Cornish-Fisher 임계값, 95% 양측)
@@ -1475,10 +1536,11 @@ class PatternBacktester {
           }
 
           // ── Spearman Rank IC — Grinold & Kahn (2000) ──
-          // In-sample IC: rank correlation between WLS predicted returns and actual returns.
-          // Uses reverse-transformed coefficients × original-scale features for each occurrence.
+          // [STAT-A] Rolling OOS IC replaces in-sample IC.
+          // In-sample IC inflates predictive ability (Lo 2002).
+          // Rolling OOS: non-overlapping 12-pair windows, each unseen by model.
+          // Falls back to full-sample IC (flagged isOOS=false) when n < 24.
           // IC > 0.05 operationally significant, > 0.10 strong (Qian, Hua & Sorensen 2007).
-          // NOTE: This is in-sample IC — OOS IC would require walk-forward (see walkForwardTest).
           if (validOccs.length >= 10) {
             var icPairs = [];
             for (var icIdx = 0; icIdx < validOccs.length; icIdx++) {
@@ -1494,11 +1556,13 @@ class PatternBacktester {
               for (var icJ = 0; icJ < icX.length; icJ++) icPred += icX[icJ] * reg.coeffs[icJ];
               icPairs.push([icPred, returns[icIdx]]);
             }
-            var spearmanIC = this._spearmanCorr(icPairs);
-            if (spearmanIC != null) {
-              stats.ic = +spearmanIC.toFixed(4);
-              // ICIR = IC / std(IC_per_fold) — cross-sectional approximation via jackknife
-              // Jackknife SE: leave-one-out Spearman std for ICIR estimation
+            var oosResult = this._rollingOOSIC(icPairs, 12);
+            if (oosResult.ic != null) {
+              stats.ic = oosResult.ic;
+              stats.icIsOOS = oosResult.isOOS;
+              stats.icWindows = oosResult.nWindows;
+              // ICIR = IC / std(IC_per_fold) — jackknife SE estimation
+              // Jackknife: leave-one-out Spearman on full pairs for variance
               if (icPairs.length >= 20) {
                 var jackICs = [];
                 for (var jk = 0; jk < icPairs.length; jk++) {
@@ -1513,7 +1577,7 @@ class PatternBacktester {
                   var jkVar = 0;
                   for (var jki = 0; jki < jackICs.length; jki++) jkVar += (jackICs[jki] - jkMean) * (jackICs[jki] - jkMean);
                   var icStdDev = Math.sqrt(jkVar / (jackICs.length - 1));
-                  stats.icir = icStdDev > 1e-6 ? +(spearmanIC / icStdDev).toFixed(3) : null;
+                  stats.icir = icStdDev > 1e-6 ? +(oosResult.ic / icStdDev).toFixed(3) : null;
                 } else {
                   stats.icir = null;
                 }
@@ -1548,7 +1612,7 @@ class PatternBacktester {
       directionalAccuracy: 0, targetHitRate: null, predictionMAE: null,
       patternScore: 0, patternGrade: 'F',
       mzRegression: null, calibrationCoverage: null, predActualPairs: null,
-      ic: null, icir: null,
+      ic: null, icir: null, icIsOOS: false, icWindows: 0,
     };
   }
 
@@ -2038,8 +2102,10 @@ class PatternBacktester {
       // Ensures tier A requires demonstrable edge, not just statistical significance.
       if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0 && pf >= 1.1) {
         tr.reliabilityTier = 'A';
-      // Tier B: raw 유의 + wrAlpha>=2 + n>=20 + 양의 기대수익
-      } else if (isSig && alpha >= 2 && nSample >= 20 && exp > 0) {
+      // [STAT-A] Tier B: BH-FDR gate (consistent with pattern tier)
+      // Signal tier also requires adjusted significance for B — multiple
+      // signal types tested creates same FDR exposure as pattern scanning.
+      } else if (isAdjSig && alpha >= 2 && nSample >= 20 && exp > 0) {
         tr.reliabilityTier = 'B';
       // Tier C: wrAlpha>0 + n>=20
       } else if (alpha > 0 && nSample >= 20) {

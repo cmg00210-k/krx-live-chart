@@ -637,7 +637,7 @@ NOT: /(n-1)  (표본 표준편차, sample standard deviation)
 
 ### 학술 근거
 
-Bollinger, J. (2002). *Bollinger on Bollinger Bands*. McGraw-Hill. Ch.3.
+Bollinger, J. (2001). *Bollinger on Bollinger Bands*. McGraw-Hill. Ch.3.
 
 Bollinger는 원전에서 모집단 표준편차(/n)를 사용한다고 명시:
   "20일 이동평균과 20일 표준편차를 사용하되, 표준편차는 이동평균과

@@ -2439,7 +2439,7 @@ function _getFinancialDataForSR() {
  * 조정 인자 (모두 독립 — 중복 적용 가능, clamp [0.55, 1.35]):
  *  - CCSI <85 → ×0.88 (소비심리 악화, 상승 반전 신뢰도 저하)
  *  - CCSI >108 → ×1.06 (소비심리 호전, 상승 반전 신뢰도 상승) [105→108: Lemmon&Portniaguina 2006]
- *  - VKOSPI >30 → ×0.82 (고변동 공포 국면, 패턴 오신호 증가)
+ *  - VKOSPI: removed — handled by patterns.js regimeWeight (Doc26 §2, 3-tier fallback)
  *  - net_foreign_eok >1000 → ×1.08 (외국인 유의미한 순매수) [500→1000: Richards 2005 ~$75M]
  *  - earning_season=1 → ×0.93 (실적 불확실성, 패턴 예측력 저하)
  *  데모 데이터 소스는 조정 미적용 (source==='demo' 시 no-op)
@@ -2451,7 +2451,7 @@ function _applyMarketContextToPatterns(patterns) {
   if (_marketContext.source === 'demo') return; // 데모 데이터는 실제 조정 미적용
 
   var ccsi = _marketContext.ccsi;
-  var vkospi = _marketContext.vkospi;
+  // [C-11 FIX] vkospi 제거 — patterns.js regimeWeight 3-tier cascade가 권위적 소스
   var netForeign = _marketContext.net_foreign_eok;
   var earningSeason = _marketContext.earning_season;
 
@@ -2464,9 +2464,6 @@ function _applyMarketContextToPatterns(patterns) {
       if (ccsi < 85) adj *= 0.88;
       else if (ccsi > 108) adj *= 1.06;  // [학술 수정] 105→108 (Lemmon&Portniaguina 2006)
     }
-
-    // VKOSPI 고변동 조정 (매수/매도 모두 — 불확실성 증가)
-    if (vkospi != null && vkospi > 30) adj *= 0.82;
 
     // 외국인 유의미한 순매수 확인 (매수 패턴만) — [학술 수정] 500→1000억 (Richards 2005: ~$75M 이상)
     if (p.signal === 'buy' && netForeign != null && netForeign > 1000) adj *= 1.08;

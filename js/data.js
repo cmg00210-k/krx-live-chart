@@ -128,17 +128,20 @@ async function getFinancialData(code, period) {
       const data = await resp.json();
       // download_financials.py 출력 형식을 getPastData() 형식으로 변환
       // DART 데이터는 원 단위 → 억 단위로 변환 (1억 = 100,000,000)
-      const toEok = (v) => {
+      const toEok = (v, unit) => {
         if (!v) return 0;
         const n = typeof v === 'string' ? parseInt(v.replace(/,/g, '')) : v;
-        return Math.abs(n) > 1000000 ? Math.round(n / 100000000) : n; // 100만 이상이면 원→억
+        // [C-9 FIX] DART unit-aware conversion to 억원
+        if (unit === '백만원') return Math.round(n / 100);  // 백만원 → 억원
+        // Default: 원 → 억원 (legacy behavior with auto-detect threshold)
+        return Math.abs(n) > 1000000 ? Math.round(n / 100000000) : n;
       };
       const toDisplay = (items) => items.map(d => {
-        const revEok = toEok(d.revenue);
-        const niEok  = toEok(d.ni);
-        const totalAssetsEok = d.total_assets ? toEok(d.total_assets) : null;
-        const totalLiabilitiesEok = d.total_liabilities ? toEok(d.total_liabilities) : null;
-        const totalEquityEok = d.total_equity ? toEok(d.total_equity) : null;
+        const revEok = toEok(d.revenue, d.unit);
+        const niEok  = toEok(d.ni, d.unit);
+        const totalAssetsEok = d.total_assets ? toEok(d.total_assets, d.unit) : null;
+        const totalLiabilitiesEok = d.total_liabilities ? toEok(d.total_liabilities, d.unit) : null;
+        const totalEquityEok = d.total_equity ? toEok(d.total_equity, d.unit) : null;
 
         // NPM (순이익률): ni / rev * 100
         let npm = null;
@@ -155,7 +158,7 @@ async function getFinancialData(code, period) {
         return {
           p: _formatPeriodLabel(d.period),
           rev: revEok,
-          op:  toEok(d.op),
+          op:  toEok(d.op, d.unit),
           ni:  niEok,
           opm: d.opm || ((d.revenue && d.op) ? (d.op / d.revenue * 100).toFixed(1) + '%' : '\u2014'),
           eps: d.eps || 0,

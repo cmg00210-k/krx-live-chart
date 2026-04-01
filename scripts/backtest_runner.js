@@ -125,7 +125,7 @@ function analyzeStock(sandbox, code, market) {
 
   // Per-occurrence Wc + actual return pairs (Phase C input)
   const HORIZONS = [1, 3, 5, 10, 20];
-  const KRX_COST = 0.36;
+  const KRX_COST = 0.31;  // KRX round-trip: commission 0.03% + tax 0.18% + slippage 0.10% (flat, no horizon scaling)
   const occurrenceReturns = [];
   for (const p of patterns) {
     const idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;

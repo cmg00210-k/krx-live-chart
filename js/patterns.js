@@ -780,9 +780,12 @@ class PatternEngine {
       }
 
       // 넥라인/삼각형 미확인 패턴 confidence 감산 — Bulkowski (2005)
+      // [C-2 FIX] look-ahead bias 방지: _breakUsedFutureData인 패턴은
+      //   디스플레이용 necklineBreakConfirmed=true 유지하되,
+      //   confidence에는 미확인과 동일한 감산 적용 (미래 데이터로 인한 편향 제거)
       for (let ni = 0; ni < patterns.length; ni++) {
         const p = patterns[ni];
-        if (p.necklineBreakConfirmed === false) {
+        if (p.necklineBreakConfirmed === false || p._breakUsedFutureData === true) {
           p.confidence = Math.max(10, p.confidence - PatternEngine.NECKLINE_UNCONFIRMED_PENALTY);
         }
         if (p.breakoutConfirmed === false) {
@@ -857,7 +860,8 @@ class PatternEngine {
       pred = Math.round(pred * qualityScaling);
       pred = Math.min(95, Math.max(10, pred));
       // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
-      if (patterns[pi].necklineBreakConfirmed === false) {
+      // [C-2 FIX] _breakUsedFutureData도 미확인과 동일 감산 — look-ahead bias 방지
+      if (patterns[pi].necklineBreakConfirmed === false || patterns[pi]._breakUsedFutureData === true) {
         pred = Math.max(10, pred - PatternEngine.NECKLINE_UNCONFIRMED_PRED_PENALTY);
       }
       if (patterns[pi].breakoutConfirmed === false) {
@@ -891,7 +895,7 @@ class PatternEngine {
 
     // [Phase I-L1] 시장 군집행동 맥락 조정 — CSAD + HMM 연계
     // 극단 군집(herding_flag=2) + 하락장(r_market<0) → 매수 패턴 신뢰도 하향 보정
-    this._applyHerdingAdjust(patterns);
+    this._applyHerdingAdjust(patterns, _vkospiRegime);
 
     // [Phase I-L2] 구조 변화점 근접 패턴 신뢰도 감산 — Page (1954) CUSUM
     this._applyBreakpointAdjust(patterns, candles);
@@ -921,7 +925,7 @@ class PatternEngine {
    *  조합 페널티 = 군집 ×0.76, HMM 고변동 ×0.75 (별도 조건 — 중복 불적용)
    *  clamp: 조정 후 confidence 최소 10
    */
-  _applyHerdingAdjust(patterns) {
+  _applyHerdingAdjust(patterns, _parentVkospiRegime) {
     if (typeof backtester === 'undefined' || !backtester._behavioralData) return;
     var bd = backtester._behavioralData;
 
@@ -944,15 +948,10 @@ class PatternEngine {
     }
 
     // [Phase TA-3 C-2] VKOSPI/VIX → HMM fallback for high-vol regime (Doc26 §2)
+    // [H-3 FIX] analyze()에서 이미 계산된 _vkospiRegime 재사용 — 중복 호출 제거
     var hmmBullProb = 0;
-    var _useVKOSPIRegime = false;
-    var _vkospiRegime = null;
-
-    // Priority: VKOSPI/VIX (macro data) → HMM (behavioral data)
-    if (typeof SignalEngine !== 'undefined' && SignalEngine._classifyVolRegimeFromVKOSPI) {
-      _vkospiRegime = SignalEngine._classifyVolRegimeFromVKOSPI();
-      if (_vkospiRegime !== null) _useVKOSPIRegime = true;
-    }
+    var _vkospiRegime = _parentVkospiRegime || null;
+    var _useVKOSPIRegime = _vkospiRegime !== null;
 
     if (!_useVKOSPIRegime) {
       // HMM fallback
@@ -3776,6 +3775,9 @@ class PatternEngine {
             pattern.necklineBreakConfirmed = true;
             pattern.breakIndex = j;
             pattern.breakPrice = close;
+            // [C-2 FIX] look-ahead bias 방지: endIndex 이후 봉으로 확인 시 마킹
+            // 디스플레이용 확인은 유지, WLS 피처 빌더에서 이 플래그로 미래 데이터 사용 식별
+            pattern._breakUsedFutureData = (j > ei);
             return;
           }
         } else {
@@ -3784,6 +3786,7 @@ class PatternEngine {
             pattern.necklineBreakConfirmed = true;
             pattern.breakIndex = j;
             pattern.breakPrice = close;
+            pattern._breakUsedFutureData = (j > ei);
             return;
           }
         }
@@ -3807,6 +3810,7 @@ class PatternEngine {
             pattern.necklineBreakConfirmed = true;
             pattern.breakIndex = j;
             pattern.breakPrice = close;
+            pattern._breakUsedFutureData = (j > ei);
             return;
           }
         } else {
@@ -3815,6 +3819,7 @@ class PatternEngine {
             pattern.necklineBreakConfirmed = true;
             pattern.breakIndex = j;
             pattern.breakPrice = close;
+            pattern._breakUsedFutureData = (j > ei);
             return;
           }
         }
