@@ -133,12 +133,51 @@ ECOS_SERIES = {
         "name": "외인 주식투자 순유입 (백만불, Doc29 §5.2)",
         "freq": "M",
     },
+    # ── Phase 2: 6 추가 시리즈 ──
+    "cd_rate_91d": {
+        "stat_code": "721Y001",
+        "item_code": "2010000",
+        "name": "CD금리 91일 (월별금리)",
+        "freq": "M",
+    },
+    "cp_rate_91d": {
+        "stat_code": "721Y001",
+        "item_code": "4020000",
+        "name": "CP금리 91일 (월별금리)",
+        "freq": "M",
+    },
+    "household_credit": {
+        "stat_code": "151Y002",
+        "item_code": "1110000",
+        "name": "가계대출 예금취급기관 (십억원, 월별)",
+        "freq": "M",
+    },
+    # capacity_util: 901Y068은 농어가 테이블 — 설비가동률은 ECOS에 없음 (통계청 KOSIS 전용)
+    "unemployment_rate": {
+        "stat_code": "901Y027",
+        "item_code": "I61BC",
+        "name": "실업률 (원계열+계절조정 반환, 날짜 중복제거로 계절조정 사용)",
+        "freq": "M",
+    },
+    "house_price_idx": {
+        "stat_code": "901Y064",
+        "item_code": "P65A",
+        "name": "주택매매가격 종합지수 (전국)",
+        "freq": "M",
+    },
 }
 
 # ── FRED 시리즈 (VIX는 FDR/yfinance에서 수집 — API키 불필요) ──
 FRED_SERIES = {
     "fed_rate": {"series_id": "FEDFUNDS", "name": "Federal Funds Rate"},
     "us10y": {"series_id": "DGS10", "name": "US 10Y Treasury"},
+    # ── Phase 1-B: 6 확장 시리즈 (Doc28 교차시장, Doc30 IS-LM, Doc34 VRP) ──
+    "us_cpi": {"series_id": "CPIAUCSL", "name": "US CPI (SA, Doc30 §2 real rate)"},
+    "us_unemp": {"series_id": "UNRATE", "name": "US Unemployment (Doc30 §3 Phillips Curve)"},
+    "us_breakeven": {"series_id": "T10YIE", "name": "US 10Y Breakeven Inflation"},
+    "us_hy_spread": {"series_id": "BAMLH0A0HYM2", "name": "US HY Spread (Doc28 §5 risk appetite)"},
+    "dxy_fred": {"series_id": "DTWEXBGS", "name": "Trade-Weighted USD (Doc28 §3 official DXY)"},
+    "vix_fred": {"series_id": "VIXCLS", "name": "VIX Daily Close (FRED backup)"},
 }
 
 # ── OECD CLI 국가코드 ──
@@ -152,6 +191,10 @@ OECD_CLI_COUNTRIES = {
 UIP_W_VIX = 0.45
 UIP_W_RATE = 0.30
 UIP_W_DXY = 0.25
+
+# ── MCS 가중치 (Doc29 §6.2 Macro Context Score) ──
+# MCS = 0.25*PMI_norm + 0.20*CSI_norm + 0.25*export_norm + 0.15*yield_norm + 0.15*EPU_inv_norm
+MCS_W = {"pmi": 0.25, "csi": 0.20, "export": 0.25, "yield_curve": 0.15, "epu_inv": 0.15}
 
 VERBOSE = False
 
@@ -226,6 +269,15 @@ def fetch_ecos_series(api_key, stat_code, item_code, freq="M",
             else:
                 date_fmt = time_str
             result.append({"date": date_fmt, "value": val})
+
+        # 날짜 중복 제거 — 같은 날짜에 여러 행(원계열/계절조정 등) 반환 시
+        # 마지막 값(계절조정)만 유지
+        if result:
+            deduped = {}
+            for r in result:
+                deduped[r["date"]] = r["value"]
+            result = [{"date": d, "value": v} for d, v in deduped.items()]
+
         return result if result else None
 
     except Exception as e:
@@ -760,6 +812,120 @@ def classify_business_cycle(cli_series):
     }
 
 
+def calc_mcs(all_data, latest):
+    """Doc29 §6.2 — Macro Context Score (MCS)
+    5개 거시 컴포넌트의 가중 합산으로 거시 레짐 판별.
+    BSI는 0-200 스케일 (PMI 등가 = BSI/2).
+    Graceful degradation: 컴포넌트 2개 미만 시 None 반환."""
+
+    components = {}
+    available = {}
+
+    def _clip01(x):
+        return max(0.0, min(1.0, x))
+
+    # 1. PMI_norm — BSI 제조업경기실사지수 (0-200, PMI equiv = BSI/2)
+    #    Doc29: (PMI - 45) / 10, clipped [0,1]
+    bsi = latest.get("bsi_mfg")
+    if bsi is not None:
+        pmi_equiv = bsi / 2.0  # BSI 0-200 → PMI 0-100 scale
+        components["pmi"] = _clip01((pmi_equiv - 45) / 10)
+        available["pmi"] = True
+    else:
+        available["pmi"] = False
+    vlog(f"MCS pmi: bsi={bsi}, norm={components.get('pmi')}")
+
+    # 2. CSI_norm — 소비자심리지수 (Consumer Sentiment Index)
+    #    Doc29: (CSI - 80) / 40, clipped [0,1]
+    #    Primary: latest dict, Fallback: data/market_context.json
+    csi = latest.get("ccsi")  # ECOS CCSI if available
+    if csi is None:
+        # fallback: market_context.json
+        mc_path = os.path.join(DATA_DIR, "market_context.json")
+        if os.path.exists(mc_path):
+            try:
+                with open(mc_path, "r", encoding="utf-8") as f:
+                    mc = json.load(f)
+                csi = mc.get("ccsi") or mc.get("csi")
+                if csi is not None:
+                    vlog(f"MCS csi: market_context.json fallback csi={csi}")
+            except Exception:
+                pass
+    if csi is not None:
+        components["csi"] = _clip01((csi - 80) / 40)
+        available["csi"] = True
+    else:
+        available["csi"] = False
+    vlog(f"MCS csi: csi={csi}, norm={components.get('csi')}")
+
+    # 3. export_norm — 수출 YoY (%)
+    #    Doc29: (exp_g + 20) / 40, clipped [0,1]
+    exp_yoy = latest.get("export_yoy")
+    if exp_yoy is not None:
+        components["export"] = _clip01((exp_yoy + 20) / 40)
+        available["export"] = True
+    else:
+        available["export"] = False
+    vlog(f"MCS export: yoy={exp_yoy}, norm={components.get('export')}")
+
+    # 4. yield_curve_norm — 장단기 스프레드 (term_spread, %p 단위)
+    #    Doc29: (spread_bp + 50) / 150, clipped [0,1]
+    #    term_spread는 %p → bp 변환 (×100)
+    spread = latest.get("term_spread")
+    if spread is not None:
+        spread_bp = spread * 100  # %p → bp
+        components["yield_curve"] = _clip01((spread_bp + 50) / 150)
+        available["yield_curve"] = True
+    else:
+        available["yield_curve"] = False
+    vlog(f"MCS yield: spread={spread}, bp={spread * 100 if spread else None}, norm={components.get('yield_curve')}")
+
+    # 5. EPU_inv_norm — 경제정책불확실성 역수 (VIX as proxy)
+    #    Doc29: 1 - (EPU - 50) / 150, clipped [0,1]
+    #    VIX proxy: 1 - (VIX - 12) / 28, clipped [0,1]
+    vix = latest.get("vix")
+    if vix is not None:
+        components["epu_inv"] = _clip01(1.0 - (vix - 12) / 28)
+        available["epu_inv"] = True
+    else:
+        available["epu_inv"] = False
+    vlog(f"MCS epu_inv: vix={vix}, norm={components.get('epu_inv')}")
+
+    # -- 가중 합산 (graceful degradation: 가용 컴포넌트만 재정규화) --
+    n_avail = sum(1 for v in available.values() if v)
+    if n_avail < 2:
+        vlog(f"MCS: 가용 컴포넌트 {n_avail}개 < 2 — None 반환")
+        return None
+
+    weight_sum = 0.0
+    score_sum = 0.0
+    for key, norm in components.items():
+        w = MCS_W[key]
+        weight_sum += w
+        score_sum += w * norm
+
+    mcs = round(score_sum / weight_sum, 4) if weight_sum > 0 else None
+
+    def _r4(v):
+        return round(v, 4) if v is not None else None
+
+    result = {
+        "mcs": mcs,
+        "components": {
+            "pmi_norm": _r4(components.get("pmi")),
+            "csi_norm": _r4(components.get("csi")),
+            "export_norm": _r4(components.get("export")),
+            "yield_norm": _r4(components.get("yield_curve")),
+            "epu_inv_norm": _r4(components.get("epu_inv")),
+            "available": n_avail,
+            "total": 5,
+        }
+    }
+
+    vlog(f"MCS = {mcs} ({n_avail}/5 components)")
+    return result
+
+
 def build_latest(all_data):
     """macro_latest.json 구성"""
     today = datetime.today().strftime("%Y-%m-%d")
@@ -818,16 +984,56 @@ def build_latest(all_data):
         "export_yoy": export_yoy,
         "ipi": ipi_latest,
         "foreign_equity": _latest_value(all_data.get("foreign_equity")),
+        # Phase 2: 6 추가 시리즈
+        "cd_rate_91d": _latest_value(all_data.get("cd_rate_91d")),
+        "cp_rate_91d": _latest_value(all_data.get("cp_rate_91d")),
+        "household_credit": _latest_value(all_data.get("household_credit")),
+        # capacity_util 제거 — ECOS에 없음 (통계청 KOSIS 전용)
+        "unemployment_rate": _latest_value(all_data.get("unemployment_rate")),
+        "house_price_idx": _latest_value(all_data.get("house_price_idx")),
+        # Phase 1-B: FRED 확장 6 시리즈 (Doc28,30,34)
+        "us_cpi": _latest_value(all_data.get("us_cpi")),
+        "us_unemp": _latest_value(all_data.get("us_unemp")),
+        "us_breakeven": _latest_value(all_data.get("us_breakeven")),
+        "us_hy_spread": _latest_value(all_data.get("us_hy_spread")),
         "cycle_phase": classify_business_cycle(
             [d["value"] for d in all_data.get("korea_cli", []) if d.get("value") is not None]
             if all_data.get("korea_cli") else None
         ),
     }
 
+    # Phase 2: CD-국고채3Y 스프레드 (신용 스프레드 프록시)
+    cd_val = latest.get("cd_rate_91d")
+    ktb3y_val = latest.get("ktb3y")
+    latest["cd_ktb3y_spread"] = round(cd_val - ktb3y_val, 2) if (cd_val is not None and ktb3y_val is not None) else None
+
+    # Phase 1-B: 실질금리 파생 필드 (Doc30 Mundell-Fleming)
+    fed_r = latest.get("fed_rate")
+    bok_r = latest.get("bok_rate")
+    us_cpi_latest = latest.get("us_cpi")
+    kr_cpi_yoy = latest.get("cpi_yoy")
+    # US CPI는 지수(index)로 제공 — YoY 계산 필요
+    us_cpi_data = all_data.get("us_cpi")
+    us_cpi_yoy = None
+    if us_cpi_data and len(us_cpi_data) >= 13:
+        us_cpi_yoy = _calc_yoy([d["value"] for d in us_cpi_data])
+    latest["us_cpi_yoy"] = us_cpi_yoy
+    # 실질금리: nominal - inflation
+    us_real = round(fed_r - us_cpi_yoy, 2) if (fed_r is not None and us_cpi_yoy is not None) else None
+    kr_real = round(bok_r - kr_cpi_yoy, 2) if (bok_r is not None and kr_cpi_yoy is not None) else None
+    latest["us_real_rate"] = us_real
+    latest["kr_real_rate"] = kr_real
+    latest["real_rate_diff"] = round(kr_real - us_real, 2) if (kr_real is not None and us_real is not None) else None
+
     # None 값은 유지하되, 소수점 정리
     for k, v in latest.items():
         if isinstance(v, float):
             latest[k] = round(v, 4) if k == "foreigner_signal" else round(v, 2)
+
+    # -- MCS (Doc29 §6.2) — latest dict 완성 후 계산 --
+    mcs_result = calc_mcs(all_data, latest)
+    latest["mcs"] = mcs_result["mcs"] if mcs_result else None
+    latest["mcs_components"] = mcs_result["components"] if mcs_result else None
 
     return latest
 
@@ -857,6 +1063,9 @@ def build_history(all_data):
         "usdkrw", "korea_cli", "china_cli", "us_cli", "m2", "cpi",
         "cli",  # ECOS CLI
         "bsi_mfg", "export_value", "ipi", "foreign_equity",  # Phase ECOS-3
+        "cd_rate_91d", "cp_rate_91d", "household_credit",  # Phase 2
+        "unemployment_rate", "house_price_idx",  # Phase 2 (capacity_util 제거)
+        "us_cpi", "us_unemp", "us_breakeven", "us_hy_spread",  # Phase 1-B FRED 확장
     ]
 
     for key in series_keys:
@@ -878,6 +1087,13 @@ def build_history(all_data):
         history["rate_diff"] = [
             round(a - b, 2) if a is not None and b is not None else None
             for a, b in zip(history["bok_rate"], history["fed_rate"])
+        ]
+
+    # cd_ktb3y_spread (CD-국고채3Y 신용 스프레드)
+    if "cd_rate_91d" in history and "ktb3y" in history:
+        history["cd_ktb3y_spread"] = [
+            round(a - b, 2) if a is not None and b is not None else None
+            for a, b in zip(history["cd_rate_91d"], history["ktb3y"])
         ]
 
     return history
@@ -978,6 +1194,23 @@ def print_summary(latest, source_stats):
         ("수출YoY", "export_yoy", "%"),
         ("산업생산(IPI)", "ipi", ""),
         ("외인주식유입", "foreign_equity", "백만$"),
+        # Phase 2
+        ("CD금리91일", "cd_rate_91d", "%"),
+        ("CP금리91일", "cp_rate_91d", "%"),
+        ("CD-국고3Y", "cd_ktb3y_spread", "%p"),
+        ("가계신용잔액", "household_credit", ""),
+        # capacity_util 제거 — ECOS에 없음 (통계청 KOSIS 전용)
+        ("실업률(SA)", "unemployment_rate", "%"),
+        ("주택매매가격", "house_price_idx", ""),
+        # Phase 1-B: FRED 확장
+        ("US CPI(지수)", "us_cpi", ""),
+        ("US CPI YoY", "us_cpi_yoy", "%"),
+        ("US 실업률", "us_unemp", "%"),
+        ("US BEI 10Y", "us_breakeven", "%"),
+        ("US HY스프레드", "us_hy_spread", "%"),
+        ("US실질금리", "us_real_rate", "%"),
+        ("KR실질금리", "kr_real_rate", "%"),
+        ("실질금리차", "real_rate_diff", "%p"),
     ]
 
     for label, key, unit in indicators:
@@ -986,6 +1219,25 @@ def print_summary(latest, source_stats):
             log(f"  {label:16s}: {val}{unit}")
         else:
             log(f"  {label:16s}: (수집 실패)")
+
+    # -- MCS (Doc29 §6.2) --
+    log("-" * 55)
+    mcs = latest.get("mcs")
+    mcs_comp = latest.get("mcs_components")
+    if mcs is not None:
+        regime = "강세" if mcs > 0.6 else ("약세" if mcs < 0.4 else "중립")
+        log(f"  {'MCS':16s}: {mcs:.4f} ({regime})")
+        if mcs_comp:
+            avail = mcs_comp.get("available", 0)
+            total = mcs_comp.get("total", 5)
+            parts = []
+            for k in ["pmi_norm", "csi_norm", "export_norm", "yield_norm", "epu_inv_norm"]:
+                v = mcs_comp.get(k)
+                parts.append(f"{k}={'—' if v is None else f'{v:.3f}'}")
+            log(f"  {'  components':16s}: {', '.join(parts)}")
+            log(f"  {'  available':16s}: {avail}/{total}")
+    else:
+        log(f"  {'MCS':16s}: (계산 불가 — 컴포넌트 부족)")
 
     log("=" * 55)
 

@@ -151,7 +151,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'strong',
     tier: 1,
-    baseConfidence: 72, // [E-4] doubleBottom WR=65.6% × 구조적 강도
+    baseConfidence: 68, // [S-5] doubleBottom WR=62.1% + vol 조건부 ~68% (72→68 캘리브레이션)
     required: ['doubleBottom', 'volumeBreakout'],
     optional: ['goldenCross'],
     optionalBonus: 5,
@@ -845,8 +845,18 @@ class SignalEngine {
           const aboveUpper = c.close > bb[i].upper;
           const belowLower = c.close < bb[i].lower;
           const bullish = aboveUpper || (!belowLower && c.close > c.open);
+          // [A-4] squeeze 지속기간 측정 — Bollinger(2002): 장기 squeeze 후 breakout이 더 강력
+          let squeezeBars = 0;
+          for (let j = i - 1; j >= Math.max(0, i - 50); j--) {
+            if (bb[j] && bb[j].upper !== null) {
+              const w = bb[j].upper - bb[j].lower;
+              if (w <= pct10) squeezeBars++;
+              else break;
+            } else break;
+          }
+          const durBoost = squeezeBars >= 20 ? 8 : squeezeBars >= 10 ? 4 : 0;
           // 밴드 돌파 시 confidence 상향
-          const conf = (aboveUpper || belowLower) ? 72 : 64;
+          const conf = Math.min(90, ((aboveUpper || belowLower) ? 72 : 64) + durBoost);
           signals.push({
             type: 'bbSqueeze',
             source: 'indicator',
@@ -856,7 +866,7 @@ class SignalEngine {
             confidence: conf,
             index: i,
             time: c.time,
-            description: `볼린저 밴드 수렴 후 확산 — ${bullish ? '상승' : '하락'} 방향 변동성 확대`,
+            description: `볼린저 밴드 ${squeezeBars}봉 수렴 후 확산 — ${bullish ? '상승' : '하락'} 방향 변동성 확대`,
           });
         }
       }
@@ -876,6 +886,10 @@ class SignalEngine {
     // 대형주/소형주 거래량 분포 차이를 자동 보정
     const zThreshold = 2.0;  // z >= 2.0 = 상위 2.28% (정규분포)
 
+    // [A-3] ADV 레벨 간이 계산 — 극소형(level=0) 종목의 거래량 돌파는 잡음 비율 높음
+    const advResult = this.calcADVLevel(candles, 60);
+    const advLevel = advResult.level;  // 0=<1억, 1=<10억, 2=<100억, 3=>=100억
+
     for (let i = 0; i < candles.length; i++) {
       const zVol = cache.volZScore(i, 20);
       const ratio = cache.volRatio(i, 20);  // 설명 텍스트용 유지
@@ -889,6 +903,9 @@ class SignalEngine {
       const buyConf = Math.min(80, Math.round(50 + 15 * Math.log(Math.max(zVol, 1))));
       const sellConf = Math.min(78, Math.round(48 + 15 * Math.log(Math.max(zVol, 1))));
 
+      // [A-3] ADV 레벨 기반 confidence 조정 — 극소형 유동성 부족 잡음 감산
+      const advAdj = advLevel === 0 ? -5 : advLevel === 1 ? -2 : 0;
+
       // 거래량 급증 + 가격 상승 = 돌파 확인
       if (zVol >= zThreshold && priceUp) {
         signals.push({
@@ -897,7 +914,7 @@ class SignalEngine {
           nameShort: '거래량 돌파 확인',
           signal: 'buy',
           strength: zVol >= 3.0 ? 'strong' : 'medium',
-          confidence: buyConf,
+          confidence: Math.max(40, buyConf + advAdj),
           index: i,
           time: c.time,
           description: `거래량 ${ratio.toFixed(1)}배(z=${zVol.toFixed(1)}) 급증 + 양봉 — 매수세 유입 확인`,
@@ -912,7 +929,7 @@ class SignalEngine {
           nameShort: '투매 거래량',
           signal: 'sell',
           strength: zVol >= 3.0 ? 'strong' : 'medium',
-          confidence: sellConf,
+          confidence: Math.max(40, sellConf + advAdj),
           index: i,
           time: c.time,
           description: `거래량 ${ratio.toFixed(1)}배(z=${zVol.toFixed(1)}) 급증 + 음봉 — 매도세 투매 경고`,
@@ -988,7 +1005,7 @@ class SignalEngine {
     const ich = cache.ichimoku();  // { tenkan, kijun, spanA, spanB, chikou }
     if (!ich) return signals;
 
-    const { tenkan, kijun, spanA, spanB } = ich;
+    const { tenkan, kijun, spanA, spanB, chikou } = ich;
 
     for (let i = 1; i < candles.length; i++) {
       // ── TK Cross (전환선 × 기준선) ──
@@ -1045,33 +1062,41 @@ class SignalEngine {
         const prevCloudTop = Math.max(spanA[i - 1], spanB[i - 1]);
         const prevCloudBottom = Math.min(spanA[i - 1], spanB[i - 1]);
 
+        // [A-2] Hosoda 후행스팬(chikou) 확인: chikou[i] vs candles[i-26].close
+        // 삼역호전 완성 시 confidence +5 (Hosoda 원전: 3역 동시 충족이 최강 신호)
+        const chikouConfirm = chikou && i >= 26 && chikou[i] != null
+          ? (chikou[i] > candles[i - 26].close ? 'bull' : chikou[i] < candles[i - 26].close ? 'bear' : null)
+          : null;
+
         // 상향 돌파: 이전 종가 ≤ 구름 상단, 현재 종가 > 구름 상단
         if (candles[i - 1].close <= prevCloudTop && candles[i].close > cloudTop) {
+          const chikouBoost = chikouConfirm === 'bull' ? 5 : 0;
           signals.push({
             type: 'ichimokuCloudBreakout',
             source: 'indicator',
             nameShort: '일목 구름 상향 돌파',
             signal: 'buy',
             strength: 'strong',
-            confidence: 70,
+            confidence: 70 + chikouBoost,
             index: i,
             time: candles[i].time,
-            description: '종가가 일목 구름 상단 돌파 — 강한 상승 추세 전환 신호',
+            description: `종가가 일목 구름 상단 돌파${chikouBoost ? ' + 후행스팬 확인 (삼역호전)' : ''} — 강한 상승 추세 전환 신호`,
           });
         }
 
         // 하향 돌파: 이전 종가 ≥ 구름 하단, 현재 종가 < 구름 하단
         if (candles[i - 1].close >= prevCloudBottom && candles[i].close < cloudBottom) {
+          const chikouBoost = chikouConfirm === 'bear' ? 5 : 0;
           signals.push({
             type: 'ichimokuCloudBreakdown',
             source: 'indicator',
             nameShort: '일목 구름 하향 돌파',
             signal: 'sell',
             strength: 'strong',
-            confidence: 70,
+            confidence: 70 + chikouBoost,
             index: i,
             time: candles[i].time,
-            description: '종가가 일목 구름 하단 이탈 — 강한 하락 추세 전환 신호',
+            description: `종가가 일목 구름 하단 이탈${chikouBoost ? ' + 후행스팬 확인 (삼역역전)' : ''} — 강한 하락 추세 전환 신호`,
           });
         }
       }
@@ -1652,7 +1677,7 @@ class SignalEngine {
       buy_hammerBBVol: 63, sell_shootingStarBBVol: 69,
       buy_morningStarRsiVol: 58, sell_eveningStarRsiVol: 65,
       buy_engulfingMacdAlign: 48, sell_engulfingMacdAlign: 66,
-      buy_doubleBottomNeckVol: 72, sell_doubleTopNeckVol: 75,
+      buy_doubleBottomNeckVol: 68, sell_doubleTopNeckVol: 75,
       buy_ichimokuTriple: 70, sell_ichimokuTriple: 70,
       buy_goldenMarubozuVol: 65, sell_deadMarubozuVol: 68 };
 

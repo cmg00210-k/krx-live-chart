@@ -26,25 +26,57 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-:: ── 1단계: OHLCV 다운로드 (cron 모드 — 로그 파일 출력) ──
+:: ── 1단계: 매크로 지표 다운로드 (ECOS/FRED/OECD) ──
 echo.
-echo [%date% %time%] [1/3] OHLCV 다운로드 중 (cron 모드)...
+echo [%date% %time%] [1/7] 매크로 지표 다운로드 중...
+"%PYTHON%" scripts/download_macro.py
+if errorlevel 1 (
+    echo [%date% %time%] 경고: 매크로 지표 다운로드 실패
+)
+
+:: ── 2단계: KOSIS 경제지표 다운로드 (경기종합지수 22항목) ──
+echo.
+echo [%date% %time%] [2/7] KOSIS 경제지표 다운로드 중...
+"%PYTHON%" scripts/download_kosis.py
+if errorlevel 1 (
+    echo [%date% %time%] 경고: KOSIS 다운로드 실패
+)
+
+:: ── 3단계: 금리/채권 데이터 다운로드 (수익률 곡선 + 신용 스프레드) ──
+echo.
+echo [%date% %time%] [3/7] 금리/채권 데이터 다운로드 중...
+"%PYTHON%" scripts/download_bonds.py
+if errorlevel 1 (
+    echo [%date% %time%] 경고: 금리/채권 다운로드 실패
+)
+
+:: ── 3단계: 시장 컨텍스트 다운로드 (CCSI, VKOSPI, 투자자 수급) ──
+echo.
+echo [%date% %time%] [4/7] 시장 컨텍스트 다운로드 중...
+"%PYTHON%" scripts/download_market_context.py
+if errorlevel 1 (
+    echo [%date% %time%] 경고: 시장 컨텍스트 다운로드 실패
+)
+
+:: ── 4단계: OHLCV 다운로드 (cron 모드 — 로그 파일 출력) ──
+echo.
+echo [%date% %time%] [5/7] OHLCV 다운로드 중 (cron 모드)...
 "%PYTHON%" scripts/download_ohlcv.py --cron --years 1
 if errorlevel 1 (
     echo [%date% %time%] 경고: OHLCV 다운로드 실패 (일부 종목)
 )
 
-:: ── 2단계: 분봉 데이터 생성 (5분봉) ──
+:: ── 5단계: 분봉 데이터 생성 (5분봉) ──
 echo.
-echo [%date% %time%] [2/3] 분봉 데이터 생성 중 (5분봉)...
+echo [%date% %time%] [6/7] 분봉 데이터 생성 중 (5분봉)...
 "%PYTHON%" scripts/generate_intraday.py --timeframe 5m
 if errorlevel 1 (
     echo [%date% %time%] 경고: 분봉 생성 실패
 )
 
-:: ── 3단계: 인덱스 가격/등락률 갱신 (OHLCV 파일 기반, FDR 없이) ──
+:: ── 6단계: 인덱스 가격/등락률 갱신 (OHLCV 파일 기반, FDR 없이) ──
 echo.
-echo [%date% %time%] [3/3] 인덱스 가격 갱신 중...
+echo [%date% %time%] [7/7] 인덱스 가격 갱신 중...
 "%PYTHON%" scripts/update_index_prices.py --offline
 if errorlevel 1 (
     echo [%date% %time%] 경고: 인덱스 갱신 실패
@@ -52,6 +84,6 @@ if errorlevel 1 (
 
 echo.
 echo [%date% %time%] ========================================
-echo [%date% %time%] 일일 데이터 업데이트 완료
+echo [%date% %time%] 일일 데이터 업데이트 완료 (7단계)
 echo [%date% %time%] ========================================
 exit /b 0

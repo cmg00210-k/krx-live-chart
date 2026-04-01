@@ -2450,12 +2450,13 @@ function _applyMarketContextToPatterns(patterns) {
 // 이론: IS-LM (Doc30), AD-AS (Doc30 §2), Mundell-Fleming (Doc30 §1.4),
 //       Yield Curve Regime (Doc35 §3), MCS (Doc29 §6.2)
 //
-// 5개 독립 팩터 (곱셈 결합, clamp [0.70, 1.25]):
+// 6개 독립 팩터 (곱셈 결합, clamp [0.70, 1.25]):
 //   1. 경기국면 (cycle_phase) — IS-LM 균형점 방향
 //   2. 수익률곡선 (slope_10y3y) — 경기 선행 시그널
 //   3. 크레딧 레짐 (aa_spread) — 위험 프리미엄
 //   4. 외인 시그널 (foreigner_signal) — UIP/Mundell-Fleming 자본유입
 //   5. 패턴-특화 오버라이드 — doubleTop/Bottom 등 고WR 패턴 강화
+//   6. MCS (Doc29 §6.2) — PMI+CSI+수출+금리곡선+EPU 가중합산 레짐
 // ══════════════════════════════════════════════════════════════
 function _applyMacroConfidenceToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
@@ -2544,6 +2545,21 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // bearishEngulfing (n=113K): BSI/CLI 하락 구간에서 신뢰도 증가
     if (pType === 'bearishEngulfing' && !isBuy && cliDelta != null && cliDelta < -0.1) {
       adj *= 1.06;    // CLI 하락 모멘텀: 추가 +6%
+    }
+
+    // ── 6. MCS (Doc29 §6.2 Macro Context Score) ──
+    // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, 매도 패턴 감쇄
+    // MCS < 0.4: 거시 약세 → 매도 패턴 부스트, 매수 패턴 감쇄
+    // 0.4~0.6: 중립 → 조정 없음
+    var mcs = macro ? macro.mcs : null;
+    if (mcs != null) {
+      if (mcs > 0.6) {
+        var mcsAdj = 1.0 + (mcs - 0.6) * 0.25;  // 0.6→1.0, 1.0→1.10
+        adj *= isBuy ? mcsAdj : (2.0 - mcsAdj);
+      } else if (mcs < 0.4) {
+        var mcsAdj = 1.0 + (0.4 - mcs) * 0.25;  // 0.4→1.0, 0.0→1.10
+        adj *= isBuy ? (2.0 - mcsAdj) : mcsAdj;
+      }
     }
 
     // ── clamp [0.70, 1.25] ──

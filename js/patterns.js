@@ -1180,7 +1180,8 @@ class PatternEngine {
   detectHangingMan(candles, ctx = {}) {
     const results = [];
     const { atr = [], vma = [] } = ctx;
-    for (let i = Math.max(5, ctx.detectFrom || 0); i < candles.length; i++) {
+    // [S-6] 최소 10봉 선행 데이터 필요 — Nison: 교수형은 의미있는 상승 추세 후에만 유효
+    for (let i = Math.max(10, ctx.detectFrom || 0); i < candles.length; i++) {
       const c = candles[i];
       const body = Math.abs(c.close - c.open);
       const range = c.high - c.low;
@@ -1196,7 +1197,8 @@ class PatternEngine {
       // 상승 추세 확인 (해머와 반대, ATR 기반 정규화)
       const a = this._atr(atr, i, candles);
       const trend = this._detectTrend(candles, i, 10, a);
-      if (trend.direction !== 'up') continue;
+      // [S-6] 추세 강도 0.3 이상 요구 — 3봉 약한 상승 후 hangingMan은 잡음
+      if (trend.direction !== 'up' || trend.strength < 0.3) continue;
 
       // [FIX] look-ahead bias 제거: candles[i+1] 미래 참조 삭제
       // Nison: 교수형은 확인 캔들(다음 봉 하락)로 신뢰도가 높아지나,
@@ -1253,7 +1255,11 @@ class PatternEngine {
       const trendScore = Math.min(trend.strength, 1);
       // [H-2 FIX] extra: 거래량 급증 (해머 volSurge 대칭) — Morris: 고점 반전은 거래량 증가로 확인
       const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
+      const volR = this._volRatio(candles, i, vma);
+      let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
+      // [S-1] 거래량 확인 부스트 — Morris(2006): 반전 패턴은 거래량 급증으로 확인
+      if (volR >= 2.0) confidence = Math.min(confidence + 3, 95);
+      else if (volR < 0.7) confidence = Math.max(confidence - 2, 20);
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
