@@ -374,7 +374,7 @@ def fetch_financials(api_key: str, corp_code: str, year: int,
 
 
 def parse_account_value(value_str: str) -> Optional[int]:
-    """DART 계정 금액 문자열 → 정수 변환 (단위: 백만원 → 백만원 그대로)"""
+    """DART 계정 금액 문자열 → 정수 변환 (단위: 원, DART fnlttSinglAcnt 기준)"""
     if not value_str or value_str.strip() in ("", "-"):
         return None
     try:
@@ -418,11 +418,18 @@ def extract_period_data(items: list, year: int,
 
     result = {"period": period}
     found_any = False
+    detected_unit = None  # DART API unit 필드 추적
 
     for item in items:
         account_nm = item.get("account_nm", "").strip()
         # 연결재무제표 우선 (fs_div='CFS'), 없으면 별도재무제표 ('OFS')
         fs_div = item.get("fs_div", "")
+
+        # DART API unit 필드 추출 (첫 번째 발견된 값 사용)
+        if detected_unit is None:
+            unit_val = item.get("unit", "")
+            if unit_val and unit_val.strip():
+                detected_unit = unit_val.strip()
 
         # TARGET_ACCOUNTS에 매칭되는 계정과목 추출
         for dart_name, our_key in TARGET_ACCOUNTS.items():
@@ -440,6 +447,9 @@ def extract_period_data(items: list, year: int,
 
     if not found_any:
         return None
+
+    # unit 필드 기록 (DART fnlttSinglAcnt 기본값: "원")
+    result["unit"] = detected_unit or "원"
 
     return result
 

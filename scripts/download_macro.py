@@ -203,6 +203,14 @@ MCS_W = {"pmi": 0.225, "csi": 0.180, "export": 0.225, "yield_curve": 0.135, "epu
 # BOK empirical ρ ≈ 0.8 (Shin & Kim, 2014, BOK Working Paper)
 TAYLOR_RHO = 0.8  # interest rate smoothing parameter (#167)
 
+# ── FF3 상수 — Fama & French (1993), "Common risk factors in the returns of stocks and bonds" ──
+FF3_SIZE_BREAKPOINT = 0.50       # #168 median market cap split (50th percentile)
+FF3_VALUE_BREAKPOINT_HIGH = 0.30  # #169 top 30% book-to-market → High (value)
+FF3_VALUE_BREAKPOINT_LOW = 0.30   # #170 bottom 30% book-to-market → Low (growth)
+FF3_REBALANCE_MONTH = 6           # #171 June rebalancing (Fama-French convention)
+FF3_FACTORS_PATH = os.path.join(MACRO_DIR, "ff3_factors.json")
+FF3_MIN_STOCKS = 100              # minimum universe size for meaningful factor construction
+
 VERBOSE = False
 
 
@@ -1242,6 +1250,458 @@ def save_json(data, path, label):
 
 
 # ══════════════════════════════════════════════════════
+#  [STAT-A] Korean FF3 Factor Construction
+#  Fama & French (1993), "Common risk factors in the
+#  returns of stocks and bonds", JFE 33(1), 3-56.
+#
+#  2×3 size/value sort:
+#    Size:  median market cap → Small (S) / Big (B)
+#    Value: Book-to-Market top 30% (H) / mid 40% (M) / bottom 30% (L)
+#
+#  Factor returns (value-weighted):
+#    SMB = 1/3*(S/H + S/M + S/L) - 1/3*(B/H + B/M + B/L)
+#    HML = 1/2*(S/H + B/H) - 1/2*(S/L + B/L)
+#    MKT_RF = VW market return - Rf
+#
+#  Rf: CD 91-day rate / 252 (daily), from macro_latest.json
+#  Rebalancing: annual at June end (constant #171)
+# ══════════════════════════════════════════════════════
+
+def _load_ff3_universe():
+    """Load stock universe with marketCap and book equity for FF3 construction.
+
+    Returns: list of dicts with keys: code, market, marketCap_억, book_equity_krw, bm_ratio
+             or empty list on failure.
+
+    marketCap from index.json is in 억원.
+    book_equity (total_equity) from financials/*.json is in raw KRW.
+    B/M ratio = total_equity / (marketCap * 1e8)
+    """
+    index_path = os.path.join(DATA_DIR, "index.json")
+    fin_dir = os.path.join(DATA_DIR, "financials")
+
+    if not os.path.exists(index_path):
+        log("[FF3] data/index.json 없음 — 건너뜀")
+        return []
+
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception as e:
+        log(f"[FF3] index.json 로드 실패: {e}")
+        return []
+
+    stocks = idx.get("stocks", [])
+    if not stocks:
+        log("[FF3] index.json에 stocks 없음")
+        return []
+
+    universe = []
+    skip_no_cap = 0
+    skip_no_fin = 0
+    skip_no_equity = 0
+    skip_negative_bm = 0
+
+    for s in stocks:
+        code = s.get("code", "")
+        market = s.get("market", "")
+        mcap = s.get("marketCap")
+
+        # marketCap must be positive
+        if not mcap or mcap <= 0:
+            skip_no_cap += 1
+            continue
+
+        # Load financials for book equity
+        fin_path = os.path.join(fin_dir, f"{code}.json")
+        if not os.path.exists(fin_path):
+            skip_no_fin += 1
+            continue
+
+        try:
+            with open(fin_path, "r", encoding="utf-8") as f:
+                fin = json.load(f)
+        except Exception:
+            skip_no_fin += 1
+            continue
+
+        # Only trust DART data — seed data must not be used (Data Trust Rules)
+        source = fin.get("source", "")
+        if source == "seed":
+            skip_no_fin += 1
+            continue
+
+        # Get most recent annual total_equity
+        annual = fin.get("annual", [])
+        if not annual:
+            skip_no_equity += 1
+            continue
+
+        # Use most recent period's total_equity
+        total_equity = None
+        for period in reversed(annual):
+            te = period.get("total_equity")
+            if te is not None and te > 0:
+                total_equity = te
+                break
+
+        if total_equity is None or total_equity <= 0:
+            skip_no_equity += 1
+            continue
+
+        # B/M = total_equity(KRW) / marketCap(억원 * 1e8)
+        # = total_equity / (mcap * 1e8)
+        bm_ratio = total_equity / (mcap * 1e8)
+
+        if bm_ratio <= 0:
+            skip_negative_bm += 1
+            continue
+
+        universe.append({
+            "code": code,
+            "market": market,
+            "marketCap": mcap,          # 억원
+            "book_equity": total_equity,  # KRW
+            "bm_ratio": bm_ratio,
+        })
+
+    vlog(f"[FF3] Universe: {len(universe)} stocks "
+         f"(skip: no_cap={skip_no_cap}, no_fin={skip_no_fin}, "
+         f"no_equity={skip_no_equity}, neg_bm={skip_negative_bm})")
+
+    return universe
+
+
+def _load_daily_closes(code, market):
+    """Load daily close prices for a stock from OHLCV data.
+
+    Returns: dict of {"YYYY-MM-DD": close_price} or empty dict.
+    """
+    market_dir = market.lower()  # "kospi" or "kosdaq"
+    ohlcv_path = os.path.join(DATA_DIR, market_dir, f"{code}.json")
+
+    if not os.path.exists(ohlcv_path):
+        return {}
+
+    try:
+        with open(ohlcv_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    candles = data.get("candles", [])
+    closes = {}
+    for c in candles:
+        t = c.get("time")
+        cl = c.get("close")
+        if t and cl and cl > 0:
+            closes[t] = cl
+
+    return closes
+
+
+def _compute_daily_returns(closes_dict):
+    """Compute simple daily returns from close prices.
+
+    Args:
+        closes_dict: {"YYYY-MM-DD": close_price}
+
+    Returns: dict of {"YYYY-MM-DD": return} (first day has no return)
+    """
+    sorted_dates = sorted(closes_dict.keys())
+    returns = {}
+    for i in range(1, len(sorted_dates)):
+        prev_close = closes_dict[sorted_dates[i - 1]]
+        curr_close = closes_dict[sorted_dates[i]]
+        if prev_close > 0:
+            returns[sorted_dates[i]] = (curr_close - prev_close) / prev_close
+    return returns
+
+
+def _assign_ff3_portfolios(universe):
+    """Assign each stock to one of the 6 FF3 portfolios (S/H, S/M, S/L, B/H, B/M, B/L).
+
+    Uses 2×3 independent sort:
+      - Size: median market cap → S or B
+      - Value: B/M top 30% → H, bottom 30% → L, middle 40% → M
+
+    Returns: dict mapping portfolio name to list of {code, market, marketCap}
+    """
+    n = len(universe)
+    if n < FF3_MIN_STOCKS:
+        log(f"[FF3] Universe too small ({n} < {FF3_MIN_STOCKS}) — 건너뜀")
+        return {}
+
+    # Sort by marketCap for size breakpoint
+    caps = sorted([s["marketCap"] for s in universe])
+    size_median_idx = int(len(caps) * FF3_SIZE_BREAKPOINT)
+    size_breakpoint = caps[size_median_idx]
+
+    # Sort by B/M for value breakpoints
+    bms = sorted([s["bm_ratio"] for s in universe])
+    n_low = int(len(bms) * FF3_VALUE_BREAKPOINT_LOW)
+    n_high = int(len(bms) * (1.0 - FF3_VALUE_BREAKPOINT_HIGH))
+    bm_low_breakpoint = bms[n_low] if n_low < len(bms) else bms[-1]
+    bm_high_breakpoint = bms[n_high] if n_high < len(bms) else bms[-1]
+
+    portfolios = {
+        "SH": [], "SM": [], "SL": [],
+        "BH": [], "BM": [], "BL": [],
+    }
+
+    for s in universe:
+        # Size assignment
+        is_small = s["marketCap"] <= size_breakpoint
+
+        # Value assignment (B/M: high = value, low = growth)
+        if s["bm_ratio"] >= bm_high_breakpoint:
+            value_group = "H"
+        elif s["bm_ratio"] <= bm_low_breakpoint:
+            value_group = "L"
+        else:
+            value_group = "M"
+
+        size_group = "S" if is_small else "B"
+        portfolio_key = f"{size_group}{value_group}"
+        portfolios[portfolio_key].append({
+            "code": s["code"],
+            "market": s["market"],
+            "marketCap": s["marketCap"],
+        })
+
+    for pf, members in portfolios.items():
+        vlog(f"[FF3] Portfolio {pf}: {len(members)} stocks")
+
+    return portfolios
+
+
+def _compute_portfolio_vw_return(members, all_returns, date):
+    """Compute value-weighted return for a portfolio on a given date.
+
+    Args:
+        members: list of {code, market, marketCap}
+        all_returns: dict of {code: {date: return}}
+        date: "YYYY-MM-DD"
+
+    Returns: float (value-weighted return) or None if insufficient data
+    """
+    total_weight = 0.0
+    weighted_return = 0.0
+    count = 0
+
+    for m in members:
+        code = m["code"]
+        ret = all_returns.get(code, {}).get(date)
+        if ret is not None:
+            w = m["marketCap"]
+            weighted_return += w * ret
+            total_weight += w
+            count += 1
+
+    if total_weight <= 0 or count < 2:
+        return None
+
+    return weighted_return / total_weight
+
+
+def build_ff3_factors():
+    """Build Korean FF3 (Fama-French 3-Factor) daily factor returns.
+
+    Methodology: Fama & French (1993), adapted for KOSPI+KOSDAQ.
+    Uses current snapshot for portfolio assignment (equivalent to assuming
+    we are within the June-to-May holding period).
+
+    For a full rolling implementation, historical June snapshots would be
+    needed — this version uses the latest available data as the single
+    rebalancing point, which is appropriate for the most recent ~1 year.
+
+    Output: data/macro/ff3_factors.json
+    """
+    log("[FF3] Fama-French 3-Factor 구성 시작...")
+
+    # 1. Load universe
+    universe = _load_ff3_universe()
+    if len(universe) < FF3_MIN_STOCKS:
+        log(f"[FF3] 유효 종목 {len(universe)}개 — 최소 {FF3_MIN_STOCKS}개 필요. 건너뜀.")
+        return False
+
+    log(f"[FF3] Universe: {len(universe)}개 종목 (KOSPI+KOSDAQ)")
+
+    # 2. Assign portfolios
+    portfolios = _assign_ff3_portfolios(universe)
+    if not portfolios:
+        return False
+
+    # 3. Load daily close prices and compute returns for all stocks
+    log("[FF3] OHLCV 로드 중 (전 종목)...")
+    all_codes = set()
+    for members in portfolios.values():
+        for m in members:
+            all_codes.add((m["code"], m["market"]))
+
+    all_returns = {}  # code → {date: return}
+    all_dates_set = set()
+    loaded = 0
+    for code, market in all_codes:
+        closes = _load_daily_closes(code, market)
+        if not closes:
+            continue
+        returns = _compute_daily_returns(closes)
+        if returns:
+            all_returns[code] = returns
+            all_dates_set.update(returns.keys())
+            loaded += 1
+
+    log(f"[FF3] {loaded}/{len(all_codes)}개 종목 수익률 계산 완료")
+
+    if not all_dates_set:
+        log("[FF3] 수익률 데이터 없음 — 건너뜀")
+        return False
+
+    sorted_dates = sorted(all_dates_set)
+    vlog(f"[FF3] Date range: {sorted_dates[0]} ~ {sorted_dates[-1]} ({len(sorted_dates)} days)")
+
+    # 4. Load Rf (CD 91-day rate, annualized → daily)
+    # Rf_daily = CD_rate(%) / 100 / 252
+    rf_daily = 0.0  # default if unavailable
+    if os.path.exists(LATEST_PATH):
+        try:
+            with open(LATEST_PATH, "r", encoding="utf-8") as f:
+                macro_latest = json.load(f)
+            cd_rate = macro_latest.get("cd_rate_91d")
+            if cd_rate is not None and cd_rate > 0:
+                rf_daily = cd_rate / 100.0 / 252.0
+                vlog(f"[FF3] Rf daily = {rf_daily:.6f} (CD 91d = {cd_rate}%)")
+        except Exception:
+            pass
+
+    if rf_daily == 0.0:
+        log("[FF3] CD 91일 금리 없음 — Rf=0 사용 (factor spread에 영향 없음)")
+
+    # 5. Compute daily factor returns
+    log("[FF3] 일별 팩터 수익률 계산 중...")
+    factor_dates = []
+    smb_series = []
+    hml_series = []
+    mkt_rf_series = []
+
+    # Pre-build market portfolio (all stocks) — used for MKT-RF
+    all_universe_members = []
+    for members in portfolios.values():
+        all_universe_members.extend(members)
+
+    for date in sorted_dates:
+        # Portfolio value-weighted returns
+        pf_returns = {}
+        valid = True
+        for pf_name in ["SH", "SM", "SL", "BH", "BM", "BL"]:
+            r = _compute_portfolio_vw_return(portfolios[pf_name], all_returns, date)
+            if r is None:
+                valid = False
+                break
+            pf_returns[pf_name] = r
+
+        if not valid:
+            continue
+
+        # SMB = 1/3*(S/H + S/M + S/L) - 1/3*(B/H + B/M + B/L)
+        smb = (1.0 / 3.0) * (pf_returns["SH"] + pf_returns["SM"] + pf_returns["SL"]) \
+            - (1.0 / 3.0) * (pf_returns["BH"] + pf_returns["BM"] + pf_returns["BL"])
+
+        # HML = 1/2*(S/H + B/H) - 1/2*(S/L + B/L)
+        hml = 0.5 * (pf_returns["SH"] + pf_returns["BH"]) \
+            - 0.5 * (pf_returns["SL"] + pf_returns["BL"])
+
+        # MKT-RF = VW market return - Rf
+        mkt_return = _compute_portfolio_vw_return(all_universe_members, all_returns, date)
+        if mkt_return is None:
+            continue
+
+        mkt_rf = mkt_return - rf_daily
+
+        factor_dates.append(date)
+        smb_series.append(round(smb, 6))
+        hml_series.append(round(hml, 6))
+        mkt_rf_series.append(round(mkt_rf, 6))
+
+    if not factor_dates:
+        log("[FF3] 유효 팩터 수익률 없음 — 건너뜀")
+        return False
+
+    # 6. Compute summary statistics
+    import math
+
+    def _stats(series):
+        n = len(series)
+        if n == 0:
+            return {"mean": None, "std": None, "sharpe": None}
+        mean = sum(series) / n
+        var = sum((x - mean) ** 2 for x in series) / max(n - 1, 1)
+        std = math.sqrt(var)
+        # Annualized: mean*252, std*sqrt(252), Sharpe = mean*252 / (std*sqrt(252))
+        ann_mean = mean * 252
+        ann_std = std * math.sqrt(252)
+        sharpe = ann_mean / ann_std if ann_std > 0 else None
+        return {
+            "daily_mean": round(mean, 6),
+            "daily_std": round(std, 6),
+            "ann_mean_pct": round(ann_mean * 100, 2),
+            "ann_std_pct": round(ann_std * 100, 2),
+            "sharpe": round(sharpe, 3) if sharpe is not None else None,
+            "n_days": n,
+        }
+
+    # 7. Build output
+    result = {
+        "updated": datetime.today().strftime("%Y-%m-%d"),
+        "methodology": "Fama-French (1993) 2x3 size/value sort",
+        "universe_size": len(universe),
+        "rebalance_month": FF3_REBALANCE_MONTH,
+        "rf_daily": round(rf_daily, 8),
+        "constants": {
+            "size_breakpoint": FF3_SIZE_BREAKPOINT,
+            "value_breakpoint_high": FF3_VALUE_BREAKPOINT_HIGH,
+            "value_breakpoint_low": FF3_VALUE_BREAKPOINT_LOW,
+        },
+        "portfolio_counts": {pf: len(members) for pf, members in portfolios.items()},
+        "date_range": {
+            "start": factor_dates[0],
+            "end": factor_dates[-1],
+            "n_days": len(factor_dates),
+        },
+        "statistics": {
+            "SMB": _stats(smb_series),
+            "HML": _stats(hml_series),
+            "MKT_RF": _stats(mkt_rf_series),
+        },
+        "daily": {
+            "dates": factor_dates,
+            "SMB": smb_series,
+            "HML": hml_series,
+            "MKT_RF": mkt_rf_series,
+        },
+    }
+
+    # 8. Save
+    save_json(result, FF3_FACTORS_PATH, "ff3_factors")
+
+    # 9. Print summary
+    log(f"[FF3] === Fama-French 3-Factor 결과 ===")
+    log(f"[FF3]   기간: {factor_dates[0]} ~ {factor_dates[-1]} ({len(factor_dates)}일)")
+    log(f"[FF3]   종목수: {len(universe)} (6 portfolios)")
+    for pf, cnt in sorted(result["portfolio_counts"].items()):
+        log(f"[FF3]     {pf}: {cnt}종목")
+
+    for factor_name in ["SMB", "HML", "MKT_RF"]:
+        st = result["statistics"][factor_name]
+        sharpe_str = f"{st['sharpe']:.3f}" if st["sharpe"] is not None else "N/A"
+        log(f"[FF3]   {factor_name:6s}: ann_mean={st['ann_mean_pct']:+.2f}%, "
+            f"ann_std={st['ann_std_pct']:.2f}%, sharpe={sharpe_str}")
+
+    return True
+
+
+# ══════════════════════════════════════════════════════
 #  요약 출력
 # ══════════════════════════════════════════════════════
 
@@ -1401,7 +1861,15 @@ def main():
             save_json(latest, LATEST_PATH, "latest")
         if history:
             save_json(history, HISTORY_PATH, "history")
-        print_summary(latest, {"오프라인": {"ok": 1, "fail": 0}})
+        # FF3 uses local files only — safe to run offline
+        source_stats = {"오프라인": {"ok": 1, "fail": 0}}
+        try:
+            ff3_ok = build_ff3_factors()
+            source_stats["FF3"] = {"ok": 1 if ff3_ok else 0, "fail": 0 if ff3_ok else 1}
+        except Exception as e:
+            log(f"[FF3] 오류 발생: {e}")
+            source_stats["FF3"] = {"ok": 0, "fail": 1}
+        print_summary(latest, source_stats)
         return
 
     # ── 의존성 확인 ──
@@ -1501,6 +1969,17 @@ def main():
     history = build_history(all_data)
     save_json(history, HISTORY_PATH, "history")
 
+    # ── [STAT-A] FF3 팩터 구성 ──
+    try:
+        ff3_ok = build_ff3_factors()
+        if ff3_ok:
+            source_stats["FF3"] = {"ok": 1, "fail": 0}
+        else:
+            source_stats["FF3"] = {"ok": 0, "fail": 1}
+    except Exception as e:
+        log(f"[FF3] 오류 발생: {e}")
+        source_stats["FF3"] = {"ok": 0, "fail": 1}
+
     # ── 요약 ──
     print_summary(latest, source_stats)
 
@@ -1512,34 +1991,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-# ══════════════════════════════════════════════════════════════
-# DESIGN: Korean FF3 Factor Construction — Fama & French (1993)
-# Status: NOT IMPLEMENTED — design only
-#
-# Data sources:
-#   - Market: KOSPI total return index (ECOS or KRX)
-#   - Rf: CD 91-day rate / 250 (daily)
-#   - Size: market_cap from data/index.json (prevClose × listed_shares)
-#   - Value: BPS from data/financials/{code}.json → PBR = price/BPS
-#
-# Construction (annual June rebalancing):
-#   1. At June end, sort all KOSPI+KOSDAQ by market_cap → median split → S/B
-#   2. Sort by PBR → bottom 30% (High BM) / top 30% (Low BM)
-#   3. Form 6 portfolios: S/H, S/M, S/L, B/H, B/M, B/L
-#   4. SMB = avg(S/H, S/M, S/L) - avg(B/H, B/M, B/L)
-#   5. HML = avg(S/H, B/H) - avg(S/L, B/L)
-#   6. Save daily factor returns to data/macro/ff3_factors.json
-#
-# Dependencies:
-#   - data/index.json must have market_cap or (prevClose + shares)
-#   - data/financials/*.json must have BPS for PBR calculation
-#   - Rebalancing requires ~2,700 stock data (June snapshot)
-#
-# Constant: #167 TAYLOR_RHO = 0.8 (added above)
-# New constants (proposed):
-#   #168 FF3_SIZE_BREAKPOINT = 0.50 (median market cap)
-#   #169 FF3_VALUE_BREAKPOINT_HIGH = 0.30 (top 30% book-to-market)
-#   #170 FF3_VALUE_BREAKPOINT_LOW = 0.30 (bottom 30% book-to-market)
-#   #171 FF3_REBALANCE_MONTH = 6 (June)
-# ══════════════════════════════════════════════════════════════
+# [STAT-A] FF3 design block → IMPLEMENTED above as build_ff3_factors()
+# Constants #168-#171 defined at module level. See Fama & French (1993).

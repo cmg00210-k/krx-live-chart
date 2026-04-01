@@ -50,6 +50,7 @@ function calcBB(closes, n = 20, mult = 2) {
     if (i < n - 1) return { upper: null, lower: null, mid: null };
     const sl = closes.slice(i - n + 1, i + 1);
     const mean = sl.reduce((a, b) => a + b, 0) / n;
+    // Population σ (÷n) per Bollinger (2001) — intentional, not Bessel-corrected
     const std = Math.sqrt(sl.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
     return { upper: mean + mult * std, lower: mean - mult * std, mid: mean };
   });

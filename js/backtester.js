@@ -134,6 +134,7 @@ class PatternBacktester {
         if (results[i]) loaded[files[i]] = results[i];
       }
       // [Phase0-#8] HMM staleness check: 30일 이상 경과 시 null 처리
+      // [D] Heuristic — 30-day staleness cutoff: regime shifts typically resolve within 1 month
       if (loaded['hmm_regimes'] && loaded['hmm_regimes'].daily) {
         var daily = loaded['hmm_regimes'].daily;
         var lastEntry = daily.length > 0 ? daily[daily.length - 1] : null;
@@ -166,6 +167,7 @@ class PatternBacktester {
         if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
           that._rlPolicy = data;
           // [C-9] Staleness guard: warn if policy older than 90 days
+          // [D] Heuristic — 90-day policy staleness: ~1 quarterly regime cycle
           if (data.trained_date) {
             var age = (Date.now() - new Date(data.trained_date).getTime()) / (1000*60*60*24);
             if (age > 90) console.warn('[RL] Policy stale: ' + Math.round(age) + 'd old (trained ' + data.trained_date + ')');
@@ -350,7 +352,7 @@ class PatternBacktester {
         curve: [],
       };
       this._resultCache.set(cacheKey, empty);
-      if (this._resultCache.size > 200) this._resultCache.clear();
+      if (this._resultCache.size > 200) this._resultCache.clear(); // [D] Heuristic — 200 eviction cap: memory guard
       return empty;
     }
 
@@ -369,7 +371,7 @@ class PatternBacktester {
       curve,
     };
     this._resultCache.set(cacheKey, result);
-    if (this._resultCache.size > 200) this._resultCache.clear();
+    if (this._resultCache.size > 200) this._resultCache.clear(); // [D] Heuristic — 200 eviction cap: memory guard
     return result;
   }
 
@@ -391,6 +393,11 @@ class PatternBacktester {
     for (const pType of Object.keys(this._META)) {
       const result = this.backtest(candles, pType);
       if (result.sampleSize > 0) {
+        // [B-1 FIX] WFE activation — Pardo (2008): Walk-Forward Efficiency
+        // walkForwardTest() was dead code (defined but never called).
+        // WFE < 30% → overfit → reliability capped at C (line 438).
+        var wfeResult = this.walkForwardTest(candles, pType);
+        if (wfeResult) result.wfe = wfeResult.wfe;
         results[pType] = result;
       }
     }
@@ -419,9 +426,21 @@ class PatternBacktester {
       var exp = h5.expectancy || 0;
       var pf = h5.profitFactor || 0;
 
-      if (isAdjSig && alpha >= 5 && nSample >= 100 && exp > 0 && pf >= 1.3) {
+      // [STAT-B] OOS IC gate — Grinold & Kahn (2000), Qian, Hua & Sorensen (2007)
+      // IC=null passes (insufficient data for IC calc ≠ IC=0).
+      // A-tier: IC > 0.02 (non-trivial predictive power, Qian et al. minimal benchmark)
+      // B-tier: IC > 0.01 (minimal non-random signal)
+      // Prevents noise-fit regressions from achieving high tier.
+      var h5ic = h5.ic;
+      var icPassA = (h5ic == null || h5ic > 0.02);
+      var icPassB = (h5ic == null || h5ic > 0.01);
+
+      // [D] Heuristic — reliability tier thresholds (alpha, n, pf) are practitioner conventions,
+      // not from a single published source. Informed by CFA sample-size guidance and
+      // common quant thresholds, but exact cutoffs are project-specific.
+      if (isAdjSig && alpha >= 5 && nSample >= 100 && exp > 0 && pf >= 1.3 && icPassA) {
         tierResult.reliabilityTier = 'A';
-      } else if (isAdjSig && alpha >= 3 && nSample >= 30 && exp > 0) {
+      } else if (isAdjSig && alpha >= 3 && nSample >= 30 && exp > 0 && icPassB) {
         // [STAT-A] BH-FDR gate for B-tier — Benjamini & Hochberg (1995)
         // Raw significance alone insufficient: with 30+ patterns × 5 horizons,
         // ~7.5 false positives expected at α=0.05. BH-FDR controls FDR ≤ 5%.
@@ -432,10 +451,10 @@ class PatternBacktester {
         tierResult.reliabilityTier = 'D';
       }
       // [C-3 FIX] WFE gating — Pardo (2008): WFE < 30% → overfit, cap at C
-      // NOTE: tierResult.wfe is populated when walkForwardTest() runs upstream.
-      // If wfe is undefined (not computed), this block is a no-op (safe degradation).
+      // [B-1 FIX] walkForwardTest() returns wfe as integer % (e.g. 50 = 50%).
+      // Previous threshold 0.30 was scale mismatch (never triggered). Corrected to 30.
       var wfeVal = tierResult.wfe;
-      if (wfeVal != null && wfeVal < 0.30 && (tierResult.reliabilityTier === 'A' || tierResult.reliabilityTier === 'B')) {
+      if (wfeVal != null && wfeVal < 30 && (tierResult.reliabilityTier === 'A' || tierResult.reliabilityTier === 'B')) {
         tierResult.reliabilityTier = 'C';
       }
     }
@@ -553,6 +572,7 @@ class PatternBacktester {
     const len = candles.length;
 
     // OOS 블록 크기: 전체의 ~20%를 folds개로 분배
+    // [D] Heuristic — 20% OOS ratio and min 15 bars: practitioner conventions for WFE
     const oosSize = Math.max(15, Math.floor(len * 0.20 / folds));
     const totalOos = oosSize * folds;
     if (len - totalOos < minTrain) return null;
@@ -608,7 +628,7 @@ class PatternBacktester {
     const avgIS = sumIS / validFolds;
     const avgOOS = sumOOS / validFolds;
     // WFE: avoid division by zero, sign-aware (both negative = not robust)
-    var minISEdge = 0.005; // 0.5% minimum in-sample edge for meaningful WFE
+    var minISEdge = 0.005; // [D] Heuristic — 0.5% minimum IS edge: below KRX round-trip cost → noise
     const wfe = Math.abs(avgIS) < minISEdge
       ? 0  // insufficient IS edge → WFE undefined
       : Math.round((avgOOS / avgIS) * 100);
@@ -1041,6 +1061,7 @@ class PatternBacktester {
       const median = n % 2 === 0
         ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
         : sorted[Math.floor(n / 2)];
+      // Sample variance (÷(n-1), Bessel correction) — distinct from BB's population σ
       const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1 || 1);
       const stdDev = Math.sqrt(variance);
 
@@ -1133,9 +1154,9 @@ class PatternBacktester {
           }
         }
 
-        var B = 500, bootWR = [];
+        var B = 500, bootWR = []; // Efron & Tibshirani (1993): 200-1000 replicates for percentile CIs
 
-        if (hasCalendarDates && Object.keys(monthGroups).length >= 3) {
+        if (hasCalendarDates && Object.keys(monthGroups).length >= 3) { // [D] Heuristic — min 3 months for meaningful calendar resampling
           // ── Calendar-time bootstrap: resample months with replacement ──
           // Fama & French (2010): calendar-time portfolios correct for cross-sectional dependence.
           // Each bootstrap iteration resamples whole months, preserving intra-month clustering.
@@ -1255,6 +1276,9 @@ class PatternBacktester {
 
       // [Phase 1] 패턴 종합 점수 (0-100)
       // DA * 0.30 + targetHitRate * 0.25 + (100 - MAE*10) * 0.25 + min(PF*20, 100) * 0.20
+      // [D] Heuristic — composite score weights (0.30/0.25/0.25/0.20) and scaling factors
+      // (MAE×10, PF×20) are practitioner-designed; no single published source.
+      // Fallback 50 for missing MAE = neutral midpoint assumption.
       var _da = directionalAccuracy || 0;
       var _thr = targetHitRate != null ? targetHitRate : _da;  // fallback: DA 대용
       var _maeScore = predictionMAE != null ? Math.max(0, 100 - predictionMAE * 10) : 50;  // fallback: 중립
@@ -1263,6 +1287,7 @@ class PatternBacktester {
         _da * 0.30 + _thr * 0.25 + _maeScore * 0.25 + _pfScore * 0.20
       )).toFixed(1);
 
+      // [D] Heuristic — grade boundaries (80/65/50/35) are practitioner conventions
       var patternGrade;
       if (patternScore >= 80) patternGrade = 'A';
       else if (patternScore >= 65) patternGrade = 'B';
@@ -1399,7 +1424,7 @@ class PatternBacktester {
       //               momentum60 제거 (parsimony: 7→5열 축소, 과적합 방지)
       if (returns.length >= 30 && typeof calcWLSRegression === 'function') {
         var X = [], weights = [];
-        var lambda = 0.995;
+        var lambda = 0.995; // [D] Heuristic — exponential decay half-life ~138 obs; no published optimal
         for (var ri = 0; ri < returns.length; ri++) {
           var occ = validOccs[ri];
           X.push([
@@ -1438,8 +1463,8 @@ class PatternBacktester {
         // Standard WLS is not robust to outliers; IRLS down-weights |resid| > delta.
         // Delta = 1.345 * MAD-sigma ≈ 5.8 for KRX 5-day return distribution.
         if (reg && reg.coeffs) {
-          var HUBER_DELTA = 5.8;
-          var HUBER_ITERS = 5;
+          var HUBER_DELTA = 5.8; // 1.345σ — Huber (1964) 95% efficiency; σ≈4.3 from KRX 5-day MAD
+          var HUBER_ITERS = 5;  // [D] Heuristic — typically converges in 3-5 iterations (Street et al. 1988)
           for (var hIter = 0; hIter < HUBER_ITERS; hIter++) {
             var huberWeights = [];
             var changed = false;
@@ -1698,7 +1723,7 @@ class PatternBacktester {
    * @returns {Object|null} { trending, reverting, neutral } each { wr, n } or null
    */
   _computeRegimeWR(candles, occurrences, h, patternSignal) {
-    if (!occurrences || occurrences.length < 30) return null;
+    if (!occurrences || occurrences.length < 30) return null; // CLT minimum for regime-split subgroups
     var cost = this._horizonCost(h);
     var buckets = { trending: { wins: 0, n: 0 }, reverting: { wins: 0, n: 0 }, neutral: { wins: 0, n: 0 } };
 
@@ -1714,6 +1739,7 @@ class PatternBacktester {
       var ret = (exitPrice - entryPrice) / entryPrice * 100 - cost;
 
       // Classify regime by hw stored on occurrence
+      // [D] Heuristic — hw boundaries (1.1/0.9) are ±10% from neutral (1.0); no published source
       var hw = occ.hw || 1.0;
       var bucket = hw > 1.1 ? 'trending' : hw < 0.9 ? 'reverting' : 'neutral';
       buckets[bucket].n++;
@@ -1773,6 +1799,7 @@ class PatternBacktester {
 
       const n = returns.length;
       const mean = returns.reduce((a, b) => a + b, 0) / n;
+      // Sample variance (÷(n-1), Bessel correction) — distinct from BB's population σ
       const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1 || 1);
       const sigma = Math.sqrt(variance);
 
@@ -2097,15 +2124,23 @@ class PatternBacktester {
       var exp = h5.expectancy || 0;
       var pf = h5.profitFactor || 0;
 
+      // [STAT-B] OOS IC gate for signal tier — same logic as pattern tier
+      // IC=null passes (IC requires n>=10, signals often have smaller samples)
+      var h5ic = h5.ic;
+      var icPassA = (h5ic == null || h5ic > 0.02);
+      var icPassB = (h5ic == null || h5ic > 0.01);
+
+      // [D] Heuristic — signal reliability tier thresholds are relaxed vs pattern tiers
+      // (smaller samples, shorter lookback). Cutoffs are practitioner-designed.
       // [M-2 FIX] Tier A: add profitFactor >= 1.1 gate (pattern tier A uses >= 1.3).
       // Signal tier uses lower threshold since signals have smaller samples & shorter lookback.
       // Ensures tier A requires demonstrable edge, not just statistical significance.
-      if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0 && pf >= 1.1) {
+      if (isAdjSig && alpha >= 3 && nSample >= 50 && exp > 0 && pf >= 1.1 && icPassA) {
         tr.reliabilityTier = 'A';
       // [STAT-A] Tier B: BH-FDR gate (consistent with pattern tier)
       // Signal tier also requires adjusted significance for B — multiple
       // signal types tested creates same FDR exposure as pattern scanning.
-      } else if (isAdjSig && alpha >= 2 && nSample >= 20 && exp > 0) {
+      } else if (isAdjSig && alpha >= 2 && nSample >= 20 && exp > 0 && icPassB) {
         tr.reliabilityTier = 'B';
       // Tier C: wrAlpha>0 + n>=20
       } else if (alpha > 0 && nSample >= 20) {

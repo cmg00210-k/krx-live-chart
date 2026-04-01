@@ -557,6 +557,9 @@ class SignalEngine {
         const emaConfirm = ema12[i] !== null && ema26[i] !== null &&
                            ema12[i] > ema26[i];
         const strength = emaConfirm ? 'strong' : 'medium';
+        // [D] Heuristic — EMA confirmation +12pp bonus, buy/sell asymmetry +2pp
+        // (KRX short-sale constraint: buy signals slightly more reliable).
+        // No published source for specific confidence values.
         const confidence = emaConfirm ? 72 : 60;
 
         signals.push({
@@ -577,6 +580,7 @@ class SignalEngine {
         const emaConfirm = ema12[i] !== null && ema26[i] !== null &&
                            ema12[i] < ema26[i];
         const strength = emaConfirm ? 'strong' : 'medium';
+        // [D] Heuristic — dead cross confidence 2pp below golden cross (sell asymmetry).
         const confidence = emaConfirm ? 70 : 58;
 
         signals.push({
@@ -841,6 +845,8 @@ class SignalEngine {
       const cPrev = candles[i - 1];
 
       // 하단 밴드 터치 후 반등
+      // [D] Heuristic — BB bounce=60 / break=50: practitioner convention.
+      // Bollinger (2001) defines bands, not confidence per se.
       if (cPrev.low <= bb[i - 1].lower && c.close > bb[i].lower &&
           c.close > c.open) {
         signals.push({
@@ -1196,6 +1202,8 @@ class SignalEngine {
         const currDiff = tenkan[i] - kijun[i];
 
         // 강세 크로스: 전환선이 기준선 상향 돌파
+        // [D] Heuristic — Ichimoku confidence: Hosoda (1969) 삼역호전 qualitative framework.
+        // Specific numeric values (72/65/70 + chikou boost) are practitioner adaptations.
         if (prevDiff <= 0 && currDiff > 0) {
           // 구름 위에서 발생하면 강도 상향
           const cloudTop = (spanA[i] !== null && spanB[i] !== null)
@@ -1804,6 +1812,9 @@ class SignalEngine {
       if (candles[curr].low < candles[prev].low &&
           indicator[curr] > indicator[prev]) {
         const typePrefix = name === 'macd' ? 'macd' : 'rsi';
+        // [D] Heuristic — divergence confidence: regular(70/68) > hidden(62/60),
+        // buy(70/62) > sell(68/60). Asymmetry reflects KRX short-sale constraint effect.
+        // No published calibration source; practitioner convention.
         signals.push({
           type: `${typePrefix}BullishDivergence`,
           source: 'indicator',
@@ -2190,7 +2201,10 @@ class SignalEngine {
   //  유동성 높은 종목 = 더 많은 시장 참여자 = 패턴 신뢰도 ↑
   // ══════════════════════════════════════════════════════
 
-  /** ADV 등급별 신뢰도 승수 — 극소형(0.75), 소형(0.85), 중형(1.00), 대형(1.10) */
+  /** ADV 등급별 신뢰도 승수 — 극소형(0.75), 소형(0.85), 중형(1.00), 대형(1.10)
+   *  [D] Heuristic — asymmetric penalty/bonus: thin stock penalty (-25%) > thick bonus (+10%).
+   *  Reflects noise dominance in low-liquidity stocks (Amihud 2002 ILLIQ) and
+   *  crowding/alpha decay in high-liquidity stocks (Lo 2004 AMH). Specific values uncalibrated. */
   static ADV_MULTIPLIERS = [0.75, 0.85, 1.00, 1.10];
 
   /**
@@ -2291,6 +2305,9 @@ class SignalEngine {
     // NOTE: 3x VRP multiplier widened in Phase0-#6; empirical validation pending
     var ratio = lastLong / lastShort;
 
+    // [D] Heuristic — VolRegime ratio thresholds 1.2/0.8 are round-number conventions.
+    // Symmetric 1/x would be 1.25/0.8 or 1.2/0.833. Current pair creates wider
+    // neutral zone on risk-off side. No published source for specific breakpoints.
     var regime, multiplier;
     if (ratio > 1.2) {
       regime = 'risk-on';

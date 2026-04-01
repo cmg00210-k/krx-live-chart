@@ -599,6 +599,8 @@ class PatternEngine {
       var nEff = Math.max(2, Math.floor(Math.log(closes.length / 20) / Math.log(1.5)));
       var shrinkage = nEff / (nEff + 20);
       var hShrunk = shrinkage * hurst + (1 - shrinkage) * 0.5;
+      // [D] Heuristic — [0.6, 1.4] clamp: 2*H_shrunk maps H∈[0.3,0.7] to weight∈[0.6,1.4].
+      // No published Hurst→confidence mapping; Mandelbrot & Van Ness (1968) is descriptive.
       hurstWeight = Math.max(0.6, Math.min(2 * hShrunk, 1.4));
     }
     // k(vol): 변동성 레짐 보정 — ATR_14/ATR_50 비율 (경제물리학 멱법칙 기반)
@@ -609,6 +611,8 @@ class PatternEngine {
     //        → volWeight=1.0 (보정 없음). 데이터 부족 시 레짐 보정 비활성화는 의도된 폴백.
     //        충분한 데이터가 없으면 ATR14/ATR50 비율 자체가 무의미하기 때문.
     const lastATR50 = atr50[atr50.length - 1] || lastATR14;
+    // [D] Heuristic — 1/sqrt scaling from economic physics power law. Clamp [0.7, 1.4]:
+    // prevents extreme ATR14/ATR50 ratio from dominating confidence.
     const volWeight = Math.max(0.7, Math.min(1 / Math.sqrt(lastATR14 / lastATR50), 1.4));
 
     // m(meanRev): 평균 회귀 보정 — OU 과정 반감기 기반 (core_data/12_extreme_value_theory.md)
@@ -1308,6 +1312,8 @@ class PatternEngine {
       const volR = this._volRatio(candles, i, vma);
       let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       // [S-1] 거래량 확인 부스트 — Morris(2006): 반전 패턴은 거래량 급증으로 확인
+      // [D] Heuristic — volume thresholds (2.0x/0.7x) and adjustments (+3/-2) are
+      // practitioner conventions. Morris prescribes "above average volume" qualitatively.
       if (volR >= 2.0) confidence = Math.min(confidence + 3, 95);
       else if (volR < 0.7) confidence = Math.max(confidence - 2, 20);
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);

@@ -1,5 +1,5 @@
 {
-  "updated": "2026-04-01",
+  "updated": "2026-04-02",
   "ktb10y": 3.73,
   "ktb3y": 3.38,
   "term_spread": 0.35,
@@ -41,14 +41,18 @@
   "us_real_rate": 0.98,
   "kr_real_rate": 0.5,
   "real_rate_diff": -0.48,
-  "mcs": 0.5205,
+  "taylor_implied_rate": 3.4125,
+  "taylor_inertial_rate": 2.6825,
+  "taylor_gap": -0.1825,
+  "mcs": 0.507,
   "mcs_components": {
-    "pmi_norm": 0.0,
-    "csi_norm": null,
+    "pmi_norm": 0.0167,
+    "csi_norm": 0.385,
     "export_norm": 1.0,
     "yield_norm": 0.5667,
     "epu_inv_norm": 0.5429,
-    "available": 4,
-    "total": 5
+    "taylor_gap_norm": 0.5913,
+    "available": 6,
+    "total": 6
   }
 }

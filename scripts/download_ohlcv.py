@@ -65,19 +65,29 @@ def get_all_stocks():
                 raise
 
     stocks = []
+    spac_filtered = 0
     for _, row in kospi.iterrows():
         code = str(row['Code']).strip()
         name = str(row['Name']).strip()
         if code and name and len(code) == 6:
+            # SPAC 필터: 합병 전 NAV 근처 거래 → 기술적 패턴 분석 부적합
+            name_upper = name.upper()
+            if '스팩' in name or 'SPAC' in name_upper:
+                spac_filtered += 1
+                continue
             stocks.append({"code": code, "name": name, "market": "KOSPI"})
 
     for _, row in kosdaq.iterrows():
         code = str(row['Code']).strip()
         name = str(row['Name']).strip()
         if code and name and len(code) == 6:
+            name_upper = name.upper()
+            if '스팩' in name or 'SPAC' in name_upper:
+                spac_filtered += 1
+                continue
             stocks.append({"code": code, "name": name, "market": "KOSDAQ"})
 
-    logger.info(f"  KOSPI {len(kospi)}개 + KOSDAQ {len(kosdaq)}개 = {len(stocks)}개")
+    logger.info(f"  KOSPI {len(kospi)}개 + KOSDAQ {len(kosdaq)}개 = {len(stocks)}개 (SPAC {spac_filtered}개 제외)")
     return stocks
 
 
