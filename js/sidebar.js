@@ -54,8 +54,9 @@ const sidebarManager = (() => {
   let _filteredStocks = [];          // 현재 필터/정렬 적용된 전체 종목 배열
 
   // ── R5: 3모드 순환 순서 ──
-  const _viewModes = ['default', 'analysis', 'screener'];
-  const _viewModeLabels = { 'default': '기본', analysis: '상세', screener: '스크린' };
+  // 스크리너 비활성화 (2026-04-06) — 'screener' 제거
+  const _viewModes = ['default', 'analysis'];
+  const _viewModeLabels = { 'default': '기본', analysis: '상세' };
 
   // ── 시가총액 데이터 (억원 단위, index.json에서 동적 빌드) ──
   // init() 호출 시 _buildMarketCapFromStocks()로 ALL_STOCKS에서 자동 채움.
@@ -594,8 +595,7 @@ const sidebarManager = (() => {
       // localStorage 저장
       try { localStorage.setItem(LS_VIEW, _viewMode); } catch(ex) {}
 
-      // 스크리너 패널 토글: screener 모드에서만 패널 표시, 나머지 섹션 숨김
-      _toggleScreenerPanel(_viewMode === 'screener');
+      // 스크리너 비활성화 (2026-04-06) — _toggleScreenerPanel 호출 제거
 
       build(_currentSort, true);
     });

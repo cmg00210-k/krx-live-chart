@@ -274,7 +274,7 @@ class KRXDataService {
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
       // 같은 카테고리 내 시총순
-      return (b.base || 0) - (a.base || 0);
+      return (b.marketCap || b.base || 0) - (a.marketCap || a.base || 0);
     });
   }
 

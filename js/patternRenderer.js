@@ -421,9 +421,12 @@ const patternRenderer = (() => {
         }
 
         // ── 7. 패턴 라벨 (HTS 스타일 pill badge) ──
-        if (d.labels && d.labels.length) {
+        // [Audit C-3] extreme zoom-out: 라벨 텍스트 생략 (구조적 오버레이만 유지)
+        if (d.labels && d.labels.length && !(d._visibleBars > 800)) {
           ctx.setLineDash([]);
-          const fontSize = 12;
+          // [Audit C-1] Zoom-adaptive font size: visibleBars 기반 스케일
+          var vbars = d._visibleBars || 200;
+          var fontSize = vbars <= 30 ? 11 : (vbars <= 150 ? 12 : (vbars <= 400 ? 11 : 10));
           ctx.font = `700 ${fontSize}px 'Pretendard', sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -455,8 +458,10 @@ const patternRenderer = (() => {
 
             // 겹침 방지: 기존 라벨과 충돌 시 y 오프셋
             const textMetrics = ctx.measureText(lb.text);
-            const boxW = textMetrics.width + 10;
-            const boxH = fontSize + 6;
+            // [Audit C-2] Zoom-adaptive padding
+            var pad = fontSize <= 10 ? 7 : 10;
+            const boxW = textMetrics.width + pad;
+            const boxH = fontSize + (fontSize <= 10 ? 4 : 6);
             let attempts = 0;
             while (attempts < 6) {
               let collision = false;
@@ -468,7 +473,8 @@ const patternRenderer = (() => {
                 }
               }
               if (!collision) break;
-              labelY += (lb.placement === 'top' ? 1 : -1) * (boxH + 2);
+              // [Audit A-1 BUG FIX] 충돌 시 차트 밖으로 탈출: top→위(−Y), bottom→아래(+Y)
+              labelY += (lb.placement === 'top' ? -1 : 1) * (boxH + 2);
               attempts++;
             }
 
@@ -481,7 +487,7 @@ const patternRenderer = (() => {
 
             const boxX = lb.x - boxW / 2;
             const boxY = labelY - boxH / 2;
-            const radius = 3;
+            const radius = fontSize <= 10 ? 2 : 3;
 
             // [Phase2-B] Active 패턴: 배경 틴트 + 두꺼운 테두리, Expired: 흐린 배경
             var isActive = lb.outcome === 'active';
@@ -511,27 +517,37 @@ const patternRenderer = (() => {
             ctx.fill();
 
             // ── 테두리 (Active: 두껍고 불투명, Expired: 흐림) ──
+            // [Audit B-2] 저신뢰 패턴(confidence<50): 점선 테두리로 불확실성 표현
+            var confScore = lb.confidence != null ? lb.confidence : 50;
+            var isLowConf = confScore < 50;
             ctx.strokeStyle = lb.color;
             if (isActive) {
-              ctx.lineWidth = 1.8;
+              ctx.lineWidth = isLowConf ? 1.2 : 1.8;
               ctx.globalAlpha = 1.0;
+              if (isLowConf) ctx.setLineDash([2, 3]);
             } else {
               var wcAlpha = lb.wc != null ? Math.min(0.3 + 0.5 * lb.wc, 1.0) : 0.65;
               ctx.lineWidth = lb.wc != null ? Math.max(0.5, Math.min(lb.wc * 1.2, 2.0)) : 0.8;
               ctx.globalAlpha = wcAlpha * agingAlpha;
+              if (isLowConf) ctx.setLineDash([2, 3]);
             }
             ctx.beginPath();
             _roundRect(ctx, boxX, boxY, boxW, boxH, radius);
             ctx.stroke();
+            ctx.setLineDash([]);
             ctx.globalAlpha = agingAlpha;
 
             // ── 텍스트 ──
+            // [Audit D-2] 극저 신뢰(confidence<35): 텍스트 반투명 처리 (ghost label)
+            var textAlpha = confScore < 35 ? 0.55 : agingAlpha;
+            ctx.globalAlpha = textAlpha;
             ctx.fillStyle = lb.color;
             ctx.fillText(lb.text, lb.x + 1.5, labelY);
 
             // ── 적중 상태 도트 (Active=금색◌ / Hit=빨강● / Failed=파랑●) ──
             ctx.globalAlpha = 1;
-            if (lb.outcome) {
+            // [Audit D-3] 극저 신뢰 패턴은 도트 생략 — 추적 의미 없음
+            if (lb.outcome && confScore >= 35) {
               const dotX = boxX + boxW + 5;
               const dotR = isActive ? 4.5 : 3.5;
               ctx.beginPath();
@@ -549,6 +565,10 @@ const patternRenderer = (() => {
                 ctx.stroke();
               }
             }
+            // [Audit A-2] Canvas2D state leak 방지: 다음 라벨 iteration 전 초기화
+            ctx.globalAlpha = 1;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
           });
         }
 
@@ -871,6 +891,8 @@ const patternRenderer = (() => {
       });
 
       const data = _emptyData();
+      // [Audit C-1] Zoom-adaptive: visibleBars를 draw data에 전달
+      data._visibleBars = src._visibleBars || 200;
 
       patterns.forEach(p => {
         // ── 단일 캔들 패턴: 글로우 하이라이트 ──
@@ -1833,9 +1855,10 @@ const patternRenderer = (() => {
     updateAllViews() { this._view.update(); }
     paneViews() { return [this._view]; }
 
-    setPatterns(candles, patterns, extendedLines) {
+    setPatterns(candles, patterns, extendedLines, visibleBars) {
       this._patterns = { candles, patterns };
       this._extendedLines = extendedLines || [];
+      this._visibleBars = visibleBars || 200;
       if (this._requestUpdate) this._requestUpdate();
     }
 
@@ -1966,7 +1989,7 @@ const patternRenderer = (() => {
       if (bHasTarget !== aHasTarget) return bHasTarget - aHasTarget;
       return (b.confidence || 0) - (a.confidence || 0);
     });
-    _primitive.setPatterns(candles, sorted.slice(0, effectiveMax), extendedStructLines);
+    _primitive.setPatterns(candles, sorted.slice(0, effectiveMax), extendedStructLines, visibleBars);
   }
 
   function cleanup() {

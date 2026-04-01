@@ -104,21 +104,19 @@
         <div class="sb-view-group" id="sb-view-group">
           <button class="sb-view-opt active" data-view="default" title="기본">기본</button>
           <button class="sb-view-opt" data-view="analysis" title="상세">상세</button>
-          <button class="sb-view-opt" data-view="screener" title="전종목 패턴 스캔">스크린</button>
+          <!-- 스크리너 비활성화 (2026-04-06): 필요성 재검토 후 복원 가능 -->
+          <!-- <button class="sb-view-opt" data-view="screener" title="전종목 패턴 스캔">스크린</button> -->
         </div>
         <button class="sb-chip sb-pattern-only-chip" data-filter="patternOnly" style="display:none">패턴 감지만</button>
       </div>
       <div class="sb-body">
-        <!-- 스크리너 패널 -->
+        <!-- 스크리너 패널 — 비활성화 (2026-04-06) -->
+        <!--
         <div class="sb-section sb-screener-panel" id="sb-screener-panel" style="display:none">
           <div class="sb-screener-controls">
-            <select class="sb-sort-select" id="sb-screener-ptn">
-              <option value="">모든 패턴</option>
-            </select>
+            <select class="sb-sort-select" id="sb-screener-ptn"><option value="">모든 패턴</option></select>
             <select class="sb-sort-select" id="sb-screener-dir">
-              <option value="">방향 전체</option>
-              <option value="bullish">상승</option>
-              <option value="bearish">하락</option>
+              <option value="">방향 전체</option><option value="bullish">상승</option><option value="bearish">하락</option>
             </select>
             <button class="sb-screener-run-btn" id="sb-screener-run">전종목 스캔</button>
           </div>
@@ -128,6 +126,7 @@
           <div class="sb-screener-status" id="sb-screener-status">스캔 준비</div>
           <div class="sb-list" id="sb-screener-results"></div>
         </div>
+        -->
         <!-- 즐겨찾기 섹션 -->
         <div class="sb-section" id="sb-watchlist-section" style="display:none">
           <div class="sb-header" id="sb-watchlist-header">
@@ -680,10 +679,10 @@
   <script defer src="js/api.js?v=13"></script>
   <script defer src="js/realtimeProvider.js?v=10"></script>
   <script defer src="js/indicators.js?v=21"></script>
-  <script defer src="js/patterns.js?v=37"></script>
-  <script defer src="js/signalEngine.js?v=30"></script>
+  <script defer src="js/patterns.js?v=38"></script>
+  <script defer src="js/signalEngine.js?v=31"></script>
   <script defer src="js/chart.js?v=12"></script>
-  <script defer src="js/patternRenderer.js?v=20"></script>
+  <script defer src="js/patternRenderer.js?v=21"></script>
   <script defer src="js/signalRenderer.js?v=12"></script>
   <script defer src="js/backtester.js?v=32"></script>
   <script defer src="js/sidebar.js?v=12"></script>

@@ -38,9 +38,11 @@ class PatternEngine {
    *  [T-5] 0.3→0.5: Nison (1991) "long real body" 기준. 0.3은 과감지 유발 (n=103K) */
   static THREE_SOLDIER_BODY_MIN = 0.5;
 
-  /** ATR 대비 최소 body — 장악형 이전 봉 / 현재 봉 */
-  static ENGULF_PREV_BODY_MIN = 0.1;
-  static ENGULF_CURR_BODY_MIN = 0.2;
+  /** ATR 대비 최소 body — 장악형 이전 봉 / 현재 봉
+   *  [Audit] 0.1→0.2: Nison "visible real body" 기준. 0.1은 도지급 봉 포함으로
+   *  장악 심리(공포→탐욕 전환) 미성립. HARAMI_PREV_BODY_MIN(0.3)보다 느슨 유지 */
+  static ENGULF_PREV_BODY_MIN = 0.2;
+  static ENGULF_CURR_BODY_MIN = 0.25;
 
   /** 장악 봉의 body 배율 — KRX 가격제한폭(30%) 고려
    *  [T-4] 1.2→1.5: 1.2x는 과감지 (n=103K). Nison "clearly engulfs" → 1.5x가 KRX 적정 */
@@ -1309,25 +1311,33 @@ class PatternEngine {
           currBody < a * PatternEngine.ENGULF_CURR_BODY_MIN) continue;
 
       // Bulkowski: 장악 봉의 body가 이전 봉 body보다 유의미하게 커야 유효
-      // KRX 가격제한폭(30%) 고려하여 1.2배로 설정 (국제 기준 1.3배보다 보수적)
+      // [T-4] KRX 가격제한폭(30%) 고려. 1.5x — Nison "clearly engulfs" 기준
       if (currBody < prevBody * PatternEngine.ENGULF_BODY_MULT) continue;
 
       const trend = this._detectTrend(candles, i - 1, 10, a);
-      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      // [Audit Fix-4] Wyckoff: 거래량 동반 없는 반전은 무효 — VMA 0.7배 미만 거부
+      const vr = this._volRatio(candles, i, vma);
+      if (vr < 0.7) continue;
+      const volumeScore = Math.min(vr / 2, 1);
       const bodyScore = Math.min(currBody / a, 1);
 
       // 상승 장악형
       if (prev.close < prev.open && curr.close > curr.open) {
         if (curr.open <= prev.close && curr.close >= prev.open) {
           if (trend.direction === 'up') continue;  // [Fix-MED] 상승 추세에서 상승 반전 불필요 — 반전 패턴 원칙
-          const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
-          // [Phase I-L0] extra: 장악 비율 초과분 — ENGULF_BODY_MULT(1.2) 이상 얼마나 더 큰지
-          // currBody = prevBody * 1.2 → extra 0, currBody = prevBody * 3.2 → extra 1.0
+          // [Audit Fix-2] neutral 추세 trendScore 0.3→0.1: Nison — 선행 하락추세 필수
+          const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.1;
+          // [Phase I-L0] extra: 장악 비율 초과분 — ENGULF_BODY_MULT(1.5) 이상 얼마나 더 큰지
+          // currBody = prevBody * 1.5 → extra 0, currBody = prevBody * 3.5 → extra 1.0
           const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
-          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
-          // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
-          // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
-          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 90);
+          // [Audit Fix-1] shadow 동적 계산: close가 range 상단에 가까울수록 강한 반전 (Nison 1991)
+          const currRange = curr.high - curr.low;
+          const upperShadow = curr.high - curr.close;
+          const shadowScore = currRange > 0 ? Math.max(0, Math.min(1 - upperShadow / currRange, 1)) : 0.5;
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: shadowScore, extra: engulfExtra });
+          // [Audit Fix-5] 거래량 보너스/패널티: Nison "above-average volume strengthens"
+          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, 90);
+          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, 10);
           results.push({
             type: 'bullishEngulfing', name: '상승장악형 (Bullish Engulfing)', nameShort: '상승장악',
             signal: 'buy', strength: 'strong', confidence,
@@ -1344,14 +1354,19 @@ class PatternEngine {
       if (prev.close > prev.open && curr.close < curr.open) {
         if (curr.open >= prev.close && curr.close <= prev.open) {
           if (trend.direction === 'down') continue;  // [Fix-MED] 하락 추세에서 하락 반전 불필요 — 반전 패턴 원칙
-          const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+          // [Audit Fix-2] neutral 추세 trendScore 0.3→0.1: Nison — 선행 상승추세 필수
+          const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.1;
           // [H-1 FIX] extra: 장악 비율 초과분 (상승장악형 engulfExtra 대칭)
-          // currBody = prevBody * 1.2 → extra 0, currBody = prevBody * 3.2 → extra 1.0
+          // currBody = prevBody * 1.5 → extra 0, currBody = prevBody * 3.5 → extra 1.0
           const engulfExtra = Math.max(0, Math.min((currBody / prevBody - PatternEngine.ENGULF_BODY_MULT) / 2, 1));
-          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, extra: engulfExtra });
-          // [ACC] 거래량 확인: 장악 봉의 거래량이 이전 봉 대비 1.2배 이상이면 +10%
-          // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
-          if (curr.volume > prev.volume * 1.2) confidence = Math.min(confidence + 10, 90);
+          // [Audit Fix-1] shadow 동적 계산: close가 range 하단에 가까울수록 강한 반전 (bearish 대칭)
+          const currRange = curr.high - curr.low;
+          const lowerShadow = curr.close - curr.low;
+          const shadowScore = currRange > 0 ? Math.max(0, Math.min(1 - lowerShadow / currRange, 1)) : 0.5;
+          let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: shadowScore, extra: engulfExtra });
+          // [Audit Fix-5] 거래량 보너스/패널티: Nison "above-average volume strengthens"
+          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, 90);
+          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, 10);
           results.push({
             type: 'bearishEngulfing', name: '하락장악형 (Bearish Engulfing)', nameShort: '하락장악',
             signal: 'sell', strength: 'strong', confidence,

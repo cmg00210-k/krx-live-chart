@@ -125,7 +125,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'medium',
     tier: 2,
-    baseConfidence: 60, // [E-4] bullishEngulfing WR=43.5% + MACD 조건부 배수
+    baseConfidence: 48, // [Audit] bullishEngulfing WR=41.3% → MACD조건부 추정 ~48%. 60은 +18.7pp 과대
     required: ['bullishEngulfing', 'macdBullishCross'],
     optional: ['maAlignment_bull'],
     optionalBonus: 4,
