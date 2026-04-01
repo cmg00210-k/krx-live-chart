@@ -504,7 +504,76 @@ for iteration = 1, 2, ... do
 end
 ```
 
-### 3.5 포트폴리오 할당에의 적용
+### 3.5 Soft Actor-Critic (SAC)
+
+Haarnoja et al. (2018), *Soft Actor-Critic: Off-Policy Maximum Entropy
+Deep Reinforcement Learning with a Stochastic Actor*, ICML
+
+SAC는 엔트로피 정규화 보상을 최대화하는 off-policy actor-critic 알고리즘이다.
+
+```
+엔트로피 정규화 목적 함수:
+  J_SAC = E[Σ_{t=0}^{T} γᵗ (r_t + α · H(π(·|s_t)))]
+
+  H(π(·|s_t)) = -E_π[log π(a|s_t)]  — 정책의 엔트로피
+  α: 온도 파라미터 (temperature) — 탐험-활용 균형 제어
+
+Q 함수 업데이트 (soft Bellman):
+  Q(s,a) ← r + γ · E_{s'}[V(s')]
+  V(s) = E_{a~π}[Q(s,a) - α · log π(a|s)]
+
+정책 업데이트:
+  π* = argmin_π D_KL(π(·|s) || exp(Q(s,·)/α) / Z(s))
+
+핵심 특성:
+  1) 연속 행동 공간에 최적 — 포지션 크기를 [-1, +1] 범위로 연속 조절
+  2) Off-policy — 경험 재생 버퍼 사용, 데이터 효율적
+  3) 자동 온도 조절 (α auto-tuning) — 하이퍼파라미터 감소
+  4) 확률적 정책 — 불확실한 시장 상태에서 자연스러운 탐험
+
+금융 적용 시 PPO 대비 장점:
+  - 연속적 포지션 크기 조절이 필수인 포트폴리오 관리에 적합
+  - Off-policy이므로 과거 거래 경험의 재활용 효율이 높음
+  - 엔트로피 항이 과도한 집중 매매를 억제 (분산 효과)
+```
+
+### 3.6 오프라인 강화학습 (Offline RL)
+
+금융 데이터에서 온라인 탐험(online exploration)은 실제 자금 손실을 수반하므로
+극히 비용이 높다. 오프라인 RL은 사전 수집된 과거 데이터만으로 정책을 학습한다.
+
+```
+Conservative Q-Learning (CQL):
+  Kumar et al. (2020), "Conservative Q-Learning for Offline Reinforcement
+  Learning", NeurIPS
+
+CQL 목적 함수:
+  min_Q α · E_{s~D}[log Σ_a exp(Q(s,a)) - E_{a~π_β}[Q(s,a)]]
+       + (1/2) · E_{(s,a,r,s')~D}[(Q - B̂^π Q̂)²]
+
+  D: 오프라인 데이터셋 (과거 거래 이력)
+  π_β: 데이터 수집 정책 (behavior policy)
+  B̂^π: soft Bellman 연산자
+
+핵심 아이디어:
+  → OOD(out-of-distribution) 행동의 Q값을 보수적으로 과소 평가
+  → 데이터에서 관측된 행동에 대해서만 신뢰할 수 있는 Q값 학습
+  → 온라인 탐험 없이도 안전한 정책 도출
+
+금융 적용 가치:
+  1) 과거 백테스트 데이터 = 오프라인 데이터셋
+  2) 실제 매매 없이 정책 학습 가능 (탐험 비용 = 0)
+  3) 데이터에 없는 극단적 포지션을 자동 회피 (보수적 Q 추정)
+  4) 한계: 데이터 수집 정책(과거 전략)의 커버리지가 부족하면
+     최적 정책과의 괴리 불가피 — 충분히 다양한 과거 이력 필요
+```
+
+Decision Transformer (Chen et al., 2021):
+  RL을 시퀀스 모델링으로 재정의 — Transformer 아키텍처로
+  (return, state, action) 시퀀스를 자기회귀 예측.
+  금융에서는 "목표 수익률을 조건부로 최적 행동을 생성"하는 프레임워크로 활용 가능.
+
+### 3.7 포트폴리오 할당에의 적용
 
 Jiang et al. (2017), *Deep Reinforcement Learning for Portfolio Management*
 
@@ -876,7 +945,7 @@ RL 에이전트의 암묵적 특징 선택:
 | REINFORCE | 정책 기반 | 이산/연속 | 낮음 | 낮음 | 학습 기준선 |
 | A2C/A3C | Actor-Critic | 이산/연속 | 중간 | 중간 | 범용 거래 |
 | PPO | Actor-Critic | 이산/연속 | 중간 | 높음 | 포트폴리오 관리 |
-| SAC | Actor-Critic | 연속 | 높음 | 높음 | 연속 포지션 조절 |
+| SAC | Actor-Critic | 연속 | 높음 | 높음 | 연속 포지션 조절 (§3.5) |
 
 ---
 

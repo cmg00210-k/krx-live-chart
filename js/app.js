@@ -2636,6 +2636,9 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // taylor_gap > 0: 과도한 긴축 → 성장주 억압, 매도 지지
     // taylor_gap < 0: 과도한 완화 → 성장주 부양, 매수 지지
     // dead band: |gap| < 0.5%p → 조정 없음 (#141=0.25 normalized)
+    // Sign convention: taylor_gap = i_actual - i_Taylor (Doc30 §4.1)
+    //   gap > 0 → overtly tight (hawkish) → negative for equities → sell boost
+    //   gap < 0 → overtly loose (dovish) → positive for equities → buy boost
     var taylorGap = macro ? macro.taylor_gap : null;
     if (taylorGap != null) {
       // tgNorm: gap을 [-2, +2] 범위에서 [-1, +1]로 정규화
@@ -2720,6 +2723,7 @@ function _updateMicroContext(candleData) {
           hhi += sh * sh;
         }
         // HHI_MEAN_REV_COEFF = 0.10 (#119, Doc33 §6.2)
+        // TODO: eps_stability factor from Doc33 §5.2 — requires quarterly EPS variance data
         hhiBoost = 0.10 * hhi;
       }
     }
@@ -2868,9 +2872,9 @@ function _analyzeOnMainThread() {
   detectedPatterns = patternEngine.analyze(analyzeCandles, { timeframe: currentTimeframe, market: currentStock && currentStock.market ? currentStock.market : '' });
   const result = signalEngine.analyze(analyzeCandles, detectedPatterns);
   detectedSignals = result.signals;
-  // [Phase I] Prospect theory loss aversion boost — Kahneman & Tversky (1979)
-  if (detectedPatterns._srLevels && typeof signalEngine.applyProspectBoost === 'function') {
-    signalEngine.applyProspectBoost(detectedSignals, analyzeCandles, detectedPatterns._srLevels, result.cache);
+  // [Phase I] S/R proximity boost — support/resistance 근접 신호 강화
+  if (detectedPatterns._srLevels && typeof signalEngine.applySRProximityBoost === 'function') {
+    signalEngine.applySRProximityBoost(detectedSignals, analyzeCandles, detectedPatterns._srLevels, result.cache);
   }
   // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
   _applyMarketContextToPatterns(detectedPatterns);

@@ -568,9 +568,10 @@ KOSDAQ 소형주 보정:
   — 시총 50억 종목:  실질 임계값 2.0 × 1.50 = 3.00
 ```
 
-**CheeseStock 매핑:** `calcAttentionState()` 함수를 `indicators.js`에 추가하고,
-`signalEngine.js`의 신뢰도 산출 과정에서 `confidenceAdj`를 가감산한다.
-`data/index.json`의 `mktCap` 필드를 활용하여 시가총액 보정을 적용한다.
+**CheeseStock 매핑:** 주의 상태 함수는 `indicators.js`의 `IndicatorCache.attentionState(idx, lookback)`로
+구현 완료되었다 (함수명이 본 문서의 `calcAttentionState()`와 다름에 주의). 구현체는
+거래량 백분위(q30/q70) 기반 deprivation/jump 분류를 사용하며, 본 문서의 설계와
+방향은 동일하나 인터페이스 세부사항이 다를 수 있다. 코드를 authoritative로 참조할 것.
 
 참고문헌:
 - Barber, B.M. & Odean, T. (2008). All That Glitters. *RFS*, 21(2), 785-818.
@@ -883,10 +884,11 @@ detectValuationSR(candles, financial) → valuationLevels[]
     — 이론적으로 가장 강한 지지/저항
 ```
 
-**CheeseStock 매핑:** `detectValuationSR()`은 `patterns.js`의 지지/저항 분석과
-통합하여 사용한다. `financials.js`의 `getFinancialData()`에서 BPS, EPS, DPS를
-추출하고, 이를 가격 임계값으로 변환한다. 현재 `patterns.js`의 `_supportResistance()`에
-밸류에이션 레벨을 추가 입력으로 제공하는 확장이 가능하다.
+**CheeseStock 매핑:** `detectValuationSR()`은 `patterns.js`에 구현 완료되었다
+(line ~3247, `patternEngine.detectValuationSR(currentPrice, financialData)`).
+`financials.js`의 `getFinancialData()`에서 BPS, EPS, DPS를 추출하고,
+이를 가격 임계값으로 변환한다. 본 문서의 설계 사양과 실제 구현 간
+세부 차이가 있을 수 있으므로, 코드를 authoritative로 참조할 것.
 
 | 상수 | 값 | 등급 | 학습 | 범위 | 출처 |
 |------|---|------|------|------|------|

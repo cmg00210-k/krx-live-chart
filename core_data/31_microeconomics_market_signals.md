@@ -250,6 +250,13 @@ threshold(ε_VP) = 2.0 * (5.0 / max(ε_VP, 1.0))^0.3
 
 ### 2.2 교차탄력성 — 섹터 로테이션 민감도 (Cross-Elasticity and Sector Rotation)
 
+> **Methodology Disclaimer:** 본 절의 탄력성 추정치는 단면(cross-sectional) OLS 회귀에
+> 기반한다. 가격과 수요(거래량)의 동시성(simultaneity) — 즉 가격이 수요에 영향을
+> 주는 동시에 수요가 가격에 영향을 주는 내생성(endogeneity) 문제 — 가 해결되지
+> 않았다. 따라서 아래 추정치는 인과적 효과(causal effect)가 아닌 기술적 연관성
+> (descriptive association)으로 해석해야 한다. 인과 추론이 필요한 경우 도구변수법
+> (IV) 또는 자연실험(natural experiment) 설계가 요구된다.
+
 교차가격탄력성(cross-price elasticity)은 한 재화의 가격 변동이 다른 재화의
 수요에 미치는 영향을 측정한다. 증권시장에서 이는 섹터 간 자금 흐름의
 대체/보완 관계로 대응된다.
@@ -1120,9 +1127,14 @@ Doc 29의 MCS (일반균형 Layer 1)가 거시 레짐을 판별하여 패턴 신
 
 | # | 상수명 | 위치 | 현재값 | 등급 | 학습 | 범위 | 출처 |
 |---|-------|------|-------|------|------|------|------|
-| 99 | VPE_threshold_base | signalEngine.js | 2.0 | [C] | [L:GCV] | 1.0-3.0 | Marshall (1890) VPE 이론 |
-| 100 | VPE_exponent | signalEngine.js | 0.3 | [C] | [L:GCV] | 0.1-0.5 | 경험적 비선형 스케일 |
-| 101 | VPE_reference | signalEngine.js | 5.0 | [B] | [L:MAN] | 3.0-8.0 | KRX 시장 평균 VPE |
+| 99 | VPE_threshold_base | signalEngine.js | 2.0 | [C] | [L:GCV] | 1.0-3.0 | PROPOSED: Marshall (1890) VPE 이론 |
+| 100 | VPE_exponent | signalEngine.js | 0.3 | [C] | [L:GCV] | 0.1-0.5 | PROPOSED: 경험적 비선형 스케일 |
+| 101 | VPE_reference | signalEngine.js | 5.0 | [B] | [L:MAN] | 3.0-8.0 | PROPOSED: KRX 시장 평균 VPE |
+
+> **PROPOSED:** 상수 #99-#101 (Value-Price-Earnings elasticity)은 Marshall (1890)의
+> 가격탄력성 이론을 증권시장에 확장 적용한 이론적 제안(theoretical proposal)이다.
+> KRX 데이터로의 실증 검증이 수행되지 않았으며, `calcVPE()` 함수도 미구현 상태이다.
+> 실제 적용 전 반드시 백테스트 검증이 필요하다.
 | 102 | α_cycle | backtester.js | 0.03 | [C] | [L:WLS] | 0.01-0.06 | 경기순환 탄력성 보정 |
 | 103 | β_chaebol_align | patterns.js | +0.05 | [D] | [L:WLS] | 0.02-0.10 | 재벌 전이 문헌 |
 | 104 | β_chaebol_misalign | patterns.js | -0.05 | [D] | [L:WLS] | -0.10 ~ -0.02 | 재벌 전이 문헌 |

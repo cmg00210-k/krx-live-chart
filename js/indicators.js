@@ -18,7 +18,8 @@ function calcMA(data, n) {
 
 /** 지수 이동평균 (EMA) — 첫 N개 SMA로 초기값 설정 (정확도 개선) */
 function calcEMA(data, n) {
-  if (!data.length) return [];
+  if (!data || !data.length) return [];
+  if (n <= 0) return [];
   if (data.length < n) return data.map(() => null);
 
   const k = 2 / (n + 1);
@@ -38,6 +39,7 @@ function calcEMA(data, n) {
 
 /** 볼린저 밴드 (BB) */
 function calcBB(closes, n = 20, mult = 2) {
+  if (!closes || !closes.length) return [];
   return closes.map((_, i) => {
     if (i < n - 1) return { upper: null, lower: null, mid: null };
     const sl = closes.slice(i - n + 1, i + 1);
@@ -162,13 +164,14 @@ function calcKalman(closes, Q = 0.01, R = 1.0) {
   let P = 1.0;          // 추정 오차
   result[0] = x;
 
-  // Adaptive Q: EWMA 변동성으로 Q 스케일링 — Mehra (1970), Mohamed & Schwarz (1999)
+  // Adaptive Q: Mohamed & Schwarz (1999), "Adaptive Kalman Filtering for INS/GPS"
   // Q_t = Q_base * (σ_t / σ̄)^2. 저변동성 → 부드러움, 고변동성 → 민감
   var ewmaVar = 0, ewmaAlpha = 0.06; // ~2/(30+1) for 30-bar EWMA
   var varSum = 0, varCount = 0;
 
   for (let i = 1; i < closes.length; i++) {
-    var ret = (closes[i] - closes[i - 1]) / (closes[i - 1] || 1);
+    if (closes[i - 1] <= 0) continue;
+    var ret = (closes[i] - closes[i - 1]) / closes[i - 1];
     ewmaVar = ewmaAlpha * ret * ret + (1 - ewmaAlpha) * ewmaVar;
     varSum += ewmaVar; varCount++;
     var meanVar = varSum / varCount;
@@ -221,6 +224,7 @@ function calcHurst(closes, minWindow = 10) {
       let cum = 0;
       for (const d of devs) { cum += d; cumDevs.push(cum); }
       const R = Math.max(...cumDevs) - Math.min(...cumDevs);
+      // Population σ (1/n) per Mandelbrot & Wallis (1969) convention for R/S analysis
       const S = Math.sqrt(devs.reduce((a, d) => a + d * d, 0) / w);
       if (S > 0) { rsSum += R / S; validBlocks++; }
     }
@@ -229,7 +233,7 @@ function calcHurst(closes, minWindow = 10) {
     logN.push(Math.log(w));
   }
 
-  if (logRS.length < 2) return null;
+  if (logRS.length < 4) return null;
   // 선형 회귀로 기울기(H) 추정 — log(R/S) = H * log(n) + c
   const n = logRS.length;
   var sx = 0, sy = 0, sxy = 0, sx2 = 0;
@@ -287,6 +291,7 @@ function calcHillEstimator(returns, k) {
 
   var alpha = k / sumLog;
   // 점근 표준오차: se = α / sqrt(k) — Hill (1975)
+  // NOTE: Hill SE assumes IID; for dependent data, decluster extremes or use block bootstrap (Drees & Kaufmann, 1998)
   var se = alpha / Math.sqrt(k);
 
   return { alpha: alpha, se: se, isHeavyTail: alpha < 4, k: k };
@@ -332,6 +337,7 @@ function calcGPDFit(returns, quantile) {
   if (Nu < 20) return null;
 
   // PWM 추정 — exc를 오름차순 정렬
+  // NOTE: PWM estimator valid only for xi < 0.5 (Hosking & Wallis, 1987); beyond this, use MLE
   exc.sort(function(a, b) { return a - b; });
   var b0 = 0, b1 = 0;
   for (var i = 0; i < Nu; i++) {
@@ -346,6 +352,7 @@ function calcGPDFit(returns, quantile) {
 
   var xi = 2 - b0 / denom;
   var sigma = 2 * b0 * b1 / denom;
+  if (xi >= 0.5) xi = 0.499;  // PWM validity guard: clamp xi < 0.5 (Hosking & Wallis, 1987)
   if (sigma <= 0 || xi >= 1 || xi <= -0.5) return null;  // 유효 범위 확인
 
   // VaR at quantile p
@@ -436,10 +443,12 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
     }
   }
 
-  // R-squared
-  var ssRes = 0, ssTot = varI * T;
+  // R-squared using the final beta (Scholes-Williams corrected if active)
+  // Recompute alpha for the corrected beta to ensure consistent R²
+  var alphaFinal = meanRi - beta * meanRm;
+  var ssRes = 0, ssTot = varI;
   for (var i = 0; i < T; i++) {
-    var pred = alpha + beta0 * mr[i];
+    var pred = alphaFinal + beta * mr[i];
     var err = sr[i] - pred;
     ssRes += err * err;
   }
@@ -447,7 +456,7 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
 
   return {
     beta: +beta.toFixed(3),
-    alpha: +(alpha * 252).toFixed(4),  // 연율화 Jensen's alpha
+    alpha: +(alphaFinal * 252).toFixed(4),  // 연율화 Jensen's alpha (SW-corrected)
     rSquared: +rSq.toFixed(3),
     thinTrading: thinTrading,
     nObs: T,
@@ -526,7 +535,11 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     ssRes += w * residuals[i] * residuals[i];
     ssTot += w * (y[i] - yBarW) * (y[i] - yBarW);
   }
-  var rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+  var rSquared = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0;
+
+  // Adjusted R² — penalizes model complexity (Theil 1961)
+  // adjR² = 1 - (1-R²)(n-1)/(n-p-1), guards against overfitting with many features
+  var adjR2 = n > p + 1 ? 1 - (1 - rSquared) * (n - 1) / (n - p - 1) : rSquared;
 
   // 계수 표준오차
   var df = n - p;
@@ -559,10 +572,10 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
         }
       }
       var denom = (1 - Math.min(h_ii, 0.99));
-      var eScaled = w * residuals[i] / (denom * denom);  // w * e_i / (1-h_ii)^2
+      var eScaled = w * w * residuals[i] / (denom * denom);  // w² * e_i / (1-h_ii)^2 — HC3 (MacKinnon & White 1985)
       for (var j = 0; j < p; j++) {
         for (var k = 0; k < p; k++) {
-          meat[j][k] += X[i][j] * w * eScaled * residuals[i] * X[i][k];
+          meat[j][k] += X[i][j] * eScaled * residuals[i] * X[i][k];
         }
       }
     }
@@ -581,9 +594,69 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     });
   }
 
+  // VIF diagnostic for multicollinearity — Marquardt (1970), Belsley, Kuh & Welsch (1980)
+  // VIF_j = 1/(1 - R²_j) where R²_j from auxiliary OLS: regress X_j on all other features.
+  // Full auxiliary OLS (O(p³n)), feasible since p <= 10 in this system.
+  // VIF > 5 flags moderate multicollinearity; VIF > 10 flags severe (Kutner et al. 2005).
+  var vifs = [];
+  if (p > 1) {
+    for (var j = 1; j < p; j++) {
+      // Auxiliary OLS: regress X_j on all other features (including intercept col 0)
+      var otherCols = [];
+      for (var c = 0; c < p; c++) { if (c !== j) otherCols.push(c); }
+      var pAux = otherCols.length;
+      // Build auxiliary design matrix Z and response yAux
+      var Z = new Array(n);
+      var yAux = new Array(n);
+      for (var i = 0; i < n; i++) {
+        yAux[i] = X[i][j];
+        Z[i] = new Array(pAux);
+        for (var ci = 0; ci < pAux; ci++) Z[i][ci] = X[i][otherCols[ci]];
+      }
+      // Z'Z
+      var ZtZ = new Array(pAux);
+      for (var a = 0; a < pAux; a++) {
+        ZtZ[a] = new Array(pAux).fill(0);
+        for (var b = 0; b < pAux; b++) {
+          for (var i = 0; i < n; i++) ZtZ[a][b] += Z[i][a] * Z[i][b];
+        }
+      }
+      var ZtZinv = _invertMatrix(ZtZ);
+      var r2j = 0;
+      if (ZtZinv) {
+        // Z'y
+        var Zty = new Array(pAux).fill(0);
+        for (var a = 0; a < pAux; a++) {
+          for (var i = 0; i < n; i++) Zty[a] += Z[i][a] * yAux[i];
+        }
+        // beta_aux = inv(Z'Z) * Z'y
+        var betaAux = new Array(pAux).fill(0);
+        for (var a = 0; a < pAux; a++) {
+          for (var b = 0; b < pAux; b++) betaAux[a] += ZtZinv[a][b] * Zty[b];
+        }
+        // R²_j = 1 - SSres/SStot
+        var meanJ = 0;
+        for (var i = 0; i < n; i++) meanJ += yAux[i];
+        meanJ /= n;
+        var ssTot = 0, ssRes = 0;
+        for (var i = 0; i < n; i++) {
+          var pred = 0;
+          for (var a = 0; a < pAux; a++) pred += Z[i][a] * betaAux[a];
+          ssRes += (yAux[i] - pred) * (yAux[i] - pred);
+          ssTot += (yAux[i] - meanJ) * (yAux[i] - meanJ);
+        }
+        r2j = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+        r2j = Math.max(0, Math.min(r2j, 0.9999)); // clamp to avoid division by zero
+      }
+      var vifJ = 1 / (1 - r2j);
+      vifs.push({ feature: j, vif: +vifJ.toFixed(2), flag: vifJ > 5 });
+    }
+  }
+
   return {
     coeffs: coeffs,
     rSquared: rSquared,
+    adjR2: adjR2,
     stdErrors: stdErrors,
     tStats: tStats,
     hcStdErrors: hcStdErrors,
@@ -592,6 +665,7 @@ function calcWLSRegression(X, y, weights, ridgeLambda) {
     fitted: fitted,
     sigmaHat2: sigmaHat2,
     invXtWX: inv,
+    vifs: vifs,
   };
 }
 
@@ -1123,63 +1197,6 @@ function calcWilliamsR(candles, period = 14) {
   return wr;
 }
 
-/** [DEAD] 모멘텀 (Momentum) — 미사용, 향후 composite 후보
- *  Momentum = close[i] - close[i - period]
- *  @param {number[]} closes — 종가 배열
- *  @param {number} period — 비교 기간 (기본 10)
- *  @returns {number[]} — 모멘텀 배열
- */
-function calcMomentum(closes, period = 10) {
-  const len = closes.length;
-  const mom = new Array(len).fill(null);
-  if (len <= period) return mom;
-
-  for (let i = period; i < len; i++) {
-    mom[i] = closes[i] - closes[i - period];
-  }
-  return mom;
-}
-
-/** [DEAD] 어썸 오실레이터 (Awesome Oscillator) — 미사용, 향후 composite 후보
- *  Median Price = (High + Low) / 2
- *  AO = SMA(Median, shortPeriod) - SMA(Median, longPeriod)
- *  @param {Array} candles — OHLCV 캔들 배열
- *  @param {number} shortPeriod — 단기 SMA 기간 (기본 5)
- *  @param {number} longPeriod — 장기 SMA 기간 (기본 34)
- *  @returns {number[]} — AO 배열
- */
-function calcAwesomeOscillator(candles, shortPeriod = 5, longPeriod = 34) {
-  const len = candles.length;
-  const ao = new Array(len).fill(null);
-  if (len < longPeriod) return ao;
-
-  const median = candles.map(c => (c.high + c.low) / 2);
-  const shortMA = calcMA(median, shortPeriod);
-  const longMA = calcMA(median, longPeriod);
-
-  for (let i = 0; i < len; i++) {
-    if (shortMA[i] !== null && longMA[i] !== null) {
-      ao[i] = shortMA[i] - longMA[i];
-    }
-  }
-  return ao;
-}
-
-// ══════════════════════════════════════════════════════
-//  [DEAD] RSI Fisher Transform — Amari (1985), core_data/13 §7.3
-//  RSI를 정규분포에 가까운 공간으로 변환, 극단값 거짓 신호 감소
-//  rsi_fisher = 0.5 * ln((1+r)/(1-r)), r = 2*(RSI/100) - 1
-//  미사용 — IndicatorCache.rsiFisher()도 외부 호출 없음
-// ══════════════════════════════════════════════════════
-
-function calcRSIFisher(rsiArray) {
-  return rsiArray.map(function(v) {
-    if (v === null || v === undefined) return null;
-    var r = Math.max(-0.999, Math.min(0.999, 2 * (v / 100) - 1));
-    return 0.5 * Math.log((1 + r) / (1 - r));
-  });
-}
-
 
 // ══════════════════════════════════════════════════════
 //  Theil-Sen Robust Trendline — Theil (1950), Sen (1968)
@@ -1207,14 +1224,16 @@ function calcTheilSen(xValues, yValues) {
   }
   if (slopes.length === 0) return null;
   slopes.sort(function(a, b) { return a - b; });
-  var medSlope = slopes[Math.floor(slopes.length / 2)];
+  var mid = Math.floor(slopes.length / 2);
+  var medSlope = slopes.length % 2 === 1 ? slopes[mid] : (slopes[mid - 1] + slopes[mid]) / 2;
   // Median intercept
   var intercepts = [];
   for (var k = 0; k < n; k++) {
     intercepts.push(yValues[k] - medSlope * xValues[k]);
   }
   intercepts.sort(function(a, b) { return a - b; });
-  var medIntercept = intercepts[Math.floor(intercepts.length / 2)];
+  var midI = Math.floor(intercepts.length / 2);
+  var medIntercept = intercepts.length % 2 === 1 ? intercepts[midI] : (intercepts[midI - 1] + intercepts[midI]) / 2;
   return { slope: medSlope, intercept: medIntercept };
 }
 
@@ -1236,6 +1255,7 @@ function calcTheilSen(xValues, yValues) {
  * @returns {number[]} — 조건부 표준편차 배열 (index 0 = null, 최소 2개 필요)
  */
 function calcEWMAVol(closes, lambda) {
+  // λ=0.94: RiskMetrics (1996) G7 default; adequate for KRX large-cap liquidity — KRX-specific calibration TBD
   if (lambda === undefined || lambda === null) lambda = 0.94; // [B] RiskMetrics default
   var len = closes.length;
   var result = new Array(len).fill(null);
@@ -1263,7 +1283,10 @@ function calcEWMAVol(closes, lambda) {
   var variance = initVar;
   var oneMinusLambda = 1 - lambda;
 
-  for (var i = 1; i < len; i++) {
+  for (var i = 1; i <= initN; i++) {
+    result[i] = Math.sqrt(initVar);
+  }
+  for (var i = initN + 1; i < len; i++) {
     var r = returns[i]; // r_i = ln(P_i / P_{i-1})
     if (r === null) break;
     // 업데이트: 직전 수익률로 현재 분산 추정
@@ -1281,6 +1304,9 @@ function calcEWMAVol(closes, lambda) {
  * @returns {string[]} — 'low' (ratio < 0.75) | 'mid' (0.75-1.50) | 'high' (> 1.50) | null
  */
 function classifyVolRegime(ewmaVol) {
+  var VOL_REGIME_LOW = 0.75;   // below 75% of long-run EMA = low vol
+  var VOL_REGIME_HIGH = 1.50;  // above 150% of long-run EMA = high vol
+
   var len = ewmaVol.length;
   var result = new Array(len).fill(null);
   var longRunEMA = null;
@@ -1299,9 +1325,9 @@ function classifyVolRegime(ewmaVol) {
     if (longRunEMA <= 0) continue;
     var ratio = sigma / longRunEMA;
 
-    if (ratio < 0.75) {
+    if (ratio < VOL_REGIME_LOW) {
       result[i] = 'low';
-    } else if (ratio <= 1.50) {
+    } else if (ratio <= VOL_REGIME_HIGH) {
       result[i] = 'mid';
     } else {
       result[i] = 'high';
@@ -1349,12 +1375,12 @@ function calcAmihudILLIQ(candles, window) {
 
   var illiq = sum / validDays;
   var logIlliq = illiq > 0 ? +(Math.log10(illiq * 1e8)).toFixed(2) : null;
-  var level = (logIlliq == null || logIlliq <= LOG_LOW) ? 'liquid'
+  var level = (logIlliq === null || logIlliq <= LOG_LOW) ? 'liquid'
     : logIlliq >= LOG_HIGH ? 'illiquid' : 'moderate';
 
   // 신뢰도 할인: logIlliq 기반 선형 보간 (KRW-safe, 2-C validation R-1)
   var confDiscount = 1.0;
-  if (logIlliq != null) {
+  if (logIlliq !== null) {
     if (logIlliq >= LOG_HIGH) {
       confDiscount = CONF_DISCOUNT;
     } else if (logIlliq > LOG_LOW) {
@@ -1400,6 +1426,7 @@ function calcOnlineCUSUM(returns, threshold, volRegime) {
   var len = returns.length;
   var breakpoints = [];
 
+  // NOTE: ARL calibration assumes standard CUSUM; adaptive h/k variant may differ — validate with simulation
   // EMA 기반 러닝 평균/분산 — alpha = 2/31 (~30-bar half-life)
   var alpha = 2 / 31;   // [B] ~30-bar half-life for adaptive mean/variance
   var slack = 0.5;       // [B] Roberts (1966) ARL 최적화 슬랙
@@ -1443,8 +1470,9 @@ function calcOnlineCUSUM(returns, threshold, volRegime) {
     }
 
     // EMA 기반 러닝 통계 업데이트
+    var oldMean = runMean;
     runMean = alpha * r + (1 - alpha) * runMean;
-    var diff = r - runMean;
+    var diff = r - oldMean;
     runVar = alpha * (diff * diff) + (1 - alpha) * runVar;
     if (runVar <= 0) runVar = 1e-10;
   }
@@ -1672,15 +1700,6 @@ class IndicatorCache {
     return this._cache[key];
   }
 
-  /** RSI Fisher Transform — Amari (1985), core_data/13 §7.3 */
-  rsiFisher(period = 14) {
-    const key = `rsiFisher_${period}`;
-    if (!(key in this._cache)) {
-      this._cache[key] = calcRSIFisher(this.rsi(period));
-    }
-    return this._cache[key];
-  }
-
   /** ATR (period) */
   atr(period = 14) {
     const key = `atr_${period}`;
@@ -1899,23 +1918,6 @@ class IndicatorCache {
     return this._cache[key];
   }
 
-  /** 모멘텀 */
-  momentum(period = 10) {
-    const key = `mom_${period}`;
-    if (!(key in this._cache)) {
-      this._cache[key] = calcMomentum(this.closes, period);
-    }
-    return this._cache[key];
-  }
-
-  /** 어썸 오실레이터 (AO) */
-  ao(shortPeriod = 5, longPeriod = 34) {
-    const key = `ao_${shortPeriod}_${longPeriod}`;
-    if (!(key in this._cache)) {
-      this._cache[key] = calcAwesomeOscillator(this._candles, shortPeriod, longPeriod);
-    }
-    return this._cache[key];
-  }
 
   // ── 거래량 이동평균 (VMA) ──────────────────────────
 
@@ -2210,43 +2212,15 @@ class IndicatorCache {
             }
           }
 
-          // 4x4 역행렬 (가우스-조르당)
-          const aug = XtX.map((row, r) => {
-            const ext = new Array(2 * p).fill(0);
-            for (let c = 0; c < p; c++) ext[c] = row[c];
-            ext[p + r] = 1;
-            return ext;
-          });
-
-          let singular = false;
-          for (let col = 0; col < p; col++) {
-            // 피벗 선택
-            let maxVal = Math.abs(aug[col][col]), maxRow = col;
-            for (let r = col + 1; r < p; r++) {
-              if (Math.abs(aug[r][col]) > maxVal) {
-                maxVal = Math.abs(aug[r][col]);
-                maxRow = r;
-              }
-            }
-            if (maxVal < 1e-12) { singular = true; break; }
-            if (maxRow !== col) { const tmp = aug[col]; aug[col] = aug[maxRow]; aug[maxRow] = tmp; }
-
-            const pivot = aug[col][col];
-            for (let c = 0; c < 2 * p; c++) aug[col][c] /= pivot;
-
-            for (let r = 0; r < p; r++) {
-              if (r === col) continue;
-              const factor = aug[r][col];
-              for (let c = 0; c < 2 * p; c++) aug[r][c] -= factor * aug[col][c];
-            }
-          }
-          if (singular) continue;
+          // 4x4 역행렬 — top-level _invertMatrix() 재사용
+          const inv = _invertMatrix(XtX);
+          if (!inv) continue; // 특이 행렬
 
           // β = inv(X'X) * X'y
           const beta = new Array(p).fill(0);
           for (let a = 0; a < p; a++) {
             for (let b = 0; b < p; b++) {
-              beta[a] += aug[a][p + b] * Xty[b];
+              beta[a] += inv[a][b] * Xty[b];
             }
           }
 
@@ -2290,32 +2264,6 @@ class IndicatorCache {
   get cachedKeys() {
     return Object.keys(this._cache);
   }
-}
-
-// ── 독립 래퍼 함수 (하위 호환용) ──────────────────────
-
-/** [DEAD] 주의 결핍/폭발 상태 배열 — Stigler/Peng-Xiong Attention Theory
- * 미사용 — attentionState() 래퍼
- * @param {Array} candles — OHLCV 캔들 배열
- * @param {number} lookback — 백분위 산출 기간 (기본 20)
- * @returns {Array<{deprivationDays,isAttentionJump,multiplier}|null>}
- */
-function calcAttentionState(candles, lookback = 20) {
-  if (!candles || candles.length === 0) return [];
-  const cache = new IndicatorCache(candles);
-  return candles.map((_, i) => cache.attentionState(i, lookback));
-}
-
-/** [DEAD] 점프 강도 배열 — Merton (1976) Jump-Diffusion
- * 미사용 — jumpIntensity() 래퍼
- * @param {Array} candles — OHLCV 캔들 배열
- * @param {number} lookback — 점프 관측 기간 (기본 252)
- * @returns {Array<{lambda,isJump,jumpCount}|null>}
- */
-function calcJumpIntensity(candles, lookback = 252) {
-  if (!candles || candles.length === 0) return [];
-  const cache = new IndicatorCache(candles);
-  return candles.map((_, i) => cache.jumpIntensity(i, lookback));
 }
 
 /**

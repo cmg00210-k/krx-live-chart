@@ -415,6 +415,8 @@ CheeseStock 패턴 분석에의 함의:
 - 위험 관리는 단순한 "보호"가 아니라 "수익 향상" 수단이다
 - backtester.js의 패턴별 수익률 분석에서 산술 평균뿐 아니라 기하 평균을 함께 보아야 하는 근거
 
+(주: 연속시간 대수정규(GBM) 가정 하에서 정확한 관계. 이산 수익률에서는 근사식이며, 왜도/첨도가 큰 KOSDAQ 종목에서는 고차 보정 필요.)
+
 ### 4.3 시간 평균 최적화와 켈리 기준 (Time-Average Optimization & Kelly)
 
 켈리 기준(Kelly 1956)은 시간 평균 성장률을 최대화하는 **정확한 해**이다:
@@ -650,6 +652,13 @@ N: 목표 자본 단위
 
 파산 확률 ≤ 1%를 유지하는 것이 전문 트레이더의 기준
 ```
+
+**전제 조건 (Missing Assumptions)**:
+
+1. 고정 베팅 크기 (fixed stake per trade)
+2. i.i.d. 결과 (independent, identically distributed outcomes)  
+3. 일정한 edge (constant probability advantage over time)
+패턴 기반 트레이딩에서는 포지션 크기가 가변적이고, edge가 시간에 따라 감쇠(alpha decay)하므로 직접 적용 시 주의 필요.
 
 ### 5.5 최대 낙폭 제약 (Maximum Drawdown Constraints)
 

@@ -157,7 +157,10 @@ async function _renderCAPMBeta(stock) {
     var t = stockCandles[si].time;
     if (mktMap[t]) { sCloses.push(stockCandles[si].close); mCloses.push(mktMap[t]); }
   }
-  var rfAnnual = (_macroData && _macroData.ktb10y) ? _macroData.ktb10y : 0;
+  // Rf fallback chain: macro → bonds_latest → 3.5% (consistent with yield gap, H-3 fix)
+  var rfAnnual = (_macroData && _macroData.ktb10y != null) ? _macroData.ktb10y
+    : (_bondsLatest && _bondsLatest.yields && _bondsLatest.yields.ktb_10y != null) ? _bondsLatest.yields.ktb_10y
+    : 3.5;
   var result = (typeof calcCAPMBeta === 'function') ? calcCAPMBeta(sCloses, mCloses, 250, rfAnnual) : null;
   if (!result) { el.textContent = '\u2014'; return; }
   var b = result.beta;

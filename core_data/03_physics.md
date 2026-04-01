@@ -62,6 +62,10 @@ h = 외부 뉴스/정보의 영향
 - J < 0: 역행 투자 (contrarian) → 평균 회귀
 - J > Jc (임계값): 자발적 자화 = 시장 붕괴 또는 버블
 
+※ KRX 적용 한계: KRX의 ±30% 가격제한폭은 극단적 꼬리 사건을 절단(truncation)하므로,
+  Ising/percolation 임계 지수(critical exponents)를 KRX 데이터에 직접 적용하려면
+  검열 조정(censoring adjustment)이 필요하다. 미조정 시 임계 지수를 과소 추정할 수 있다.
+
 Bornholdt (2001), *Expectation Bubbles in a Spin Model of Markets*
 → 이징 모형으로 버블과 붕괴를 시뮬레이션
 
@@ -87,6 +91,10 @@ P(x) ~ x^(-α)    (x > xₘᵢₙ)
 log P(x) = -α · log x + C
 ```
 
+※ 멱법칙 검증 주의: 시각적 로그-로그 직선성만으로는 멱법칙을 확인할 수 없다.
+  Clauset, Shalizi & Newman (2009), "Power-Law Distributions in Empirical Data",
+  SIAM Review — KS 검정 + MLE + 우도비 검정을 통한 정식 검증이 필요하다.
+
 금융 시장에서의 멱법칙:
 1. **수익률 분포의 꼬리**: α ≈ 3 (inverse cubic law)
    - Gopikrishnan et al. (1999), *Scaling of the Distribution of
@@ -102,7 +110,11 @@ log P(x) = -α · log x + C
 ```
 X(ct) ≡ c^H · X(t)    (분포 의미에서)
 
-H = 허스트 지수 = 1/α (프랙탈 스케일링)
+H = 허스트 지수 (프랙탈 스케일링)
+
+※ H = 1/α 관계의 범위: Lévy stable 과정에서는 H = 1/α가 성립하나,
+  일반적인 확률 과정에서 H와 α의 관계는 보다 복잡하다.
+  (Samorodnitsky & Taqqu, 1994, *Stable Non-Gaussian Random Processes*)
 ```
 
 시간 스케일을 변경해도 통계적 구조가 보존됨:
@@ -196,6 +208,11 @@ q ≠ 1: 멱법칙 꼬리를 자연스럽게 생성
 - q-가우시안 분포가 금융 수익률 분포를 잘 피팅
 - Borland (2002), *A Theory of Non-Gaussian Option Pricing*
 - q ≈ 1.4~1.5에서 실제 시장 데이터와 부합
+
+※ 에르고딕성 가정 주의: Shannon 엔트로피와 Tsallis 엔트로피 모두 앙상블 평균에 기반하나,
+  금융 수익률에서는 시간 평균 ≠ 앙상블 평균일 수 있다 (비에르고딕 과정).
+  Peters (2019), *Ergodicity Economics*, Nature Physics — 개별 종목, 특히 KRX 소형주에서
+  에르고딕성 위배가 심각할 수 있으며, 이 경우 엔트로피 기반 측도의 해석에 주의가 필요하다.
 
 ### 5.2 전이 엔트로피 (Transfer Entropy)
 

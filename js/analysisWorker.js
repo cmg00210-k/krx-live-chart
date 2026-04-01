@@ -258,9 +258,9 @@ self.onmessage = function (e) {
         signals = result.signals;
         stats = result.stats;
 
-        // [Phase I] Prospect theory loss aversion boost — Kahneman & Tversky (1979)
-        if (patterns._srLevels && typeof signalEngine.applyProspectBoost === 'function') {
-          signalEngine.applyProspectBoost(signals, analyzeCandles, patterns._srLevels, result.cache);
+        // [Phase I] S/R proximity boost — support/resistance 근접 신호 강화
+        if (patterns._srLevels && typeof signalEngine.applySRProximityBoost === 'function') {
+          signalEngine.applySRProximityBoost(signals, analyzeCandles, patterns._srLevels, result.cache);
         }
 
         // 캐시 갱신 — windowed 플래그: 백테스트 캐시 시딩 시 윈도우된 결과 제외

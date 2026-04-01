@@ -4,6 +4,13 @@
 
 CNN Fear & Greed Index를 KRX 데이터로 재구성:
 
+> **Weight Validation Caveat:** 아래 구성 요소 가중치(w1~w4)는 CNN Fear & Greed Index의
+> 등가중(equal-weight) 접근법을 준용한 초기 설정이다. KRX 시장에 대한 개별적
+> 가중치 최적화(calibration)가 수행되지 않았으며, 한국 시장의 센티먼트 동학이
+> 미국과 다를 수 있다 — 특히 개인투자자 비중이 높은 KOSDAQ에서는 거래량 기반
+> 지표(w3)의 설명력이 미국 대비 높을 가능성이 있다. 향후 KRX 백테스트 데이터로
+> 가중치를 교정할 것을 권고한다.
+
 ```
 FearGreed = w1*RSI_norm + w2*volSurge_norm + w3*volRatio_norm + w4*newHighLow_norm
 
@@ -12,7 +19,7 @@ volSurge_norm: ATR14/ATR50 (>1.2=공포, <0.8=탐욕)
 volRatio_norm: 거래량/VMA20 (>2=극단)
 newHighLow_norm: (신고가 종목수 - 신저가 종목수) / 전체종목
 
-w1=0.30, w2=0.30, w3=0.20, w4=0.20 (가중치)
+w1=0.30, w2=0.30, w3=0.20, w4=0.20 (가중치 — 등가중 근사, KRX 미검증)
 ```
 
 CZW 적용: R:R gate의 lambda를 fearGreed에 따라 동적 조정

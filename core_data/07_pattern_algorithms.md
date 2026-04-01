@@ -715,15 +715,49 @@ Bulkowski (2005)
 역머리어깨형: 부등호 반전
 ```
 
-### 9.2 컵앤핸들 (Cup and Handle)
+### 9.2 컵앤핸들 (Cup and Handle) — 현재 구현
 
-O'Neil (1988)
+O'Neil (1988), Bulkowski (2005): 61% breakout success rate.
 
 ```
-컵: 2차 함수 피팅 price(t) ≈ a(t-t_center)² + price_min
-  a>0, 깊이 12~35%, R²>0.6
-핸들: handle_depth < cup_depth×0.5, slope≤0
-돌파: close > price_right_rim, 목표가 = rim + cup_depth
+알고리즘 (detectCupAndHandle):
+
+1) 왼쪽 림 탐색: 최근 200봉에서 로컬 고점 (앞뒤 3봉보다 고가 높은 봉)
+   isLocalHigh: H[i] > H[i±k], k ∈ [1,3]
+
+2) 컵 바닥 탐색: rimL 이후 cupWidth(30~65봉) 구간 내 최저점
+   bottomIdx = argmin(L[j]), j ∈ [rimL+5, rimR-5]
+
+3) 컵 깊이 검증: 12~35% of left rim price
+   depth = (leftRimPrice - bottomPrice) / leftRimPrice
+   0.12 ≤ depth ≤ 0.35
+
+4) 오른쪽 림 회복 검증: 왼쪽 림의 90% 이상 회복
+   rightRimPrice ≥ leftRimPrice × 0.90
+
+5) U-shape 검증: 파라볼릭 피팅 R² > 0.6
+   y(t) = a·(t - t_center)² + p_min  (OLS fit)
+   a > 0 (위로 볼록 = U-shape)
+   R² = 1 - SS_res / SS_tot ≥ 0.6
+
+6) 핸들 탐색: 오른쪽 림 이후 소폭 하락
+   핸들 길이: cupWidth × 0.15 ~ cupWidth × 0.30 (최소 5, 최대 20봉)
+   핸들 깊이 < 컵 깊이의 50%
+   돌파 확인: close > rightRimPrice × 0.98
+
+7) 거래량 U-shape 검증:
+   volBottom < volLeft AND volRight > volBottom → 가산점
+
+8) 목표가: measured move = rim + min(cupDepth·hw·mw, raw×CAP, ATR×CAP)
+   손절가: 핸들 최저 - ATR × STOP_LOSS_ATR_MULT (핸들 있을 때)
+           또는 바닥 + (림-바닥)×0.5 (핸들 없을 때)
+
+품질 점수 (5요인):
+  body: R² (U-shape fit)
+  volume: 거래량 U-shape 여부 (0.5/0.8)
+  trend: 핸들 유무 (0.5/0.8)
+  shadow: 림 대칭성 = 1 - |leftRim-rightRim|/leftRim/0.10
+  extra: 적정 깊이 = min(depth/0.25, 1)
 ```
 
 ### 9.3 엘리엇 파동 자동 카운팅
@@ -758,6 +792,53 @@ X-A-B-C-D 5점 패턴, 피보나치 비율 기반
 | Butterfly | 0.786 | 0.382~0.886 | 1.618~2.618 | 1.272~1.618 |
 | Bat | 0.382~0.500 | 0.382~0.886 | 1.618~2.618 | 0.886 |
 | Crab | 0.382~0.618 | 0.382~0.886 | 2.240~3.618 | 1.618 |
+
+### 9.5 채널 (Channel) — 현재 구현
+
+Edwards & Magee (2018), Bulkowski (2005)
+
+```
+알고리즘 (detectChannel):
+
+1) 스윙 포인트 수집: 최근 max(CHANNEL_MIN_SPAN×3, 60)봉 이내의
+   스윙 고점(swH) 및 저점(swL), 각각 최소 2개 필요
+
+2) OLS 추세선 피팅: 상단선/하단선 각각 독립 회귀
+   y = slope·x + intercept  (x = bar index, y = price)
+   slope = (n·Σxy - Σx·Σy) / (n·Σx² - (Σx)²)
+   intercept = (Σy - slope·Σx) / n
+
+3) 평행도 검증: 상하단 기울기 차이가 ATR 대비 임계값 이내
+   |slope_hi - slope_lo| / ATR < CHANNEL_PARALLELISM_MAX (0.020)
+
+4) 채널 폭 검증: 중간 지점에서 상하단 거리가 적정 범위
+   width = hiLine(midIdx) - loLine(midIdx)
+   ATR × CHANNEL_WIDTH_MIN(1.5) ≤ width ≤ ATR × CHANNEL_WIDTH_MAX(8.0)
+
+5) 봉 포함율 검증: 채널 구간 내 봉의 80%+ 포함
+   봉 i가 포함 ⟺ H[i] ≤ upper + ATR×0.15 AND L[i] ≥ lower - ATR×0.15
+   contained / spanLen ≥ CHANNEL_CONTAINMENT (0.80)
+   spanLen ≥ CHANNEL_MIN_SPAN (15봉)
+
+6) 터치 수 검증: 스윙 포인트가 추세선에 근접한 횟수
+   터치 ⟺ |swingPrice - lineValue| ≤ ATR × CHANNEL_TOUCH_TOL (0.3)
+   hiTouches + loTouches ≥ CHANNEL_MIN_TOUCHES (3)
+
+7) 방향 분류: 평균 기울기의 ATR 정규화
+   slopeNorm = avgSlope / ATR
+   |slopeNorm| < 0.02 → 횡보, > 0 → 상승, < 0 → 하락
+
+8) 신뢰도: 터치 수 + 포함율 기반
+   touchScore = min(15, (touches - 3) × 5)
+   containScore = min(15, round((containment - 0.80) × 150))
+   confidence = clamp(45 + touchScore + containScore, 20, 85)
+
+9) 목표가/손절가:
+   buy: priceTarget = upperNow + width × 0.5 × hw × mw
+        stopLoss = lowerNow - ATR × STOP_LOSS_ATR_MULT
+   sell: priceTarget = lowerNow - width × 0.5 × hw × mw
+         stopLoss = upperNow + ATR × STOP_LOSS_ATR_MULT
+```
 
 ---
 

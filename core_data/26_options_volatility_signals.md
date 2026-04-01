@@ -16,18 +16,31 @@ KRX 적용 시 가정 위배를 심층 분석한다.
 Black & Scholes (1973), Merton (1973) — 1997 노벨 경제학상.
 
 ```
-콜옵션: C = S·N(d₁) - K·e^(-rT)·N(d₂)
-풋옵션: P = K·e^(-rT)·N(-d₂) - S·N(-d₁)
+배당이 없는 경우 (원형):
+  콜옵션: C = S·N(d₁) - K·e^(-rT)·N(d₂)
+  풋옵션: P = K·e^(-rT)·N(-d₂) - S·N(-d₁)
 
-d₁ = [ln(S/K) + (r + σ²/2)T] / (σ√T)
-d₂ = d₁ - σ√T
+  d₁ = [ln(S/K) + (r + σ²/2)T] / (σ√T)
+  d₂ = d₁ - σ√T
+
+연속 배당수익률 q를 포함하는 일반형 (Merton 1973):
+  콜옵션: C = S·e^(-qT)·N(d₁) - K·e^(-rT)·N(d₂)
+  풋옵션: P = K·e^(-rT)·N(-d₂) - S·e^(-qT)·N(-d₁)
+
+  d₁ = [ln(S/K) + (r - q + σ²/2)T] / (σ√T)
+  d₂ = d₁ - σ√T
 
 S: 기초자산 현재가
 K: 행사가격 (strike price)
 r: 무위험이자율 (risk-free rate)
+q: 연속 배당수익률 (continuous dividend yield)
 T: 만기까지 잔존 기간 (연 단위)
 σ: 변동성 (volatility)
 N(): 표준정규분포 누적분포함수
+
+※ KRX 주식 옵션: 개별 주식 배당수익률은 종목별로 상이.
+  KOSPI200 지수 옵션의 경우 q ≈ 1.5-2.5% (연 환산).
+  q = 0으로 설정하면 원형 BSM과 동일.
 ```
 
 **위험중립 가격결정 (Risk-Neutral Pricing) 직관:**
@@ -497,16 +510,32 @@ IV/HV:    내재변동성 / 역사적 변동성 비율
 
 ## 6. 감마 노출 (Gamma Exposure, GEX) 효과
 
+> **DATA PIPELINE REQUIRED:** GEX 산출은 옵션 체인 데이터(행사가별 OI, 델타, 감마)를
+> 필요로 한다. 현재 CheeseStock의 OHLCV 파이프라인으로는 산출 불가하며,
+> KRX 파생상품 일별 데이터 수집 스크립트(download_vkospi.py) 추가가 선행되어야 한다.
+
 ### 6.1 시장 조성자 감마 헤지 메커니즘
 
 옵션 시장 조성자(market maker)는 매도한 옵션의 감마를 기초자산 매매로 헤지한다.
 이 역학이 지수 수준의 기계적 지지/저항을 생성한다.
 
 ```
-GEX = Σᵢ [OI_call(Kᵢ) × Γ_call(Kᵢ) × 100 × Kᵢ]
-    - Σᵢ [OI_put(Kᵢ) × Γ_put(Kᵢ) × 100 × Kᵢ]
+GEX = Σᵢ [OI_call(Kᵢ) × Γ_call(Kᵢ) × 100 × S]
+    - Σᵢ [OI_put(Kᵢ) × Γ_put(Kᵢ) × 100 × S]
 
-(부호 규약: 시장 조성자가 옵션을 매도(short)한 것으로 가정)
+(S = 현물가격, 부호 규약: 시장 조성자가 옵션을 매도(short)한 것으로 가정)
+(KOSPI200 옵션: 승수 = 250,000원, 100 대신 250,000 사용)
+
+부호 규약 정의 (Sign Convention):
+  Positive GEX (GEX > 0): 딜러가 순(net) 롱 감마 포지션
+    → 주가 변동에 대해 역방향 헤지 = 평균 회귀(mean-reversion) 압력
+  Negative GEX (GEX < 0): 딜러가 순(net) 숏 감마 포지션
+    → 주가 변동에 대해 순방향 헤지 = 추세(trending) 압력
+
+  ※ Doc34(VRP) 부호 규약과의 일관성:
+    VRP > 0 = IV > RV = 시장 안정 (positive GEX 환경과 상관)
+    VRP < 0 = IV < RV = 시장 불안 (negative GEX 환경과 상관)
+    두 지표의 부호가 시장 레짐에 대해 동일 방향을 가리킬 때 신호 강도 증가.
 ```
 
 **Positive GEX (GEX > 0):**
@@ -554,7 +583,7 @@ KOSPI200 옵션 기반으로 GEX를 개략 산출할 수 있다.
 산출 가능 범위:
   - 일별 행사가별 OI: KRX 공시 (무료)
   - 감마 산출: BSM으로 각 행사가의 Γ 계산
-  - GEX 근사: OI × Γ × 100 × K의 총합
+  - GEX 근사: OI × Γ × 100 × S의 총합 (KOSPI200: 승수 250,000)
 
 GEX > 0: 레인지 바운드 패턴 (double top/bottom, rectangle) 신뢰도 +10%
 GEX < 0: 돌파 패턴 (triangle, wedge breakout) 신뢰도 +10%

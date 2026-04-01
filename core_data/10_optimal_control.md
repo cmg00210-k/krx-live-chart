@@ -152,6 +152,33 @@ f: 순간 보상
 g: 최종 보상
 ```
 
+**HJB 일반 형태와 선형-이차 특수 경우:**
+
+```
+일반 HJB:
+  0 = min_u {L·V(x) + r(x, u)}
+
+  L: 상태 과정의 무한소 생성자 (infinitesimal generator)
+     L·V = μ(x,u)·∂V/∂x + ½σ²(x,u)·∂²V/∂x²
+  r(x, u): 순간 비용 함수
+
+선형-이차(LQ) 특수 경우:
+  상태 동학: dx = (Ax + Bu)dt + σ dW       (선형)
+  비용 함수: r(x,u) = x'Qx + u'Ru          (이차)
+
+  가치 함수가 이차 형태를 가짐:
+    V(x) = x'Px + c
+
+  P는 대수 Riccati 방정식을 만족:
+    A'P + PA - PBR⁻¹B'P + Q = 0
+
+  최적 제어:
+    u* = -R⁻¹B'Px
+
+  → LQ 문제는 해석적 해가 존재하는 유일한 비자명 사례
+  → 금융에서 평균-분산 최적화는 LQ 문제의 특수 경우
+```
+
 ### 2.4 검증 정리 (Verification Theorem)
 
 Fleming & Rishel (1975), *Deterministic and Stochastic Optimal Control*
@@ -446,6 +473,34 @@ Kₜ: 칼만 이득 (Kalman gain)
 - 가격의 잡음을 제거하여 "진짜 추세" 추정
 - 이동평균은 칼만 필터의 특수 경우로 해석 가능
 - 시변 베타(β) 추정, 시변 변동성 추정
+
+**적응적 과정 잡음 Q (Adaptive Process Noise):**
+
+표준 칼만 필터는 Q를 상수로 가정하나, 금융 시계열에서는
+변동성 레짐 전환으로 인해 Q가 시변해야 최적 추적이 가능하다.
+
+```
+Mohamed & Schwarz (1999), "Adaptive Kalman Filtering for INS/GPS":
+
+  Q_k = α · ε_k · ε_k' + (1 - α) · Q_{k-1}
+
+  ε_k = y_k - C · x̂_{k|k-1}    (혁신 시퀀스, innovation sequence)
+  α: 적응 학습률 (forgetting factor)
+
+금융 데이터 적용:
+  α ∈ [0.01, 0.1] for 일봉 데이터
+    α 작음 (0.01): 느린 적응, 안정적 추정 (장기 추세 추적)
+    α 큼  (0.10): 빠른 적응, 레짐 전환에 민감 (단기 변동 추적)
+
+  수렴 조건: ε_k가 정상(stationary)이고 α < 1이면
+    Q_k는 실제 과정 잡음의 이동 평균으로 수렴 (Mohamed & Schwarz 1999).
+
+  KRX 적용: indicators.js calcKalman()의 Q = 0.01 (고정)을
+    적응적 Q_k로 대체하면 변동성 레짐 전환 시 추적 성능 개선 기대.
+    단, Q_k 업데이트는 계산 비용이 낮아 실시간 적용 가능.
+```
+
+Tier 분류: Kalman Q 고정값은 [D][L:GS] (Doc22 #36), 적응적 α는 추가 시 [C][L:GCV].
 
 ### 5.2 은닉 마르코프 모형 (Hidden Markov Model, HMM)
 

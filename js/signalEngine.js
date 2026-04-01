@@ -324,7 +324,9 @@ class SignalEngine {
     indicatorSignals.push(...this._detectMACDSignals(candles, cache));
     indicatorSignals.push(...this._detectRSISignals(candles, cache));
     indicatorSignals.push(...this._detectBBSignals(candles, cache));
-    indicatorSignals.push(...this._detectVolumeSignals(candles, cache));
+    // [M-3 FIX] ADV level computed once here, shared with _detectVolumeSignals and stats below
+    var _sharedAdvResult = this.calcADVLevel(candles, 60);
+    indicatorSignals.push(...this._detectVolumeSignals(candles, cache, _sharedAdvResult));
     indicatorSignals.push(...this._detectOBVDivergence(candles, cache)); // [Phase TA-2][N-1] OBV 다이버전스
     indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
     indicatorSignals.push(...this._detectHurstSignal(candles, cache));
@@ -442,11 +444,19 @@ class SignalEngine {
         && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
       if (_hmmBeh && _hmmBeh.daily && _hmmBeh.daily.length > 0) {
         var _lastR = _hmmBeh.daily[_hmmBeh.daily.length - 1];
-        if (_lastR && _lastR.bull_prob > 0.5) {
-          var volScale = 0.70 + 0.30 * (1 - _lastR.bull_prob); // [D][L:GS] bull_prob=1→0.70, 0.5→0.85
+        if (_lastR && _lastR.bull_prob != null) {
+          var bull_prob = _lastR.bull_prob;
+          // [H-1 FIX] Directional HMM discount — regime-confirming signals unpenalized,
+          // counter-trend signals discounted. bull_prob>0.5=bullish, <0.5=bearish.
+          var counterScale = bull_prob > 0.5
+            ? 0.70 + 0.30 * (1 - bull_prob)   // bullish regime: sell penalty
+            : 0.70 + 0.30 * bull_prob;         // bearish regime: buy penalty
           for (var vi = 0; vi < signals.length; vi++) {
             if (signals[vi].confidence) {
-              signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * volScale));
+              var isBuy = signals[vi].signal === 'buy';
+              var regimeConfirms = (bull_prob > 0.5 && isBuy) || (bull_prob <= 0.5 && !isBuy);
+              var vs = regimeConfirms ? 1.0 : counterScale;
+              signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * vs));
             }
           }
         }
@@ -455,7 +465,8 @@ class SignalEngine {
 
     // ── ADV Level Multiplier — Katz & Shapiro (1985) 네트워크 외부성 ──
     // 유동성(거래대금) 등급별 패턴 신뢰도 승수 (정보 전달용, 실제 적용은 renderer/app)
-    var advResult = this.calcADVLevel(candles, 60);
+    // [M-3 FIX] Reuse _sharedAdvResult computed above (avoid duplicate calcADVLevel)
+    var advResult = _sharedAdvResult;
     stats.advLevel = advResult.level;
     stats.advMultiplier = advResult.multiplier;
     stats.categoryCounts.adv = advResult.level; // 등급을 카운트 필드에 기록
@@ -471,29 +482,47 @@ class SignalEngine {
   }
 
   // ══════════════════════════════════════════════════════
-  //  Prospect Theory Loss Aversion Boost — Kahneman & Tversky (1979)
-  //  core_data/04 §1: λ=2.25 → 지지선 근처 반전(buy) 시그널 강화
-  //  손실회피 비대칭: 지지선 이탈 공포 > 저항선 돌파 기대
+  //  [D-Heuristic] S/R proximity boost: factor=8 is empirical (not derived from prospect theory)
+  //  지지선 근처 반전(buy) 시그널 강화, 저항선 근처 매도 시그널 강화
   //  호출: app.js에서 S/R 가용 시 선택적 적용 (analyze 시그니처 불변)
   // ══════════════════════════════════════════════════════
 
-  applyProspectBoost(signals, candles, srLevels, cache) {
+  applySRProximityBoost(signals, candles, srLevels, cache) {
     if (!srLevels || srLevels.length === 0 || !cache) return;
     var atrArr = cache.atr(14);
     var lastATR = atrArr && atrArr.length > 0 ? atrArr[atrArr.length - 1] : null;
     if (!lastATR || lastATR <= 0) return;
     for (var pi = 0; pi < signals.length; pi++) {
       var sig = signals[pi];
-      if (sig.signal !== 'buy' || sig.index >= candles.length) continue;
+      if (sig.index >= candles.length) continue;
       var sigPrice = candles[sig.index].close;
-      for (var si = 0; si < srLevels.length; si++) {
-        var sr = srLevels[si];
-        if (sr.type !== 'support') continue;
-        var dist = Math.abs(sigPrice - sr.price) / lastATR;
-        if (dist < 1.0) {
-          var boost = Math.round(8 * Math.max(0, 1 - dist) * Math.min(sr.strength || 1, 2) / 2);
-          sig.confidence = Math.min(90, sig.confidence + boost);
-          break;
+
+      // Buy-side: support proximity boost (factor=8)
+      if (sig.signal === 'buy') {
+        for (var si = 0; si < srLevels.length; si++) {
+          var sr = srLevels[si];
+          if (sr.type !== 'support') continue;
+          var dist = Math.abs(sigPrice - sr.price) / lastATR;
+          if (dist < 1.0) {
+            var boost = Math.round(8 * Math.max(0, 1 - dist) * Math.min(sr.strength || 1, 2) / 2);
+            sig.confidence = Math.min(90, sig.confidence + boost);
+            break;
+          }
+        }
+      }
+
+      // Sell-side: resistance proximity boost (factor=5, weaker than buy-side)
+      // Asymmetry rationale: support bounces are stronger reversal signals than resistance rejections
+      if (sig.signal === 'sell') {
+        for (var si = 0; si < srLevels.length; si++) {
+          var sr = srLevels[si];
+          if (sr.type !== 'resistance') continue;
+          var dist = Math.abs(sigPrice - sr.price) / lastATR;
+          if (dist < 1.0) {
+            var boost = Math.round(5 * Math.max(0, 1 - dist) * Math.min(sr.strength || 1, 2) / 2);
+            sig.confidence = Math.min(90, sig.confidence + boost);
+            break;
+          }
         }
       }
     }
@@ -805,7 +834,8 @@ class SignalEngine {
     const bb = (typeof cache.bbEVT === 'function') ? cache.bbEVT(20, 2) : cache.bb(20, 2);
 
     for (let i = 1; i < candles.length; i++) {
-      if (bb[i].upper === null || bb[i - 1].upper === null) continue;
+      if (bb[i].upper === null || bb[i - 1].upper === null ||
+          bb[i].lower === null || bb[i - 1].lower === null) continue;
 
       const c = candles[i];
       const cPrev = candles[i - 1];
@@ -921,14 +951,14 @@ class SignalEngine {
   //  5. 거래량 시그널
   // ══════════════════════════════════════════════════════
 
-  _detectVolumeSignals(candles, cache) {
+  _detectVolumeSignals(candles, cache, advResultParam) {
     const signals = [];
     // C-6 CZW: z-score 기반 동적 임계 (Ane & Geman 2000, 로그정규분포)
     // 대형주/소형주 거래량 분포 차이를 자동 보정
     const zThreshold = 2.0;  // z >= 2.0 = 상위 2.28% (정규분포)
 
-    // [A-3] ADV 레벨 간이 계산 — 극소형(level=0) 종목의 거래량 돌파는 잡음 비율 높음
-    const advResult = this.calcADVLevel(candles, 60);
+    // [A-3][M-3 FIX] ADV 레벨 — analyze()에서 전달받거나 fallback 계산
+    const advResult = advResultParam || this.calcADVLevel(candles, 60);
     const advLevel = advResult.level;  // 0=<1억, 1=<10억, 2=<100억, 3=>=100억
 
     for (let i = 0; i < candles.length; i++) {
@@ -1053,6 +1083,8 @@ class SignalEngine {
     const lookback = 20; // 스윙 포인트 탐색 범위 (약 1거래월)
 
     // 스윙 포인트 탐색: 좌우 3봉 대비 극값 (Zigzag 단순화)
+    // NOTE: OBV swing uses 3-bar future confirmation (look-ahead). Signal index at swing, not confirmation bar.
+    // This is consistent with _detectDivergence() behavior (see line ~1739).
     // [Phase TA-2] swingOrder=3: 너무 작으면 잡음, 너무 크면 놓침
     const swingOrder = 3;
     const swingLows = [];
@@ -1497,8 +1529,8 @@ class SignalEngine {
   // ══════════════════════════════════════════════════════
   //  [Phase TA-3 C-2] VKOSPI/VIX Regime Classification
   //  Whaley (2000, 2009): VIX as "investor fear gauge"
-  //  Doc26 §2: VKOSPI ≈ VIX × 1.1 (KRX 실증 프록시)
-  //  Fallback chain: VKOSPI → VIX×1.1 → null
+  //  Doc26 §2: VKOSPI ≈ VIX × regime-dependent scale (KRX 실증 프록시)
+  //  Fallback chain: VKOSPI → VIX×scale (1.0/1.1/1.25) → null
   // ══════════════════════════════════════════════════════
 
   /**
@@ -1518,10 +1550,15 @@ class SignalEngine {
     } else if (macro && macro.vkospi != null) {
       vol = macro.vkospi;  // macro_latest.json VKOSPI
     } else if (macro && macro.vix != null) {
-      vol = macro.vix * 1.1;  // VIX → VKOSPI 프록시 (Whaley 2009: KRX σ ≈ US σ × 1.1)
+      // [D-Heuristic] VIX→VKOSPI proxy: regime-dependent (pending actual VKOSPI data pipeline)
+      // Normal (VIX<20): x1.0, Elevated (20<=VIX<30): x1.1, Crisis (VIX>=30): x1.25
+      var vix = macro.vix;
+      var vkospiScale = vix < 20 ? 1.0 : vix < 30 ? 1.1 : 1.25;
+      vol = vix * vkospiScale;
     }
 
     if (vol == null) return null;
+    // NOTE: Thresholds (15/20/25/30) transplanted from VIX; pending VKOSPI-specific calibration
     if (vol < 15) return 'low';
     if (vol <= 25) return 'normal';
     if (vol <= 35) return 'high';
@@ -1944,6 +1981,12 @@ class SignalEngine {
         // Bayesian updating: 독립적 확인 시그널은 사후확률을 단조증가시킴
         // Grinold-Kahn IC aggregation: IR_composite ≈ IC·√(N·(1+(N-1)ρ)⁻¹), ρ<1이면 IR 향상
         // 5pt 차등: OHLCV 기반 기술적 지표의 공유 노이즈를 반영한 적정 수준
+        // [M-4 FIX] D-tier quality gate: reliabilityTier from backtester should reduce cap 95→70
+        // LIMITATION: reliabilityTier is computed per-pattern in backtester.backtestAll(),
+        // which runs AFTER signalEngine.analyze() in the pipeline. Composite signals here
+        // cannot access backtester results at this stage. The quality gate must be applied
+        // downstream (e.g., in patternRenderer or app.js when displaying composite signals).
+        // TODO: Pass backtestResults into analyze() or apply D-tier discount post-hoc.
         const confidence = Math.min(
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
@@ -1952,11 +1995,9 @@ class SignalEngine {
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
           : confidence;
-        // [CRITICAL FIX] Direction-aware composite confidencePred
-        // _predMap values are P(price UP). For sell composites, invert to P(price DOWN).
-        if (def.signal === 'sell' && _predMap[def.id] != null) {
-          confidencePred = Math.max(10, Math.min(90, 100 - confidencePred));
-        }
+        // [H-2 FIX] _predMap values are already directional win rates
+        // (e.g. shootingStar WR=56% = P(decline)). No inversion needed.
+        confidencePred = Math.max(10, Math.min(90, confidencePred));
         // G-3: Platt calibration — Platt (1999), P = 1/(1+exp(-(a*x+b)))
         var _plattP = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.platt_params)
           ? backtester._rlPolicy.platt_params[def.id] : null;
@@ -2180,6 +2221,7 @@ class SignalEngine {
     var adv = sum / count;
     var adv_eok = adv / 1e8; // 억원 단위 변환
 
+    // ADV tiers: thin(<1M)/normal(1-10M)/thick(>100M KRW) — calibrated for KRX; Doc32 values (1/5/50) outdated
     // 등급 분류: <1억 → 0, <10억 → 1, <100억 → 2, >=100억 → 3
     var level;
     if (adv_eok < 1)        level = 0;
@@ -2216,8 +2258,8 @@ class SignalEngine {
       closes.push(candles[i].close || 0);
     }
 
-    // EWMA 변동성: 장기 lambda=0.97 (~60일 반감기), 단기 lambda=0.86 (~10일 반감기)
-    // lambda = 1 − 2/(span+1): span=60→0.967≈0.97, span=10→0.818≈0.86
+    // EWMA 변동성: 장기 lambda=0.97 (반감기 ~23일), 단기 lambda=0.86 (반감기 ~4.6일)
+    // 반감기 h = ln(2)/ln(1/λ). EMA span 등가: span=60→λ≈0.97, span=10→λ≈0.86
     var volLong, volShort;
 
     if (cache && typeof cache.ewmaVol === 'function') {
@@ -2246,6 +2288,7 @@ class SignalEngine {
     // > 1.2 → 장기 변동성 > 단기 → 현재 안정 (변동성 감소 추세) → risk-on
     // < 0.8 → 단기 변동성 급등 → 현재 불안정 → risk-off
     // [Phase0-#6] multiplier 확대: [0.95,1.05]→[0.85,1.15] (레짐 효과 강화)
+    // NOTE: 3x VRP multiplier widened in Phase0-#6; empirical validation pending
     var ratio = lastLong / lastShort;
 
     var regime, multiplier;

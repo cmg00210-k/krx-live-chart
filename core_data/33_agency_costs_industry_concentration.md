@@ -243,7 +243,7 @@ Bae et al. (2002)는 재벌 계열사 간 인수합병이 소액주주 가치를
    RPRR_i = 관계사 매출 / 총 매출
    — DART 사업보고서 > 특수관계자 거래 섹션
    — 임계치: RPRR > 0.30 → 고위험 (터널링 가능성)
-   — 참고: 상수 #120에서 CHAEBOL_TUNNELING_THRESHOLD = 0.30
+   — 참고: 상수 #168에서 CHAEBOL_TUNNELING_THRESHOLD = 0.30
 
 2. 대주주 지분율 (Controlling Shareholder Stake):
    CSS_i = 대주주 + 특수관계자 보유 지분 합계
@@ -277,6 +277,12 @@ RPRR이 높더라도 경쟁력 있는 내부 거래일 수 있고, CSS가 높더
 ---
 
 ## 4. 대리인 위험 지수 (Agency Risk Index, ARI)
+
+> **NOT IMPLEMENTED:** ARI(Aggregate Risk Index)는 실시간 팩터 데이터 피드
+> (ROE 업종 중위수, CAPEX 잔차, 이사회 독립성, 내부거래 비율)를 필요로 하며,
+> 현재 코드에 구현되어 있지 않다. 향후 DART API 기반 재무 데이터 파이프라인이
+> 완성되면 구현할 수 있는 설계 사양(design specification)으로 기재한다.
+> §11 구현 로드맵의 Phase 1(간소화 ARI) 참조.
 
 ### 4.1 ARI 설계
 
@@ -329,7 +335,7 @@ ARI를 패턴 신뢰도(confidence)에 반영하는 공식:
 ```
 conf_adj = conf_base × (1 - ARI_CONFIDENCE_DECAY × ARI)
 
-ARI_CONFIDENCE_DECAY = 0.20  (상수 #118)
+ARI_CONFIDENCE_DECAY = 0.20  (상수 #166)
 
 예시:
   ARI = 0.50 (높은 대리인 위험)
@@ -552,7 +558,7 @@ HHI가 패턴 신뢰도에 영향을 미치는 경로는 다음과 같다:
 ```
 mean_reversion_boost = HHI_MEAN_REV_COEFF × HHI × eps_stability
 
-HHI_MEAN_REV_COEFF = 0.10  (상수 #119)
+HHI_MEAN_REV_COEFF = 0.10  (상수 #167)
 
 적용 대상: mean-reversion 성격의 패턴
   — doubleBottom, doubleTop
@@ -889,9 +895,9 @@ Nordhaus (1975) 모형:
                × (1 + mean_reversion_boost)              ... HHI 부스트 (해당 패턴만)
 
   여기서:
-    ARI_CONFIDENCE_DECAY = 0.20 (상수 #118)
+    ARI_CONFIDENCE_DECAY = 0.20 (상수 #166)
     mean_reversion_boost = HHI_MEAN_REV_COEFF × HHI × eps_stability
-    HHI_MEAN_REV_COEFF = 0.10 (상수 #119)
+    HHI_MEAN_REV_COEFF = 0.10 (상수 #167)
 
 교호 효과 시나리오:
 
@@ -956,31 +962,35 @@ Quiet Life Hypothesis:
 
 ## 10. 학습 가능 상수 요약 (Learnable Constants Summary)
 
-본 문서에서 도입한 상수 (#118-#120):
+본 문서에서 도입한 상수 (#166-#168):
+
+> **번호 재배정 (Renumbering):** 원래 #118-#120으로 배정되었으나, Doc 32의
+> VALUATION_SR_STRENGTH가 #118을 선점하여 충돌이 발생했다.
+> Doc 22의 마지막 등록 상수(#165) 이후 순번인 #166-#168로 재배정한다.
 
 | # | 상수명 | 위치(예정) | 현재값 | 등급 | 학습 | 범위 | 출처 |
 |---|-------|----------|-------|------|------|------|------|
-| 118 | ARI_CONFIDENCE_DECAY | patterns.js | 0.20 | [C] | [L:WLS] | 0.10-0.35 | Jensen & Meckling (1976) 대리인 비용 문헌 |
-| 119 | HHI_MEAN_REV_COEFF | patterns.js | 0.10 | [C] | [L:WLS] | 0.05-0.20 | Cowling-Waterson (1976) HHI-마진 관계 |
-| 120 | CHAEBOL_TUNNELING_THRESHOLD | patterns.js | 0.30 | [D] | [L:MAN] | 0.20-0.40 | Bae et al. (2002) 한국 재벌 실증 |
+| 166 | ARI_CONFIDENCE_DECAY | patterns.js | 0.20 | [C] | [L:WLS] | 0.10-0.35 | Jensen & Meckling (1976) 대리인 비용 문헌 |
+| 167 | HHI_MEAN_REV_COEFF | patterns.js | 0.10 | [C] | [L:WLS] | 0.05-0.20 | Cowling-Waterson (1976) HHI-마진 관계 |
+| 168 | CHAEBOL_TUNNELING_THRESHOLD | patterns.js | 0.30 | [D] | [L:MAN] | 0.20-0.40 | Bae et al. (2002) 한국 재벌 실증 |
 
 **등급 분류 근거:**
 
-- **[C] 보정 가능 (상수 #118, #119):** 이론적 방향은 명확하지만(대리인 비용↑ →
+- **[C] 보정 가능 (상수 #166, #167):** 이론적 방향은 명확하지만(대리인 비용↑ →
   패턴 신뢰도↓, HHI↑ → mean-reversion 신뢰도↑), 정확한 크기는 KRX 데이터
   백테스트로 교정해야 한다. WLS 기반 교정이 적합하다 (Doc 17 §2 참조).
 
-  - **#118 ARI_CONFIDENCE_DECAY = 0.20:** Jensen & Meckling의 정성적 예측을
+  - **#166 ARI_CONFIDENCE_DECAY = 0.20:** Jensen & Meckling의 정성적 예측을
     정량화한 값. 0.20은 "패턴 신뢰도의 최대 20%가 대리인 비용에 귀속"이라는
     보수적 추정. 0.10 미만이면 거버넌스 효과가 과소평가되고, 0.35 초과이면
     기술적 패턴의 가격 발견 기능을 과도하게 부정하는 것이다.
 
-  - **#119 HHI_MEAN_REV_COEFF = 0.10:** Cowling-Waterson의 HHI-Lerner 관계에서
+  - **#167 HHI_MEAN_REV_COEFF = 0.10:** Cowling-Waterson의 HHI-Lerner 관계에서
     도출된 계수. 0.10은 "HHI=1(독점)이고 eps_stability=1(완벽 안정)일 때
     mean-reversion boost가 최대 10%"라는 의미. 현실에서 HHI=1은 불가능하므로
     실효 부스트 범위는 0~5%.
 
-- **[D] 휴리스틱 (상수 #120):** CHAEBOL_TUNNELING_THRESHOLD = 0.30은 Bae et al.
+- **[D] 휴리스틱 (상수 #168):** CHAEBOL_TUNNELING_THRESHOLD = 0.30은 Bae et al.
   (2002)의 한국 실증에서 내부거래 비중이 높은 그룹의 터널링 빈도가 증가하는
   임계점을 참고한 값이다. 이 임계치는 공정거래법 개정, 지주회사 전환 추이,
   산업 특성에 따라 변동 가능하므로 수동(manual) 조정이 적합하다.
@@ -989,9 +999,9 @@ Quiet Life Hypothesis:
 
 | 본 문서 상수 | 관련 기존 상수 | 상호작용 |
 |-------------|--------------|---------|
-| #118 ARI_CONFIDENCE_DECAY | #105 δ_info (Doc 31) | 정보 비대칭(#105)과 대리인 비용(#118) 이중 할인 가능. 합산 시 max(0.35) 캡 권장 |
-| #119 HHI_MEAN_REV_COEFF | #102 α_cycle (Doc 31) | 경기순환 보정(#102)과 산업구조 보정(#119) 독립 적용 가능 (교호항 불필요) |
-| #120 CHAEBOL_TUNNELING_THRESHOLD | #103, #104 β_chaebol (Doc 31) | RPRR > #120 시 #103-#104 보정 활성화. 연쇄 적용 설계 |
+| #166 ARI_CONFIDENCE_DECAY | #105 δ_info (Doc 31) | 정보 비대칭(#105)과 대리인 비용(#166) 이중 할인 가능. 합산 시 max(0.35) 캡 권장 |
+| #167 HHI_MEAN_REV_COEFF | #102 α_cycle (Doc 31) | 경기순환 보정(#102)과 산업구조 보정(#167) 독립 적용 가능 (교호항 불필요) |
+| #168 CHAEBOL_TUNNELING_THRESHOLD | #103, #104 β_chaebol (Doc 31) | RPRR > #168 시 #103-#104 보정 활성화. 연쇄 적용 설계 |
 
 ---
 
@@ -1037,9 +1047,9 @@ Quiet Life Hypothesis:
 
 ```
 7. 백테스트 기반 상수 교정:
-   — #118 ARI_CONFIDENCE_DECAY: ARI 분위별 패턴 성공률 비교
-   — #119 HHI_MEAN_REV_COEFF: 산업별 mean-reversion 패턴 수익률 비교
-   — #120 CHAEBOL_TUNNELING_THRESHOLD: RPRR 분위별 초과수익률 분석
+   — #166 ARI_CONFIDENCE_DECAY: ARI 분위별 패턴 성공률 비교
+   — #167 HHI_MEAN_REV_COEFF: 산업별 mean-reversion 패턴 수익률 비교
+   — #168 CHAEBOL_TUNNELING_THRESHOLD: RPRR 분위별 초과수익률 분석
 
 8. 교호항 검증:
    — ARI × HHI 교호항 유의성 테스트

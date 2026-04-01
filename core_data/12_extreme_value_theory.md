@@ -460,7 +460,33 @@ k 선택의 딜레마 (임계값 선택과 동일한 문제):
 힐 플롯 (Hill Plot):
   k 값에 대해 α̂(k) 그래프
   → 안정 구간(plateau) = 적절한 k
+
+최적 k 선택 방법론:
+  - Hill plot 안정 구간 방법 (시각적, 주관적)
+  - Danielsson et al. (2001), "Using a Bootstrap Method to Choose the
+    Sample Fraction in Tail Index Estimation" — 데이터 기반 최적 k 선택.
+    Bootstrap 반복으로 MSE를 최소화하는 k를 추정.
+  - k = √n 규칙은 편의적 경험칙(rule-of-thumb)이며 특정 저자 귀속 불가.
+    표본 크기에 따라 과소/과대 추정 위험이 있으므로 데이터 적응적 방법 권장.
 ```
+
+**대안 추정량: Dekkers-Einmahl-de Haan (DEH, 1989) 모멘트 추정량:**
+
+```
+DEH 모멘트 추정량:
+  M⁽¹⁾ = (1/k) Σᵢ₌₁ᵏ [ln X₍ᵢ₎ - ln X₍ₖ₊₁₎]
+  M⁽²⁾ = (1/k) Σᵢ₌₁ᵏ [ln X₍ᵢ₎ - ln X₍ₖ₊₁₎]²
+
+  ξ̂_DEH = M⁽¹⁾ + 1 - (1/2) / (1 - (M⁽¹⁾)² / M⁽²⁾)
+
+장점: Hill 추정량(ξ > 0에서만 유효)과 달리 ξ ≤ 0에도 적용 가능.
+      얇은 꼬리(thin tail) 분포에서 보다 강건.
+단점: 두꺼운 꼬리에서는 Hill 추정량 대비 분산이 높음.
+```
+
+Dekkers, A.L.M., Einmahl, J.H.J. & de Haan, L. (1989),
+"A Moment Estimator for the Index of an Extreme-Value Distribution",
+Annals of Statistics, 17(4), 1833-1855.
 
 ### 5.4 ξ와 α의 관계
 

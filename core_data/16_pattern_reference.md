@@ -17,11 +17,12 @@
 
 ---
 
-## 전체 패턴 목록 (42종) -- 39종 구현 완료 (92.9%)
+## 전체 패턴 목록 (45종) -- 41종 구현 완료 (91.1%)
 
 > **[2026-03-26 갱신]** Phase D-H에서 13종 추가: longLeggedDoji, spinningTop, bullish/bearishMarubozu, bullish/bearishBeltHold, threeInsideUp/Down, abandonedBabyBullish/Bearish, channel, piercingLine, darkCloud, tweezerBottom/Top.
+> **[2026-04-02 갱신]** 구현 현황 전수 점검: 1봉 12/12, 2봉 10/10, 3봉 8/12, 차트 11/11. symmetricTriangle, channel, cupAndHandle 차트 패턴 추가 반영.
 
-### 1봉 패턴 (Single-Candle) -- 12종 (7종 구현)
+### 1봉 패턴 (Single-Candle) -- 12종 (12종 구현, 100%)
 
 | # | 영문명 | 한국명 | 방향 | 기능 | 구현 | 함수명 |
 |---|--------|--------|------|------|------|--------|
@@ -32,13 +33,13 @@
 | 5 | Doji | 도지 | 중립 | 불확실 | **O** | `detectDoji()` |
 | 6 | Dragonfly Doji | 잠자리 도지 | 강세 | 반전 | **O** | `detectDragonflyDoji()` |
 | 7 | Gravestone Doji | 비석 도지 | 약세 | 반전 | **O** | `detectGravestoneDoji()` |
-| 8 | Long-Legged Doji | 긴다리 도지 | 중립 | 불확실 | -- | -- |
-| 9 | Spinning Top | 팽이형 | 중립 | 불확실 | -- | -- |
-| 10 | Marubozu (Bullish) | 양봉 마루보주 | 강세 | 지속 | -- | -- |
-| 11 | Marubozu (Bearish) | 음봉 마루보주 | 약세 | 지속 | -- | -- |
-| 12 | Belt Hold | 띠형 | 양방향 | 반전 | -- | -- |
+| 8 | Long-Legged Doji | 긴다리 도지 | 중립 | 불확실 | **O** | `detectLongLeggedDoji()` |
+| 9 | Spinning Top | 팽이형 | 중립 | 불확실 | **O** | `detectSpinningTop()` |
+| 10 | Marubozu (Bullish) | 양봉 마루보주 | 강세 | 지속 | **O** | `detectMarubozu()` |
+| 11 | Marubozu (Bearish) | 음봉 마루보주 | 약세 | 지속 | **O** | `detectMarubozu()` |
+| 12 | Belt Hold | 띠형 | 양방향 | 반전 | **O** | `detectBeltHold()` |
 
-### 2봉 패턴 (Double-Candle) -- 10종 (6종 구현)
+### 2봉 패턴 (Double-Candle) -- 10종 (10종 구현, 100%)
 
 | # | 영문명 | 한국명 | 방향 | 기능 | 구현 | 함수명 |
 |---|--------|--------|------|------|------|--------|
@@ -46,14 +47,14 @@
 | 14 | Bearish Engulfing | 하락 장악형 | 약세 | 반전 | **O** | `detectEngulfing()` |
 | 15 | Bullish Harami | 상승 잉태형 | 강세 | 반전 | **O** | `detectHarami()` |
 | 16 | Bearish Harami | 하락 잉태형 | 약세 | 반전 | **O** | `detectHarami()` |
-| 17 | Harami Cross | 잉태 십자형 | 양방향 | 반전 | -- | -- |
+| 17 | Harami Cross | 잉태 십자형 | 양방향 | 반전 | **O** | `detectHaramiCross()` |
 | 18 | Piercing Line | 관통형 | 강세 | 반전 | **O** | `detectPiercingLine()` |
 | 19 | Dark Cloud Cover | 먹구름형 | 약세 | 반전 | **O** | `detectDarkCloud()` |
 | 20 | Tweezer Top | 족집게 천장 | 약세 | 반전 | **O** | `detectTweezerTop()` |
 | 21 | Tweezer Bottom | 족집게 바닥 | 강세 | 반전 | **O** | `detectTweezerBottom()` |
-| 22 | Stick Sandwich | 스틱 샌드위치 | 강세 | 반전 | -- | -- |
+| 22 | Stick Sandwich | 스틱 샌드위치 | 강세 | 반전 | **O** | `detectStickSandwich()` |
 
-### 3봉 패턴 (Triple-Candle) -- 12종 (4종 구현)
+### 3봉 패턴 (Triple-Candle) -- 12종 (8종 구현)
 
 | # | 영문명 | 한국명 | 방향 | 기능 | 구현 | 함수명 |
 |---|--------|--------|------|------|------|--------|
@@ -63,14 +64,14 @@
 | 26 | Evening Doji Star | 석별 도지형 | 약세 | 반전 | -- | -- |
 | 27 | Three White Soldiers | 적삼병 | 강세 | 반전 | **O** | `detectThreeWhiteSoldiers()` |
 | 28 | Three Black Crows | 흑삼병 | 약세 | 반전 | **O** | `detectThreeBlackCrows()` |
-| 29 | Bullish Abandoned Baby | 강세 버림받은 아기 | 강세 | 반전 | -- | -- |
-| 30 | Bearish Abandoned Baby | 약세 버림받은 아기 | 약세 | 반전 | -- | -- |
-| 31 | Three Inside Up | 상승 삼내형 | 강세 | 반전 | -- | -- |
-| 32 | Three Inside Down | 하락 삼내형 | 약세 | 반전 | -- | -- |
+| 29 | Bullish Abandoned Baby | 강세 버림받은 아기 | 강세 | 반전 | **O** | `detectAbandonedBaby()` |
+| 30 | Bearish Abandoned Baby | 약세 버림받은 아기 | 약세 | 반전 | **O** | `detectAbandonedBaby()` |
+| 31 | Three Inside Up | 상승 삼내형 | 강세 | 반전 | **O** | `detectThreeInsideUp()` |
+| 32 | Three Inside Down | 하락 삼내형 | 약세 | 반전 | **O** | `detectThreeInsideDown()` |
 | 33 | Upside Gap Two Crows | 갭상 쌍까마귀 | 약세 | 반전 | -- | -- |
 | 34 | Upside/Downside Tasuki Gap | 타스키 갭 | 양방향 | 지속 | -- | -- |
 
-### 차트 패턴 (Multi-Candle Structure) -- 8종 (8종 구현, 100%)
+### 차트 패턴 (Multi-Candle Structure) -- 11종 (11종 구현, 100%)
 
 | # | 영문명 | 한국명 | 방향 | 기능 | 구현 | 함수명 |
 |---|--------|--------|------|------|------|--------|
@@ -82,26 +83,33 @@
 | 40 | Descending Triangle | 하락 삼각형 | 약세 | 지속 | **O** | `detectDescendingTriangle()` |
 | 41 | Rising Wedge | 상승 쐐기 | 약세 | 반전 | **O** | `detectRisingWedge()` |
 | 42 | Falling Wedge | 하락 쐐기 | 강세 | 반전 | **O** | `detectFallingWedge()` |
+| 43 | Symmetric Triangle | 대칭 삼각형 | 중립 | 지속 | **O** | `detectSymmetricTriangle()` |
+| 44 | Channel | 채널 | 양방향 | 지속 | **O** | `detectChannel()` |
+| 45 | Cup and Handle | 컵앤핸들 | 강세 | 지속 | **O** | `detectCupAndHandle()` |
 
 ---
 
 ## 구현 현황 요약
 
 ```
-42종 패턴 기준:
-  구현 완료:   26종 (61.9%)
-  미구현:      16종 (38.1%)
+45종 패턴 기준 (2026-04-02 갱신):
+  구현 완료:   41종 (91.1%)
+  미구현:       4종 (8.9%)
 
 카테고리별:
-  1봉 패턴:  7/12 (58.3%)  -- Phase 8에서 잠자리/비석 도지 추가
-  2봉 패턴:  6/10 (60.0%)  -- Phase 8에서 관통형/먹구름/족집게 추가
-  3봉 패턴:  4/12 (33.3%)
-  차트 패턴: 8/8  (100.0%)
+  1봉 패턴: 12/12 (100.0%) -- longLeggedDoji, spinningTop, marubozu, beltHold 추가
+  2봉 패턴: 10/10 (100.0%) -- haramiCross, stickSandwich 추가
+  3봉 패턴:  8/12 (66.7%)  -- abandonedBaby, threeInsideUp/Down 추가
+  차트 패턴: 11/11 (100.0%) -- symmetricTriangle, channel, cupAndHandle 추가
 
-추가 시스템 (42종 외):
+미구현 4종:
+  #25 Morning Doji Star, #26 Evening Doji Star,
+  #33 Upside Gap Two Crows, #34 Tasuki Gap
+
+추가 시스템 (45종 외):
   지지/저항선:      detectSupportResistance()
   지표 시그널:      SignalEngine 16종 + 복합 6종
-  백테스트:        PatternBacktester (26종 등록)
+  백테스트:        PatternBacktester
 ```
 
 ---

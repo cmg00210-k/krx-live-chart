@@ -76,7 +76,7 @@ $$\hat{\beta} = (X^T W X)^{-1} X^T W y$$
 - $W$ = 대각 가중 행렬 ($W_{ii} = w_i$)
 - $y$ = 관측 수익률 벡터 (n × 1)
 
-### 95% 신뢰구간
+### 95% 예측구간 (Prediction Interval)
 
 $$\text{SE}(\hat{y}_{new}) = \sqrt{\hat{\sigma}^2 \cdot (1 + x_{new}^T (X^T W X)^{-1} x_{new})}$$
 
@@ -210,7 +210,7 @@ HC0는 고레버리지(high leverage) 관측치에서 유한표본 size distorti
 HC3는 모자 행렬(hat matrix) 대각 원소로 레버리지를 보정한다:
 
 ```
-Cov_HC3(beta) = (X'WX)^{-1}  [sum_i w_i^2 * e_i^2 / (1 - h_ii)^2 * x_i x_i']  (X'WX)^{-1}
+Cov_HC3(β̂) = (X'WX)⁻¹ [Σᵢ (wᵢ eᵢ)² / (1 - hᵢᵢ)² · xᵢ xᵢ'] (X'WX)⁻¹
 
 h_ii  : hat matrix 대각 원소 (leverage) = w_i * x_i' (X'WX)^{-1} x_i
 w_i   : WLS 관측 가중치

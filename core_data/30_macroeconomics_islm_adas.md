@@ -77,6 +77,12 @@ dr/dY |_{IS} = -[1 - c_1(1-t) + m] / b  <  0    (우하향)
 
 **한국 파라미터 추정치:**
 
+> **Parameter Vintage Warning:** 아래 파라미터는 2010-2016 한국 데이터 기반 추정치이다.
+> Post-COVID 구조 변화(공급망 리쇼어링, 디지털 가속화, 가계부채 급증)로 인해
+> 이 추정치의 현재 유효성은 재검증이 필요하다. 특히 한계소비성향(c_1)은 가계부채
+> 부담 증가로 하향 이동했을 가능성이 있으며, 한계수입성향(m)은 글로벌 공급망
+> 재편으로 변동 중이다.
+
 | Parameter | Symbol | Korea Value | Tier | Learn | Range | Source |
 |-----------|--------|-------------|------|-------|-------|--------|
 | 한계소비성향 | c_1 | 0.55 | [B] | [L:MAN] | [0.50, 0.65] | BOK (2023) 국민계정 |
@@ -147,6 +153,14 @@ dr/dY |_{LM} = k/h  >  0    (우상향)
 |-----------|--------|-------------|------|-------|-------|--------|
 | 소득 화폐수요 민감도 | k | 0.20 | [C] | [L:MAN] | [0.15, 0.30] | BOK M2/GDP 추정 |
 | 이자율 화폐수요 민감도 | h | 2000 | [C] | [L:GS] | [1200, 3500] | Kim & Park (2016) |
+
+**현대적 재해석 주의 (Modern Reinterpretation Caveat):**
+
+> Modern central banks target interest rates, not money supply (Romer, 2000).
+> The IS-LM framework with fixed M is a pedagogical simplification. For policy
+> analysis, use the IS-MP (Taylor rule) framework where the central bank sets i
+> directly and the LM curve is replaced by a horizontal monetary policy rule.
+> §4.1의 테일러 준칙이 이 현대적 접근에 해당한다.
 
 CheeseStock 매핑: 유동성 함정 판별은 Doc 29 §3.1의 기준금리 구간에서 r ≤ 0.75%일 때
 통화정책 이벤트 트레이딩 신호를 자동 감쇠(dampen)하는 근거가 된다.
@@ -254,6 +268,12 @@ BP 곡선: r = r* + E[Δe] + (m/kappa) * Y - (X_0 + eta*e) / kappa
 한국의 선택: ① + ② → ③ 포기 (변동환율제)
   1997 외환위기 이전: ② + ③ → ① 제한 (자본통제 + 관리변동환율)
   1997 이후: ① + ② 선택 → 원화 자유변동
+
+주의: 한국은 de jure 자유변동이나 de facto 관리변동(managed float)에 가깝다.
+  BOK는 외환안정화기금(FX stabilization fund)과 구두개입(verbal guidance)을 통해
+  급격한 환율 변동을 억제한다. Mundell-Fleming 삼위일체는 이에 따라
+  부분적 자본이동성(partial capital mobility) 하의 trade-off로 재해석해야 한다.
+  IMF 분류(2024): 한국 = "floating" (but with FX intervention history)
 ```
 
 **변동환율제 하 정책 유효성 (Mundell-Fleming Results):**
@@ -686,14 +706,40 @@ i = r* + pi + a_pi * (pi - pi*) + a_y * (y - y*)
   a_y   = 산출량 갭 반응 계수 (Taylor 원안: 0.5)
 ```
 
+**개방경제 확장 테일러 준칙 (Extended Taylor Rule for Open Economy):**
+
+```
+i = r* + pi + a_pi * (pi - pi*) + a_y * (y - y*) + a_e * Delta_e
+
+a_e = 환율변동 반응 계수 ≈ 0.1-0.3 (Ball, 1999)
+```
+
+Ball (1999)은 소규모 개방경제에서 환율 pass-through를 반영한 확장 테일러 준칙을
+제안했다. a_e 항은 환율 절하(Delta_e > 0)가 수입물가를 통해 인플레이션에 전달되는
+간접 경로를 사전적으로 반영한다.
+
 **한국 적응형 (Kim & Park 2016):**
 
 ```
-i = r* + pi + a_pi * (pi - pi*) + a_y * (y - y*) + a_e * (Delta_e)
+한국 추정: a_e ≈ 0.10 (원/달러 10% 절하 시 +100bp 추가 긴축 경향)
+원인: 수입물가 전가(pass-through) + 자본유출 방어
+```
 
-a_e = 환율변동 반응 계수
-  한국 추정: a_e ≈ 0.10 (원/달러 10% 절하 시 +100bp 추가 긴축 경향)
-  원인: 수입물가 전가(pass-through) + 자본유출 방어
+**산출량 갭 추정 — CLI 매핑 (Output Gap Estimation via CLI):**
+
+```
+코드 구현 (download_macro.py):
+  output_gap = (CLI - 100) * CLI_TO_GAP_SCALE
+  CLI_TO_GAP_SCALE = 0.5  (상수 #139)
+
+OECD CLI(경기선행지수 순환변동치)는 100을 장기 추세로 정규화한다.
+  CLI = 101 → output_gap ≈ +0.5%  (소폭 확장)
+  CLI = 98  → output_gap ≈ -1.0%  (수축)
+  CLI = 104 → output_gap ≈ +2.0%  (과열)
+
+한계: CLI는 선행지수이므로 현재 산출량 갭의 직접 측정이 아닌 방향 지표이다.
+BOK의 공식 산출량 갭 추정치는 연 2회(통화신용정책보고서)만 공개되므로,
+CLI 기반 proxy가 실시간 근사에 실용적이다.
 ```
 
 **테일러 갭 (Taylor Gap):**
@@ -716,7 +762,7 @@ Taylor_gap < 0: 과도한 완화 (overtly loose)
 
 | Parameter | Symbol | Value | Tier | Learn | Range | Source |
 |-----------|--------|-------|------|-------|-------|--------|
-| 자연이자율 (한국) | r_star | 1.0% | [C] | [L:MAN] | [0.5%, 2.0%] | BOK 추정 (2023) |
+| 자연이자율 (한국) | r_star | 1.0% | [C] | [L:MAN] | [0.5%, 2.0%] | Laubach-Williams (2003) method; BOK (2023) 추정. 불확실성 대역 ±1pp |
 | 인플레이션 목표 | pi_star | 2.0% | [A] | [L:MAN] | fixed | BOK 공식 목표 |
 | 인플레 반응 계수 | a_pi | 0.50 | [B] | [L:GS] | [0.30, 0.80] | Taylor (1993) |
 | 산출량 갭 반응 계수 | a_y | 0.50 | [B] | [L:GS] | [0.25, 0.75] | Taylor (1993) |
@@ -795,13 +841,17 @@ CheeseStock 매핑: 5채널 분석은 Doc 29 §3.2의 섹터별 금리 민감도
 
 Doc 29에서 정의된 MCS(Macro Composite Score)에 테일러 갭을 추가하여 MCS_v2를 정의한다.
 
-**MCS v1 (Doc 29 §6 기준):**
+**MCS v1 (Doc 29 §6.2 기준 — 코드 authoritative):**
 
 ```
-MCS = w1*CSI_norm + w2*PMI_norm + w3*export_norm + w4*rate_dir + w5*spread_norm
+MCS = w1*PMI_norm + w2*CSI_norm + w3*export_growth_norm + w4*yield_curve_norm + w5*EPU_inv_norm
 
-w1=0.15, w2=0.25, w3=0.25, w4=0.20, w5=0.15
+w1=0.25 (PMI), w2=0.20 (CSI), w3=0.25 (수출), w4=0.15 (장단기금리차), w5=0.15 (정책불확실성 역수)
 ```
+
+> **주의:** 구성 요소 순서와 레이블은 Doc 29 §6.2 및 `download_macro.py`의 `MCS_W` dict가
+> 권위적(authoritative) 소스이다. `rate_dir`(금리 방향)은 `yield_curve_norm`(장단기금리차)으로,
+> `spread_norm`은 `EPU_inv_norm`(경제정책불확실성 역수, VIX proxy)으로 각각 대응된다.
 
 **MCS v2 확장:**
 
@@ -852,6 +902,12 @@ Doc 22의 상수 레지스트리에 w6을 #83으로 등록한다.
 ## 5. 재정정책 승수 (Fiscal Policy Multipliers)
 
 ### 5.1 정부지출 승수 (Government Spending Multiplier)
+
+> **방법론적 주의:** 아래의 정태적(static) 케인즈 승수 1/(1-c) 계산은 고정 금리와
+> 구축효과 부재를 가정한다. 동태적(DSGE) 승수는 통화정책 대응(monetary accommodation)
+> 정도에 따라 0.5~2.0의 넓은 범위를 가진다 (Christiano, Eichenbaum & Rebelo, 2011).
+> 특히 ZLB 조건(§5.3)에서는 승수가 크게 증폭되며, 긴축적 통화정책 하에서는
+> 0.5 이하로 축소될 수 있다. 아래 정태 승수는 상한(upper bound)으로 해석해야 한다.
 
 **단순 승수 (폐쇄경제, LM 수평 가정):**
 
@@ -1174,6 +1230,9 @@ CheeseStock 매핑: 모든 상수는 오프라인 `calibrated_constants.json`에
 - Rudebusch, G.D. (2002). "Term Structure Evidence on Interest Rate Smoothing and Monetary Policy Inertia." *Journal of Monetary Economics*, 49(6), 1161-1187.
 - Woodford, M. (2003). *Interest and Prices: Foundations of a Theory of Monetary Policy*. Princeton University Press.
 - Kim, S. & Park, Y. (2016). "Monetary Policy Transmission in Korea: A Bayesian VAR Approach." *Korean Economic Review*, 32(1), 57-89.
+- Romer, D. (2000). "Keynesian Macroeconomics without the LM Curve." *Journal of Economic Perspectives*, 14(2), 149-169.
+- Laubach, T. & Williams, J.C. (2003). "Measuring the Natural Rate of Interest." *Review of Economics and Statistics*, 85(4), 1063-1070.
+- Ball, L. (1999). "Policy Rules for Open Economies." In *Monetary Policy Rules* (ed. Taylor, J.B.), 127-156. University of Chicago Press.
 
 ### 총공급 및 필립스 곡선
 

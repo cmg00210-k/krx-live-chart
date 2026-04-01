@@ -64,6 +64,13 @@ Late Contraction (후기 수축):
 
 **실증적 한계:** Stovall 모형은 미국 S&P 500 기반이며, 한국은 수출 의존도(GDP 대비 ~50%)와 반도체 편중(KOSPI 시총의 ~25%)으로 인해 직접 적용에 한계가 있다. Conover et al. (2008)은 통화정책 국면이 섹터 회전보다 설명력이 높음을 보고했다.
 
+> **UNVALIDATED FOR KOREA:** 위 섹터 회전 모형은 미국 경기순환 기반(Stovall, 1996)이며
+> KRX에서의 실증 검증이 수행되지 않았다. 한국 시장은 (1) 반도체/자동차 수출 편중으로
+> 글로벌 수요 사이클에 동조하며, (2) 재벌(chaebol) 구조로 인해 섹터 간 자금 이동이
+> 미국과 다른 패턴을 보이고, (3) 개인투자자 비중이 높아 KOSDAQ에서 전통적 섹터 회전이
+> 작동하지 않을 수 있다. 본 모형은 분석 프레임워크로만 참고하고, KRX 실증 데이터로
+> 검증 후 적용해야 한다.
+
 ### 1.3 KRX 섹터 분류 (GICS vs KRX)
 
 | KRX 업종 | GICS 대응 | KOSPI 비중(2025) | 특징 |
@@ -390,11 +397,16 @@ MCS = w1 * PMI_norm + w2 * CSI_norm + w3 * export_growth_norm
 가중치: w1=0.25, w2=0.20, w3=0.25, w4=0.15, w5=0.15
 
 정규화:
-  PMI_norm = (PMI - 45) / (55 - 45)       [0,1] 클리핑
+  PMI_norm = (PMI - 35) / (65 - 35)       [0,1] 클리핑
+  # 코드 구현: (BSI/2 - 35) / 30, 상수 #143=35(low), #144=30(range)
+  # 한국 BSI 기반 PMI는 미국 ISM PMI보다 범위가 좁아 (35,65) 정규화 사용
   CSI_norm = (CSI - 80) / (120 - 80)       [0,1] 클리핑
   export_growth_norm = (exp_g + 20) / 40   [0,1] 클리핑 (YoY%)
   yield_curve_norm = (spread + 50) / 150   [0,1] 클리핑 (bp)
   EPU_inv_norm = 1 - (EPU - 50) / (200 - 50) [0,1] 클리핑
+  # 코드 구현: VIX를 EPU proxy로 사용 — 1 - (VIX - 12) / 28, clipped [0,1]
+  # 변수명은 epu_inv이나 실제 입력은 VIX (FRED VIXCLS). EPU 직접 데이터가
+  # 확보되면 원래 공식으로 전환 예정. download_macro.py §5 참조.
 
 MCS 해석:
   MCS > 0.6: 거시 강세 → 매수 패턴 신뢰도 × 1.05~1.10

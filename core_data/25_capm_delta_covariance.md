@@ -116,6 +116,8 @@ beta_t = beta_t|t-1 + K_t * (r_i,t - beta_t|t-1 * r_m,t)
 P_t = (1 - K_t * r_m,t) * P_t|t-1 + Q
 ```
 
+(주: alpha = 0 가정 — 일별 기대수익률이 무시가능하므로 (RiskMetrics 1996 convention). Alpha를 jointly estimate하려면 2-dimensional state 필요.)
+
 This is a *new function* (calcKalmanBeta) — ~20 lines of JS, reusing the
 adaptive-Q pattern from calcKalman().
 
@@ -314,7 +316,7 @@ R_i = alpha_i + sum_k delta_{i,k} * F_k + epsilon_i
 **Variance decomposition:**
 
 ```
-Var(R_i) = delta_i'^2 * Var(F) * delta_i + Var(epsilon_i)
+Var(R_i) = delta_i' * Var(F) * delta_i + Var(epsilon_i)
            \_________________________/       \___________/
            systematic variance                idiosyncratic variance
 
@@ -613,6 +615,8 @@ beta_bar = (1/T^2) * sum_t || r_t r_t' - S ||_F^2
 delta_bar = || S - F ||_F^2
 ```
 
+(주: 위 공식은 target F = I (identity matrix)일 때의 단순화. Factor-model 또는 constant-correlation target 사용 시 rho 보정 항이 필요: kappa = (pi - rho) / gamma. 자세한 내용은 Ledoit & Wolf (2004) Theorem 1 참조.)
+
 **Shrinkage target options:**
 
 | Target F | Name | Properties |
@@ -639,7 +643,7 @@ Marchenko-Pastur distribution bounds:
   lambda_- = sigma^2 * (1 - sqrt(q))^2     (lower edge, if q < 1)
 
 For CheeseStock: q = 2728/250 = 10.9
-  lambda_+ = sigma^2 * (1 + sqrt(10.9))^2 = sigma^2 * 17.2
+  lambda_+ = sigma^2 * (1 + sqrt(10.9))^2 = sigma^2 * 18.5
   lambda_- = 0  (since q > 1, there are N-T zero eigenvalues)
 ```
 

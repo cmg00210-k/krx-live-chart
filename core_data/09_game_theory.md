@@ -160,18 +160,25 @@ Leonid Hurwicz, Eric Maskin, Roger Myerson (2007 노벨 경제학상)
 
 ### 5.1 복제자 동학 (Replicator Dynamics)
 
-John Maynard Smith, *Evolution and the Theory of Games* (1982)
+Taylor & Jonker (1978), "Evolutionary Stable Strategies and Game Dynamics",
+Mathematical Biosciences, 40(1-2), 145-156 — 복제자 동학 방정식의 최초 정식화.
+
+John Maynard Smith, *Evolution and the Theory of Games* (1982) — 진화적 안정 전략(ESS)의 체계화.
 
 ```
+복제자 동학 방정식 (Taylor & Jonker, 1978):
+
 전략 i의 비율 변화:
 
 ẋᵢ = xᵢ · [fᵢ(x) - f̄(x)]
 
 xᵢ: 전략 i를 사용하는 참여자 비율
 fᵢ: 전략 i의 적합도(fitness) = 기대 보수
-f̄: 전체 평균 적합도
+f̄: 전체 평균 적합도 = Σⱼ xⱼ · fⱼ(x)
 
 → 평균보다 높은 보수의 전략은 확산, 낮은 전략은 도태
+→ 내쉬 균형의 동학적 기초를 제공: 복제자 동학의 정적점(rest point)은
+  내쉬 균형과 밀접하게 연관된다 (Weibull 1995).
 ```
 
 ### 5.2 진화적 안정 전략 (ESS)

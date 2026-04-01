@@ -43,10 +43,18 @@ v(x) = -λ(-x)^β      (x < 0, 손실)
 4. **오목(이득)/볼록(손실)**: 이득 영역에서 위험 회피, 손실 영역에서 위험 추구
 
 **확률 가중 함수 (Probability Weighting)**:
+
+※ 확률 가중 함수는 **누적 전망이론(Cumulative Prospect Theory)**의 핵심 요소로,
+  원본 전망이론(Kahneman & Tversky, 1979)이 아닌 **Tversky & Kahneman (1992),
+  "Advances in Prospect Theory: Cumulative Representation of Uncertainty",
+  Journal of Risk and Uncertainty**에서 도입되었다.
+  1979년 논문은 원본 전망이론(가치함수 + 결정 가중치),
+  1992년 논문은 누적 확률 가중과 순위 의존 효용으로의 확장이다.
+
 ```
 w(p) = p^γ / (p^γ + (1-p)^γ)^(1/γ)
 
-γ ≈ 0.61 (Tversky & Kahneman, 1992)
+γ ≈ 0.61 (Tversky & Kahneman, 1992 — 누적 전망이론)
 ```
 
 - 낮은 확률 과대평가 → 복권 효과 (급등 기대)
@@ -213,6 +221,47 @@ CNN Money의 Fear & Greed Index 구성:
     2) NLP 기반 뉴스 감성분석 (FinBERT, 2019+)
     3) 옵션 풋/콜 비율 + 스큐 (정보 내용이 높음)
     4) 소셜미디어 감성 (Twitter/Reddit 감성 스코어)
+
+---
+
+## 4B. 교차문화 행동재무학 (Cross-Cultural Behavioral Finance)
+
+서구 시장에서 도출된 전망이론 파라미터와 행동 편향의 강도는
+문화적 맥락에 따라 상이할 수 있다. 한국 시장에의 적용 시 이를 고려해야 한다.
+
+**한국 시장의 고유한 행동적 특성:**
+
+1. **강한 소매 군집행동 (Retail Herding)**
+   Kim & Wei (2002), "Foreign Portfolio Investors Before and During a Crisis",
+   Journal of International Economics — 한국 개인투자자의 군집행동 강도가
+   기관/외국인 대비 유의하게 높으며, 위기 시 증폭된다.
+
+2. **유교적 위험 태도 (Confucian Risk Attitudes)**
+   Weber & Hsee (1998), "Cross-Cultural Differences in Risk Perception,
+   but Cross-Cultural Similarities in Attitudes Towards Perceived Risk",
+   Management Science — 동아시아 투자자는 동일 수준의 객관적 위험에 대해
+   서구 투자자 대비 낮은 위험 인식을 보이는 경향이 있다.
+   이는 '쿠션 가설(cushion hypothesis)': 강한 사회적 안전망(가족, 기업집단)이
+   개인의 위험 감수를 완화한다는 설명과 관련된다.
+
+3. **재벌 지배구조와 처분효과**
+   Choi & Sias (2009), "Institutional Industry Herding",
+   Journal of Financial Economics — 재벌 계열사 간 지분 연결이
+   기관투자자의 군집행동 패턴에 영향을 미치며,
+   개인투자자의 처분효과가 대형 재벌주에서 특히 두드러진다.
+
+**파라미터 보정 시사점:**
+
+```
+서구 기준 전망이론 파라미터: λ = 2.25, α = 0.88
+한국 시장 보정 고려 사항:
+  - 소매 투자자 비중이 높은 KRX에서는 군집행동 계수가
+    서구 시장 대비 1.3-1.5x 클 수 있음
+  - 개인투자자 거래 비중: KRX ~60-70% vs NYSE ~20-30%
+  - λ, α 파라미터의 한국 특화 실증 연구는 아직 부족하며,
+    알고리즘 적용 시 범위 기반 접근(Wakker 2010)을 유지하되
+    한국 고유 데이터로의 재추정이 장기 과제
+```
 
 ---
 

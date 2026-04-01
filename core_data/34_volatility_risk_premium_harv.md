@@ -190,11 +190,11 @@ vrp_proxy < 0.8:  단기 vol >> 장기 vol (변동성 급등)
   → 표준 신뢰도 적용
 ```
 
-**구현 매핑 — `signalEngine.calcVRPRegime()`:**
+**구현 매핑 — `signalEngine.calcVolRegime()`:**
 
 ```javascript
 // signalEngine.js (line ~1887)
-calcVRPRegime(candles, cache) {
+calcVolRegime(candles, cache) {
   // 1. EWMA 변동성 추출: 장기(λ=0.97), 단기(λ=0.86)
   volLong  = cache.ewmaVol(0.97);   // IndicatorCache 접근자
   volShort = cache.ewmaVol(0.86);
@@ -207,8 +207,8 @@ calcVRPRegime(candles, cache) {
   ratio = lastLong / lastShort;
 
   // 4. 레짐 분류 및 신뢰도 승수
-  if (ratio > 1.2) → regime='risk-on',  multiplier=1.05
-  if (ratio < 0.8) → regime='risk-off', multiplier=0.95
+  if (ratio > 1.2) → regime='risk-on',  multiplier=1.15  (Phase0-#6 확대)
+  if (ratio < 0.8) → regime='risk-off', multiplier=0.85
   else             → regime='neutral',  multiplier=1.00
 
   return { regime, ratio, multiplier };
@@ -219,7 +219,7 @@ calcVRPRegime(candles, cache) {
 
 ```
 signalEngine.analyze()
-  → calcVRPRegime() 호출 (line ~426)
+  → calcVolRegime() 호출 (line ~426)
   → stats.vrpRegime 저장
   → app.js _lastVrpRegime 업데이트 (line ~128)
   → 패턴 신뢰도 조정 시 multiplier 적용
@@ -341,7 +341,15 @@ RV_d(t) = r²_t                                  (1일 실현분산)
 
 RV_w(t) = (1/5) × Σ_{i=0}^{4} r²_{t-i}         (5일 평균 실현분산)
 
-RV_m(t) = (1/22) × Σ_{i=0}^{21} r²_{t-i}       (22일 평균 실현분산)
+RV_m(t) = (1/M) × Σ_{i=0}^{M-1} r²_{t-i}        (M일 평균 실현분산)
+
+KRX 캘린더 보정:
+  M = 21 (KRX 월간 영업일 수, 22가 아님)
+  KRX 연간 영업일: ~250일 (미국 252일과 상이)
+  연환산 계수: √250 (√252가 아님)
+  사유: KRX 공휴일(설날, 추석, 한글날 등)로 미국 대비 연간 2-3일 적음.
+  Corsi (2009) 원논문은 미국 시장 기준(M=22, √252)이므로
+  KRX 적용 시 반드시 보정해야 한다.
 
 한계: 일봉 기반 RV는 일중 변동성을 과소 추정
      Parkinson (1980) estimator로 개선 가능:
@@ -416,6 +424,7 @@ RV_{t+1} = β₀ + β_d·RV_d + β_w·RV_w + β_m·RV_m + β_J·J_t + ε_{t+1}
 J_t = max(RV_t - BV_t, 0)  (점프 변동성)
 BV_t: 이중 제곱 변동성 (Bipower Variation)
     = (π/2) × Σ |r_{t,i}| × |r_{t,i-1}|
+    (주: 유한 표본 보정 M/(M-1) 생략 — 고빈도(M ≫ 1) 점근 근사 기준. 일별 데이터에서는 M/(M-1) 보정이 필요할 수 있음.)
 
 β_J는 보통 음수: 점프 발생 후 변동성이 빠르게 소멸
 → 점프는 연속 변동성과 다른 동역학을 가짐
@@ -439,6 +448,8 @@ RV_{t+1} = β₀ + ... + β_J+·J_t^+ + β_J-·J_t^- + ε
 J^+: 양의 점프 (급등) → β_J+ > 0 (미래 변동성 증가)
 J^-: 음의 점프 (급락) → β_J- < 0 (미래 변동성 더 크게 증가)
 → 비대칭성: |β_J-| > |β_J+| (레버리지 효과)
+(주: J⁻는 음의 점프의 절대 크기로 정의하므로 β_J⁻ > 0이면 음의 점프가
+미래 변동성을 증가시킴. 기호 정의에 따라 부호 해석이 달라짐.)
 ```
 
 **CheeseStock 현재 구현:** 기본 HAR-RV만 구현 (확장 모형은 향후 과제).
@@ -882,7 +893,7 @@ ts_ratio < 0.9: 단기 vol < 장기 vol → 종목 수준 contango
 **내재 상관관계 (Implied Correlation):**
 
 ```
-ρ̄_implied = (σ²_I,implied) / (Σ w²_i × σ²_i,implied)
+ρ̄_implied = [σ²_I,implied - Σ wᵢ² σ²_i,implied] / [Σᵢ Σ_{j≠i} wᵢ wⱼ σ_i,implied σ_j,implied]
 
 σ²_I,implied:     지수 옵션의 내재분산 (VKOSPI²)
 σ²_i,implied:     개별 종목 옵션의 내재분산
@@ -997,7 +1008,8 @@ KOSPI200 기준: GEX flip level ≈ 기초자산 현재가 ± 3-5%
 ### 7.3 Charm (시간에 의한 감마 변화)
 
 ```
-Charm = ∂Δ/∂T = -∂Γ/∂T × S × ΔT
+Charm = -∂Delta/∂T = -N'(d₁) × [2(r-q)T - d₂σ√T] / (2Tσ√T)
+(정확한 closed-form은 Hull Ch.19 참조)
 
 만기가 가까워질수록 ATM 감마가 급증:
   Γ(T→0) → ∞ at ATM
@@ -1039,11 +1051,11 @@ KRX 옵션 만기(매월 2째 목요일)에 KOSPI200의 변동성이
 │                                                              │
 │  Combined = base_confidence × vrp_mult × har_mult × jump_mult│
 │                                                              │
-│  vrp_mult:  calcVRPRegime().multiplier (1.05 / 1.00 / 0.95) │
+│  vrp_mult:  calcVolRegime().multiplier (1.15 / 1.00 / 0.85) │
 │  har_mult:  HAR/EWMA 비율 기반 (1.05 / 1.00 / 0.90)        │
 │  jump_mult: λ 기반 (1.00 / 0.85 / 0.70)                    │
 │                                                              │
-│  최종 범위: 0.57 ~ 1.16  (0.95×0.90×0.70 ~ 1.05×1.05×1.05) │
+│  최종 범위: 0.51 ~ 1.33  (0.85×0.90×0.70 ~ 1.15×1.05×1.05) │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -1131,7 +1143,7 @@ f_t(x; ν) = [Γ((ν+1)/2) / (Γ(ν/2)√(νπ))] × [1 + x²/ν]^{-(ν+1)/2}
 
 실용 근사 (Hill estimator 기반):
   ν̂ ≈ 1 / ξ̂,  ξ̂ = Hill tail index (indicators.js hillEstimator)
-  → IndicatorCache.hillTailIndex(k) 활용
+  → IndicatorCache.hill(k).alpha 활용
 
 KOSPI200 대형주: ν̂ ≈ 4-7
 KOSDAQ 소형주:   ν̂ ≈ 2.5-4
@@ -1146,7 +1158,7 @@ CI_95(t) = μ̂_t ± t_{0.025, ν̂} × σ_EWMA(t)
 
 μ̂_t:        단기 평균 수익률 추정 (EWMA 또는 0)
 σ_EWMA(t):   calcEWMAVol(closes, λ) [i]
-ν̂:          hillTailIndex 기반 자유도
+ν̂:          hill().alpha 기반 자유도
 
 이 신뢰구간이 HAR-RV 예측의 불확실성 정량화에 사용된다:
   HAR_RV_ann ± t_{0.025, ν̂} × SE(HAR_RV)
@@ -1232,7 +1244,7 @@ Tier C (GCV): VRP 임계값, HAR 비율, 점프 빈도 임계값
 
 ```
 VRP 관련:
-  signalEngine.calcVRPRegime()의 임계값 1.2, 0.8 (하드코딩)
+  signalEngine.calcVolRegime()의 임계값 1.2, 0.8 (하드코딩)
   → #121, #122로 외부화 권장
 
 점프 관련:
@@ -1302,8 +1314,8 @@ HAR 관련:
 | §6.2 상관관계 | 28_cross_market_correlation.md | §1-3 | 글로벌-KRX 상관관계 전파 |
 | §7.1 GEX | 26_options_volatility_signals.md | §6 | GEX 기본 개념, KRX 적용 |
 | §7.3 만기일 효과 | 27_futures_basis_program_trading.md | §4.2 | 옵션 만기일(2째 목요일) 변동성 |
-| §8.1 VRP 레짐 | signalEngine.js | line ~1887 | calcVRPRegime() 구현 |
-| §9.2 Hill estimator | indicators.js | hillTailIndex() | 꼬리 지수 산출 |
+| §8.1 VRP 레짐 | signalEngine.js | line ~1887 | calcVolRegime() 구현 |
+| §9.2 Hill estimator | indicators.js | hill().alpha | 꼬리 지수 산출 |
 | §11.3 상수 외부화 | 22_learnable_constants_guide.md | Master Registry | 136+ 상수 통합 관리 |
 
 ---
@@ -1318,8 +1330,8 @@ HAR 관련:
 │  [이론]                    [구현]                    [신호]           │
 │                                                                     │
 │  VRP (Bollerslev 2009)     signalEngine              vrpRegime       │
-│  IV - RV 스프레드          .calcVRPRegime()          risk-on/off     │
-│  ↓ 프록시                  EWMA(0.97)/EWMA(0.86)    mult: 0.95~1.05 │
+│  IV - RV 스프레드          .calcVolRegime()          risk-on/off     │
+│  ↓ 프록시                  EWMA(0.97)/EWMA(0.86)    mult: 0.85~1.15 │
 │                                                                     │
 │  HAR-RV (Corsi 2009)       IndicatorCache            harRV_ann (%)   │
 │  RV_d + RV_w + RV_m        .harRV(idx)              rv_d, rv_w, rv_m│

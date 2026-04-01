@@ -120,17 +120,20 @@ class PatternBacktester {
     var prefix = isWorker ? '../data/backtest/' : 'data/backtest/';
     // [Phase I-L1] csad_herding 추가: Chang, Cheng & Khorana (2000) 군집행동 지표
     // 45% 극단 군집 일수 → 하락장 극단 군집 시 매수 패턴 신뢰도 하향 조정에 활용
+    // [H-12] disposition_proxy: loaded for future Doc24 §3 integration (disposition effect discount); currently unused
     var files = ['illiq_spread', 'hmm_regimes', 'disposition_proxy', 'csad_herding'];
     var loaded = {};
-    files.forEach(function(name) {
-      fetch(prefix + name + '.json')
+    // [H-3 FIX] Promise.all replaces setTimeout(3000) race condition.
+    // All fetches complete before storing _behavioralData.
+    Promise.all(files.map(function(name) {
+      return fetch(prefix + name + '.json')
         .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(data) { if (data) loaded[name] = data; })
-        .catch(function() {});
-    });
-    // Store reference (async — available after first analysis cycle)
-    // [Phase0-#8] HMM staleness check: 30일 이상 경과 시 null 처리
-    setTimeout(function() {
+        .catch(function() { return null; });
+    })).then(function(results) {
+      for (var i = 0; i < files.length; i++) {
+        if (results[i]) loaded[files[i]] = results[i];
+      }
+      // [Phase0-#8] HMM staleness check: 30일 이상 경과 시 null 처리
       if (loaded['hmm_regimes'] && loaded['hmm_regimes'].daily) {
         var daily = loaded['hmm_regimes'].daily;
         var lastEntry = daily.length > 0 ? daily[daily.length - 1] : null;
@@ -145,7 +148,7 @@ class PatternBacktester {
         }
       }
       that._behavioralData = loaded;
-    }, 3000);
+    });
   }
 
   /** Load LinUCB policy JSON (graceful: missing file = no-op) */
@@ -162,6 +165,16 @@ class PatternBacktester {
       .then(function(data) {
         if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
           that._rlPolicy = data;
+          // [C-9] Staleness guard: warn if policy older than 90 days
+          if (data.trained_date) {
+            var age = (Date.now() - new Date(data.trained_date).getTime()) / (1000*60*60*24);
+            if (age > 90) console.warn('[RL] Policy stale: ' + Math.round(age) + 'd old (trained ' + data.trained_date + ')');
+          }
+          // [H-16] Dimension validation: Python may train with different feature count
+          var expectedDim = data.feature_dim || 7; // default 7 for backward compatibility
+          if (data.d !== expectedDim) {
+            console.warn('[RL] Dimension mismatch: policy.d=' + data.d + ', expected=' + expectedDim);
+          }
         }
         // G-2: Beta-Binomial posterior mean → PatternEngine 주입
         if (data && data.win_rates_live && typeof PatternEngine !== 'undefined') {
@@ -282,8 +295,11 @@ class PatternBacktester {
     ];
   }
 
-  /** Apply LinUCB: dot product + argmax over 5 actions */
-  _applyLinUCB(context) {
+  // [C-7] Greedy-only LinUCB: exploration term α√(x'A⁻¹x) dropped in JS; full UCB in rl_linucb.py
+  // LinUCB is a contextual bandit (single-step), not MDP — no Bellman equation applies (Li et al., 2010)
+  // [C-8] Known misalignment: RL reward (per-sample return) ≠ evaluation metric (Spearman IC) — see Doc11§13.3
+  /** Apply LinUCB (greedy): dot product + argmax over 5 actions */
+  _applyLinUCBGreedy(context) {
     var p = this._rlPolicy;
     if (!p || context.length !== p.d) return { action: 2, factor: 1.0 };
     var bestA = 2, bestScore = -Infinity; // default: trust_mra (action 2)
@@ -387,6 +403,9 @@ class PatternBacktester {
     this._applyBHFDR(results);
 
     // [Expert Consensus] Reliability Tier — CFA + Statistical + Theory consensus
+    // NOTE: reliabilityTier 'A'/'B'/'C'/'D' = 백테스트 통계 유의성 등급 [A-rel ~ D-rel]
+    // 혼동 주의: core_data/22의 상수 Tier A/B/C/D/E [A-const]와 별개 시스템
+    // 혼동 주의: app.js의 검증 Tier S/A/B/C/D [S-ver ~ D-ver]와도 별개
     for (var tierKey in results) {
       var tierResult = results[tierKey];
       if (!tierResult || !tierResult.horizons) { tierResult.reliabilityTier = 'D'; continue; }
@@ -412,6 +431,49 @@ class PatternBacktester {
     }
 
     return results;
+  }
+
+  /** Spearman Rank IC — Grinold & Kahn (2000), "Active Portfolio Management"
+   *  Rank correlation between predicted and actual returns.
+   *  Non-parametric: robust to non-normal return distributions (Cont 2001).
+   *  IC > 0.05 is operationally significant; IC > 0.10 is strong.
+   *
+   *  @param {Array} pairs — [[predicted, actual], ...] (minimum 5 pairs)
+   *  @returns {number|null} — Spearman rho in [-1, 1], or null if insufficient data
+   */
+  _spearmanCorr(pairs) {
+    if (!pairs || pairs.length < 5) return null;
+    var n = pairs.length;
+    // Rank each column with averaged ties
+    function rank(arr) {
+      var sorted = arr.map(function(v, i) { return { v: v, i: i }; });
+      sorted.sort(function(a, b) { return a.v - b.v; });
+      var ranks = new Array(n);
+      for (var i = 0; i < n; i++) {
+        ranks[sorted[i].i] = i + 1;
+      }
+      // Handle ties: average ranks — Kendall & Gibbons (1990)
+      var j = 0;
+      while (j < n) {
+        var k = j;
+        while (k < n - 1 && sorted[k + 1].v === sorted[k].v) k++;
+        if (k > j) {
+          var avgRank = (j + k + 2) / 2;
+          for (var m = j; m <= k; m++) ranks[sorted[m].i] = avgRank;
+        }
+        j = k + 1;
+      }
+      return ranks;
+    }
+    var rankPred = rank(pairs.map(function(p) { return p[0]; }));
+    var rankAct = rank(pairs.map(function(p) { return p[1]; }));
+    // Spearman rho via sum of squared rank differences
+    var sumD2 = 0;
+    for (var i = 0; i < n; i++) {
+      var d = rankPred[i] - rankAct[i];
+      sumD2 += d * d;
+    }
+    return 1 - (6 * sumD2) / (n * (n * n - 1));
   }
 
   /** Walk-Forward 검증 — Pardo (2008), Bailey & Lopez de Prado (2014)
@@ -444,6 +506,10 @@ class PatternBacktester {
     let sumIS = 0, sumOOS = 0, validFolds = 0;
 
     for (let f = 0; f < folds; f++) {
+      // [H-4 FIX] Clear result cache per fold to prevent cross-fold contamination.
+      // Different training slices produce different pattern sets; shared cache keys
+      // could return stale results from a prior fold's training window.
+      this._resultCache = new Map();
       // Expanding window: train [0, trainEnd], test [testStart, testEnd]
       const testEnd = len - 1 - (folds - 1 - f) * oosSize;
       const testStart = testEnd - oosSize + 1;
@@ -487,8 +553,10 @@ class PatternBacktester {
     const avgIS = sumIS / validFolds;
     const avgOOS = sumOOS / validFolds;
     // WFE: avoid division by zero, sign-aware (both negative = not robust)
-    const wfe = Math.abs(avgIS) > 0.0001
-      ? Math.round((avgOOS / avgIS) * 100) : 0;
+    var minISEdge = 0.005; // 0.5% minimum in-sample edge for meaningful WFE
+    const wfe = Math.abs(avgIS) < minISEdge
+      ? 0  // insufficient IS edge → WFE undefined
+      : Math.round((avgOOS / avgIS) * 100);
     // Both-negative: WFE numerically correct but strategically useless
     const bothNegative = avgIS < 0 && avgOOS < 0;
 
@@ -810,6 +878,7 @@ class PatternBacktester {
 
     for (const h of horizons) {
       const returns = [];
+      const returnDates = [];  // [Calendar Bootstrap] 각 return의 패턴 발생 날짜 (YYYY-MM-DD)
       const validOccs = [];  // 유효한 발생 이력 (회귀용)
       const maeArr = [];  // Max Adverse Excursion per trade
       const mfeArr = [];  // Max Favorable Excursion per trade
@@ -838,6 +907,7 @@ class PatternBacktester {
         const exitPrice = candles[exitIdx].close;
         const ret = (exitPrice - entryPrice) / entryPrice * 100 - this._horizonCost(h); // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
+        returnDates.push(candles[occ.idx].time || '');  // [Calendar Bootstrap] 패턴 발생 시점 날짜
         validOccs.push(occ);
         maeArr.push(minRet);
         mfeArr.push(maxRet);
@@ -918,6 +988,7 @@ class PatternBacktester {
 
       // [Expert Consensus] Sortino Ratio — Sortino & van der Meer (1991)
       // Penalizes only downside deviation, more appropriate for asymmetric returns
+      // Annualization: √(252/horizon) convention per Sortino & Price (1994); assumes IID downside deviations
       // [H-1 FIX] Denominator = sqrt(sum(min(r,0)^2) / N_total), NOT / N_negative.
       // Per Sortino & van der Meer (1991): downside deviation uses total sample count
       // to avoid overestimating risk when few negative returns exist.
@@ -973,9 +1044,10 @@ class PatternBacktester {
       // [Expert Consensus] Regime-Conditioned WR — Lo (2004) AMH
       var regimeWR = this._computeRegimeWR(candles, validOccs, h, patternSignal);
 
-      // [Expert Consensus] Block Bootstrap — Kunsch (1989), Carlstein (1986)
-      // i.i.d. bootstrap violates temporal dependence in pattern returns.
-      // Block resampling preserves within-cluster correlation.
+      // [Expert Consensus] Calendar-Time Block Bootstrap — Fama & French (2010), Politis & Romano (1994)
+      // Patterns cluster in volatile periods (earnings, regime changes), violating i.i.d. assumption.
+      // Calendar-month resampling preserves within-month temporal dependence and seasonal effects.
+      // Fallback: index-based block bootstrap when date strings are unavailable (intraday data).
       var winRateCI = null;
       if (n >= 30) {
         // Winsorize at 1st/99th percentile before bootstrap (Wilcox 2005)
@@ -986,22 +1058,69 @@ class PatternBacktester {
         var clipHi = sortedForClip[Math.min(n - 1, Math.floor(n * 0.99))];
         var clippedReturns = returns.map(function(r) { return Math.max(clipLo, Math.min(clipHi, r)); });
 
+        // Calendar-month grouping: group clipped returns by YYYY-MM
+        // Patterns in the same month share macro regime, so resampling whole months
+        // preserves within-month correlation structure (Carlstein 1986, calendar variant).
+        var monthGroups = {};
+        var hasCalendarDates = false;
+        for (var gi = 0; gi < n; gi++) {
+          var dateStr = returnDates[gi];
+          // Daily candles: "YYYY-MM-DD" format — extract "YYYY-MM"
+          var monthKey = (dateStr && typeof dateStr === 'string' && dateStr.length >= 7)
+            ? dateStr.substring(0, 7) : null;
+          if (monthKey) {
+            hasCalendarDates = true;
+            if (!monthGroups[monthKey]) monthGroups[monthKey] = [];
+            monthGroups[monthKey].push(clippedReturns[gi]);
+          }
+        }
+
         var B = 500, bootWR = [];
-        var blockSize = Math.max(2, Math.round(Math.sqrt(n)));
-        var nBlocks = Math.ceil(n / blockSize);
-        for (var bi = 0; bi < B; bi++) {
-          var wins_b = 0, count_b = 0;
-          for (var blk = 0; blk < nBlocks && count_b < n; blk++) {
-            var startIdx = Math.floor(Math.random() * n);
-            for (var bj = 0; bj < blockSize && count_b < n; bj++) {
-              var idx = (startIdx + bj) % n;
-              if ((patternSignal === 'buy' && clippedReturns[idx] > 0) ||
-                  (patternSignal === 'sell' && clippedReturns[idx] < 0) ||
-                  (patternSignal === 'neutral' && clippedReturns[idx] > 0)) wins_b++;
+
+        if (hasCalendarDates && Object.keys(monthGroups).length >= 3) {
+          // ── Calendar-time bootstrap: resample months with replacement ──
+          // Fama & French (2010): calendar-time portfolios correct for cross-sectional dependence.
+          // Each bootstrap iteration resamples whole months, preserving intra-month clustering.
+          var monthKeys = Object.keys(monthGroups);
+          for (var bi = 0; bi < B; bi++) {
+            var wins_b = 0, count_b = 0;
+            var bootReturns = [];
+            // Resample months until we have >= n returns
+            while (bootReturns.length < n) {
+              var rndMonth = monthKeys[Math.floor(Math.random() * monthKeys.length)];
+              for (var mri = 0; mri < monthGroups[rndMonth].length; mri++) {
+                bootReturns.push(monthGroups[rndMonth][mri]);
+              }
+            }
+            // Trim to exactly n (avoid bias from last month overshoot)
+            for (var bri = 0; bri < n; bri++) {
+              if ((patternSignal === 'buy' && bootReturns[bri] > 0) ||
+                  (patternSignal === 'sell' && bootReturns[bri] < 0) ||
+                  (patternSignal === 'neutral' && bootReturns[bri] > 0)) wins_b++;
               count_b++;
             }
+            bootWR.push(count_b > 0 ? (wins_b / count_b * 100) : 50);
           }
-          bootWR.push(count_b > 0 ? (wins_b / count_b * 100) : 50);
+        } else {
+          // ── Fallback: index-based block bootstrap (intraday or missing dates) ──
+          // Kunsch (1989), Carlstein (1986): block size = sqrt(n) preserves local dependence.
+          // NOTE: This path does not correct for temporal clustering across periods.
+          var blockSize = Math.max(2, Math.round(Math.sqrt(n)));
+          var nBlocks = Math.ceil(n / blockSize);
+          for (var bi = 0; bi < B; bi++) {
+            var wins_b = 0, count_b = 0;
+            for (var blk = 0; blk < nBlocks && count_b < n; blk++) {
+              var startIdx = Math.floor(Math.random() * n);
+              for (var bj = 0; bj < blockSize && count_b < n; bj++) {
+                var idx = (startIdx + bj) % n;
+                if ((patternSignal === 'buy' && clippedReturns[idx] > 0) ||
+                    (patternSignal === 'sell' && clippedReturns[idx] < 0) ||
+                    (patternSignal === 'neutral' && clippedReturns[idx] > 0)) wins_b++;
+                count_b++;
+              }
+            }
+            bootWR.push(count_b > 0 ? (wins_b / count_b * 100) : 50);
+          }
         }
         bootWR.sort(function(a, b2) { return a - b2; });
         winRateCI = [
@@ -1031,7 +1150,12 @@ class PatternBacktester {
       // [H-3 FIX] Kelly (1956): clamp to [0, 1.0]. Negative Kelly = don't bet.
       // Raw Kelly > 1.0 implies leveraged positions — inappropriate for unleveraged equity.
       // Half-Kelly (f*/2) is industry standard; raw clamped here, downstream can halve.
-      const kellyRaw = payoffRatio > 0 ? (((wins / n) * payoffRatio) - ((n - wins) / n)) / payoffRatio : 0;
+      // NOTE: Full Kelly used; half-Kelly (0.5f*) recommended for production — reduces drawdown ~50% (Thorp, 2006)
+      // [M-5 FIX] Use excess probability over null WR instead of raw wins/n.
+      // In a market with positive drift, wrNull > 50% overstates raw edge.
+      // Kelly edge = (observed WR - null WR); recentered to 0.5 for formula.
+      const kellyP = Math.max(0, Math.min(1, (wins / n) - (wrNull / 100) + 0.5));
+      const kellyRaw = payoffRatio > 0 ? ((kellyP * payoffRatio) - (1 - kellyP)) / payoffRatio : 0;
       const kellyFraction = +Math.max(0, Math.min(1.0, kellyRaw)).toFixed(4);
 
       // t-검정: H0: mean = 0 (fat-tail 보정 Cornish-Fisher 임계값, 95% 양측)
@@ -1043,6 +1167,12 @@ class PatternBacktester {
 
       // [Expert Consensus] Harvey-Liu-Zhu (2016) stricter threshold for multiple testing
       var hlzSignificant = Math.abs(tStat) > 3.0;
+
+      // MDE (Minimum Detectable Effect) — Cohen (1988), power analysis
+      // The smallest mean return (%) reliably distinguishable from zero at 95% confidence.
+      // Uses fat-tail-corrected tCritical (not naive 1.96) for KRX heavy-tail returns.
+      // If observed |mean| < MDE, the result is statistically indistinguishable from noise.
+      var mde = n > 1 && stdDev > 0 ? +(tCritical * stdDev / Math.sqrt(n)).toFixed(2) : null;
 
       // [Expert Consensus] CFA: n<100 unreliable, n<400 caution (95% CI ±5pp)
       let sampleWarning = '';
@@ -1174,6 +1304,7 @@ class PatternBacktester {
         tStat: +tStat.toFixed(2),
         significant,
         hlzSignificant,
+        mde,                // [Diagnostic] Minimum Detectable Effect (%) — Cohen (1988)
         adjustedSignificant: false, // Holm-Bonferroni 보정 후 backtestAll()에서 갱신
         sampleWarning,
         directionalAccuracy,
@@ -1190,7 +1321,7 @@ class PatternBacktester {
       if (returns.length >= 20) {
         var sx = 0, sy = 0, sxy = 0, sx2 = 0;
         for (var ri = 0; ri < returns.length; ri++) {
-          var xi = (validOccs[ri].confidencePred || validOccs[ri].confidence || 50) / 100;
+          var xi = (validOccs[ri].confidence || 50) / 100;
           var yi = returns[ri];
           sx += xi; sy += yi; sxy += xi * yi; sx2 += xi * xi;
         }
@@ -1279,10 +1410,12 @@ class PatternBacktester {
             labels: ['intercept', 'confidence', 'trendStrength', 'lnVolumeRatio', 'atrNorm'],
             coeffs: reg.coeffs.map(function(c) { return +c.toFixed(6); }),
             rSquared: +reg.rSquared.toFixed(4),
+            adjR2: +(reg.adjR2 != null ? reg.adjR2 : reg.rSquared).toFixed(4), // [Diagnostic] Theil (1961), overfitting guard
             // HC3 heteroskedasticity-robust tStats (White 1980, MacKinnon & White 1985)
             // OLS tStats may be inconsistent under financial return heteroskedasticity.
             // HC3 with (1-h_ii)^2 jackknife correction is optimal for n=30-300 (Long & Ervin 2000).
             tStats: reg.hcTStats.map(function(t) { return +t.toFixed(2); }),
+            vifs: reg.vifs || [],    // [Diagnostic] VIF per feature — Marquardt (1970), flag > 5
           };
 
           // 최근 패턴에 대한 기대수익률 예측
@@ -1311,10 +1444,13 @@ class PatternBacktester {
               if (deltaT != null && deltaT >= 2.0) {
                 // LinUCB path (expensive): build context and apply bandit adjustment
                 var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
-                var rlResult = this._applyLinUCB(rlCtx);
-                stats.expectedReturn = +(predicted * rlResult.factor).toFixed(2);
+                var rlResult = this._applyLinUCBGreedy(rlCtx);
+                // [H-20] Safety clamp: |factor| <= 3.0 prevents extreme adjustments
+                var MAX_FACTOR = 3.0;
+                var clampedFactor = Math.max(-MAX_FACTOR, Math.min(MAX_FACTOR, rlResult.factor));
+                stats.expectedReturn = +(predicted * clampedFactor).toFixed(2);
                 stats.rlAction = rlResult.action;
-                stats.rlFactor = rlResult.factor;
+                stats.rlFactor = clampedFactor;
                 predicted = stats.expectedReturn;
               }
               // else: Ridge-only, no context build needed (performance optimization)
@@ -1337,6 +1473,55 @@ class PatternBacktester {
             stats.ci95Lower = +(predicted - tCrit * se).toFixed(2);
             stats.ci95Upper = +(predicted + tCrit * se).toFixed(2);
           }
+
+          // ── Spearman Rank IC — Grinold & Kahn (2000) ──
+          // In-sample IC: rank correlation between WLS predicted returns and actual returns.
+          // Uses reverse-transformed coefficients × original-scale features for each occurrence.
+          // IC > 0.05 operationally significant, > 0.10 strong (Qian, Hua & Sorensen 2007).
+          // NOTE: This is in-sample IC — OOS IC would require walk-forward (see walkForwardTest).
+          if (validOccs.length >= 10) {
+            var icPairs = [];
+            for (var icIdx = 0; icIdx < validOccs.length; icIdx++) {
+              var icOcc = validOccs[icIdx];
+              var icX = [
+                1,
+                (icOcc.confidencePred || icOcc.confidence || 50) / 100,
+                icOcc.trendStrength || 0,
+                Math.log(Math.max(icOcc.volumeRatio || 1, 0.1)),
+                icOcc.atrNorm || 0.02,
+              ];
+              var icPred = 0;
+              for (var icJ = 0; icJ < icX.length; icJ++) icPred += icX[icJ] * reg.coeffs[icJ];
+              icPairs.push([icPred, returns[icIdx]]);
+            }
+            var spearmanIC = this._spearmanCorr(icPairs);
+            if (spearmanIC != null) {
+              stats.ic = +spearmanIC.toFixed(4);
+              // ICIR = IC / std(IC_per_fold) — cross-sectional approximation via jackknife
+              // Jackknife SE: leave-one-out Spearman std for ICIR estimation
+              if (icPairs.length >= 20) {
+                var jackICs = [];
+                for (var jk = 0; jk < icPairs.length; jk++) {
+                  var jkPairs = icPairs.slice(0, jk).concat(icPairs.slice(jk + 1));
+                  var jkIC = this._spearmanCorr(jkPairs);
+                  if (jkIC != null) jackICs.push(jkIC);
+                }
+                if (jackICs.length >= 10) {
+                  var jkSum = 0;
+                  for (var jki = 0; jki < jackICs.length; jki++) jkSum += jackICs[jki];
+                  var jkMean = jkSum / jackICs.length;
+                  var jkVar = 0;
+                  for (var jki = 0; jki < jackICs.length; jki++) jkVar += (jackICs[jki] - jkMean) * (jackICs[jki] - jkMean);
+                  var icStdDev = Math.sqrt(jkVar / (jackICs.length - 1));
+                  stats.icir = icStdDev > 1e-6 ? +(spearmanIC / icStdDev).toFixed(3) : null;
+                } else {
+                  stats.icir = null;
+                }
+              } else {
+                stats.icir = null;
+              }
+            }
+          }
         }
       }
 
@@ -1358,11 +1543,12 @@ class PatternBacktester {
       maxDrawdown: 0, cvar5: 0,
       sortinoRatio: null, cohensH: 0,
       expectancy: 0, profitFactor: 0, kellyFraction: 0,
-      tStat: 0, significant: false, hlzSignificant: false, adjustedSignificant: false,
+      tStat: 0, significant: false, hlzSignificant: false, mde: null, adjustedSignificant: false,
       sampleWarning: 'insufficient',
       directionalAccuracy: 0, targetHitRate: null, predictionMAE: null,
       patternScore: 0, patternGrade: 'F',
       mzRegression: null, calibrationCoverage: null, predActualPairs: null,
+      ic: null, icir: null,
     };
   }
 
@@ -1758,6 +1944,7 @@ class PatternBacktester {
       kalmanUpturn: 'buy',         kalmanDownturn: 'sell',
       volumeBreakout: 'buy',       volumeSelloff: 'sell',
       volumeExhaustion: 'neutral',
+      obvBullishDivergence: 'buy', obvBearishDivergence: 'sell',
     };
     if (KNOWN_DIR[signalType]) return KNOWN_DIR[signalType];
 

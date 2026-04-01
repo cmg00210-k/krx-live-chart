@@ -50,6 +50,9 @@
 - Dickey, D.A. & Fuller, W.A. (1979). *Distribution of the Estimators for Autoregressive Time Series with a Unit Root*. JASA, 74.
   → ADF 단위근 검정.
 
+- Mehra, R.K. (1970). *On the Identification of Variances and Adaptive Kalman Filtering*. IEEE Transactions on Automatic Control, 15(2), 175-184.
+  → 적응적 칼만 필터의 분산 식별 원전.
+
 ---
 
 ## III. 물리학 & 경제물리학
@@ -183,6 +186,9 @@
 
 - Wilder, J.W. (1978). *New Concepts in Technical Trading Systems*. Trend Research.
   → RSI, ATR, ADX, 파라볼릭 SAR의 원전.
+
+- Appel, G. (1979). *The Moving Average Convergence-Divergence Trading Method*. Systems and Forecasts newsletter.
+  → MACD 지표의 원전. 12/26/9 매개변수의 출처.
 
 - Bollinger, J. (2001). *Bollinger on Bollinger Bands*. McGraw-Hill.
   → 볼린저 밴드의 원전. 설계 철학과 활용법.

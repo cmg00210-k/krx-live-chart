@@ -51,6 +51,12 @@ VPIN = sum(|V_buy - V_sell|) / (n * V_bucket)
 | 0.85-0.95 | 고독성 | -30% |
 | > 0.95 | 플래시 크래시 위험 | 신호 무효 |
 
+> **DATA REQUIREMENT WARNING:** VPIN (Easley et al., 2012)은 tick-level 거래 데이터와
+> 매수/매도 분류(buy/sell classification, e.g., Lee-Ready algorithm)를 필요로 한다.
+> OHLCV 데이터만으로는 계산이 불가능하며, 본 프로젝트에서는 향후 데이터 업그레이드
+> (Koscom 실시간 체결 데이터 전환) 시 구현할 수 있는 목표(aspirational target)로
+> 기재한다. 현재 유동성 측정은 Amihud ILLIQ(§3.1)로 대체한다.
+
 참고문헌:
 - Easley, D. et al. (2012). Flow Toxicity. *RFS*, 25(5).
 
@@ -59,6 +65,13 @@ VPIN = sum(|V_buy - V_sell|) / (n * V_bucket)
 ## 3. 유동성 비대칭 (Liquidity Asymmetry)
 
 ### 3.1 Amihud 비유동성 비율
+
+> **Canonical Definition (Amihud, 2002):**
+> ILLIQ = (1/D) * sum_{d=1}^{D} |r_d| / Vol_d
+> 여기서 D = 거래일수, r_d = 일간수익률, Vol_d = 일간거래대금(KRW).
+> 이 정의가 본 프로젝트의 모든 ILLIQ 참조(Doc 18, Doc 31, Doc 32, Doc 22)의
+> 정준적(canonical) 기준이다. 코드 구현(indicators.js)에서는 log-transformed
+> 스케일을 사용하므로, Doc 22의 ILLIQ Scale Note를 참조할 것.
 
 ```
 ILLIQ = (1/D) * sum(|r_t| / DVOL_t)
@@ -116,7 +129,7 @@ v(x) = -2.25*(-x)^0.88  (손실)
 - 매수가(P0) 아래: 손실 회피 → 좁은 매수 스프레드
 - 미실현 이익 큰 종목: 후속 수익률 하락 (Frazzini 2006)
 
-금융 적용: `signalEngine.js` `applyProspectBoost()`가 지지선 근처 buy 신호 강화.
+금융 적용: `signalEngine.js` `applySRProximityBoost()`가 지지/저항 근처 신호 강화.
 
 참고문헌:
 - Barberis, N. & Xiong, W. (2009). Realization Utility. *JF*, 64(4).
@@ -172,7 +185,7 @@ R_strength = sum(V_i * w(P_anchor - P_i))
 | 주문흐름 독성 | Easley et al. (2012) | LinUCB 확장 후보 |
 | 비유동성 | Amihud (2002) | 시장별 슬리피지 |
 | 노이즈 필터링 | Hansen & Lunde (2006) | calcKalman Q |
-| 처분효과 주문장 | Barberis & Xiong (2009) | applyProspectBoost |
+| 처분효과 주문장 | Barberis & Xiong (2009) | applySRProximityBoost |
 | 스프레드 역학 | Stoll (1989), Hwang (2004) | 패턴 신뢰도 감산 |
 
 ---

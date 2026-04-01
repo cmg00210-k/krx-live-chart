@@ -15,6 +15,19 @@
 | **D** | `⚠️` / `[D]` | Heuristic | 학술 근거 없는 경험적 값. 검증 필수 | **MUST** — 검증 또는 대체 필수 |
 | **E** | `❌` / `[E]` | Deprecated | 사용 중단 또는 대체 필요 | **REMOVE** |
 
+### Tier Namespace Convention
+
+본 문서의 5-Tier (A/B/C/D/E)는 **상수의 학술적 근거 수준**을 분류합니다.
+프로젝트 내 다른 tier 시스템과 혼동을 방지하기 위해 다음 접두사를 사용합니다:
+
+| Prefix | System | File | Tiers | Purpose |
+|--------|--------|------|-------|---------|
+| `[A-const]` ~ `[E-const]` | Constants | Doc 22 (본 문서) | A/B/C/D/E | 상수의 학술 근거 수준 |
+| `[A-rel]` ~ `[D-rel]` | Reliability | backtester.js | A/B/C/D | 백테스트 통계적 유의성 |
+| `[S-ver]` ~ `[D-ver]` | Verification | app.js | S/A/B/C/D | TA 컴포넌트 이론 검증 상태 |
+
+예: RSI period=14는 `[A-const]` (학술 고정) 이면서 RSI 신호의 reliability는 `[B-rel]` (양호한 통계적 유의성)일 수 있음.
+
 ### ASCII 기호 규칙 (코드 주석용)
 
 코드 주석에서는 emoji 대신 `[A]`~`[E]` 태그를 사용한다:
@@ -85,7 +98,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 22 | macdCross weight | ±2 | B | BAY | [1, 3] | Appel (1979) |
 | 23 | rsiOversold weight | ±1.5 | B | BAY | [1, 2.5] | Wilder (1978) |
 | 24 | volumeBreakout weight | ±2 | B | BAY | [1, 3] | Caginalp (1998) |
-| 25 | entropy floor | 0.80 | D | GS | [0.70, 0.95] | Shannon (1948) basis |
+| 25 | entropy floor | 0.80 | D | GS | [0.70, 0.95] | Heuristic, Shannon entropy concept |
 | 26 | HMM vol floor | 0.70 | D | GS | [0.70, 0.85] | Hamilton (1989) |
 | 27 | MAX_CUMULATIVE_ADJ | 15 | D | GS | [10, 20] | No basis |
 | 28 | composite window | 5 | C | GS | [3, 7] | 1 KRX week |
@@ -98,11 +111,11 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 |---|----------|-------|------|-------|-------|----------------|
 | 31 | RSI period | 14 | A | MAN | fixed | Wilder (1978) |
 | 32 | MACD fast/slow/sig | 12/26/9 | A | MAN | fixed | Appel (1979) |
-| 33 | BB period/mult | 20/2 | A | MAN | fixed | Bollinger (1992) |
+| 33 | BB period/mult | 20/2 | A | MAN | fixed | Bollinger (2001) |
 | 34 | ATR period | 14 | A | MAN | fixed | Wilder (1978) |
 | 35 | Ichimoku 9/26/52/26 | std | A | MAN | fixed | Hosoda (1968) |
-| 36 | Kalman Q | 0.01 | B | GS | [0.001, 0.1] | Mehra (1970) |
-| 37 | Kalman R | 1.0 | B | GS | [0.1, 10] | Mehra (1970) |
+| 36 | Kalman Q | 0.01 | D | GS | [0.001, 0.1] | Heuristic defaults, Mehra (1970) adaptive framework |
+| 37 | Kalman R | 1.0 | D | GS | [0.1, 10] | Heuristic defaults, Mehra (1970) adaptive framework |
 | 38 | bbEVT factor | 0.15 | D | GS | [0.05, 0.30] | No published source |
 | 39 | Hurst minWindow | 10 | B | GS | [8, 20] | Di Matteo (2005) |
 | 40 | CCI constant | 0.015 | A | MAN | fixed | Lambert (1980) |
@@ -114,12 +127,12 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 41 | Ridge lambda | 2.0 | C | GS | [0.5, 10] | Hoerl & Kennard (1970) |
 | 42 | WLS decay lambda | 0.995 | C | GS | [0.990, 0.999] | Lo (2004) AMH |
 | 43 | KRX_COMMISSION | 0.03% | A | MAN | fixed | KRX regulation |
-| 44 | KRX_TAX | 0.18% | A | MAN | fixed | KRX regulation |
+| 44 | KRX_TAX | 0.18% | C | MAN | [0.15, 0.30] | KRX regulation. Tax rates change by legislation. KOSPI: 0.03%+농특세0.15%=0.18%, KOSDAQ: 0.18% (2025). 2026 예정: 0.15%. |
 | 45 | KRX_SLIPPAGE | 0.10% | C | BAY | [0.04, 0.50] | Amihud (2002) |
 | 46 | CANDLE_TARGET_ATR.strong | 1.88 | C | BAY | [1.0, 3.0] | Theil-Sen calibrated |
 | 47 | CANDLE_TARGET_ATR.medium | 2.31 | C | BAY | [1.5, 3.5] | Theil-Sen calibrated |
 | 48 | CANDLE_TARGET_ATR.weak | 2.18 | C | BAY | [1.5, 3.5] | Theil-Sen calibrated |
-| 49 | N0 (shrinkage denom) | 35 | C | GS | [20, 50] | Efron & Morris (1975) |
+| 49 | N0 (shrinkage denom) | 35 | D | GS | [20, 50] | Heuristic, Efron & Morris (1975) shrinkage framework |
 | 50 | BH FDR q | 0.05 | A | MAN | fixed | Benjamini & Hochberg (1995) |
 
 ### Macro — Taylor Rule / MCS (signalEngine.js, api.js)
@@ -139,6 +152,18 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 
 ### CAPM / APT (backtester.js, financials.js)
 
+**CAPM Beta R² 공식 주의사항:**
+```
+R²_beta = β²ᵢ × Var(R_m) / Var(R_i)
+
+주의: Var(R_m)과 Var(R_i)는 동일 시간 단위의 수익률 분산이어야 한다.
+  올바름: Var(R_i) = Var(일별 수익률)           (시간 스케일링 없음)
+  오류:   Var(R_i) = Var(일별 수익률) × T       (기간 T를 곱하면 총분산이 됨)
+
+수익률의 분산 자체가 이미 단위 기간당 측도이므로 ×T 스케일링은
+R²를 과소 추정하게 만든다. 25_capm_delta_covariance.md §5 참조.
+```
+
 | # | Constant | Value | Tier | Learn | Range | Academic Source |
 |---|----------|-------|------|-------|-------|----------------|
 | 150 | VPE_MIN_QUARTERS | 3 | C | MAN | [2, 4] | Statistical minimum for trend |
@@ -157,6 +182,12 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 163 | ILLIQ_CONF_DISCOUNT_BASE | 0.85 | C | GS | [0.70, 0.95] | Design — max discount factor |
 | 164 | ILLIQ_HIGH_THRESHOLD | 0.100 | C | GCV | [0.050, 0.200] | KRX small-cap empirical |
 | 165 | ILLIQ_LOW_THRESHOLD | 0.010 | C | GCV | [0.005, 0.020] | KRX large-cap empirical |
+
+> **ILLIQ Scale Note:** 코드 내 ILLIQ 임계값(#164, #165)은 log-transformed 값을 사용한다.
+> Amihud (2002) 원논문의 raw ILLIQ 값은 x10^6 스케일이며 직접 비교할 수 없다.
+> Raw Amihud: ILLIQ_raw = (1/D) * sum(|r_d| / Vol_d) (일반적으로 10^-6 ~ 10^-3 범위).
+> Code scale: log(1 + ILLIQ_raw * 10^6)을 정규화한 [0, 1] 범위 값.
+> 두 스케일 간 변환 시 반드시 로그 변환 여부를 확인할 것.
 
 ---
 

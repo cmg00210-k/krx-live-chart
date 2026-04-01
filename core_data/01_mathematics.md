@@ -395,11 +395,18 @@ I(X;Y) = Σ Σ p(x,y) · log₂ [p(x,y) / (p(x)·p(y))]
 
 | 공식 | 시스템 구현 | 파일 |
 |------|------------|------|
-| SMA = (1/n)ΣP | calcMA() | chart.js |
-| EMA = αP + (1-α)EMA' | calcEMA() | chart.js |
-| BB = SMA ± kσ | calcBB() | chart.js |
-| RSI = 100 - 100/(1+RS) | calcRSI() | chart.js |
-| MACD = EMA(12) - EMA(26) | calcMACD() | chart.js |
-| 허스트 지수 H (R/S 분석) | 미구현 (향후 추가 권장) | — |
+| SMA = (1/n)ΣP | calcMA() | indicators.js |
+| EMA = αP + (1-α)EMA' | calcEMA() | indicators.js |
+| BB = SMA ± kσ | calcBB() | indicators.js |
+| RSI = 100 - 100/(1+RS) | calcRSI() | indicators.js |
+| MACD = EMA(12) - EMA(26) | calcMACD() | indicators.js |
+| ATR (Average True Range) | calcATR() | indicators.js |
+| 일목균형표 (Ichimoku) | calcIchimoku() | indicators.js |
+| 칼만 필터 (Kalman) | calcKalman() | indicators.js |
+| 허스트 지수 H (R/S 분석) | calcHurst() | indicators.js |
+| WLS 회귀 | calcWLSRegression() | indicators.js |
+| EWMA 변동성 | calcEWMAVol() | indicators.js |
+| Hill 꼬리 지수 | calcHillEstimator() | indicators.js |
+| GPD VaR (EVT) | calcGPDFit() | indicators.js |
 | 웨이블릿 디노이징 | 미구현 (고도화 후보) | — |
 | 섀넌 엔트로피 | 미구현 (고도화 후보) | — |

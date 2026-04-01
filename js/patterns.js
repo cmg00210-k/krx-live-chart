@@ -14,7 +14,9 @@ class PatternEngine {
 
   // ══════════════════════════════════════════════════
   //  임계값 상수 (매직 넘버 제거)
-  //  학술 참조: Nison (1991), Morris (2006), Bulkowski (2005)
+  //  학술 참조: Nison (1991), Morris (2006),
+  //    Bulkowski (2005) Encyclopedia of Chart Patterns,
+  //    Bulkowski (2008) Encyclopedia of Candlestick Charts
   // ══════════════════════════════════════════════════
 
   /** 도지 body/range 비율 상한 — Nison 표준 */
@@ -182,7 +184,9 @@ class PatternEngine {
    *  - "strength"는 방향 신뢰도(hit rate)이지 가격 이동 크기가 아님
    *  - medium = 반전 패턴(hammer, shootingStar 등) → 추세 전환 시 stop-cascade + 평균회귀 오버슈트로 큰 이동
    *  - strong = 확인 패턴(engulfing, 3soldiers 등) → 이미 진행 중인 움직임 확인, 잔여 이동 상대적으로 작음
-   *  - Bulkowski (2008) 개별 패턴 순위도 비단조(non-monotonic) 관계 확인 */
+   *  - Bulkowski (2008) 개별 패턴 순위도 비단조(non-monotonic) 관계 확인
+   *  WARNING: non-monotonic (weak > strong) — Theil-Sen calibration artifact.
+   *  Weak patterns appear more in volatile contexts (confounding), not true causal relationship. */
   static CANDLE_TARGET_ATR = { strong: 1.88, medium: 2.31, weak: 2.18 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
@@ -191,8 +195,9 @@ class PatternEngine {
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
   static CHART_TARGET_RAW_CAP = 2.0;
 
-  /** [C] Prospect Theory 비대칭 손절/목표 — Kahneman & Tversky (1979)
-   *  손실 회피 계수 λ=2.25, sqrt(λ)=1.50 → KRX 호가 단위 적응 1.15 (dampened)
+  /** [D-Heuristic] PROSPECT_STOP_WIDEN: empirical heuristic loosely inspired by loss aversion;
+   *  sqrt(λ) has no formal derivation from Kahneman & Tversky (1979).
+   *  Value 1.15 is dampened from sqrt(2.25)=1.50 to fit KRX tick structure.
    *  손절: 더 넓게 (whipsaw 방지), 목표: 더 보수적 (disposition effect 반영) */
   static PROSPECT_STOP_WIDEN = 1.15;
   /** [C] 1/PROSPECT_STOP_WIDEN — disposition effect 보수주의 */
@@ -250,7 +255,7 @@ class PatternEngine {
     threeInsideUp: 42.4, threeInsideDown: 55.1,
     abandonedBabyBullish: 51.8, abandonedBabyBearish: 64.8,
     bullishHaramiCross: 46.0, bearishHaramiCross: 57.5,
-    stickSandwich: 52.0,
+    stickSandwich: 52.0, cupAndHandle: 61.0,
     longLeggedDoji: 45.0, channel: 58.0,
     doubleBottom: 62.1, doubleTop: 74.7,
     headAndShoulders: 56.9, inverseHeadAndShoulders: 44.0,
@@ -271,7 +276,7 @@ class PatternEngine {
     threeInsideUp: 14275, threeInsideDown: 13760,
     abandonedBabyBullish: 137, abandonedBabyBearish: 71,
     bullishHaramiCross: 8500, bearishHaramiCross: 7200,
-    stickSandwich: 420,
+    stickSandwich: 420, cupAndHandle: 125,
     longLeggedDoji: 36690, channel: 125,
     doubleBottom: 1939, doubleTop: 1539, headAndShoulders: 1156,
     inverseHeadAndShoulders: 1280, ascendingTriangle: 352, descendingTriangle: 503,
@@ -707,7 +712,7 @@ class PatternEngine {
     if (_cc('longLeggedDoji')) patterns.push(...this.detectLongLeggedDoji(candles, ctx));
     if (_cc('spinningTop'))    patterns.push(...this.detectSpinningTop(candles, ctx));
     if (_cc('bullishMarubozu')) patterns.push(...this.detectMarubozu(candles, ctx));
-    if (_cc('beltHold'))       patterns.push(...this.detectBeltHold(candles, ctx));
+    if (_cc('beltHold') || _cc('bullishBeltHold') || _cc('bearishBeltHold'))       patterns.push(...this.detectBeltHold(candles, ctx));
     // 2봉 패턴
     if (_cc('bullishEngulfing')) patterns.push(...this.detectEngulfing(candles, ctx));
     if (_cc('bullishHarami'))  patterns.push(...this.detectHarami(candles, ctx));
@@ -715,7 +720,7 @@ class PatternEngine {
     if (_cc('darkCloud'))      patterns.push(...this.detectDarkCloud(candles, ctx));
     if (_cc('tweezerBottom'))  patterns.push(...this.detectTweezerBottom(candles, ctx));
     if (_cc('tweezerTop'))     patterns.push(...this.detectTweezerTop(candles, ctx));
-    if (_cc('haramiCross'))    patterns.push(...this.detectHaramiCross(candles, ctx));
+    if (_cc('haramiCross') || _cc('bullishHaramiCross') || _cc('bearishHaramiCross'))    patterns.push(...this.detectHaramiCross(candles, ctx));
     if (_cc('stickSandwich'))  patterns.push(...this.detectStickSandwich(candles, ctx));
     // 3봉 패턴
     if (_cc('threeWhiteSoldiers')) patterns.push(...this.detectThreeWhiteSoldiers(candles, ctx));
@@ -724,7 +729,7 @@ class PatternEngine {
     if (_cc('eveningStar'))    patterns.push(...this.detectEveningStar(candles, ctx));
     if (_cc('threeInsideUp'))  patterns.push(...this.detectThreeInsideUp(candles, ctx));
     if (_cc('threeInsideDown'))patterns.push(...this.detectThreeInsideDown(candles, ctx));
-    if (_cc('abandonedBaby'))  patterns.push(...this.detectAbandonedBaby(candles, ctx));
+    if (_cc('abandonedBaby') || _cc('abandonedBabyBullish') || _cc('abandonedBabyBearish'))  patterns.push(...this.detectAbandonedBaby(candles, ctx));
 
     // [PERF] 스윙 포인트 탐지 — 차트 패턴 + S/R 모두 사용
     const swingFrom = Math.max(0, (_detectFrom || 0) - PatternEngine.HS_WINDOW - 10);
@@ -891,8 +896,10 @@ class PatternEngine {
     // [Phase I-L2] 구조 변화점 근접 패턴 신뢰도 감산 — Page (1954) CUSUM
     this._applyBreakpointAdjust(patterns, candles);
 
+    // NOTE: KRX structural adjustments not yet applied: T+2 settlement, turn-of-month (TOM) effects — Kim & Park (2015)
+
     var deduped = this._dedup(patterns);
-    // [Phase I] S/R levels 첨부 — applyProspectBoost 등 후처리에서 활용
+    // [Phase I] S/R levels 첨부 — applySRProximityBoost 등 후처리에서 활용
     deduped._srLevels = sr;
     return deduped;
   }
@@ -963,7 +970,8 @@ class PatternEngine {
     for (var ci = 0; ci < patterns.length; ci++) {
       var p = patterns[ci];
       // 극단 군집 + 하락장 → 매수 패턴 신뢰도 ×0.76
-      // 근거: KRX CSAD 실증, 극단 군집 하락일 매수 반전 성공률 -24%p (core_data/20 §3.4)
+      // 근거: KRX CSAD 실증, 극단 군집 하락일 매수 반전 성공률 -24%p
+      // Chang, Cheng & Khorana (2000) CCK CSAD model — core_data/19 §5.2
       // [GAP-4] 3일 평균: herdingFlag >= 1.67 (3일 중 2일 이상 flag=2 + 부분)
       if (p.signal === 'buy' && herdingFlag >= 1.67 && rMarket < 0) {
         p.confidence = Math.max(10, Math.round(p.confidence * 0.76));
@@ -1014,6 +1022,10 @@ class PatternEngine {
     var cusum = calcOnlineCUSUM(returns, 2.5, lastVolRegime);
     if (!cusum.isRecent || cusum.breakpoints.length === 0) return;
     var lastBP = cusum.breakpoints[cusum.breakpoints.length - 1];
+    // [M-4 limitation] barsSince = distance from LAST data point, not from each pattern's
+    // detection index. Ideally should be per-pattern (pIdx - lastBP.index), but this function
+    // applies a single discount to all nearby patterns. Acceptable approximation because the
+    // proximity check (line below, |pIdx - lastBP.index| < 20) already filters relevance.
     var barsSince = returns.length - 1 - lastBP.index;
     // 선형 회복: 0봉→×0.70, 30봉+→×1.0
     var discount = 0.70 + 0.30 * Math.min(1.0, barsSince / 30);
@@ -2003,6 +2015,7 @@ class PatternEngine {
 
       // 추세 맥락 (ATR 기반 정규화) — Nison (1991): 마루보주는 추세 지속 신호
       // [T-1] 추세 필터: bullish는 down/neutral에서만, bearish는 up/neutral에서만 유의
+      // Marubozu 트렌드 필터: strong uptrend (>0.5) 제외. Weak uptrend (0.3-0.5)은 continuation으로 허용
       // KRX 5년 실증: 무차별 WR 41.8% → 추세 필터 적용 시 51-53% 기대
       const trend = this._detectTrend(candles, i, 10, a);
       if (isBullish && trend.direction === 'up' && trend.strength > 0.5) continue;
@@ -2445,6 +2458,7 @@ class PatternEngine {
       const currMid = (curr.open + curr.close) / 2;
       const centrality = 1 - Math.min(Math.abs(currMid - prevMid) / (prevBody * 0.5 + 0.001), 1);
       // [Phase1-FIX] extra: 거래량 수축 비율 — Nison: 도지 봉에서 거래량 감소는 우유부단 확인
+      // volContraction: curr.vol > prev.vol → negative → clamped to 0 (no contraction bonus)
       const volContraction = (i > 0 && candles[i - 1].volume > 0) ? Math.min(1 - curr.volume / (candles[i - 1].volume + 0.001), 1) : 0.3;
       const extraScore = Math.max(0, volContraction);
 
@@ -2541,7 +2555,7 @@ class PatternEngine {
       results.push({
         type: 'stickSandwich', name: '스틱샌드위치 (Stick Sandwich)', nameShort: '스틱샌드위치',
         signal: 'buy', strength: 'medium', confidence,
-        stopLoss: +(supportLevel - a * PatternEngine.STOP_LOSS_ATR_MULT).toFixed(0),
+        stopLoss: this._stopLoss(candles, i, 'buy', atr),
         priceTarget: this._candleTarget(candles, i, 'buy', 'medium', atr, ctx.hurstWeight, ctx.meanRevWeight),
         description: `동일 종가 음봉 사이 양봉 — 지지선 확인 반전. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
@@ -2648,34 +2662,20 @@ class PatternEngine {
       if (endIdx >= candles.length) continue;
 
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
+      let confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
+      confidence = Math.min(90, confidence);  // [M-8] Taleb-motivated ceiling
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
       const raw = relevantHighs[0].price - supportLevel;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
       const priceTarget = +(supportLevel - patternHeight).toFixed(0);
 
-      // [Phase TA-2][B-2] 인라인 돌파 확인 — Edwards & Magee (1948), Bulkowski (2005)
-      // 하락 삼각형은 수평 지지선 하방 돌파가 핵심 시그널.
-      // endIndex 이후 캔들이 지지선을 ATR*0.5 이상 하회하면 돌파 확인.
-      // 시장 심리: 수평 지지선은 반복 매수세 집결점. 이탈 시 매수 포기 → 투매 가속.
-      let breakConfirmed = false;
-      const breakThreshold = a * 0.5;
-      // endIndex 이후 최근 봉까지 검사 (최대 lookforward 범위)
-      const breakLookLimit = Math.min(endIdx + (PatternEngine.TRIANGLE_BREAK_LOOKFORWARD || 15), candles.length - 1);
-      for (let bi = endIdx; bi <= breakLookLimit; bi++) {
-        if (candles[bi].close < supportLevel - breakThreshold) {
-          breakConfirmed = true;
-          break;
-        }
-      }
-
-      const breakBoost = breakConfirmed ? 5 : 0;
+      // [Fix C-3] 인라인 돌파 확인 제거 — look-ahead bias.
+      // _checkTriangleBreakout()가 모든 삼각형 타입의 돌파를 통합 처리함.
 
       results.push({
         type: 'descendingTriangle', name: '하락 삼각형 (Descending Triangle)', nameShort: '하락삼각',
-        signal: 'sell', strength: 'strong', confidence: confidence + breakBoost, stopLoss, priceTarget,
-        breakConfirmed, // [Phase TA-2][B-2] 돌파 확인 플래그
-        description: `수평 지지 + 하락 저항 — 하방 돌파 ${breakConfirmed ? '확인됨' : '가능'}. 형태 점수 ${confidence + breakBoost}%`,
+        signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
+        description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 형태 점수 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
         trendlines: [
@@ -3218,6 +3218,7 @@ class PatternEngine {
         });
       }
     }
+    // TODO: 52-week high/low as anchor S/R levels — George & Hwang (2004) momentum-anchoring effect
     return levels.sort((a, b) => b.touches - a.touches).slice(0, 10);
   }
 
@@ -3537,6 +3538,7 @@ class PatternEngine {
       description: '평행 추세선 ' + dirLabel + ' 채널. 형태 점수 ' + confidence + '%',
       subType: direction,
       signal,
+      strength: confidence >= 75 ? 'strong' : confidence >= 60 ? 'medium' : 'weak',
       confidence,
       startIndex: spanStart,
       endIndex: spanEnd,
@@ -3552,9 +3554,16 @@ class PatternEngine {
       priceTarget: signal === 'buy' ? +(upperNow + width * 0.5 * hw * mw).toFixed(0)
         : signal === 'sell' ? +(lowerNow - width * 0.5 * hw * mw).toFixed(0)
         : +((upperNow + lowerNow) / 2).toFixed(0),
-      stopLoss: signal === 'buy' ? lowerNow - atr * PatternEngine.STOP_LOSS_ATR_MULT
-        : signal === 'sell' ? upperNow + atr * PatternEngine.STOP_LOSS_ATR_MULT
+      stopLoss: signal === 'buy' ? Math.round(lowerNow - atr * PatternEngine.STOP_LOSS_ATR_MULT)
+        : signal === 'sell' ? Math.round(upperNow + atr * PatternEngine.STOP_LOSS_ATR_MULT)
         : null,
+      marker: signal !== 'neutral' ? {
+        time: candles[spanEnd].time,
+        position: signal === 'buy' ? 'belowBar' : 'aboveBar',
+        color: signal === 'buy' ? KRX_COLORS.PTN_MARKER_BUY : KRX_COLORS.PTN_MARKER_SELL,
+        shape: signal === 'buy' ? 'arrowUp' : 'arrowDown',
+        text: signal === 'buy' ? '채널 상승' : '채널 하락',
+      } : null,
     });
     return results;
   }
@@ -3732,6 +3741,7 @@ class PatternEngine {
     pattern.breakPrice = null;
 
     const ei = pattern.endIndex;
+    // NOTE: 최근 봉에서 neckline 미돌파 시 -15 감점 (정상 동작, 확인 대기 상태)
     if (ei == null || ei >= candles.length - 1) return;
 
     const lookforward = PatternEngine.NECKLINE_BREAK_LOOKFORWARD;

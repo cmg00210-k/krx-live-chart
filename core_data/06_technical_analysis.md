@@ -395,7 +395,7 @@ Aroon Down = 100 × (n - 최근 n봉 내 최저가까지의 거리) / n
  │
 1978 RSI, ATR, ADX, 파라볼릭 SAR (J.W. Wilder)
  │
-1980 MACD (Gerald Appel)
+1979 MACD (Gerald Appel)
  │
 1983 볼린저 밴드 (John Bollinger)
  │

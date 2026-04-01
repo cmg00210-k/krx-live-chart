@@ -63,10 +63,22 @@ def compute_reward(y_actual, y_mra, action_factor):
     Removes magnitude-shrinkage bias of squared-error reward that caused
     strong_dampen dominance (49% selection, IC -0.112 in persistent mode).
     Log compression stabilizes extreme rewards (kurtosis=73.5).
+
+    [1-H#19] Transaction cost penalty: actions that change the position
+    incur KRX round-trip costs (commission 0.03% + tax 0.18% + slippage 0.10%).
+    turnover = |action_factor - 1.0| (0 for trust_mra, higher for larger changes).
     """
     y_adj = y_mra * action_factor
     r_raw = y_adj * y_actual - y_mra * y_actual
-    return math.copysign(math.log1p(abs(r_raw)), r_raw)
+    r_compressed = math.copysign(math.log1p(abs(r_raw)), r_raw)
+
+    # [1-H#19] KRX transaction cost penalty
+    # Commission 0.03% + Securities tax 0.18% + Slippage ~0.10% = 0.31% round-trip
+    KRX_COST = 0.0031
+    turnover = abs(action_factor - 1.0)  # 0 for trust_mra, 0.7 for strong_dampen, etc.
+    r_compressed -= KRX_COST * turnover
+
+    return r_compressed
 
 
 # ──────────────────────────────────────────────

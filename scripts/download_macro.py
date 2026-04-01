@@ -209,6 +209,20 @@ def vlog(msg):
         print(f"[MACRO][v] {msg}")
 
 
+def calc_taylor_implied_rate(pi, y_gap, r_star=1.0, pi_star=2.0, a_pi=0.50, a_y=0.50, a_e=0.1, delta_e=0.0):
+    """Taylor Rule implied rate (Taylor 1993, Ball 1999 open-economy extension).
+
+    i* = r* + pi + a_pi*(pi - pi*) + a_y*y_gap + a_e*delta_e
+
+    [1-E#4] Ball (1999): a_e * delta_e adds exchange rate pass-through.
+    a_e ≈ 0.1 (conservative for KRW — lower than commodity currencies).
+    delta_e = YoY KRW/USD change rate (positive = depreciation = tightening).
+
+    상수: r_star=#135, pi_star=#136, a_pi=#137, a_y=#138, a_e=#143 (Ball 1999)
+    """
+    return r_star + pi + a_pi * (pi - pi_star) + a_y * y_gap + a_e * delta_e
+
+
 def _rate_limit():
     """API 호출 간 대기"""
     time.sleep(RATE_LIMIT)
@@ -908,22 +922,25 @@ def calc_mcs(all_data, latest):
     vlog(f"MCS epu_inv: vix={vix}, norm={components.get('epu_inv')}")
 
     # 6. Taylor_gap_norm — 테일러 갭 정규화 (Doc30 §4.3, 상수 #135-#142)
-    #    Taylor Rule: i* = r* + pi + a_pi*(pi-pi*) + a_y*output_gap
+    #    Taylor Rule: i* = r* + pi + a_pi*(pi-pi*) + a_y*output_gap + a_e*delta_e
     #    Taylor gap = bok_rate - i* (bp)
-    #    Normalized: clip((gap_bp + 100) / 200, 0, 1)
-    #    gap=-100bp(극완화)→0.0, gap=0(중립)→0.5, gap=+100bp(극긴축)→1.0
+    #    [1-E#16] Sign convention: positive gap = hawkish (actual > implied) = BAD for stocks
+    #    MCS is "higher = better for stocks", so we INVERT the gap:
+    #    Normalized: clip((-gap_bp + 100) / 200, 0, 1)
+    #    gap=+100bp(극긴축)→0.0, gap=0(중립)→0.5, gap=-100bp(극완화)→1.0
     bok_r = latest.get("bok_rate")
     cpi_yoy_val = latest.get("cpi_yoy")
     cli_val = latest.get("korea_cli")
     if bok_r is not None and cpi_yoy_val is not None:
-        r_star = 1.0     # #135 Korean neutral real rate (BOK 2023)
-        pi_star = 2.0    # #136 BOK inflation target
-        a_pi = 0.50      # #137 Taylor (1993) inflation response
-        a_y = 0.50       # #138 Taylor (1993) output gap response
         output_gap = (cli_val - 100) * 0.5 if cli_val is not None else 0  # #139 CLI_TO_GAP_SCALE
-        i_taylor = r_star + cpi_yoy_val + a_pi * (cpi_yoy_val - pi_star) + a_y * output_gap
+        # [1-E#4] Ball (1999) exchange rate term — defaults to 0 until pipeline provides data
+        exchange_rate_change = latest.get('exchange_rate_yoy', 0.0) or 0.0
+        i_taylor = calc_taylor_implied_rate(
+            pi=cpi_yoy_val, y_gap=output_gap, delta_e=exchange_rate_change
+        )
         taylor_gap_bp = (bok_r - i_taylor) * 100  # %p → bp
-        components["taylor_gap"] = _clip01((taylor_gap_bp + 100) / 200)
+        # [1-E#16] INVERTED: hawkish (positive gap) → low norm → reduces MCS (bad for stocks)
+        components["taylor_gap"] = _clip01((-taylor_gap_bp + 100) / 200)
         available["taylor_gap"] = True
         vlog(f"MCS taylor: i*={i_taylor:.2f}, gap={bok_r - i_taylor:.2f}%p, norm={components['taylor_gap']:.4f}")
     else:
@@ -1069,19 +1086,19 @@ def build_latest(all_data):
         if isinstance(v, float):
             latest[k] = round(v, 4) if k == "foreigner_signal" else round(v, 2)
 
-    # -- Taylor Rule Gap (Doc30 §4.1, 상수 #135-#138) --
+    # -- Taylor Rule Gap (Doc30 §4.1, 상수 #135-#138, #143 Ball 1999) --
+    # [1-E#20] DRY: uses calc_taylor_implied_rate() helper
     bok_rate_val = latest.get("bok_rate")
     cpi_yoy_val = latest.get("cpi_yoy")
     cli_val = latest.get("korea_cli")
     if bok_rate_val is not None and cpi_yoy_val is not None:
-        r_star = 1.0     # #135
-        pi_star = 2.0    # #136
-        a_pi = 0.50      # #137
-        a_y = 0.50       # #138
         output_gap = (cli_val - 100) * 0.5 if cli_val is not None else 0  # #139
-        i_taylor = r_star + cpi_yoy_val + a_pi * (cpi_yoy_val - pi_star) + a_y * output_gap
+        exchange_rate_change = latest.get('exchange_rate_yoy', 0.0) or 0.0
+        i_taylor = calc_taylor_implied_rate(
+            pi=cpi_yoy_val, y_gap=output_gap, delta_e=exchange_rate_change
+        )
         latest["taylor_implied_rate"] = round(i_taylor, 4)
-        latest["taylor_gap"] = round(bok_rate_val - i_taylor, 4)  # %p
+        latest["taylor_gap"] = round(bok_rate_val - i_taylor, 4)  # %p, positive=hawkish
     else:
         latest["taylor_implied_rate"] = None
         latest["taylor_gap"] = None
