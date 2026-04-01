@@ -17,6 +17,7 @@ import sys
 import json
 import os
 import argparse
+from datetime import datetime, timedelta
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -56,9 +57,18 @@ def extract_summary_from_ohlcv(stock_entry):
             ) if prev_close > 0 else 0.0
             stock_entry["volume"] = last.get("volume", 0)
 
-            # lastClose도 최신 값으로 갱신 (FDR 미사용 시 이걸로 대체)
+            # lastClose는 OHLCV 파일이 최신일 때만 갱신.
+            # FDR이 이미 오늘 값을 써 놓은 경우, 날이 지난 OHLCV로 덮어쓰지 않는다.
+            # "최신"의 기준: 마지막 캔들 날짜가 오늘 기준 2 거래일(=3 달력일) 이내.
             if last["close"] > 0:
-                stock_entry["lastClose"] = last["close"]
+                try:
+                    last_date = datetime.strptime(last["time"], "%Y-%m-%d")
+                    cutoff = datetime.now() - timedelta(days=3)
+                    if last_date >= cutoff:
+                        stock_entry["lastClose"] = last["close"]
+                    # else: OHLCV stale — keep FDR value already in stock_entry
+                except Exception:
+                    stock_entry["lastClose"] = last["close"]  # date parse failed, best-effort
 
         elif len(candles) == 1:
             stock_entry["prevClose"] = candles[-1]["close"]

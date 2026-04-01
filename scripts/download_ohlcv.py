@@ -83,10 +83,32 @@ def get_all_stocks():
 
 def download_stock(code, name, market, start_date, end_date, output_dir):
     """단일 종목 OHLCV 다운로드 → 시장별 폴더에 JSON 저장"""
-    try:
-        # [C-3] 수정주가 적용: 액면분할/병합 반영 (미반영 시 허위 패턴 발생)
-        df = stock.get_market_ohlcv(start_date, end_date, code, adjusted=True)
+    MAX_ATTEMPTS = 3
+    RETRY_SLEEP = 2  # seconds between attempts
 
+    def _is_permanent_error(exc):
+        """404 / invalid code 등 재시도해도 소용없는 에러 판별"""
+        msg = str(exc).lower()
+        return any(k in msg for k in ("404", "not found", "invalid", "종목코드"))
+
+    df = None
+    last_exc = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            # [C-3] 수정주가 적용: 액면분할/병합 반영 (미반영 시 허위 패턴 발생)
+            df = stock.get_market_ohlcv(start_date, end_date, code, adjusted=True)
+            break  # success
+        except Exception as e:
+            last_exc = e
+            if _is_permanent_error(e):
+                break  # don't retry permanent failures
+            if attempt < MAX_ATTEMPTS - 1:
+                time.sleep(RETRY_SLEEP)
+
+    if last_exc is not None and df is None:
+        return {"error": str(last_exc)}
+
+    try:
         if df.empty:
             return None
 

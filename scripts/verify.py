@@ -122,14 +122,22 @@ CANDLE_PATTERNS_SET = CANONICAL_PATTERNS - CHART_PATTERNS_SET
 
 
 def _extract_set_literal(text, var_name):
-    """Extract string literals from  new Set([...]) declaration."""
+    """Extract string literals from  new Set([...]) declaration.
+    Handles both plain literals and spread references (...otherSet)."""
     m = re.search(
         r"(?:const|var)\s+" + re.escape(var_name) + r"\s*=\s*new Set\(\[(.*?)\]\)",
         text, re.DOTALL
     )
     if not m:
         return set()
-    return set(re.findall(r"['\"](\w+)['\"]", m.group(1)))
+    body = m.group(1)
+    # Direct string literals
+    result = set(re.findall(r"['\"](\w+)['\"]", body))
+    # Spread references: ...varName  -> resolve each recursively
+    spreads = re.findall(r"\.\.\.\s*(\w+)", body)
+    for ref in spreads:
+        result |= _extract_set_literal(text, ref)
+    return result
 
 
 def _extract_obj_keys(text, marker, indent=2):
@@ -213,9 +221,11 @@ def check_patterns(strict=False):
         panel_src, "const PATTERN_ACADEMIC_META = Object.freeze({", indent=2
     )
 
-    # --- app.js viz sets ---
-    viz_candle = _extract_set_literal(app_src, "_VIZ_CANDLE_TYPES")
-    viz_chart  = _extract_set_literal(app_src, "_VIZ_CHART_TYPES")
+    # --- app.js viz sets (spread-composed) + D-tier exclusions ---
+    viz_candle   = _extract_set_literal(app_src, "_VIZ_CANDLE_TYPES")
+    viz_chart    = _extract_set_literal(app_src, "_VIZ_CHART_TYPES")
+    suppressed   = _extract_set_literal(app_src, "_SUPPRESS_PATTERNS")
+    context_only = _extract_set_literal(app_src, "_CONTEXT_ONLY_PATTERNS")
 
     # Helper: validate one location
     def check_location(name, actual, expected, allow_extra=False):
@@ -254,8 +264,11 @@ def check_patterns(strict=False):
     check_location("patternRenderer PATTERN_NAMES_KO",     names_ko,   CANONICAL_PATTERNS, allow_extra=True)
     check_location("backtester _META",                     bt_keys,    CANONICAL_PATTERNS)
     check_location("patternPanel PATTERN_ACADEMIC_META",   panel_keys, CANONICAL_PATTERNS)
-    check_location("app _VIZ_CANDLE_TYPES",                viz_candle, CANDLE_PATTERNS_SET)
-    check_location("app _VIZ_CHART_TYPES",                 viz_chart,  CHART_PATTERNS_SET)
+    # VIZ sets exclude D-tier (SUPPRESS + CONTEXT_ONLY) by design
+    viz_candle_expected = CANDLE_PATTERNS_SET - suppressed - context_only
+    viz_chart_expected  = CHART_PATTERNS_SET  - suppressed - context_only
+    check_location("app _VIZ_CANDLE_TYPES",                viz_candle, viz_candle_expected)
+    check_location("app _VIZ_CHART_TYPES",                 viz_chart,  viz_chart_expected)
 
     return errors, warnings
 
@@ -579,6 +592,33 @@ def check_scripts(strict=False):
             warnings += 1
         else:
             ok(f"{bat_path.name} - ASCII-safe command lines")
+
+    # 5f. ?v=N version sync: index.html <script> tags vs analysisWorker.js importScripts
+    index_html    = ROOT / "index.html"
+    worker_js     = ROOT / "js" / "analysisWorker.js"
+    if index_html.exists() and worker_js.exists():
+        html_src    = read(index_html)
+        worker_src  = read(worker_js)
+        # Extract filename->version from index.html <script src="js/FILE.js?v=N">
+        html_vers   = {m.group(1): int(m.group(2))
+                       for m in re.finditer(r'<script[^>]+src="js/([^"?]+\.js)\?v=(\d+)"', html_src)}
+        # Extract filename->version from importScripts('FILE.js?v=N', ...)
+        worker_vers = {m.group(1): int(m.group(2))
+                       for m in re.finditer(r"['\"]([^'\"?]+\.js)\?v=(\d+)['\"]", worker_src)}
+        mismatches = []
+        for fname, wv in worker_vers.items():
+            hv = html_vers.get(fname)
+            if hv is not None and hv != wv:
+                mismatches.append((fname, hv, wv))
+        if mismatches:
+            for fname, hv, wv in mismatches:
+                fail(f"Version mismatch: {fname} index.html ?v={hv} != analysisWorker.js ?v={wv}")
+                errors += 1
+        else:
+            ok("index.html <-> analysisWorker.js ?v=N versions in sync")
+    else:
+        warn("5f skipped: index.html or js/analysisWorker.js not found")
+        warnings += 1
 
     return errors, warnings
 

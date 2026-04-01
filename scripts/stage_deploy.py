@@ -50,7 +50,7 @@ CRITICAL_THRESHOLD = 19500  # red: immediate action needed
 # ---------------------------------------------------------------------------
 EXCLUDE_DIRS = {
     "scripts", "core_data", "pattern_impl", "docs", "server",
-    ".claude", ".git", "deploy",  # never recurse into deploy/ itself
+    ".claude", ".git", "deploy", "logs",  # never recurse into deploy/ itself
     # czw/ removed — calibration data moved to data/backtest/
     os.path.join("data", "backtest", "results"),
 }
@@ -68,7 +68,7 @@ _BASE_EXCLUDE_SUFFIX_PATTERNS = [
 # Use OS-native sep so comparisons work on both Windows and Unix.
 EXCLUDE_EXACT = {
     ".env",                        # NEVER deploy -- contains DART_API_KEY
-    ".cfignore",                   # deploy tooling artifact, not app code
+    # .cfignore removed (wrangler ignores it; stage_deploy.py is the sole gatekeeper)
     ".vercelignore",               # leftover from old Vercel setup
     "vercel.json",                 # leftover from old Vercel setup
     "package.json",                # dev tooling config (wrangler pinning)

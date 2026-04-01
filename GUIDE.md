@@ -370,9 +370,10 @@ Current `?v=N` values are maintained in `index.html` (lines 633-648) and `js/ana
 
 ### Deploy Command
 ```bash
-wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message="deploy"
+python scripts/stage_deploy.py
+npx wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message="deploy"
 ```
-Note: .cfignore broken in wrangler 4.75 — manually exclude 1m/backtest-results before deploy.
+Note: wrangler .cfignore is broken (ignored since 4.75). stage_deploy.py handles all exclusions.
 
 ### Verification
 ```bash

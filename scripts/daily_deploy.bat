@@ -31,7 +31,7 @@ python scripts/generate_intraday.py --timeframe 30m --days 5
 python scripts/generate_intraday.py --timeframe 1h --days 5
 
 echo [4/6] Index update...
-python scripts/download_ohlcv.py --update-index-only 2>nul
+python scripts/update_index_prices.py
 
 echo [5/6] Sector fundamentals...
 python scripts/download_sector.py

@@ -108,11 +108,14 @@ function getPastData(code, period) {
  * @returns {Promise<Array>} 재무 데이터 배열 (최신순)
  */
 async function getFinancialData(code, period) {
-  // 1. 캐시 확인
+  // 1. 캐시 확인 (TTL: 4시간)
   if (_financialCache[code]) {
     const cached = _financialCache[code];
-    const arr = period === 'quarter' ? cached.quarterly : cached.annual;
-    if (arr && arr.length) return arr;
+    const age = Date.now() - (cached.fetchedAt || 0);
+    if (age < 4 * 3600 * 1000) {
+      const arr = period === 'quarter' ? cached.quarterly : cached.annual;
+      if (arr && arr.length) return arr;
+    }
   }
 
   // 2. data/financials/{code}.json 시도
@@ -171,7 +174,7 @@ async function getFinancialData(code, period) {
       const quarterly = toDisplay(data.quarterly || []);
       const annual = toDisplay(data.annual || []);
 
-      _financialCache[code] = { quarterly, annual, source: data.source || 'dart' };
+      _financialCache[code] = { quarterly, annual, source: data.source || 'dart', fetchedAt: Date.now() };
       return period === 'quarter' ? quarterly : annual;
     }
   } catch (e) {
@@ -189,6 +192,7 @@ async function getFinancialData(code, period) {
     quarterly: period === 'quarter' ? fallback : (existing.quarterly || []),
     annual: period === 'annual' ? fallback : (existing.annual || []),
     source: isHardcoded ? 'hardcoded' : 'seed',
+    fetchedAt: Date.now(),
   };
   return fallback;
 }

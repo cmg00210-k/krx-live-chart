@@ -294,8 +294,18 @@ class KRXDataService {
       try {
         const idbData = await _idb.get(key);
         if (idbData && idbData.candles && idbData.candles.length > 0) {
+          // KST 기준 15:30 장마감 후 오늘 캔들 캐시 강제 만료 검사
+          // 마지막 캔들 날짜가 오늘(KST)이고 현재 KST 시각이 16:00 이후면 stale 처리
+          const _nowKst = new Date(Date.now() + 9 * 3600000);
+          const _kstDateStr = _nowKst.toISOString().slice(0, 10); // "YYYY-MM-DD"
+          const _kstHour = _nowKst.getUTCHours(); // KST hour (shifted above)
+          const _lastCandle = idbData.candles[idbData.candles.length - 1];
+          const _lastCandleDate = _lastCandle && (_lastCandle.date || (_lastCandle.time
+            ? new Date((_lastCandle.time + 9 * 3600) * 1000).toISOString().slice(0, 10)
+            : null));
+          const _postCloseStale = (_lastCandleDate === _kstDateStr) && (_kstHour >= 16);
           // IDB 데이터가 24시간 이내면 네트워크 요청 없이 바로 사용
-          if (Date.now() - (idbData.lastUpdate || 0) < 86400000) {
+          if (!_postCloseStale && Date.now() - (idbData.lastUpdate || 0) < 86400000) {
             this.cache[key] = idbData;  // L1 캐시에도 복사
             // [FIX-TRUST] IDB 캐시 데이터도 출처 태그 (file 기반 캐시)
             if (!idbData.candles._dataSource) {
