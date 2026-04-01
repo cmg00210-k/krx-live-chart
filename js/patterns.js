@@ -1191,12 +1191,13 @@ class PatternEngine {
       // [FIX] look-ahead bias 제거: candles[i+1] 미래 참조 삭제
       // Nison: 교수형은 확인 캔들(다음 봉 하락)로 신뢰도가 높아지나,
       // 실시간 감지 시 미래 데이터를 사용하면 백테스트 결과가 왜곡됨.
-      // 확인 없이는 보수적으로 평가 (extra=0.15, strength='weak')
+      // [Phase1-FIX] extra: volSurge 동적 값 (shootingStar 대칭) — Morris: 하락 전환은 거래량 증가로 확인
       const bodyScore = Math.min(body / a, 1);
       const shadowScore = Math.min(lowerShadow / range, 1);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
       const trendScore = Math.min(trend.strength, 1);
-      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: 0.15 });
+      const volSurge = Math.min(this._volRatio(candles, i, vma) / 1.5, 1);
+      const confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: volSurge });
       const strength = 'weak';  // 확인 캔들 없이는 약한 신호 (look-ahead bias 방지)
       const stopLoss = this._stopLoss(candles, i, 'sell', atr);
       const priceTarget = this._candleTarget(candles, i, 'sell', 'weak', atr, ctx.hurstWeight, ctx.meanRevWeight);
@@ -1968,10 +1969,8 @@ class PatternEngine {
       // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
       if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 90);
 
-      // 손절가/목표가: body 높이 기반 (마루보주는 body ≈ range)
-      const stopLoss = isBullish
-        ? +(c.low - a * 1.5).toFixed(0)
-        : +(c.high + a * 1.5).toFixed(0);
+      // [Phase1-FIX] 손절가: _stopLoss() 통일 (기존 하드코딩 1.5 ATR → PROSPECT_STOP_WIDEN 적용)
+      const stopLoss = this._stopLoss(candles, i, signal, atr);
       const priceTarget = this._candleTarget(candles, i, signal, 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
 
       results.push({
@@ -2386,11 +2385,19 @@ class PatternEngine {
       const trend = this._detectTrend(candles, i - 1, 10, a);
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
 
+      // [Phase1-FIX] shadow: 도지 중심성 (1봉 body 중앙에 도지가 위치할수록 높음) — Nison: 중앙 위치가 우유부단 극대화
+      const prevMid = (Math.max(prev.open, prev.close) + Math.min(prev.open, prev.close)) / 2;
+      const currMid = (curr.open + curr.close) / 2;
+      const centrality = 1 - Math.min(Math.abs(currMid - prevMid) / (prevBody * 0.5 + 0.001), 1);
+      // [Phase1-FIX] extra: 거래량 수축 비율 — Nison: 도지 봉에서 거래량 감소는 우유부단 확인
+      const volContraction = (i > 0 && candles[i - 1].volume > 0) ? Math.min(1 - curr.volume / (candles[i - 1].volume + 0.001), 1) : 0.3;
+      const extraScore = Math.max(0, volContraction);
+
       // 강세 잉태십자 (하락 추세 → 큰 음봉 → 도지 내포)
       if (prev.close < prev.open && trend.direction === 'down') {
         const trendScore = Math.min(trend.strength, 1);
         const bodyScore = Math.min(prevBody / a, 1);
-        const confidence = this._quality({ body: bodyScore, shadow: 0.6, volume: volumeScore, trend: trendScore, extra: 0.4 });
+        const confidence = this._quality({ body: bodyScore, shadow: centrality, volume: volumeScore, trend: trendScore, extra: extraScore });
         results.push({
           type: 'bullishHaramiCross', name: '강세잉태십자 (Bullish Harami Cross)', nameShort: '강세잉태십자',
           signal: 'buy', strength: 'medium', confidence,
@@ -2406,7 +2413,7 @@ class PatternEngine {
       if (prev.close > prev.open && trend.direction === 'up') {
         const trendScore = Math.min(trend.strength, 1);
         const bodyScore = Math.min(prevBody / a, 1);
-        const confidence = this._quality({ body: bodyScore, shadow: 0.6, volume: volumeScore, trend: trendScore, extra: 0.4 });
+        const confidence = this._quality({ body: bodyScore, shadow: centrality, volume: volumeScore, trend: trendScore, extra: extraScore });
         results.push({
           type: 'bearishHaramiCross', name: '약세잉태십자 (Bearish Harami Cross)', nameShort: '약세잉태십자',
           signal: 'sell', strength: 'medium', confidence,
@@ -2858,6 +2865,10 @@ class PatternEngine {
       const span = l2.index - l1.index;
       if (span < 5 || span > 40) continue;
 
+      // [Phase1-FIX] 선행 하락 추세 확인 — Edwards & Magee (2018): DB는 선행 하락이 전제
+      const preTrend = this._detectTrend(candles, l1.index, 15, a);
+      if (preTrend.direction !== 'down') continue;
+
       // 넥라인 (두 저점 사이 최고 고가 — 실제 저항선 반영)
       let neckline = 0;
       for (let j = l1.index; j <= l2.index; j++) {
@@ -2866,8 +2877,12 @@ class PatternEngine {
       const raw = neckline - Math.min(l1.price, l2.price);
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
 
+      // [Phase1-FIX] 피봇 간 거래량 패턴 — Bulkowski: 2번째 저점에서 거래량 감소 확인
+      const vol1 = (vma && vma[l1.index]) ? candles[l1.index].volume / vma[l1.index] : 1;
+      const vol2 = (vma && vma[l2.index]) ? candles[l2.index].volume / vma[l2.index] : 1;
+      const volDecline = vol2 < vol1 ? 0.8 : 0.5;  // 거래량 감소 시 보너스
       const volumeScore = Math.min(this._volRatio(candles, l2.index, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('doubleBottom', { body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(l1.price - l2.price) / a });
+      const confidence = this._adaptiveQuality('doubleBottom', { body: 0.7, volume: volumeScore * volDecline + 0.2, trend: Math.min(preTrend.strength, 1), extra: 1 - Math.abs(l1.price - l2.price) / a });
       const stopLoss = +(Math.min(l1.price, l2.price) - a).toFixed(0);
       const priceTarget = +(neckline + patternHeight).toFixed(0);
 
@@ -2899,6 +2914,10 @@ class PatternEngine {
       const span = h2.index - h1.index;
       if (span < 5 || span > 40) continue;
 
+      // [Phase1-FIX] 선행 상승 추세 확인 — Edwards & Magee (2018): DT는 선행 상승이 전제
+      const preTrend = this._detectTrend(candles, h1.index, 15, a);
+      if (preTrend.direction !== 'up') continue;
+
       // 넥라인 (두 고점 사이 최저 저가 — 실제 지지선 반영)
       let neckline = Infinity;
       for (let j = h1.index; j <= h2.index; j++) {
@@ -2907,8 +2926,12 @@ class PatternEngine {
       const raw = Math.max(h1.price, h2.price) - neckline;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
 
+      // [Phase1-FIX] 피봇 간 거래량 패턴 — Bulkowski: 2번째 고점에서 거래량 감소 확인
+      const vol1 = (vma && vma[h1.index]) ? candles[h1.index].volume / vma[h1.index] : 1;
+      const vol2 = (vma && vma[h2.index]) ? candles[h2.index].volume / vma[h2.index] : 1;
+      const volDecline = vol2 < vol1 ? 0.8 : 0.5;  // 거래량 감소 시 보너스
       const volumeScore = Math.min(this._volRatio(candles, h2.index, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('doubleTop', { body: 0.7, volume: volumeScore, trend: 0.6, extra: 1 - Math.abs(h1.price - h2.price) / a });
+      const confidence = this._adaptiveQuality('doubleTop', { body: 0.7, volume: volumeScore * volDecline + 0.2, trend: Math.min(preTrend.strength, 1), extra: 1 - Math.abs(h1.price - h2.price) / a });
       const stopLoss = +(Math.max(h1.price, h2.price) + a).toFixed(0);
       const priceTarget = +(neckline - patternHeight).toFixed(0);
 

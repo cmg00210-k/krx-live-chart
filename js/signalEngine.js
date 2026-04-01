@@ -427,12 +427,12 @@ class SignalEngine {
     stats.advMultiplier = advResult.multiplier;
     stats.categoryCounts.adv = advResult.level; // 등급을 카운트 필드에 기록
 
-    // ── VRP Regime Signal — Carr & Wu (2009) 변동성 위험 프리미엄 ──
-    // EWMA 장기/단기 비율로 위험 선호 레짐 판별
-    var vrpResult = this.calcVRPRegime(candles, cache);
-    stats.vrpRegime = vrpResult.regime;
-    stats.vrpMultiplier = vrpResult.multiplier;
-    stats.categoryCounts.vrp = vrpResult.regime === 'neutral' ? 0 : 1; // 비중립 = 활성
+    // ── VolRegime Signal — Carr & Wu (2009) 변동성 위험 프리미엄 ──
+    // [Phase0-#6] VRP→VolRegime 리네임 + multiplier 확대 [0.85,1.15]
+    var volRegimeResult = this.calcVolRegime(candles, cache);
+    stats.volRegime = volRegimeResult.regime;
+    stats.volRegimeMultiplier = volRegimeResult.multiplier;
+    stats.categoryCounts.volRegime = volRegimeResult.regime === 'neutral' ? 0 : 1; // 비중립 = 활성
 
     return { signals, cache, stats };
   }
@@ -823,30 +823,37 @@ class SignalEngine {
       const currWidth = bb[i].upper - bb[i].lower;
       if (currWidth <= 0) continue;
 
-      // 최근 lookback 봉의 밴드 폭 최소값
-      let minWidth = Infinity;
+      // [Phase1-FIX] Bollinger (2002) 표준: bandwidth percentile 기반 squeeze 판정
+      // 기존 "최소값의 2배" → lookback 구간 내 백분위 정렬
+      const widths = [];
       for (let j = i - lookback; j < i; j++) {
         if (bb[j].upper === null) continue;
         const w = bb[j].upper - bb[j].lower;
-        if (w > 0 && w < minWidth) minWidth = w;
+        if (w > 0) widths.push(w);
       }
 
-      if (minWidth === Infinity || minWidth <= 0) continue;
+      if (widths.length < 10) continue;
+      widths.sort((a, b) => a - b);
+      const pct10 = widths[Math.floor(widths.length * 0.10)];  // 하위 10% 임계
 
-      // Squeeze 후 Breakout: 현재 밴드 폭이 최소값의 2배 이상
-      // 이전 봉이 아직 squeeze 상태였는지 확인
+      // Squeeze 후 Breakout: 이전 봉이 하위 10% squeeze → 현재 확산
       if (i > 0 && bb[i - 1].upper !== null) {
         const prevWidth = bb[i - 1].upper - bb[i - 1].lower;
-        if (prevWidth <= minWidth * 1.3 && currWidth >= minWidth * 2) {
+        if (prevWidth <= pct10 && currWidth >= pct10 * 2) {
           const c = candles[i];
-          const bullish = c.close > c.open;
+          // [Phase1-FIX] 방향 확인 강화: 단일 봉 양/음봉 + 밴드 돌파 방향
+          const aboveUpper = c.close > bb[i].upper;
+          const belowLower = c.close < bb[i].lower;
+          const bullish = aboveUpper || (!belowLower && c.close > c.open);
+          // 밴드 돌파 시 confidence 상향
+          const conf = (aboveUpper || belowLower) ? 72 : 64;
           signals.push({
             type: 'bbSqueeze',
             source: 'indicator',
             nameShort: 'BB 스퀴즈 브레이크아웃',
             signal: bullish ? 'buy' : 'sell',
-            strength: 'strong',
-            confidence: 68,
+            strength: (aboveUpper || belowLower) ? 'strong' : 'medium',
+            confidence: conf,
             index: i,
             time: c.time,
             description: `볼린저 밴드 수렴 후 확산 — ${bullish ? '상승' : '하락'} 방향 변동성 확대`,
@@ -1644,7 +1651,7 @@ class SignalEngine {
       buy_bbBounceRsi: 55, sell_bbBreakoutRsi: 55,
       buy_hammerBBVol: 63, sell_shootingStarBBVol: 69,
       buy_morningStarRsiVol: 58, sell_eveningStarRsiVol: 65,
-      buy_engulfingMacdAlign: 60, sell_engulfingMacdAlign: 66,
+      buy_engulfingMacdAlign: 48, sell_engulfingMacdAlign: 66,
       buy_doubleBottomNeckVol: 72, sell_doubleTopNeckVol: 75,
       buy_ichimokuTriple: 70, sell_ichimokuTriple: 70,
       buy_goldenMarubozuVol: 65, sell_deadMarubozuVol: 68 };
@@ -1811,7 +1818,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, vrp: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0,
     };
 
     for (const s of signals) {
@@ -1961,19 +1968,19 @@ class SignalEngine {
   }
 
   // ══════════════════════════════════════════════════════
-  //  VRP Regime Signal — 변동성 위험 프리미엄 (Carr & Wu, 2009)
-  //  VRP = Implied Vol − Realized Vol (proxy: EWMA vol ratio)
+  //  VolRegime Signal — 변동성 위험 프리미엄 (Carr & Wu, 2009)
+  //  [Phase0-#6] VRP→VolRegime 리네임 + multiplier [0.85,1.15]
   //  장기/단기 EWMA 변동성 비율로 위험 선호 레짐 판별
   // ══════════════════════════════════════════════════════
 
   /**
-   * VRP 레짐 계산 (EWMA 변동성 비율 프록시)
+   * VolRegime 레짐 계산 (EWMA 변동성 비율 프록시)
    * @param {Array} candles — OHLCV 배열
    * @param {IndicatorCache} [cache] — 캐시 (있으면 EWMA vol 재사용)
    * @returns {{ regime: string, ratio: number, multiplier: number }}
-   *   regime: 'risk-on' (vrp_proxy > 1.2) | 'risk-off' (< 0.8) | 'neutral'
+   *   regime: 'risk-on' (ratio > 1.2) | 'risk-off' (< 0.8) | 'neutral'
    */
-  calcVRPRegime(candles, cache) {
+  calcVolRegime(candles, cache) {
     var result = { regime: 'neutral', ratio: 1.0, multiplier: 1.00 };
     if (!candles || candles.length < 60) return result;
 
@@ -2008,18 +2015,19 @@ class SignalEngine {
 
     if (!lastLong || !lastShort || lastShort <= 0) return result;
 
-    // vrp_proxy = long_vol / short_vol
+    // vol_ratio = long_vol / short_vol
     // > 1.2 → 장기 변동성 > 단기 → 현재 안정 (변동성 감소 추세) → risk-on
     // < 0.8 → 단기 변동성 급등 → 현재 불안정 → risk-off
+    // [Phase0-#6] multiplier 확대: [0.95,1.05]→[0.85,1.15] (레짐 효과 강화)
     var ratio = lastLong / lastShort;
 
     var regime, multiplier;
     if (ratio > 1.2) {
       regime = 'risk-on';
-      multiplier = 1.05;
+      multiplier = 1.15;
     } else if (ratio < 0.8) {
       regime = 'risk-off';
-      multiplier = 0.95;
+      multiplier = 0.85;
     } else {
       regime = 'neutral';
       multiplier = 1.00;
@@ -2043,13 +2051,13 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, vrp: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0 },
       entropy: 0,
       entropyNorm: 0,
       advLevel: 0,
       advMultiplier: 0.75,
-      vrpRegime: 'neutral',
-      vrpMultiplier: 1.00,
+      volRegime: 'neutral',
+      volRegimeMultiplier: 1.00,
     };
   }
 }

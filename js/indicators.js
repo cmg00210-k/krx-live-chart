@@ -932,7 +932,7 @@ function calcWilliamsR(candles, period = 14) {
   return wr;
 }
 
-/** 모멘텀 (Momentum)
+/** [DEAD] 모멘텀 (Momentum) — 미사용, 향후 composite 후보
  *  Momentum = close[i] - close[i - period]
  *  @param {number[]} closes — 종가 배열
  *  @param {number} period — 비교 기간 (기본 10)
@@ -949,7 +949,7 @@ function calcMomentum(closes, period = 10) {
   return mom;
 }
 
-/** 어썸 오실레이터 (Awesome Oscillator)
+/** [DEAD] 어썸 오실레이터 (Awesome Oscillator) — 미사용, 향후 composite 후보
  *  Median Price = (High + Low) / 2
  *  AO = SMA(Median, shortPeriod) - SMA(Median, longPeriod)
  *  @param {Array} candles — OHLCV 캔들 배열
@@ -975,9 +975,10 @@ function calcAwesomeOscillator(candles, shortPeriod = 5, longPeriod = 34) {
 }
 
 // ══════════════════════════════════════════════════════
-//  RSI Fisher Transform — Amari (1985), core_data/13 §7.3
+//  [DEAD] RSI Fisher Transform — Amari (1985), core_data/13 §7.3
 //  RSI를 정규분포에 가까운 공간으로 변환, 극단값 거짓 신호 감소
 //  rsi_fisher = 0.5 * ln((1+r)/(1-r)), r = 2*(RSI/100) - 1
+//  미사용 — IndicatorCache.rsiFisher()도 외부 호출 없음
 // ══════════════════════════════════════════════════════
 
 function calcRSIFisher(rsiArray) {
@@ -1388,14 +1389,15 @@ class IndicatorCache {
 
   /** EVT-aware 볼린저 밴드 — Hill alpha < 4 시 자동 확대 (core_data/12 §7.1)
    *  Gopikrishnan (1999): 금융 수익률 α≈3 → ±2σ 과소추정
-   *  확대 공식: mult * (1 + 0.15 * max(0, 4 - α)) */
+   *  확대 공식: mult * (1 + 0.45 * max(0, 4 - α))
+   *  [Phase0-#7] 계수 0.15→0.45: 이론값 정상화 (기존=이론의 1/3) */
   bbEVT(n = 20, baseMult = 2) {
     const key = `bbEVT_${n}_${baseMult}`;
     if (!(key in this._cache)) {
       var hillResult = this.hill();
       var evtMult = baseMult;
       if (hillResult && hillResult.alpha > 0 && hillResult.alpha < 4) {
-        evtMult = baseMult * (1 + 0.15 * (4 - hillResult.alpha));
+        evtMult = baseMult * (1 + 0.45 * (4 - hillResult.alpha));
       }
       this._cache[key] = calcBB(this.closes, n, evtMult);
     }
@@ -1685,8 +1687,9 @@ class IndicatorCache {
   // ── 주의 상태 (Stigler/Peng-Xiong Attention Theory) ──
 
   /**
-   * 주의 결핍/폭발 상태 — Stigler (1961) 정보 비용 + Peng & Xiong (2006) 제한적 주의
+   * [DEAD] 주의 결핍/폭발 상태 — Stigler (1961) 정보 비용 + Peng & Xiong (2006) 제한적 주의
    * 거래량 결핍 후 갑작스러운 폭발은 과잉반응 유발 (core_data/18 §5.1)
+   * 미사용 — 행동재무 시그널 활성화 시 재활용 후보
    * @param {number} idx — 캔들 인덱스
    * @param {number} lookback — 백분위 산출 기간 (기본 20)
    * @returns {{ deprivationDays: number, isAttentionJump: boolean, multiplier: number }|null}
@@ -1735,8 +1738,9 @@ class IndicatorCache {
   // ── 점프 강도 (Merton Jump-Diffusion) ─────────────
 
   /**
-   * 점프 강도 — Merton (1976) Jump-Diffusion 모형
+   * [DEAD] 점프 강도 — Merton (1976) Jump-Diffusion 모형
    * 로그수익률 중 ATR 기반 임계값 초과를 점프로 분류, 연율화 빈도 산출
+   * 미사용 — EVT/리스크 모듈 활성화 시 재활용 후보
    * @param {number} idx — 캔들 인덱스
    * @param {number} lookback — 점프 관측 기간 (기본 252, ~1년)
    * @returns {{ lambda: number, isJump: boolean, jumpCount: number }|null}
@@ -2002,8 +2006,8 @@ class IndicatorCache {
 
 // ── 독립 래퍼 함수 (하위 호환용) ──────────────────────
 
-/**
- * 주의 결핍/폭발 상태 배열 — Stigler/Peng-Xiong Attention Theory
+/** [DEAD] 주의 결핍/폭발 상태 배열 — Stigler/Peng-Xiong Attention Theory
+ * 미사용 — attentionState() 래퍼
  * @param {Array} candles — OHLCV 캔들 배열
  * @param {number} lookback — 백분위 산출 기간 (기본 20)
  * @returns {Array<{deprivationDays,isAttentionJump,multiplier}|null>}
@@ -2014,8 +2018,8 @@ function calcAttentionState(candles, lookback = 20) {
   return candles.map((_, i) => cache.attentionState(i, lookback));
 }
 
-/**
- * 점프 강도 배열 — Merton (1976) Jump-Diffusion
+/** [DEAD] 점프 강도 배열 — Merton (1976) Jump-Diffusion
+ * 미사용 — jumpIntensity() 래퍼
  * @param {Array} candles — OHLCV 캔들 배열
  * @param {number} lookback — 점프 관측 기간 (기본 252)
  * @returns {Array<{lambda,isJump,jumpCount}|null>}

@@ -128,7 +128,23 @@ class PatternBacktester {
         .catch(function() {});
     });
     // Store reference (async — available after first analysis cycle)
-    setTimeout(function() { that._behavioralData = loaded; }, 3000);
+    // [Phase0-#8] HMM staleness check: 30일 이상 경과 시 null 처리
+    setTimeout(function() {
+      if (loaded['hmm_regimes'] && loaded['hmm_regimes'].daily) {
+        var daily = loaded['hmm_regimes'].daily;
+        var lastEntry = daily.length > 0 ? daily[daily.length - 1] : null;
+        if (lastEntry && lastEntry.date) {
+          var lastDate = new Date(lastEntry.date);
+          var now = new Date();
+          var daysSince = (now - lastDate) / (1000 * 60 * 60 * 24);
+          if (daysSince > 30) {
+            console.warn('[HMM] hmm_regimes.json stale (' + Math.floor(daysSince) + 'd old) — disabled');
+            loaded['hmm_regimes'] = null;
+          }
+        }
+      }
+      that._behavioralData = loaded;
+    }, 3000);
   }
 
   /** Load LinUCB policy JSON (graceful: missing file = no-op) */
@@ -412,7 +428,7 @@ class PatternBacktester {
    */
   walkForwardTest(candles, pType, opts) {
     if (!candles || candles.length < 100) return null;
-    const folds = (opts && opts.folds) || 4;
+    const folds = (opts && opts.folds) || (candles.length >= 500 ? 6 : 4); // [Phase0-#10] Bailey-Lopez de Prado (2014): 500+봉 → K=6
     const horizon = (opts && opts.horizon) || 5;
     const minTrain = (opts && opts.minTrain) || 60;
     const purge = horizon * 2; // [Phase0-C] 2×horizon — Bailey & Lopez de Prado (2014): AR(1) 반감기 6.5봉 > horizon(5)
