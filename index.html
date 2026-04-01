@@ -20,7 +20,7 @@
   <link rel="prefetch" href="data/index.json">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=14">
+  <link rel="stylesheet" href="css/style.css?v=15">
   <script defer src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"
     integrity="sha384-ExNwjbclSLY2LS3S2c6aDJDjpBHGZLct23WX65fLzj0ob1bRrCh9H90WThES5wQA"
     crossorigin="anonymous"></script>
@@ -239,14 +239,15 @@
             <label class="ind-check"><input type="checkbox" data-ind="rsi"> RSI</label>
             <label class="ind-check"><input type="checkbox" data-ind="stoch"> Stochastic</label>
             <label class="ind-check"><input type="checkbox" data-ind="cci"> CCI</label>
-            <label class="ind-check"><input type="checkbox" data-ind="willr"> Williams %R</label>
             <label class="ind-check"><input type="checkbox" data-ind="adx"> ADX</label>
             <label class="ind-check"><input type="checkbox" data-ind="atr"> ATR</label>
             <div class="ind-dropdown-section-title">오버레이</div>
             <label class="ind-check"><input type="checkbox" data-ind="bb"> 볼린저 밴드</label>
             <div class="ind-dropdown-section-title">고급</div>
             <label class="ind-check"><input type="checkbox" data-ind="ich"> 일목균형표</label>
-            <label class="ind-check"><input type="checkbox" data-ind="kalman"> 칼만 필터</label>
+            <div class="ind-dropdown-section-title tier-b-header">B-Tier (학술 검증 필요)</div>
+            <label class="ind-check tier-disabled" title="D-Tier: Stochastic %K와 수학적 동치"><input type="checkbox" data-ind="willr" disabled> Williams %R</label>
+            <label class="ind-check tier-disabled" title="D-Tier: weight=0, EMA와 ρ>0.90"><input type="checkbox" data-ind="kalman" disabled> 칼만 필터</label>
           </div>
         </div>
         <div class="sep"></div>
@@ -533,6 +534,10 @@
             <span class="fin-grid-value" id="fin-yield-gap">&mdash;</span>
           </div>
           <div class="fin-grid-item">
+            <span class="fin-grid-label">CAPM &beta; <span class="fin-info" data-tooltip="CAPM 체계적 위험. β>1: 시장보다 변동 큼(공격적), β<1: 방어적, β≈1: 시장 동조. Scholes-Williams(1977) 보정 적용.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-beta">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
             <span class="fin-grid-label">ROA <span class="fin-info" data-tooltip="총자산이익률. 순이익을 총자산으로 나눈 비율. 자산 활용의 효율성을 나타냅니다.">&#9432;</span></span>
             <span class="fin-grid-value" id="fin-roa">&mdash;</span>
           </div>
@@ -568,6 +573,13 @@
             <span class="fin-score-grade" id="fin-grade">&mdash;</span>
           </div>
           <span class="fin-score-note">수익성·밸류에이션·성장성·안정성 종합 <span class="fin-info" data-tooltip="수익성(ROE, OPM), 밸류에이션(PER, PBR), 성장성(CAGR), 안정성(부채비율)을 종합한 0~100 점수입니다. 참고용이며 투자 권유가 아닙니다.">&#9432;</span></span>
+        </div>
+
+        <!-- 경기순환 -->
+        <div class="fin-section-title">경기순환</div>
+        <div class="fin-cycle-badge" id="fin-cycle-badge">
+          <span class="fin-cycle-phase" id="fin-cycle-phase">&mdash;</span>
+          <span class="fin-cycle-detail" id="fin-cycle-detail"></span>
         </div>
 
         <!-- 추이 차트 -->
@@ -678,17 +690,17 @@
   <script defer src="js/data.js?v=10"></script>
   <script defer src="js/api.js?v=13"></script>
   <script defer src="js/realtimeProvider.js?v=10"></script>
-  <script defer src="js/indicators.js?v=21"></script>
-  <script defer src="js/patterns.js?v=38"></script>
+  <script defer src="js/indicators.js?v=22"></script>
+  <script defer src="js/patterns.js?v=39"></script>
   <script defer src="js/signalEngine.js?v=31"></script>
   <script defer src="js/chart.js?v=12"></script>
-  <script defer src="js/patternRenderer.js?v=21"></script>
+  <script defer src="js/patternRenderer.js?v=22"></script>
   <script defer src="js/signalRenderer.js?v=12"></script>
-  <script defer src="js/backtester.js?v=32"></script>
+  <script defer src="js/backtester.js?v=33"></script>
   <script defer src="js/sidebar.js?v=12"></script>
-  <script defer src="js/patternPanel.js?v=19"></script>
-  <script defer src="js/financials.js?v=13"></script>
+  <script defer src="js/patternPanel.js?v=20"></script>
+  <script defer src="js/financials.js?v=14"></script>
   <script defer src="js/drawingTools.js?v=10"></script>
-  <script defer src="js/app.js?v=30"></script>
+  <script defer src="js/app.js?v=31"></script>
 </body>
 </html>

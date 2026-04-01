@@ -531,15 +531,22 @@ class PatternEngine {
     return Math.round(Math.min(100, Math.max(0, raw * 100)));
   }
 
-  /** ATR 기반 손절가 — [GAP-3] Prospect Theory 비대칭 적용
+  /** ATR 기반 손절가 — [GAP-3] Prospect Theory 비대칭 + [EVT] GPD 꼬리 VaR 최적화
    *  Kahneman & Tversky (1979): 손실 회피로 손절 거리를 PROSPECT_STOP_WIDEN만큼 확대.
+   *  EVT (Doc 12 §4.1): n≥500 시 GPD VaR₉₉와 ATR 손절 중 큰 값 사용 → 꼬리 위험 보호.
    *  넓은 손절 = whipsaw 감소, 심리적 손실 감내 여유 증가. */
   _stopLoss(candles, idx, signal, atr, mult = PatternEngine.STOP_LOSS_ATR_MULT) {
     const p = candles[idx].close;
     const a = this._atr(atr, idx, candles);
     var adjMult = mult * PatternEngine.PROSPECT_STOP_WIDEN;
-    return signal === 'buy' ? +(p - a * adjMult).toFixed(0)
-         : signal === 'sell' ? +(p + a * adjMult).toFixed(0) : null;
+    var stopDist = a * adjMult;
+    // EVT enhancement: GPD VaR₉₉ (수익률 공간) → 가격 공간 변환 후 ATR 손절과 max
+    if (this._gpdVaR99 && p > 0) {
+      var gpdDist = this._gpdVaR99.VaR * p;
+      if (gpdDist > stopDist) stopDist = gpdDist;
+    }
+    return signal === 'buy' ? +(p - stopDist).toFixed(0)
+         : signal === 'sell' ? +(p + stopDist).toFixed(0) : null;
   }
 
   /** 캔들스틱 패턴 전용 목표가 — ATR × strength 배수 × context weights
@@ -646,14 +653,16 @@ class PatternEngine {
     // Hill 꼬리 지수 → ATR cap 동적화 — Hill (1975), core_data/12_extreme_value_theory.md
     // alpha < 3 (heavy tail) → cap 축소 (목표가 보수적), alpha >= 4 (정규 근사) → 기본 cap
     let dynamicATRCap = PatternEngine.CHART_TARGET_ATR_CAP; // default 6
-    const hillResult = (typeof calcHillEstimator === 'function') ? calcHillEstimator(
-      closes.slice(1).map((c, i) => closes[i] > 0 ? (c - closes[i]) / closes[i] : 0)
-    ) : null;
+    const _returns = closes.slice(1).map((c, i) => closes[i] > 0 ? (c - closes[i]) / closes[i] : 0);
+    const hillResult = (typeof calcHillEstimator === 'function') ? calcHillEstimator(_returns) : null;
     if (hillResult && hillResult.alpha < 3) {
       dynamicATRCap = 4; // heavy tail → 보수적 cap
     } else if (hillResult && hillResult.alpha < 4) {
       dynamicATRCap = 5; // moderate tail
     }
+    // [EVT] GPD 꼬리 VaR → 손절 최적화 — Pickands-Balkema-de Haan (core_data/12 §3.3, §4.1)
+    // n≥500 게이트: 2년+ 일봉에서만 GPD 적합, 부족 시 ATR 기본 손절 유지
+    this._gpdVaR99 = (typeof calcGPDFit === 'function') ? calcGPDFit(_returns, 0.99) : null;
 
     // [PERF] UI 분석 시 lookback 윈도우 제한 — 분봉(5m/1m)에서 8-20x 속도 향상
     // detectFrom: 패턴 감지 루프 시작 인덱스. 지표 사전계산(ATR/MA/Hurst 등)은 전체 데이터 유지.
@@ -734,12 +743,13 @@ class PatternEngine {
       if (_chk('headAndShoulders'))     patterns.push(...this.detectHeadAndShoulders(candles, swH, swL, ctx));
       if (_chk('inverseHeadAndShoulders')) patterns.push(...this.detectInverseHeadAndShoulders(candles, swH, swL, ctx));
       if (_chk('channel'))              patterns.push(...this.detectChannel(candles, swH, swL, ctx));
+      if (_chk('cupAndHandle'))         patterns.push(...this.detectCupAndHandle(candles, swH, swL, ctx));
 
-      // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop
+      // 넥라인 돌파 확인 — H&S, 역H&S, doubleBottom, doubleTop, cupAndHandle
       for (let ni = 0; ni < patterns.length; ni++) {
         const pt = patterns[ni].type;
         if (pt === 'headAndShoulders' || pt === 'inverseHeadAndShoulders' ||
-            pt === 'doubleBottom' || pt === 'doubleTop') {
+            pt === 'doubleBottom' || pt === 'doubleTop' || pt === 'cupAndHandle') {
           this._checkNecklineBreak(candles, patterns[ni], atr14);
         }
       }
@@ -3487,6 +3497,156 @@ class PatternEngine {
   }
 
   // ══════════════════════════════════════════════════
+  //  컵앤핸들 (Cup and Handle) — 강한 상승 지속
+  //
+  //  학술 근거: O'Neil (1988) "How to Make Money in Stocks",
+  //  Bulkowski (2005) "Encyclopedia of Chart Patterns": 61% breakout success.
+  //  core_data/07 §9.2: depth 12-35%, R²>0.6 U-shape, handle < 50% cup depth.
+  //  Cross-validation 보정: cup 30-65 bars, handle 15-30% proportional.
+  // ══════════════════════════════════════════════════
+  detectCupAndHandle(candles, swingHighs, swingLows, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [], hurstWeight: hw = 1, meanRevWeight: mw = 1 } = ctx;
+    const n = candles.length;
+    if (n < 40) return results;
+    const detectFrom = ctx.detectFrom || 0;
+
+    // 최근 200봉에서 탐색 (컵은 긴 패턴이므로 넉넉한 윈도우)
+    const scanStart = Math.max(detectFrom, n - 200);
+
+    for (let rimL = scanStart; rimL < n - 35; rimL++) {
+      // 왼쪽 림: 로컬 고점 (앞뒤 3봉보다 고가가 높은 봉)
+      let isLocalHigh = true;
+      for (let k = Math.max(0, rimL - 3); k <= Math.min(n - 1, rimL + 3); k++) {
+        if (k !== rimL && candles[k].high > candles[rimL].high) { isLocalHigh = false; break; }
+      }
+      if (!isLocalHigh) continue;
+      const leftRimPrice = candles[rimL].high;
+      const a = this._atr(atr, rimL, candles);
+
+      // 컵 바닥 탐색: rimL 이후 15-50봉 내 최저점
+      for (let cupWidth = 30; cupWidth <= 65; cupWidth += 5) {
+        const rimR_approx = rimL + cupWidth;
+        if (rimR_approx >= n - 5) continue;
+
+        // 컵 내 최저점 찾기
+        let bottomIdx = rimL + 10, bottomPrice = Infinity;
+        for (let j = rimL + 5; j < rimR_approx - 5; j++) {
+          if (candles[j].low < bottomPrice) { bottomPrice = candles[j].low; bottomIdx = j; }
+        }
+
+        // 컵 깊이: 12-35% of left rim
+        const depth = (leftRimPrice - bottomPrice) / leftRimPrice;
+        if (depth < 0.12 || depth > 0.35) continue;
+
+        // 오른쪽 림: rimR_approx 부근에서 최고점 (left rim 수준 회복 확인)
+        let rightRimIdx = rimR_approx, rightRimPrice = 0;
+        for (let j = rimR_approx - 5; j <= Math.min(rimR_approx + 5, n - 1); j++) {
+          if (candles[j].high > rightRimPrice) { rightRimPrice = candles[j].high; rightRimIdx = j; }
+        }
+        // 오른쪽 림이 왼쪽 림의 90% 이상 회복해야 함
+        if (rightRimPrice < leftRimPrice * 0.90) continue;
+
+        // U-shape 검증: 파라볼릭 피팅 R² > 0.6
+        // y(t) = a*(t - t_center)² + p_min에서 R² 계산
+        const tCenter = bottomIdx;
+        let ssTot = 0, ssRes = 0, meanClose = 0;
+        const cupLen = rightRimIdx - rimL + 1;
+        for (let j = rimL; j <= rightRimIdx; j++) meanClose += candles[j].close;
+        meanClose /= cupLen;
+        // parabolic 계수 a: OLS on y = a*x² (centered)
+        let sumX2Y = 0, sumX4 = 0;
+        for (let j = rimL; j <= rightRimIdx; j++) {
+          const x = j - tCenter;
+          const y = candles[j].close - bottomPrice;
+          sumX2Y += x * x * y;
+          sumX4 += x * x * x * x;
+        }
+        const aCoeff = sumX4 > 0 ? sumX2Y / sumX4 : 0;
+        if (aCoeff <= 0) continue;  // 위로 볼록이어야 함 (U-shape)
+        for (let j = rimL; j <= rightRimIdx; j++) {
+          const x = j - tCenter;
+          const pred = aCoeff * x * x + bottomPrice;
+          const actual = candles[j].close;
+          ssRes += (actual - pred) * (actual - pred);
+          ssTot += (actual - meanClose) * (actual - meanClose);
+        }
+        const rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+        if (rSquared < 0.6) continue;
+
+        // 핸들 탐색: 오른쪽 림 이후 소폭 하락 (컵 깊이의 50% 미만)
+        // 핸들 길이: 컵 너비의 15-30%
+        const handleMinLen = Math.max(5, Math.floor(cupWidth * 0.15));
+        const handleMaxLen = Math.min(20, Math.floor(cupWidth * 0.30));
+        let handleFound = false;
+        let handleEndIdx = rightRimIdx;
+        let handleLow = rightRimPrice;
+        for (let hLen = handleMinLen; hLen <= handleMaxLen; hLen++) {
+          const hEnd = rightRimIdx + hLen;
+          if (hEnd >= n) break;
+          // 핸들 내 최저점
+          let hLow = Infinity;
+          for (let j = rightRimIdx; j <= hEnd; j++) {
+            if (candles[j].low < hLow) hLow = candles[j].low;
+          }
+          // 핸들 깊이 < 컵 깊이의 50%
+          const handleDepth = rightRimPrice - hLow;
+          const cupDepthAbs = leftRimPrice - bottomPrice;
+          if (handleDepth > 0 && handleDepth < cupDepthAbs * 0.50) {
+            // 돌파 확인: 핸들 이후 종가가 오른쪽 림 돌파
+            if (candles[hEnd].close > rightRimPrice * 0.98) {
+              handleFound = true;
+              handleEndIdx = hEnd;
+              handleLow = hLow;
+              break;
+            }
+          }
+        }
+
+        // 핸들 없이도 컵만으로 유효 (핸들은 신뢰도 보너스)
+        const endIdx = handleFound ? handleEndIdx : rightRimIdx;
+        if (endIdx < detectFrom) continue;
+
+        // Volume U-shape: 컵 바닥에서 거래량 감소, 오른쪽에서 증가
+        const volLeft = vma[rimL] ? candles[rimL].volume / vma[rimL] : 1;
+        const volBottom = vma[bottomIdx] ? candles[bottomIdx].volume / vma[bottomIdx] : 1;
+        const volRight = vma[rightRimIdx] ? candles[rightRimIdx].volume / vma[rightRimIdx] : 1;
+        const volUShape = (volBottom < volLeft && volRight > volBottom) ? 0.8 : 0.5;
+
+        // Measured move 목표가: 컵 깊이만큼 오른쪽 림 위로
+        const raw = leftRimPrice - bottomPrice;
+        const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP,
+          a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
+        const priceTarget = +(rightRimPrice + patternHeight).toFixed(0);
+        const stopLoss = handleFound
+          ? +(handleLow - a * PatternEngine.STOP_LOSS_ATR_MULT).toFixed(0)
+          : +(bottomPrice + (rightRimPrice - bottomPrice) * 0.5).toFixed(0);
+
+        const confidence = this._adaptiveQuality('cupAndHandle', {
+          body: Math.min(rSquared, 1),  // U-shape fit
+          volume: volUShape,
+          trend: handleFound ? 0.8 : 0.5,  // 핸들 있으면 보너스
+          shadow: 1 - Math.abs(leftRimPrice - rightRimPrice) / leftRimPrice / 0.10,  // 림 대칭성
+          extra: Math.min(depth / 0.25, 1),  // 적정 깊이(25% 최적)
+        });
+
+        results.push({
+          type: 'cupAndHandle', name: '컵앤핸들 (Cup & Handle)', nameShort: '컵앤핸들',
+          signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
+          neckline: Math.max(leftRimPrice, rightRimPrice),
+          description: `U형 컵 (R²=${rSquared.toFixed(2)}, 깊이 ${(depth * 100).toFixed(1)}%) + ${handleFound ? '핸들 확인' : '핸들 미확인'}. 형태 점수 ${confidence}%`,
+          startIndex: rimL, endIndex: endIdx,
+          bottomIndex: bottomIdx,
+          handleFound: handleFound,
+          marker: { time: candles[endIdx].time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+        });
+        break;  // 동일 rimL에서 중복 방지
+      }
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
   //  넥라인 돌파 확인 (H&S, 역H&S, doubleBottom, doubleTop)
   //
   //  시장 심리:
@@ -3558,8 +3718,8 @@ class PatternEngine {
       return;
     }
 
-    // ── doubleBottom / doubleTop: 수평 넥라인 ──
-    if (type === 'doubleBottom' || type === 'doubleTop') {
+    // ── doubleBottom / doubleTop / cupAndHandle: 수평 넥라인 ──
+    if (type === 'doubleBottom' || type === 'doubleTop' || type === 'cupAndHandle') {
       const neckline = pattern.neckline;
       if (neckline == null || !isFinite(neckline)) return;
 
@@ -3568,8 +3728,8 @@ class PatternEngine {
         const threshold = a * atrMult;
         const close = candles[j].close;
 
-        if (type === 'doubleBottom') {
-          // doubleBottom (buy): 가격이 넥라인 위로 돌파
+        if (type === 'doubleBottom' || type === 'cupAndHandle') {
+          // doubleBottom/cupAndHandle (buy): 가격이 넥라인 위로 돌파
           if (close > neckline + threshold) {
             pattern.necklineBreakConfirmed = true;
             pattern.breakIndex = j;

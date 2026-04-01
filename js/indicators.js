@@ -264,6 +264,166 @@ function calcHillEstimator(returns, k) {
 }
 
 /**
+ * GPD (Generalized Pareto Distribution) 꼬리 VaR — EVT 기반 손절가 최적화
+ *
+ * 학술 근거: Pickands-Balkema-de Haan 정리 (core_data/12 §3.3)
+ *   임계값 초과 손실은 GPD를 따름.
+ *   PWM (Probability Weighted Moments) 추정: Hosking & Wallis (1987)
+ *     ξ̂ = 2 - β₀/(β₀ - 2β₁),  σ̂ = 2β₀β₁/(β₀ - 2β₁)
+ *   VaR_p = u + (σ/ξ)·[((n/Nᵤ)·(1-p))^(-ξ) - 1]  (Doc 12 §4.1)
+ *
+ * @param {number[]} returns - 수익률 배열 (양수/음수 모두)
+ * @param {number} [quantile=0.99] - VaR 신뢰수준
+ * @returns {{ VaR: number, xi: number, sigma: number, u: number, Nu: number }} 또는 null
+ */
+function calcGPDFit(returns, quantile) {
+  if (!returns || returns.length < 500) return null;  // 2년+ 일봉 필요
+  // 절대값 정렬 (내림차순)
+  var absRet = [];
+  for (var i = 0; i < returns.length; i++) {
+    if (isFinite(returns[i]) && returns[i] !== 0) absRet.push(Math.abs(returns[i]));
+  }
+  absRet.sort(function(a, b) { return b - a; });
+  var n = absRet.length;
+  if (n < 500) return null;
+
+  // 임계값: 상위 5% (Doc 12 §3.4 실무 지침)
+  var uIdx = Math.floor(n * 0.05);
+  if (uIdx < 30) return null;  // 초과 관측치 최소 30개 필요
+  var u = absRet[uIdx];
+  if (u <= 0) return null;
+
+  // 초과량 (exceedances)
+  var exc = [];
+  for (var i = 0; i < uIdx; i++) {
+    var y = absRet[i] - u;
+    if (y > 0) exc.push(y);
+  }
+  var Nu = exc.length;
+  if (Nu < 20) return null;
+
+  // PWM 추정 — exc를 오름차순 정렬
+  exc.sort(function(a, b) { return a - b; });
+  var b0 = 0, b1 = 0;
+  for (var i = 0; i < Nu; i++) {
+    b0 += exc[i];
+    b1 += exc[i] * i / (Nu - 1);
+  }
+  b0 /= Nu;
+  b1 /= Nu;
+
+  var denom = b0 - 2 * b1;
+  if (Math.abs(denom) < 1e-12) return null;
+
+  var xi = 2 - b0 / denom;
+  var sigma = 2 * b0 * b1 / denom;
+  if (sigma <= 0 || xi >= 1 || xi <= -0.5) return null;  // 유효 범위 확인
+
+  // VaR at quantile p
+  var p = quantile || 0.99;
+  var ratio = (n / Nu) * (1 - p);
+  if (ratio <= 0) return null;
+  var VaR = u + (sigma / xi) * (Math.pow(ratio, -xi) - 1);
+  if (!isFinite(VaR) || VaR <= 0) return null;
+
+  return { VaR: VaR, xi: xi, sigma: sigma, u: u, Nu: Nu };
+}
+
+/**
+ * CAPM Beta — 시장 모형 회귀 (core_data/25 §1.2)
+ *
+ * β = Cov(Rᵢ, Rₘ) / Var(Rₘ), 일별 수익률, 250일 윈도우.
+ * Scholes-Williams (1977) 비동기거래 보정:
+ *   β_SW = (β₋₁ + β₀ + β₊₁) / (1 + 2ρₘ)
+ * 거래량 0일이 10%+ 종목은 thin-trading 경고.
+ *
+ * @param {number[]} stockCloses - 종목 종가 배열 (오래→최신)
+ * @param {number[]} marketCloses - 시장 지수 종가 배열 (동일 날짜 정렬)
+ * @param {number} [window=250] - 사용할 최근 거래일 수
+ * @returns {{ beta, alpha, rSquared, thinTrading }} 또는 null
+ */
+function calcCAPMBeta(stockCloses, marketCloses, window) {
+  var w = window || 250;
+  if (!stockCloses || !marketCloses) return null;
+  var n = Math.min(stockCloses.length, marketCloses.length);
+  if (n < 60) return null;  // 최소 60일 (3개월)
+  // 최근 w일만 사용
+  var startIdx = Math.max(0, n - w);
+
+  // 일별 수익률 계산
+  var sr = [], mr = [];
+  var zeroVolDays = 0;
+  for (var i = startIdx + 1; i < n; i++) {
+    var sc = stockCloses[i], sp = stockCloses[i - 1];
+    var mc = marketCloses[i], mp = marketCloses[i - 1];
+    if (sp > 0 && mp > 0 && sc > 0 && mc > 0) {
+      var ri = (sc - sp) / sp;
+      var rm = (mc - mp) / mp;
+      sr.push(ri);
+      mr.push(rm);
+      if (Math.abs(ri) < 1e-10) zeroVolDays++;
+    }
+  }
+  var T = sr.length;
+  if (T < 50) return null;
+
+  // OLS beta: Cov(ri, rm) / Var(rm)
+  var sumRi = 0, sumRm = 0;
+  for (var i = 0; i < T; i++) { sumRi += sr[i]; sumRm += mr[i]; }
+  var meanRi = sumRi / T, meanRm = sumRm / T;
+  var cov = 0, varM = 0, varI = 0;
+  for (var i = 0; i < T; i++) {
+    var di = sr[i] - meanRi, dm = mr[i] - meanRm;
+    cov += di * dm;
+    varM += dm * dm;
+    varI += di * di;
+  }
+  if (varM < 1e-15) return null;
+  var beta0 = cov / varM;
+  var alpha = meanRi - beta0 * meanRm;
+
+  // Scholes-Williams 보정: lead/lag beta
+  var thinTrading = (zeroVolDays / T) > 0.10;
+  var beta = beta0;
+  if (thinTrading && T > 3) {
+    // β₋₁: ri vs rm(t-1)
+    var covLag = 0, covLead = 0, autoM = 0;
+    for (var i = 1; i < T - 1; i++) {
+      var di = sr[i] - meanRi;
+      covLag += di * (mr[i - 1] - meanRm);
+      covLead += di * (mr[i + 1] - meanRm);
+    }
+    for (var i = 1; i < T; i++) {
+      autoM += (mr[i] - meanRm) * (mr[i - 1] - meanRm);
+    }
+    var rhoM = autoM / varM;
+    var denomSW = 1 + 2 * rhoM;
+    if (Math.abs(denomSW) > 0.01) {
+      var betaLag = covLag / varM;
+      var betaLead = covLead / varM;
+      beta = (betaLag + beta0 + betaLead) / denomSW;
+    }
+  }
+
+  // R-squared
+  var ssRes = 0, ssTot = varI * T;
+  for (var i = 0; i < T; i++) {
+    var pred = alpha + beta0 * mr[i];
+    var err = sr[i] - pred;
+    ssRes += err * err;
+  }
+  var rSq = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+
+  return {
+    beta: +beta.toFixed(3),
+    alpha: +(alpha * 252).toFixed(4),  // 연율화 Jensen's alpha
+    rSquared: +rSq.toFixed(3),
+    thinTrading: thinTrading,
+    nObs: T,
+  };
+}
+
+/**
  * 가중 다중 선형 회귀 (WLS — Weighted Least Squares)
  *
  * 학술 근거: Reschenhofer et al. (2021)
@@ -1490,6 +1650,24 @@ class IndicatorCache {
           if (cl[i - 1] > 0) rets.push((cl[i] - cl[i - 1]) / cl[i - 1]);
         }
         this._cache[key] = calcHillEstimator(rets, k);
+      }
+    }
+    return this._cache[key];
+  }
+
+  /** GPD 꼬리 VaR — EVT 손절 최적화용 (n≥500 필요, Doc 12 §4.1) */
+  gpdVaR(quantile) {
+    var q = quantile || 0.99;
+    var key = 'gpdVaR_' + q;
+    if (!(key in this._cache)) {
+      var cl = this.closes;
+      if (cl.length < 501) { this._cache[key] = null; }
+      else {
+        var rets = [];
+        for (var i = 1; i < cl.length; i++) {
+          if (cl[i - 1] > 0) rets.push((cl[i] - cl[i - 1]) / cl[i - 1]);
+        }
+        this._cache[key] = calcGPDFit(rets, q);
       }
     }
     return this._cache[key];

@@ -119,6 +119,7 @@ var _TIER_B_CHART = new Set([
   'channel',              // WR=58.0%, n=125 (소표본)
   'descendingTriangle',   // WR=54.3%, n=503
   'inverseHeadAndShoulders', // WR=44.0%, H&S 대칭
+  'cupAndHandle',         // WR=61%(Bulkowski), KRX 미검증. O'Neil(1988)
   'fallingWedge',         // WR=39.1%, risingWedge 대칭 (KRX anomaly)
   'ascendingTriangle',    // WR=39.5%, n=352
   'symmetricTriangle',    // WR=32.3%, 방향 중립

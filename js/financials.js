@@ -15,6 +15,8 @@ var _finTrendMetric = 'revenue';
 
 // ── 매크로 데이터 캐시 (KTB10Y 등) ──
 var _macroData = null;
+// ── 시장 지수 종가 캐시 (CAPM beta용) ──
+var _marketIndexCloses = { kospi: null, kosdaq: null };
 
 // ── 업종 비교용 최신 재무값 캐시 ──
 var _latestFinOpm = 0;
@@ -130,6 +132,78 @@ async function _loadMacroData() {
   } catch (e) { /* 매크로 데이터 선택적 — 실패 시 KTB10Y 기본값 3.5% 사용 */ }
 }
 
+/** CAPM Beta 렌더링 (core_data/25 §1.2, Scholes-Williams 1977) */
+async function _renderCAPMBeta(stock) {
+  var el = document.getElementById('fin-beta');
+  if (!el) return;
+  if (!stock || !stock.market) { el.textContent = '\u2014'; return; }
+  var mktKey = stock.market.toLowerCase().indexOf('kosdaq') >= 0 ? 'kosdaq' : 'kospi';
+  // 현재 종목 종가 로드 (dataService에서 일봉 조회)
+  var stockCandles = null;
+  try { stockCandles = await dataService.getCandles(stock, '1d'); } catch (e) { /* optional */ }
+  if (!stockCandles || stockCandles.length < 60) { el.textContent = '\u2014'; return; }
+  // 날짜 기반 매칭: 종목과 시장 지수의 날짜가 다를 수 있으므로 date 키로 정렬
+  var mktMap = {};
+  var mktData = null;
+  try {
+    var resp = await fetch('data/market/' + mktKey + '_daily.json', { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) mktData = await resp.json();
+  } catch (e) { /* optional */ }
+  if (!mktData) { el.textContent = '\u2014'; return; }
+  for (var mi = 0; mi < mktData.length; mi++) mktMap[mktData[mi].time] = mktData[mi].close;
+  // 공통 날짜만 추출 (정렬된 매칭)
+  var sCloses = [], mCloses = [];
+  for (var si = 0; si < stockCandles.length; si++) {
+    var t = stockCandles[si].time;
+    if (mktMap[t]) { sCloses.push(stockCandles[si].close); mCloses.push(mktMap[t]); }
+  }
+  var result = (typeof calcCAPMBeta === 'function') ? calcCAPMBeta(sCloses, mCloses) : null;
+  if (!result) { el.textContent = '\u2014'; return; }
+  var b = result.beta;
+  var label = b >= 1.5 ? '고위험' : b >= 1.0 ? '공격적' : b >= 0.7 ? '중립' : '방어적';
+  el.textContent = b.toFixed(2) + ' (' + label + ')';
+  el.className = 'fin-grid-value' + (b >= 1.0 ? ' up' : ' dn');
+}
+
+/** 시장 지수 데이터 로드 (CAPM beta용, core_data/25 §1.2) */
+async function _loadMarketIndex(market) {
+  var key = (market || 'kospi').toLowerCase();
+  if (_marketIndexCloses[key]) return _marketIndexCloses[key];
+  try {
+    var resp = await fetch('data/market/' + key + '_daily.json', { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) {
+      var data = await resp.json();
+      _marketIndexCloses[key] = data.map(function(d) { return d.close; });
+    }
+  } catch (e) { /* market index optional */ }
+  return _marketIndexCloses[key] || null;
+}
+
+/** 경기순환 국면 배지 렌더링 — OECD CLI 4-phase (core_data/29 §1.2) */
+function _renderCyclePhase() {
+  var phaseEl = document.getElementById('fin-cycle-phase');
+  var detailEl = document.getElementById('fin-cycle-detail');
+  if (!phaseEl) return;
+  var cp = _macroData && _macroData.cycle_phase;
+  if (!cp || !cp.phase) {
+    phaseEl.textContent = '\u2014';
+    phaseEl.className = 'fin-cycle-phase';
+    if (detailEl) detailEl.textContent = '';
+    return;
+  }
+  var LABELS = { expansion: '확장기', peak: '후퇴기', contraction: '수축기', trough: '회복기' };
+  var COLORS = { expansion: 'up', peak: 'dn', contraction: 'dn', trough: 'up' };
+  phaseEl.textContent = LABELS[cp.phase] || cp.phase;
+  phaseEl.className = 'fin-cycle-phase ' + (COLORS[cp.phase] || '');
+  if (detailEl) {
+    var parts = [];
+    if (cp.months_in_phase) parts.push(cp.months_in_phase + '개월째');
+    if (cp.cli) parts.push('CLI ' + cp.cli);
+    if (!cp.confirmed) parts.push('(미확인)');
+    detailEl.textContent = parts.join(' · ');
+  }
+}
+
 /**
  * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
  * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
@@ -140,7 +214,7 @@ function _clearAllFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var i = 0; i < ids.length; i++) {
@@ -229,7 +303,7 @@ async function updateFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var _i = 0; _i < _finIds.length; _i++) {
@@ -479,6 +553,9 @@ async function updateFinancials() {
     setClass('fin-yield-gap', 'fin-grid-value');
   }
 
+  // ── CAPM Beta (core_data/25 §1.2) ──
+  _renderCAPMBeta(currentStock);
+
   // ── 성장성: 3년 CAGR 계산 ──
   const annualData = await getFinancialData(currentStock.code, 'annual');
   _calcCAGR(annualData, set, setClass);
@@ -490,6 +567,9 @@ async function updateFinancials() {
     opm: parseFloat(latest.opm) || 0,
     annualData,
   }, set, setClass);
+
+  // ── 경기순환 국면 표시 (OECD CLI 4-phase, core_data/29 §1.2) ──
+  _renderCyclePhase();
 
   // YoY/QoQ 변화율 계산
   _calcFinChanges(data);

@@ -667,6 +667,71 @@ def calc_foreigner_signal(all_data):
     return signal, rate_diff
 
 
+def classify_business_cycle(cli_series):
+    """OECD 표준 4-phase 경기순환 분류기 — core_data/29 §1.2
+    CLI(경기선행지수 순환변동치) 수준(vs 100) + 방향(delta)으로 4국면 판정.
+    2개월 연속 확인으로 위상 전환 노이즈 방지."""
+    if not cli_series or len(cli_series) < 3:
+        return None
+
+    # null 제거 후 최근 값 추출
+    valid = [v for v in cli_series if v is not None]
+    if len(valid) < 3:
+        return None
+
+    current = valid[-1]
+    previous = valid[-2]
+    prev2 = valid[-3]
+    delta = current - previous
+    delta_prev = previous - prev2
+    above_trend = current > 100
+    rising = delta > 0
+
+    if above_trend and rising:          phase = "expansion"
+    elif above_trend and not rising:    phase = "peak"
+    elif not above_trend and not rising: phase = "contraction"
+    else:                                phase = "trough"
+
+    # 2개월 연속 확인 — 단일 delta 부호 반전 시 이전 국면 유지
+    above_prev = previous > 100
+    rising_prev = delta_prev > 0
+    if above_prev and rising_prev:          prev_phase = "expansion"
+    elif above_prev and not rising_prev:    prev_phase = "peak"
+    elif not above_prev and not rising_prev: prev_phase = "contraction"
+    else:                                    prev_phase = "trough"
+
+    confirmed = (phase == prev_phase)
+
+    # confidence: level distance (0~3 typ) + delta magnitude (0~0.3 typ)
+    level_dist = abs(current - 100)
+    delta_mag = abs(delta)
+    confidence = min(1.0, (level_dist / 1.5) * 0.6 + (delta_mag / 0.15) * 0.4)
+
+    # months_in_phase: 연속 동일 국면 개월 수
+    months = 1
+    for i in range(len(valid) - 2, 0, -1):
+        d = valid[i] - valid[i - 1]
+        ab = valid[i] > 100
+        ri = d > 0
+        if ab and ri:          p = "expansion"
+        elif ab and not ri:    p = "peak"
+        elif not ab and not ri: p = "contraction"
+        else:                   p = "trough"
+        if p == phase:
+            months += 1
+        else:
+            break
+
+    return {
+        "phase": phase,
+        "cli": round(current, 4),
+        "delta": round(delta, 4),
+        "confidence": round(confidence, 2),
+        "confirmed": confirmed,
+        "months_in_phase": months,
+    }
+
+
 def build_latest(all_data):
     """macro_latest.json 구성"""
     today = datetime.today().strftime("%Y-%m-%d")
@@ -710,6 +775,10 @@ def build_latest(all_data):
         "m2_yoy": m2_yoy,
         "cpi_yoy": cpi_yoy,
         "foreigner_signal": foreigner_signal,
+        "cycle_phase": classify_business_cycle(
+            [d["value"] for d in all_data.get("korea_cli", []) if d.get("value") is not None]
+            if all_data.get("korea_cli") else None
+        ),
     }
 
     # None 값은 유지하되, 소수점 정리

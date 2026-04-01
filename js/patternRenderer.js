@@ -87,7 +87,7 @@ const patternRenderer = (() => {
     'doubleBottom', 'doubleTop',
     'headAndShoulders', 'inverseHeadAndShoulders',
     'ascendingTriangle', 'descendingTriangle', 'symmetricTriangle',
-    'risingWedge', 'fallingWedge', 'channel',
+    'risingWedge', 'fallingWedge', 'channel', 'cupAndHandle',
   ]);
 
   // ── 3계층 분류용 캔들스틱 패턴 Set ──
@@ -132,7 +132,7 @@ const patternRenderer = (() => {
     ascendingTriangle: '상승삼각형', descendingTriangle: '하락삼각형',
     symmetricTriangle: '대칭삼각형',
     risingWedge: '상승쐐기', fallingWedge: '하락쐐기',
-    channel: '채널',
+    channel: '채널', cupAndHandle: '컵앤핸들',
   };
 
   // ── 패턴 방향 판별 ──
@@ -140,7 +140,7 @@ const patternRenderer = (() => {
     'hammer', 'invertedHammer', 'bullishEngulfing', 'bullishHarami',
     'morningStar', 'threeWhiteSoldiers', 'threeInsideUp', 'doubleBottom',
     'inverseHeadAndShoulders', 'fallingWedge',
-    'ascendingTriangle', 'piercingLine',
+    'ascendingTriangle', 'piercingLine', 'cupAndHandle',
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
     'bullishBeltHold', 'bullishHaramiCross', 'stickSandwich', 'abandonedBabyBullish',
   ]);

@@ -405,6 +405,16 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '가격이 채널 상단/하단을 ATR×1.5 이상 이탈하면 채널 패턴 소멸. 채널 폭이 ATR×1.5 미만으로 좁아지면 수렴 패턴(삼각형)으로 전환.'
   },
 
+  cupAndHandle: {
+    nameKo: '컵앤핸들',
+    category: '차트패턴 (지속)',
+    candles: 40,
+    academicDesc: 'U자형 컵(30-65봉) + 소규모 하락 핸들로 구성된 강세 지속 패턴. O\'Neil (1988) "How to Make Money in Stocks"에서 체계화. Bulkowski (2005): 61% 돌파 성공률. R²>0.6 파라볼릭 피팅으로 U-shape 검증.',
+    psychology: '컵은 기관의 단계적 포지션 구축(accumulation)을, 핸들은 마지막 약한 보유자의 이탈(shakeout)을 나타냄. 핸들 완성 후 돌파 시 축적된 매수 에너지가 폭발.',
+    bulkowskiWinRate: 61,
+    invalidation: '핸들 깊이가 컵 깊이의 50%를 초과하면 패턴 무효. 오른쪽 림이 왼쪽 림의 90% 미만이면 컵 미완성.'
+  },
+
   doubleBottom: {
     nameKo: '이중바닥',
     category: '차트패턴 (반전)',

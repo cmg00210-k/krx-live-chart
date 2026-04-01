@@ -1899,6 +1899,26 @@ html, body {
   grid-template-columns: 1fr 1fr;
 }
 
+.fin-cycle-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  background: var(--bg-element);
+  border-radius: var(--ctrl-radius);
+}
+.fin-cycle-phase {
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+.fin-cycle-phase.up { color: var(--up); }
+.fin-cycle-phase.dn { color: var(--down); }
+.fin-cycle-detail {
+  font-size: var(--fs-nano);
+  color: var(--text-muted);
+}
+
 .fin-score-badge {
   display: flex;
   align-items: center;
@@ -2383,6 +2403,11 @@ html, body {
   border-top: 1px solid var(--border-subtle);
   padding-top: 6px;
 }
+/* B-Tier 학술 검증 섹션 */
+.ind-dropdown-section-title.tier-b-header {
+  color: var(--neutral); font-size: 10px;
+}
+.ind-check.tier-disabled { opacity: 0.5; cursor: not-allowed; }
 /* [FIX] 표시 드롭다운: 우측 정렬 (차트 영역 오른쪽 경계에서 잘림 방지) */
 #viz-toggle-wrap .ind-dropdown-menu { left: auto; right: 0; }
 

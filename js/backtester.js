@@ -92,6 +92,7 @@ class PatternBacktester {
       threeInsideUp:          { name: '상승삼내형',     signal: 'buy'  },
       threeInsideDown:        { name: '하락삼내형',     signal: 'sell' },
       channel:                { name: '채널',           signal: 'neutral' },
+      cupAndHandle:           { name: '컵앤핸들',       signal: 'buy'  },
     };
 
     /** 캐시 키 (종목코드 + 캔들길이) → 결과 */
