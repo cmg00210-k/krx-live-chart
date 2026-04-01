@@ -157,7 +157,8 @@ async function _renderCAPMBeta(stock) {
     var t = stockCandles[si].time;
     if (mktMap[t]) { sCloses.push(stockCandles[si].close); mCloses.push(mktMap[t]); }
   }
-  var result = (typeof calcCAPMBeta === 'function') ? calcCAPMBeta(sCloses, mCloses) : null;
+  var rfAnnual = (_macroData && _macroData.ktb10y) ? _macroData.ktb10y : 0;
+  var result = (typeof calcCAPMBeta === 'function') ? calcCAPMBeta(sCloses, mCloses, 250, rfAnnual) : null;
   if (!result) { el.textContent = '\u2014'; return; }
   var b = result.beta;
   var label = b >= 1.5 ? '고위험' : b >= 1.0 ? '공격적' : b >= 0.7 ? '중립' : '방어적';

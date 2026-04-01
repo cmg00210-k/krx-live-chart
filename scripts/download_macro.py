@@ -192,9 +192,10 @@ UIP_W_VIX = 0.45
 UIP_W_RATE = 0.30
 UIP_W_DXY = 0.25
 
-# ── MCS 가중치 (Doc29 §6.2 Macro Context Score) ──
-# MCS = 0.25*PMI_norm + 0.20*CSI_norm + 0.25*export_norm + 0.15*yield_norm + 0.15*EPU_inv_norm
-MCS_W = {"pmi": 0.25, "csi": 0.20, "export": 0.25, "yield_curve": 0.15, "epu_inv": 0.15}
+# ── MCS v2 가중치 (Doc30 §4.3 Macro Context Score v2) ──
+# MCS_v2 = 0.225*PMI + 0.180*CSI + 0.225*export + 0.135*yield + 0.135*EPU_inv + 0.100*Taylor_gap
+# v1→v2: 기존 5개 비례 축소 + Taylor gap(#142 w6=0.10) 추가
+MCS_W = {"pmi": 0.225, "csi": 0.180, "export": 0.225, "yield_curve": 0.135, "epu_inv": 0.135, "taylor_gap": 0.100}
 
 VERBOSE = False
 
@@ -825,11 +826,13 @@ def calc_mcs(all_data, latest):
         return max(0.0, min(1.0, x))
 
     # 1. PMI_norm — BSI 제조업경기실사지수 (0-200, PMI equiv = BSI/2)
-    #    Doc29: (PMI - 45) / 10, clipped [0,1]
+    #    MCS v2: (PMI - 35) / 30, clipped [0,1]  — widened from (PMI-45)/10
+    #    BSI=70(약세)→PMI=35→0.0, BSI=100(중립)→PMI=50→0.5, BSI=130(강세)→PMI=65→1.0
+    #    상수 #143=35(low), #144=30(range)
     bsi = latest.get("bsi_mfg")
     if bsi is not None:
         pmi_equiv = bsi / 2.0  # BSI 0-200 → PMI 0-100 scale
-        components["pmi"] = _clip01((pmi_equiv - 45) / 10)
+        components["pmi"] = _clip01((pmi_equiv - 35) / 30)
         available["pmi"] = True
     else:
         available["pmi"] = False
@@ -840,7 +843,7 @@ def calc_mcs(all_data, latest):
     #    Primary: latest dict, Fallback: data/market_context.json
     csi = latest.get("ccsi")  # ECOS CCSI if available
     if csi is None:
-        # fallback: market_context.json
+        # fallback 1: market_context.json
         mc_path = os.path.join(DATA_DIR, "market_context.json")
         if os.path.exists(mc_path):
             try:
@@ -849,6 +852,19 @@ def calc_mcs(all_data, latest):
                 csi = mc.get("ccsi") or mc.get("csi")
                 if csi is not None:
                     vlog(f"MCS csi: market_context.json fallback csi={csi}")
+            except Exception:
+                pass
+    if csi is None:
+        # fallback 2: KOSIS ESI (경제심리지수, 100=neutral, same scale as CSI)
+        kosis_path = os.path.join(DATA_DIR, "macro", "kosis_latest.json")
+        if os.path.exists(kosis_path):
+            try:
+                with open(kosis_path, "r", encoding="utf-8") as f:
+                    kosis = json.load(f)
+                esi = kosis.get("esi")
+                if esi is not None:
+                    csi = esi
+                    vlog(f"MCS csi: KOSIS ESI fallback csi={csi}")
             except Exception:
                 pass
     if csi is not None:
@@ -891,6 +907,28 @@ def calc_mcs(all_data, latest):
         available["epu_inv"] = False
     vlog(f"MCS epu_inv: vix={vix}, norm={components.get('epu_inv')}")
 
+    # 6. Taylor_gap_norm — 테일러 갭 정규화 (Doc30 §4.3, 상수 #135-#142)
+    #    Taylor Rule: i* = r* + pi + a_pi*(pi-pi*) + a_y*output_gap
+    #    Taylor gap = bok_rate - i* (bp)
+    #    Normalized: clip((gap_bp + 100) / 200, 0, 1)
+    #    gap=-100bp(극완화)→0.0, gap=0(중립)→0.5, gap=+100bp(극긴축)→1.0
+    bok_r = latest.get("bok_rate")
+    cpi_yoy_val = latest.get("cpi_yoy")
+    cli_val = latest.get("korea_cli")
+    if bok_r is not None and cpi_yoy_val is not None:
+        r_star = 1.0     # #135 Korean neutral real rate (BOK 2023)
+        pi_star = 2.0    # #136 BOK inflation target
+        a_pi = 0.50      # #137 Taylor (1993) inflation response
+        a_y = 0.50       # #138 Taylor (1993) output gap response
+        output_gap = (cli_val - 100) * 0.5 if cli_val is not None else 0  # #139 CLI_TO_GAP_SCALE
+        i_taylor = r_star + cpi_yoy_val + a_pi * (cpi_yoy_val - pi_star) + a_y * output_gap
+        taylor_gap_bp = (bok_r - i_taylor) * 100  # %p → bp
+        components["taylor_gap"] = _clip01((taylor_gap_bp + 100) / 200)
+        available["taylor_gap"] = True
+        vlog(f"MCS taylor: i*={i_taylor:.2f}, gap={bok_r - i_taylor:.2f}%p, norm={components['taylor_gap']:.4f}")
+    else:
+        available["taylor_gap"] = False
+
     # -- 가중 합산 (graceful degradation: 가용 컴포넌트만 재정규화) --
     n_avail = sum(1 for v in available.values() if v)
     if n_avail < 2:
@@ -917,12 +955,13 @@ def calc_mcs(all_data, latest):
             "export_norm": _r4(components.get("export")),
             "yield_norm": _r4(components.get("yield_curve")),
             "epu_inv_norm": _r4(components.get("epu_inv")),
+            "taylor_gap_norm": _r4(components.get("taylor_gap")),
             "available": n_avail,
-            "total": 5,
+            "total": 6,
         }
     }
 
-    vlog(f"MCS = {mcs} ({n_avail}/5 components)")
+    vlog(f"MCS v2 = {mcs} ({n_avail}/6 components)")
     return result
 
 
@@ -1030,7 +1069,24 @@ def build_latest(all_data):
         if isinstance(v, float):
             latest[k] = round(v, 4) if k == "foreigner_signal" else round(v, 2)
 
-    # -- MCS (Doc29 §6.2) — latest dict 완성 후 계산 --
+    # -- Taylor Rule Gap (Doc30 §4.1, 상수 #135-#138) --
+    bok_rate_val = latest.get("bok_rate")
+    cpi_yoy_val = latest.get("cpi_yoy")
+    cli_val = latest.get("korea_cli")
+    if bok_rate_val is not None and cpi_yoy_val is not None:
+        r_star = 1.0     # #135
+        pi_star = 2.0    # #136
+        a_pi = 0.50      # #137
+        a_y = 0.50       # #138
+        output_gap = (cli_val - 100) * 0.5 if cli_val is not None else 0  # #139
+        i_taylor = r_star + cpi_yoy_val + a_pi * (cpi_yoy_val - pi_star) + a_y * output_gap
+        latest["taylor_implied_rate"] = round(i_taylor, 4)
+        latest["taylor_gap"] = round(bok_rate_val - i_taylor, 4)  # %p
+    else:
+        latest["taylor_implied_rate"] = None
+        latest["taylor_gap"] = None
+
+    # -- MCS v2 (Doc30 §4.3) — latest dict 완성 후 계산 --
     mcs_result = calc_mcs(all_data, latest)
     latest["mcs"] = mcs_result["mcs"] if mcs_result else None
     latest["mcs_components"] = mcs_result["components"] if mcs_result else None
@@ -1220,24 +1276,35 @@ def print_summary(latest, source_stats):
         else:
             log(f"  {label:16s}: (수집 실패)")
 
-    # -- MCS (Doc29 §6.2) --
+    # -- Taylor Rule Gap (Doc30 §4.1) --
+    log("-" * 55)
+    tg = latest.get("taylor_gap")
+    ti = latest.get("taylor_implied_rate")
+    if tg is not None and ti is not None:
+        stance = "완화적(dovish)" if tg < -0.25 else ("긴축적(hawkish)" if tg > 0.25 else "중립")
+        log(f"  {'Taylor i*':16s}: {ti:.2f}%")
+        log(f"  {'Taylor gap':16s}: {tg:+.2f}%p ({stance})")
+    else:
+        log(f"  {'Taylor gap':16s}: (계산 불가)")
+
+    # -- MCS v2 (Doc30 §4.3) --
     log("-" * 55)
     mcs = latest.get("mcs")
     mcs_comp = latest.get("mcs_components")
     if mcs is not None:
         regime = "강세" if mcs > 0.6 else ("약세" if mcs < 0.4 else "중립")
-        log(f"  {'MCS':16s}: {mcs:.4f} ({regime})")
+        log(f"  {'MCS v2':16s}: {mcs:.4f} ({regime})")
         if mcs_comp:
             avail = mcs_comp.get("available", 0)
-            total = mcs_comp.get("total", 5)
+            total = mcs_comp.get("total", 6)
             parts = []
-            for k in ["pmi_norm", "csi_norm", "export_norm", "yield_norm", "epu_inv_norm"]:
+            for k in ["pmi_norm", "csi_norm", "export_norm", "yield_norm", "epu_inv_norm", "taylor_gap_norm"]:
                 v = mcs_comp.get(k)
                 parts.append(f"{k}={'—' if v is None else f'{v:.3f}'}")
             log(f"  {'  components':16s}: {', '.join(parts)}")
             log(f"  {'  available':16s}: {avail}/{total}")
     else:
-        log(f"  {'MCS':16s}: (계산 불가 — 컴포넌트 부족)")
+        log(f"  {'MCS v2':16s}: (계산 불가 — 컴포넌트 부족)")
 
     log("=" * 55)
 

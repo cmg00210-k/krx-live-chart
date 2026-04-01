@@ -90,6 +90,35 @@ function calcATR(candles, period = 14) {
   return atr;
 }
 
+/** [Phase TA-2] OBV (On-Balance Volume) — Granville (1963), Murphy (1999) Ch.7
+ *  거래량을 가격 방향으로 누적하여 수급 압력을 측정하는 선행 지표.
+ *  시장 심리: 가격보다 거래량이 먼저 움직인다는 전제 (Granville의 핵심 가설).
+ *  - 가격 상승 + OBV 상승 = 매수세 유입 확인 (추세 건전성)
+ *  - 가격 상승 + OBV 하락 = 스마트머니 이탈 (약세 다이버전스, 천장 경고)
+ *  - 가격 하락 + OBV 상승 = 기관 축적 (강세 다이버전스, 바닥 경고)
+ *
+ *  @param {Array} candles — OHLCV 캔들 배열
+ *  @returns {number[]} — OBV 누적값 배열 (candles와 동일 길이)
+ */
+function calcOBV(candles) {
+  if (!candles || candles.length === 0) return [];
+  const obv = new Array(candles.length);
+  obv[0] = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const close = candles[i].close;
+    const prevClose = candles[i - 1].close;
+    const volume = candles[i].volume || 0;
+    if (close > prevClose) {
+      obv[i] = obv[i - 1] + volume;
+    } else if (close < prevClose) {
+      obv[i] = obv[i - 1] - volume;
+    } else {
+      obv[i] = obv[i - 1];
+    }
+  }
+  return obv;
+}
+
 /** 일목균형표 (Ichimoku Cloud) */
 function calcIchimoku(candles, conv = 9, base = 26, spanBPeriod = 52, displacement = 26) {
   const len = candles.length;
@@ -342,7 +371,7 @@ function calcGPDFit(returns, quantile) {
  * @param {number} [window=250] - 사용할 최근 거래일 수
  * @returns {{ beta, alpha, rSquared, thinTrading }} 또는 null
  */
-function calcCAPMBeta(stockCloses, marketCloses, window) {
+function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
   var w = window || 250;
   if (!stockCloses || !marketCloses) return null;
   var n = Math.min(stockCloses.length, marketCloses.length);
@@ -350,15 +379,17 @@ function calcCAPMBeta(stockCloses, marketCloses, window) {
   // 최근 w일만 사용
   var startIdx = Math.max(0, n - w);
 
-  // 일별 수익률 계산
+  // 일별 수익률 계산 (excess return: Rf 차감 → Jensen's alpha 정확, Sharpe 1964)
+  // [C-2A] rfAnnual: KTB 10Y (bonds_latest.json). beta 불변, alpha만 보정.
   var sr = [], mr = [];
   var zeroVolDays = 0;
+  var rfDaily = (rfAnnual && rfAnnual > 0) ? Math.pow(1 + rfAnnual / 100, 1 / 250) - 1 : 0;
   for (var i = startIdx + 1; i < n; i++) {
     var sc = stockCloses[i], sp = stockCloses[i - 1];
     var mc = marketCloses[i], mp = marketCloses[i - 1];
     if (sp > 0 && mp > 0 && sc > 0 && mc > 0) {
-      var ri = (sc - sp) / sp;
-      var rm = (mc - mp) / mp;
+      var ri = (sc - sp) / sp - rfDaily;
+      var rm = (mc - mp) / mp - rfDaily;
       sr.push(ri);
       mr.push(rm);
       if (Math.abs(ri) < 1e-10) zeroVolDays++;
@@ -1280,6 +1311,62 @@ function classifyVolRegime(ewmaVol) {
 }
 
 // ══════════════════════════════════════════════════════
+//  Amihud ILLIQ — Amihud (2002) Illiquidity Measure
+//  ILLIQ = (1/D) × Σ|r_t|/DVOL_t, Doc18 §3.1
+//  유동성 기반 패턴 신뢰도 할인: Kyle (1985) λ ∝ 1/depth
+// ══════════════════════════════════════════════════════
+
+/**
+ * Amihud ILLIQ 계산 (Amihud 2002, Doc18 §3.1)
+ * @param {Array} candles - OHLCV 일봉 배열 ({close, volume})
+ * @param {number} [window=20] - 관측일 수 (#162)
+ * @returns {{ illiq: number|null, logIlliq: number|null, level: string, confDiscount: number }}
+ */
+function calcAmihudILLIQ(candles, window) {
+  var WINDOW = window || 20;            // [B] #162 Amihud (2002) standard
+  var CONF_DISCOUNT = 0.85;             // [C] #163 max discount for illiquid
+  // logIlliq = log10(raw_illiq × 1e8). KRW DVOL 스케일:
+  //   KOSPI 200: logIlliq ~ -5 (매우 유동), KOSDAQ 중형: ~ -2, KOSDAQ 소형: ~ 0+
+  var LOG_HIGH = -1.0;                  // [C] #164 logIlliq > -1 → 고비유동 (DVOL 작음)
+  var LOG_LOW = -3.0;                   // [C] #165 logIlliq < -3 → 유동 (할인 없음)
+
+  if (!candles || candles.length < WINDOW + 1)
+    return { illiq: null, logIlliq: null, level: 'unknown', confDiscount: 1.0 };
+
+  var start = candles.length - WINDOW - 1;
+  var sum = 0, validDays = 0;
+
+  for (var i = start + 1; i < candles.length; i++) {
+    var prev = candles[i - 1], cur = candles[i];
+    if (!cur.close || !prev.close || prev.close <= 0) continue;
+    if (!cur.volume || cur.volume <= 0) continue;
+    var r = Math.abs((cur.close - prev.close) / prev.close);
+    var dvol = cur.close * cur.volume;
+    if (dvol > 0) { sum += r / dvol; validDays++; }
+  }
+
+  if (validDays < 10) return { illiq: null, logIlliq: null, level: 'unknown', confDiscount: 1.0 };
+
+  var illiq = sum / validDays;
+  var logIlliq = illiq > 0 ? +(Math.log10(illiq * 1e8)).toFixed(2) : null;
+  var level = (logIlliq == null || logIlliq <= LOG_LOW) ? 'liquid'
+    : logIlliq >= LOG_HIGH ? 'illiquid' : 'moderate';
+
+  // 신뢰도 할인: logIlliq 기반 선형 보간 (KRW-safe, 2-C validation R-1)
+  var confDiscount = 1.0;
+  if (logIlliq != null) {
+    if (logIlliq >= LOG_HIGH) {
+      confDiscount = CONF_DISCOUNT;
+    } else if (logIlliq > LOG_LOW) {
+      var t = (logIlliq - LOG_LOW) / (LOG_HIGH - LOG_LOW);
+      confDiscount = 1.0 - t * (1.0 - CONF_DISCOUNT);
+    }
+  }
+
+  return { illiq: illiq, logIlliq: logIlliq, level: level, confDiscount: +confDiscount.toFixed(3) };
+}
+
+// ══════════════════════════════════════════════════════
 //  구조적 변환점 탐지 — Page (1954) CUSUM + Bai-Perron (1998)
 //  레짐 인식 패턴 가중치를 위한 변환점 검출
 // ══════════════════════════════════════════════════════
@@ -1288,15 +1375,26 @@ function classifyVolRegime(ewmaVol) {
  * Online CUSUM 변환점 탐지 — Page (1954)
  * 양방향 CUSUM + 슬랙 파라미터로 ARL 최적화 (Roberts 1966)
  *
+ * [Phase TA-3 C-1] Volatility-adaptive threshold (Doc34 §2.3)
+ * volRegime 전달 시 임계값 자동 적응:
+ *   high → 3.5 (false alarm 억제), mid/null → default, low → 1.5 (감도 향상)
+ *
  * @param {number[]} returns — 로그수익률 배열
  * @param {number} [threshold=2.5] — 탐지 임계값 (σ 단위)
+ * @param {string} [volRegime] — 변동성 레짐 ('low'/'mid'/'high', classifyVolRegime 결과)
  * @returns {{breakpoints: Array<{index:number, direction:string, magnitude:number}>,
- *            cusum: {plus:number, minus:number}, isRecent: boolean}}
+ *            cusum: {plus:number, minus:number}, isRecent: boolean, adaptedThreshold: number}}
  */
-function calcOnlineCUSUM(returns, threshold) {
+function calcOnlineCUSUM(returns, threshold, volRegime) {
   if (threshold === undefined || threshold === null) threshold = 2.5;
 
-  var empty = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false };
+  // [Phase TA-3 C-1] Volatility-adaptive threshold — Doc34 §2.3
+  // High volatility: raise threshold to reduce false alarms (ARL↑)
+  // Low volatility: lower threshold to increase sensitivity (ARL↓)
+  if (volRegime === 'high') threshold = Math.max(threshold, 3.5);
+  else if (volRegime === 'low') threshold = Math.min(threshold, 1.5);
+
+  var empty = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false, adaptedThreshold: threshold };
   if (!returns || returns.length < 40) return empty;
 
   var len = returns.length;
@@ -1360,7 +1458,8 @@ function calcOnlineCUSUM(returns, threshold) {
   return {
     breakpoints: breakpoints,
     cusum: { plus: sPlus, minus: sMinus },
-    isRecent: isRecent
+    isRecent: isRecent,
+    adaptedThreshold: threshold  // [Phase TA-3 C-1] 실제 적용된 임계값 반환
   };
 }
 
@@ -1591,6 +1690,15 @@ class IndicatorCache {
     return this._cache[key];
   }
 
+  /** [Phase TA-2] OBV — Granville (1963) 누적 거래량 */
+  obv() {
+    const key = 'obv';
+    if (!(key in this._cache)) {
+      this._cache[key] = calcOBV(this._candles);
+    }
+    return this._cache[key];
+  }
+
   /** MACD (fast, slow, sig) */
   macd(fast = 12, slow = 26, sig = 9) {
     const key = `macd_${fast}_${slow}_${sig}`;
@@ -1695,14 +1803,16 @@ class IndicatorCache {
 
   // ── 구조적 변환점 접근자 ──────────────────────────────
 
-  /** Online CUSUM 변환점 — Page (1954), Roberts (1966) slack */
-  cusum(threshold) {
+  /** Online CUSUM 변환점 — Page (1954), Roberts (1966) slack
+   *  [Phase TA-3 C-1] volRegime 전달 시 임계값 자동 적응 */
+  cusum(threshold, volRegime) {
     var thr = (threshold !== undefined && threshold !== null) ? threshold : 2.5;
-    var key = 'cusum_' + thr;
+    var vr = volRegime || null;
+    var key = 'cusum_' + thr + (vr ? '_' + vr : '');
     if (!(key in this._cache)) {
       var cl = this.closes;
       if (cl.length < 2) {
-        this._cache[key] = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false };
+        this._cache[key] = { breakpoints: [], cusum: { plus: 0, minus: 0 }, isRecent: false, adaptedThreshold: thr };
       } else {
         var rets = [];
         for (var i = 1; i < cl.length; i++) {
@@ -1712,7 +1822,7 @@ class IndicatorCache {
             rets.push(0);
           }
         }
-        this._cache[key] = calcOnlineCUSUM(rets, thr);
+        this._cache[key] = calcOnlineCUSUM(rets, thr, vr);
       }
     }
     return this._cache[key];

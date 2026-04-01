@@ -178,6 +178,9 @@ const COMPOSITE_SIGNAL_DEFS = [
     strength: 'strong',
     tier: 1,
     baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 — Hosoda 원전 기반
+    // [Phase TA-2][B-1] measuredWR: 백테스트 미측정. Hosoda 원전 WR=65~75% 추정 (삼역호전 동시).
+    // KRX 실측 WR 확보 시 baseConfidence 재교정 필요. 현재는 이론 기반 추정치 사용.
+    measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
     required: ['ichimokuCloudBreakout', 'ichimokuBullishCross'],
     optional: ['volumeBreakout'],
     optionalBonus: 4,
@@ -191,6 +194,9 @@ const COMPOSITE_SIGNAL_DEFS = [
     strength: 'strong',
     tier: 1,
     baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 (역방향)
+    // [Phase TA-2][B-1] measuredWR: 백테스트 미측정. Hosoda 원전 WR=65~75% 추정 (삼역역전 동시).
+    // KRX 실측 WR 확보 시 baseConfidence 재교정 필요. 현재는 이론 기반 추정치 사용.
+    measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
     required: ['ichimokuCloudBreakdown', 'ichimokuBearishCross'],
     optional: ['volumeSelloff'],
     optionalBonus: 4,
@@ -287,6 +293,8 @@ class SignalEngine {
       kalmanUpturn: 0, kalmanDownturn: 0,
       // 거래량
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
+      // [Phase TA-2] OBV 다이버전스 — Granville (1963): 가격-거래량 괴리
+      obvBullishDivergence: 2.5, obvBearishDivergence: -2.5,
       // 복합 (가중치 = tier별 증폭)
       composite: 0,  // 개별 계산
     };
@@ -317,6 +325,7 @@ class SignalEngine {
     indicatorSignals.push(...this._detectRSISignals(candles, cache));
     indicatorSignals.push(...this._detectBBSignals(candles, cache));
     indicatorSignals.push(...this._detectVolumeSignals(candles, cache));
+    indicatorSignals.push(...this._detectOBVDivergence(candles, cache)); // [Phase TA-2][N-1] OBV 다이버전스
     indicatorSignals.push(...this._detectIchimokuSignals(candles, cache));
     indicatorSignals.push(...this._detectHurstSignal(candles, cache));
     indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
@@ -403,18 +412,42 @@ class SignalEngine {
       }
     }
 
-    // [Phase I-L2] 고변동 레짐 감산 — Hamilton (1989), core_data/21 §2
-    // HMM bull_prob > 0.5 (고변동 에피소드) → 전체 신호 신뢰도 감산
-    // KRX 실측: 고변동 σ=3.4% vs 저변동 σ=1.15% (3.0x 비율)
-    var _hmmBeh = (typeof backtester !== 'undefined' && backtester._behavioralData
-      && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
-    if (_hmmBeh && _hmmBeh.daily && _hmmBeh.daily.length > 0) {
-      var _lastR = _hmmBeh.daily[_hmmBeh.daily.length - 1];
-      if (_lastR && _lastR.bull_prob > 0.5) {
-        var volScale = 0.70 + 0.30 * (1 - _lastR.bull_prob); // [D][L:GS] bull_prob=1→0.70, 0.5→0.85, range [0.70, 0.85]
+    // [Phase TA-3 C-2] VKOSPI/VIX → HMM fallback chain (Doc26 §2)
+    // Priority: 1) VKOSPI (KRX 자체 변동성지수, 미구현 시 null)
+    //           2) VIX × 1.1 proxy (VKOSPI ≈ VIX × 1.1 for KRX, Whaley 2009)
+    //           3) HMM regime (기존 hmm_regimes.json 데이터)
+    // 레짐별 신호 할인: crisis→0.65, high→0.80, normal→1.0, low→1.0
+    var _vkospiRegime = SignalEngine._classifyVolRegimeFromVKOSPI();
+    var _appliedVolDiscount = false;
+
+    if (_vkospiRegime !== null) {
+      // VKOSPI/VIX 기반 레짐 할인 — Whaley (2000), Carr & Wu (2009)
+      var volScale = 1.0;
+      if (_vkospiRegime === 'crisis') volScale = 0.65;       // VIX>35: 극단적 불확실성
+      else if (_vkospiRegime === 'high') volScale = 0.80;    // VIX 25-35: 고변동
+      // normal/low: no discount
+      if (volScale < 1.0) {
         for (var vi = 0; vi < signals.length; vi++) {
           if (signals[vi].confidence) {
             signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * volScale));
+          }
+        }
+        _appliedVolDiscount = true;
+      }
+    }
+
+    // HMM fallback: VKOSPI/VIX 미가용 시에만 적용 (이중 할인 방지)
+    if (!_appliedVolDiscount) {
+      var _hmmBeh = (typeof backtester !== 'undefined' && backtester._behavioralData
+        && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
+      if (_hmmBeh && _hmmBeh.daily && _hmmBeh.daily.length > 0) {
+        var _lastR = _hmmBeh.daily[_hmmBeh.daily.length - 1];
+        if (_lastR && _lastR.bull_prob > 0.5) {
+          var volScale = 0.70 + 0.30 * (1 - _lastR.bull_prob); // [D][L:GS] bull_prob=1→0.70, 0.5→0.85
+          for (var vi = 0; vi < signals.length; vi++) {
+            if (signals[vi].confidence) {
+              signals[vi].confidence = Math.max(10, Math.round(signals[vi].confidence * volScale));
+            }
           }
         }
       }
@@ -567,6 +600,10 @@ class SignalEngine {
           signal: 'buy',
           strength: 'medium',
           confidence: 65,
+          // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 정배열은
+          // 추세 확인 지표로 단독 WR보다 복합 시그널 필터 역할이 핵심.
+          // KRX 실측 WR 확보 시 confidence 재교정 필요.
+          measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
           index: i,
           time: candles[i].time,
           description: 'MA5 > MA20 > MA60 정배열 진입 — 상승 추세 확인',
@@ -582,6 +619,10 @@ class SignalEngine {
           signal: 'sell',
           strength: 'medium',
           confidence: 63,
+          // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 역배열은
+          // 하락 추세 확인 필터. 단독 매도보다 MACD/RSI 복합 시 유효성 상승.
+          // KRX 실측 WR 확보 시 confidence 재교정 필요.
+          measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
           index: i,
           time: candles[i].time,
           description: 'MA5 < MA20 < MA60 역배열 진입 — 하락 추세 확인',
@@ -986,6 +1027,113 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
+  //  5-B. OBV 다이버전스 시그널 — Granville (1963), Murphy (1999)
+  //  [Phase TA-2][N-1]
+  //
+  //  시장 심리:
+  //    OBV(On-Balance Volume)는 "거래량은 가격에 선행한다"는 Granville 가설 기반.
+  //    가격과 OBV의 괴리(다이버전스)는 스마트머니의 축적/분배를 포착:
+  //    - 강세 다이버전스: 가격은 신저점 but OBV는 더 높은 저점
+  //      → 기관/스마트머니가 하락 중 축적 (매집). 바닥 반전 가능.
+  //    - 약세 다이버전스: 가격은 신고점 but OBV는 더 낮은 고점
+  //      → 상승 중 거래량 이탈, 추종 매수 약화. 천장 반전 경고.
+  //
+  //  참고: Granville (1963) "New Key to Stock Market Profits"
+  //        Murphy (1999) "Technical Analysis of the Financial Markets" Ch.7
+  // ══════════════════════════════════════════════════════
+
+  _detectOBVDivergence(candles, cache) {
+    const signals = [];
+    if (candles.length < 30) return signals;
+
+    const obv = cache.obv();
+    if (!obv || obv.length < 30) return signals;
+
+    const closes = cache.closes;
+    const lookback = 20; // 스윙 포인트 탐색 범위 (약 1거래월)
+
+    // 스윙 포인트 탐색: 좌우 3봉 대비 극값 (Zigzag 단순화)
+    // [Phase TA-2] swingOrder=3: 너무 작으면 잡음, 너무 크면 놓침
+    const swingOrder = 3;
+    const swingLows = [];
+    const swingHighs = [];
+
+    for (let i = swingOrder; i < candles.length - swingOrder; i++) {
+      let isLow = true, isHigh = true;
+      for (let j = 1; j <= swingOrder; j++) {
+        if (closes[i] >= closes[i - j] || closes[i] >= closes[i + j]) isLow = false;
+        if (closes[i] <= closes[i - j] || closes[i] <= closes[i + j]) isHigh = false;
+      }
+      if (isLow) swingLows.push(i);
+      if (isHigh) swingHighs.push(i);
+    }
+
+    // 강세 OBV 다이버전스: 최근 lookback 내 두 저점 비교
+    // 가격 lower low + OBV higher low = 축적 중
+    for (let si = swingLows.length - 1; si >= 1; si--) {
+      const curr = swingLows[si];
+      const prev = swingLows[si - 1];
+      if (curr - prev > lookback) continue;
+      if (curr < candles.length - lookback - swingOrder) continue; // 최근 범위만
+
+      if (closes[curr] < closes[prev] && obv[curr] > obv[prev]) {
+        // 가격은 낮아졌지만 OBV는 높아짐 → 강세 다이버전스
+        const atrArr = cache.atr(14);
+        const atrVal = atrArr[curr] || (closes[curr] * 0.02);
+        const priceGapATR = Math.abs(closes[prev] - closes[curr]) / atrVal;
+        // confidence: ATR 정규화된 가격 괴리 기반 (0.5 ATR → 55, 1.0 ATR → 62, 2.0 ATR → 69)
+        const conf = Math.min(75, Math.round(50 + 12 * Math.log(Math.max(priceGapATR, 0.5) + 0.5)));
+
+        signals.push({
+          type: 'obvBullishDivergence',
+          source: 'indicator',
+          nameShort: 'OBV 강세 다이버전스',
+          signal: 'buy',
+          strength: priceGapATR >= 1.0 ? 'strong' : 'medium',
+          confidence: conf,
+          index: curr,
+          time: candles[curr].time,
+          description: `가격 신저점 but OBV 상승 — 스마트머니 축적 감지 (괴리 ${priceGapATR.toFixed(1)} ATR)`,
+        });
+        break; // 가장 최근 하나만
+      }
+    }
+
+    // 약세 OBV 다이버전스: 최근 lookback 내 두 고점 비교
+    // 가격 higher high + OBV lower high = 분배 중
+    for (let si = swingHighs.length - 1; si >= 1; si--) {
+      const curr = swingHighs[si];
+      const prev = swingHighs[si - 1];
+      if (curr - prev > lookback) continue;
+      if (curr < candles.length - lookback - swingOrder) continue; // 최근 범위만
+
+      if (closes[curr] > closes[prev] && obv[curr] < obv[prev]) {
+        // 가격은 높아졌지만 OBV는 낮아짐 → 약세 다이버전스
+        const atrArr = cache.atr(14);
+        const atrVal = atrArr[curr] || (closes[curr] * 0.02);
+        const priceGapATR = Math.abs(closes[curr] - closes[prev]) / atrVal;
+        const conf = Math.min(73, Math.round(48 + 12 * Math.log(Math.max(priceGapATR, 0.5) + 0.5)));
+
+        signals.push({
+          type: 'obvBearishDivergence',
+          source: 'indicator',
+          nameShort: 'OBV 약세 다이버전스',
+          signal: 'sell',
+          strength: priceGapATR >= 1.0 ? 'strong' : 'medium',
+          confidence: conf,
+          index: curr,
+          time: candles[curr].time,
+          description: `가격 신고점 but OBV 하락 — 스마트머니 분배 감지 (괴리 ${priceGapATR.toFixed(1)} ATR)`,
+        });
+        break; // 가장 최근 하나만
+      }
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
   //  6. 일목균형표 시그널
   // ══════════════════════════════════════════════════════
 
@@ -1341,6 +1489,46 @@ class SignalEngine {
     [10, -10], [15, -5], [20, 0], [25, 5], [30, 7], [40, 10], [50, 10]
   ];
 
+  // [C-3] ADX period TF-adaptive — Wilder (1978), Kaufman (2013)
+  // 분봉에서는 노이즈가 많아 더 긴 lookback 필요: 5m→28, 15m/30m→21, 1h+→14 (기본)
+  // PatternEngine._currentTimeframe가 analyze() 전에 설정됨
+  static _ADX_TF_PERIOD = { '1m': 28, '5m': 28, '15m': 21, '30m': 21, '1h': 14, '1d': 14, '1w': 14, '1M': 14 };
+
+  // ══════════════════════════════════════════════════════
+  //  [Phase TA-3 C-2] VKOSPI/VIX Regime Classification
+  //  Whaley (2000, 2009): VIX as "investor fear gauge"
+  //  Doc26 §2: VKOSPI ≈ VIX × 1.1 (KRX 실증 프록시)
+  //  Fallback chain: VKOSPI → VIX×1.1 → null
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * VKOSPI/VIX 기반 변동성 레짐 분류 (Doc26 §2)
+   * @returns {string|null} 'low' (vol<15) | 'normal' (15-25) | 'high' (25-35) | 'crisis' (>35) | null
+   */
+  static _classifyVolRegimeFromVKOSPI() {
+    // 1차: _macroLatest (app.js 전역) — macro_latest.json에서 로드
+    var macro = (typeof _macroLatest !== 'undefined') ? _macroLatest : null;
+    // 2차: _marketContext (app.js 전역) — market_context.json에서 로드
+    var mctx = (typeof _marketContext !== 'undefined') ? _marketContext : null;
+
+    // VKOSPI 우선 (KRX 자체 변동성지수) — 현재 미구현이므로 null일 수 있음
+    var vol = null;
+    if (mctx && mctx.vkospi != null) {
+      vol = mctx.vkospi;  // VKOSPI 직접 사용
+    } else if (macro && macro.vkospi != null) {
+      vol = macro.vkospi;  // macro_latest.json VKOSPI
+    } else if (macro && macro.vix != null) {
+      vol = macro.vix * 1.1;  // VIX → VKOSPI 프록시 (Whaley 2009: KRX σ ≈ US σ × 1.1)
+    }
+
+    if (vol == null) return null;
+    if (vol < 15) return 'low';
+    if (vol <= 25) return 'normal';
+    if (vol <= 35) return 'high';
+    return 'crisis';
+  }
+
+
   static _interpIsotonic(val, breakpoints) {
     if (!breakpoints || breakpoints.length < 2) return 0;  // degenerate → neutral
     if (val <= breakpoints[0][0]) return breakpoints[0][1];
@@ -1357,7 +1545,11 @@ class SignalEngine {
   }
 
   _applyADXFilter(signals, cache) {
-    const { adx } = cache.adx(14);
+    // [C-3] TF-adaptive ADX period: 분봉에서 안정성을 위해 더 긴 기간 사용
+    var tf = (typeof PatternEngine !== 'undefined' && PatternEngine._currentTimeframe)
+      ? PatternEngine._currentTimeframe : '1d';
+    var adxPeriod = SignalEngine._ADX_TF_PERIOD[tf] || 14;
+    const { adx } = cache.adx(adxPeriod);
     if (!adx) return;
 
     var bp = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.adx_isotonic)
@@ -1419,7 +1611,16 @@ class SignalEngine {
 
   _applyCUSUMDiscount(signals, candles, cache) {
     if (!signals || signals.length === 0) return;
-    var cusumResult = cache.cusum(2.5);
+    // [Phase TA-3 C-1] Volatility-adaptive CUSUM threshold (Doc34 §2.3)
+    // 최근 변동성 레짐을 전달하여 임계값 자동 적응
+    var lastVolRegime = null;
+    var vrArr = cache.volRegime(0.94);
+    if (vrArr && vrArr.length > 0) {
+      for (var vi = vrArr.length - 1; vi >= 0; vi--) {
+        if (vrArr[vi] !== null) { lastVolRegime = vrArr[vi]; break; }
+      }
+    }
+    var cusumResult = cache.cusum(2.5, lastVolRegime);
     if (!cusumResult || !cusumResult.isRecent || !cusumResult.breakpoints || cusumResult.breakpoints.length === 0) return;
 
     var lastBP = cusumResult.breakpoints[cusumResult.breakpoints.length - 1];
@@ -1843,7 +2044,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0,
     };
 
     for (const s of signals) {
@@ -1922,6 +2123,7 @@ class SignalEngine {
     if (type.startsWith('rsi'))      return 'rsi';
     if (type.startsWith('bb'))       return 'bb';
     if (type.startsWith('volume'))   return 'volume';
+    if (type.startsWith('obv'))      return 'obv'; // [Phase TA-2] OBV 다이버전스 — Granville (1963)
     if (type.startsWith('ichimoku')) return 'ichimoku';
     if (type.startsWith('hurst'))    return 'hurst';
     if (type.startsWith('stochRsi')) return 'rsi'; // StochRSI는 RSI 카테고리 귀속
@@ -2076,7 +2278,7 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0 },
       entropy: 0,
       entropyNorm: 0,
       advLevel: 0,

@@ -35,6 +35,7 @@ static Q_WEIGHT = { body: 0.25 }; // [D] Nison 질적 근거만, WLS refit 대�
 | **WLS** | `[L:WLS]` | WLS regression refit (coefficients from 5-col design matrix) | B, C, D | Monthly batch |
 | **BAY** | `[L:BAY]` | Bayesian posterior update (Beta-Binomial α/β) | B, C, D | Daily batch |
 | **GS** | `[L:GS]` | Grid search / cross-validation | B, C, D | Quarterly |
+| **GCV** | `[L:GCV]` | Generalized Cross-Validation (leave-one-out) | B, C, D | Quarterly |
 | **RL** | `[L:RL]` | LinUCB reward update (via rl_policy.json) | C, D | When gate passes |
 | **MAN** | `[L:MAN]` | Manual calibration only (expert judgment) | A, B | As needed |
 
@@ -121,6 +122,42 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 | 49 | N0 (shrinkage denom) | 35 | C | GS | [20, 50] | Efron & Morris (1975) |
 | 50 | BH FDR q | 0.05 | A | MAN | fixed | Benjamini & Hochberg (1995) |
 
+### Macro — Taylor Rule / MCS (signalEngine.js, api.js)
+
+| # | Constant | Value | Tier | Learn | Range | Academic Source |
+|---|----------|-------|------|-------|-------|----------------|
+| 135 | TAYLOR_R_STAR | 1.0% | C | MAN | [0.5, 2.0] | BOK (2023) neutral real rate |
+| 136 | TAYLOR_PI_STAR | 2.0% | A | MAN | fixed | BOK official inflation target |
+| 137 | TAYLOR_A_PI | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) |
+| 138 | TAYLOR_A_Y | 0.50 | B | GS | [0.25, 1.00] | Taylor (1993) |
+| 139 | CLI_TO_GAP_SCALE | 0.50 | C | GS | [0.20, 0.80] | Empirical CLI→gap mapping |
+| 140 | TAYLOR_GAP_CONF_MAX_ADJ | 0.05 | D | GS | [0.02, 0.10] | Design parameter |
+| 141 | TAYLOR_GAP_DEAD_BAND | 0.25 | D | GS | [0.10, 0.50] | Rudebusch (2002) uncertainty |
+| 142 | MCS_V2_TAYLOR_WEIGHT | 0.10 | C | GCV | [0.05, 0.20] | Doc30 §4.3 MCS v2 |
+| 143 | MCS_PMI_NORM_LOW | 35 | C | GS | [30, 40] | PMI contraction zone |
+| 144 | MCS_PMI_NORM_RANGE | 30 | C | GS | [25, 35] | PMI expansion range |
+
+### CAPM / APT (backtester.js, financials.js)
+
+| # | Constant | Value | Tier | Learn | Range | Academic Source |
+|---|----------|-------|------|-------|-------|----------------|
+| 150 | VPE_MIN_QUARTERS | 3 | C | MAN | [2, 4] | Statistical minimum for trend |
+| 151 | CAPM_RF_ANNUAL | 3.689% | B | MAN | [1.0, 7.0] | ECOS KTB 10Y (2025) |
+| 152 | CAPM_ERP | 6.0% | B | MAN | [4.0, 9.0] | Damodaran (2025) ERP |
+| 153 | WACC_TAX_RATE | 22% | A | MAN | fixed | Korean corporate tax code |
+| 154 | WACC_RD_FALLBACK | 4.0% | B | MAN | [2.0, 8.0] | AA- corporate bond rate |
+| 155 | CAPM_BETA_CLAMP_MAX | 3.0 | B | MAN | [2.0, 5.0] | Extreme beta outlier cap |
+| 156 | CAPM_BETA_CLAMP_MIN | 0.0 | B | MAN | [-0.5, 0.0] | Negative beta floor |
+
+### Microstructure (patterns.js, signalEngine.js)
+
+| # | Constant | Value | Tier | Learn | Range | Academic Source |
+|---|----------|-------|------|-------|-------|----------------|
+| 162 | ILLIQ_WINDOW | 20 | B | GS | [10, 30] | Amihud (2002) daily ILLIQ |
+| 163 | ILLIQ_CONF_DISCOUNT_BASE | 0.85 | C | GS | [0.70, 0.95] | Design — max discount factor |
+| 164 | ILLIQ_HIGH_THRESHOLD | 0.100 | C | GCV | [0.050, 0.200] | KRX small-cap empirical |
+| 165 | ILLIQ_LOW_THRESHOLD | 0.010 | C | GCV | [0.005, 0.020] | KRX large-cap empirical |
+
 ---
 
 ## 4. Update Protocol
@@ -182,13 +219,13 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 
 | Tier | Count | % | Learnable? |
 |------|-------|---|------------|
-| A (Fixed) | 37 | 15% | No |
-| B (Tunable) | 61 | 25% | Yes (GS, BAY) |
-| C (KRX) | 69 | 28% | Yes (all mechanisms) |
-| D (Heuristic) | 46 | 19% | Must validate |
+| A (Fixed) | 39 | 15% | No |
+| B (Tunable) | 69 | 26% | Yes (GS, BAY) |
+| C (KRX) | 78 | 29% | Yes (all mechanisms) |
+| D (Heuristic) | 48 | 18% | Must validate |
 | E (Deprecated) | 0 | 0% | Remove |
-| **Uncategorized** | 35 | 14% | Pending audit |
-| **Total** | **248** | 100% | |
+| **Uncategorized** | 35 | 13% | Pending audit |
+| **Total** | **269** | 100% | |
 
 ### By Learning Mechanism
 
@@ -196,6 +233,7 @@ static RSI_PERIOD = 14;           // [A][L:MAN] Wilder (1978), fixed
 |-----------|----------------|---------------------|
 | WLS Refit | ~25 | Q_WEIGHT (5), signal weights (10) |
 | Bayesian | ~40 | baseConfidence, CANDLE_TARGET_ATR |
-| Grid Search | ~55 | body/shadow ratios, Ridge/WLS λ |
+| Grid Search | ~64 | body/shadow ratios, Ridge/WLS λ, Taylor/ILLIQ |
+| GCV | ~6 | MCS weights, ILLIQ thresholds |
 | LinUCB | ~15 | ADX/CCI isotonic (when gate passes) |
-| Manual | ~37 | All Tier A |
+| Manual | ~46 | All Tier A, CAPM/WACC rates |

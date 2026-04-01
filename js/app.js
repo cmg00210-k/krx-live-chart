@@ -257,6 +257,45 @@ function _filterPatternsForViz(patterns) {
   if (!patterns || !patterns.length) return patterns;
   return patterns.filter(function(p) {
     var t = p.type;
+    // [D-1] bullishBeltHold 조건부 복원 — Morris (2006), Graham (1949)
+    // D-Tier(WR 51.4%, p=0.17) 이지만 경기 저점 + PBR<1.0 조합 시 가치 반전 신호로 유의미
+    // 조건: (1) cycle_phase === 'trough', (2) 현재가/BPS < 1.0 (순자산 이하)
+    // 두 조건 모두 충족 시 SUPPRESS 해제 → B-Tier CONTEXT_ONLY로 표시 (경고 배지 부착)
+    if (t === 'bullishBeltHold') {
+      var _d1Restore = false;
+      var _d1Macro = _macroLatest;
+      var _d1Phase = (_d1Macro && _d1Macro.cycle_phase) ? _d1Macro.cycle_phase.phase : null;
+      if (_d1Phase === 'trough') {
+        // PBR 계산: _financialCache에서 BPS 추출 후 현재가와 비교
+        var _d1Pbr = null;
+        if (typeof _financialCache !== 'undefined' && currentStock) {
+          var _d1Fin = _financialCache[currentStock.code];
+          if (_d1Fin && (_d1Fin.source === 'dart' || _d1Fin.source === 'hardcoded')) {
+            var _d1Arr = (_d1Fin.quarterly && _d1Fin.quarterly.length) ? _d1Fin.quarterly : _d1Fin.annual;
+            if (_d1Arr && _d1Arr.length && _d1Arr[0].bps) {
+              var _d1Bps = Number(_d1Arr[0].bps);
+              // 현재가: currentStock.prevClose 또는 candles 마지막 종가
+              var _d1Price = (currentStock && currentStock.prevClose) ? currentStock.prevClose
+                : (typeof candles !== 'undefined' && candles.length) ? candles[candles.length - 1].close : null;
+              if (_d1Bps > 0 && _d1Price > 0) {
+                _d1Pbr = _d1Price / _d1Bps;
+              }
+            }
+          }
+        }
+        if (_d1Pbr != null && _d1Pbr < 1.0) {
+          _d1Restore = true;
+        }
+      }
+      if (_d1Restore) {
+        // SUPPRESS 해제 → CONTEXT_ONLY로 표시 (경고 배지 + 조건부 복원 설명)
+        p._contextOnly = true;
+        p._conditionalRestore = 'trough+PBR<1.0';
+        return vizToggles.candle;
+      }
+      // 조건 미충족: 기존 SUPPRESS 유지
+      return false;
+    }
     // D-Tier SUPPRESS: UI 표시 완전 off (백테스트 데이터 수집은 계속)
     if (_SUPPRESS_PATTERNS.has(t)) return false;
     // D-Tier CONTEXT_ONLY: 표시하되 플래그 부착
@@ -440,6 +479,7 @@ let _sectorData = null;      // 업종 비교 데이터 (sector_fundamentals.jso
 let _marketContext = null;   // [Phase I-L2] 시장 맥락 (market_context.json — CCSI/VKOSPI/flow)
 var _macroLatest = null;     // 매크로 데이터 캐시 (macro_latest.json — KTB10Y/USD/CPI 등)
 var _bondsLatest = null;     // 채권 데이터 캐시 (bonds_latest.json — 수익률곡선 등)
+var _microContext = null;    // 미시경제 지표 캐시 (ILLIQ, HHI boost) — Phase 2-D
 var _lastAdvLevel = 0;       // 최근 Worker 분석의 ADV 유동성 등급 (signalEngine.calcADVLevel)
 var _lastVolRegime = 'neutral';  // [Phase0-#6] 최근 Worker 분석의 VolRegime 레짐 (signalEngine.calcVolRegime)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
@@ -1838,6 +1878,9 @@ function _initAnalysisWorker() {
         _applyMarketContextToPatterns(detectedPatterns);
         // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
         _applyMacroConfidenceToPatterns(detectedPatterns);
+        // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
+        _updateMicroContext(candles);
+        _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
         _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
@@ -2450,13 +2493,16 @@ function _applyMarketContextToPatterns(patterns) {
 // 이론: IS-LM (Doc30), AD-AS (Doc30 §2), Mundell-Fleming (Doc30 §1.4),
 //       Yield Curve Regime (Doc35 §3), MCS (Doc29 §6.2)
 //
-// 6개 독립 팩터 (곱셈 결합, clamp [0.70, 1.25]):
+// 9개 독립 팩터 (곱셈 결합, clamp [0.70, 1.25]):
 //   1. 경기국면 (cycle_phase) — IS-LM 균형점 방향
 //   2. 수익률곡선 (slope_10y3y) — 경기 선행 시그널
 //   3. 크레딧 레짐 (aa_spread) — 위험 프리미엄
 //   4. 외인 시그널 (foreigner_signal) — UIP/Mundell-Fleming 자본유입
 //   5. 패턴-특화 오버라이드 — doubleTop/Bottom 등 고WR 패턴 강화
-//   6. MCS (Doc29 §6.2) — PMI+CSI+수출+금리곡선+EPU 가중합산 레짐
+//   6. MCS v2 (Doc30 §4.3) — PMI+CSI+수출+금리곡선+EPU+Taylor gap 가중합산
+//   7. Taylor Rule Gap (Doc30 §4.1) — 정책금리와 테일러 준칙 괴리
+//   8. VRP (Volatility Risk Premium) — VIX > 30: risk-off, VIX < 15: risk-on
+//   9. 금리차 (rate_diff) — 한미 금리차 → 자본유출입 압력
 // ══════════════════════════════════════════════════════════════
 function _applyMacroConfidenceToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
@@ -2546,8 +2592,27 @@ function _applyMacroConfidenceToPatterns(patterns) {
     if (pType === 'bearishEngulfing' && !isBuy && cliDelta != null && cliDelta < -0.1) {
       adj *= 1.06;    // CLI 하락 모멘텀: 추가 +6%
     }
+    // [B-4] hammer (WR=47.9%, n=4293): ECOS 경기 국면 필터
+    // Nison (1991): 해머는 하락 추세 반전 신호 → 경기 저점에서 강화, 확장기에서 약화
+    // trough/contraction → 바닥 근처: 매수 반전 패턴 신뢰도 증가
+    // expansion/peak → 상승 추세 중: 반전 신호 약화 (추세 지속 가능성 높음)
+    if (pType === 'hammer' && isBuy) {
+      if (phase === 'trough' || phase === 'contraction') {
+        adj *= 1.06;  // 경기 저점/수축: +6% (반전 신호 강화)
+      } else if (phase === 'expansion' || phase === 'peak') {
+        adj *= 0.96;  // 상승 추세/정점: -4% (반전 신호 약화)
+      }
+    }
+    // invertedHammer (WR=48.9%, n=6710): hammer와 동일 경기 국면 로직 적용
+    if (pType === 'invertedHammer' && isBuy) {
+      if (phase === 'trough' || phase === 'contraction') {
+        adj *= 1.05;  // 경기 저점/수축: +5%
+      } else if (phase === 'expansion' || phase === 'peak') {
+        adj *= 0.97;  // 상승 추세/정점: -3%
+      }
+    }
 
-    // ── 6. MCS (Doc29 §6.2 Macro Context Score) ──
+    // ── 6. MCS v2 (Doc30 §4.3 Macro Context Score v2) ──
     // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, 매도 패턴 감쇄
     // MCS < 0.4: 거시 약세 → 매도 패턴 부스트, 매수 패턴 감쇄
     // 0.4~0.6: 중립 → 조정 없음
@@ -2562,8 +2627,140 @@ function _applyMacroConfidenceToPatterns(patterns) {
       }
     }
 
+    // ── 7. Taylor Rule Gap (Doc30 §4.1, 상수 #135-#141) ──
+    // [N-4] ECOS 금리 방향 시그널: taylor_gap 부호가 금리 방향 프록시 역할 수행
+    //   taylor_gap < 0 (dovish): 금리 인하 가능성 → 매수 부스트 (Factor 7이 자동 적용)
+    //   taylor_gap > 0 (hawkish): 금리 인상 가능성 → 매도 부스트 (Factor 7이 자동 적용)
+    //   → 별도 N-4 시그널 불필요: Factor 7에 의해 이미 완전 커버됨
+    // Taylor-implied rate: i* = r* + pi + a_pi*(pi-pi*) + a_y*(y-y*)
+    // taylor_gap > 0: 과도한 긴축 → 성장주 억압, 매도 지지
+    // taylor_gap < 0: 과도한 완화 → 성장주 부양, 매수 지지
+    // dead band: |gap| < 0.5%p → 조정 없음 (#141=0.25 normalized)
+    var taylorGap = macro ? macro.taylor_gap : null;
+    if (taylorGap != null) {
+      // tgNorm: gap을 [-2, +2] 범위에서 [-1, +1]로 정규화
+      var tgNorm = Math.max(-1, Math.min(1, taylorGap / 2));
+      if (tgNorm < -0.25) {
+        // 완화적 (dovish): 매수 부스트, 매도 감쇄
+        var tAdj = 1.0 + Math.abs(tgNorm) * 0.05;  // max ±5% (#140)
+        adj *= isBuy ? tAdj : (2.0 - tAdj);
+      } else if (tgNorm > 0.25) {
+        // 긴축적 (hawkish): 매도 부스트, 매수 감쇄
+        var tAdj = 1.0 + Math.abs(tgNorm) * 0.05;  // max ±5% (#140)
+        adj *= isBuy ? (2.0 - tAdj) : tAdj;
+      }
+      // |tgNorm| <= 0.25: 중립 (dead band) → 조정 없음
+    }
+
+    // ── 8. VRP — Volatility Risk Premium (Doc26 §3, Carr-Wu 2009) ──
+    // VIX > 30: risk-off, 모든 패턴 신뢰도 감소 (변동성 확대 → 패턴 노이즈)
+    // VIX < 15: risk-on, 매수 패턴 소폭 부스트
+    // 20~30: 정상 범위 → 조정 없음
+    var vix = macro ? macro.vix : null;
+    if (vix != null) {
+      if (vix > 30) {
+        adj *= 0.93;                    // high VIX: -7% (모든 패턴)
+      } else if (vix > 25) {
+        adj *= isBuy ? 0.97 : 1.02;    // elevated: 매수 -3%, 매도 +2%
+      } else if (vix < 15) {
+        adj *= isBuy ? 1.03 : 0.98;    // low vol: 매수 +3%, 매도 -2%
+      }
+    }
+
+    // ── 9. 한미 금리차 (Mundell-Fleming, Doc30 §1.4 확장) ──
+    // rate_diff = bok_rate - fed_rate. 음수: 한국 금리 < 미국 → 자본유출 압력
+    // 현재 -1.14%p: 상당한 유출 압력
+    var rateDiff = macro ? macro.rate_diff : null;
+    if (rateDiff != null) {
+      if (rateDiff < -1.5) {
+        adj *= isBuy ? 0.95 : 1.04;    // 큰 역전: 매수 -5%, 매도 +4%
+      } else if (rateDiff < -0.5) {
+        adj *= isBuy ? 0.98 : 1.02;    // 소폭 역전: 매수 -2%, 매도 +2%
+      } else if (rateDiff > 1.0) {
+        adj *= isBuy ? 1.03 : 0.98;    // 한국 우위: 매수 +3%, 매도 -2%
+      }
+    }
+
     // ── clamp [0.70, 1.25] ──
     adj = Math.max(0.70, Math.min(1.25, adj));
+
+    if (adj !== 1.0) {
+      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      if (p.confidencePred != null) {
+        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// [Phase 2-D] 미시경제 지표 계산 + 캐시
+// ══════════════════════════════════════════════════════════════
+function _updateMicroContext(candleData) {
+  if (!candleData || candleData.length < 21) { _microContext = null; return; }
+  var illiq = (typeof calcAmihudILLIQ === 'function') ? calcAmihudILLIQ(candleData) : null;
+
+  // HHI mean-reversion boost (industry 기반, ALL_STOCKS 필요)
+  var hhiBoost = 0;
+  if (currentStock && typeof ALL_STOCKS !== 'undefined' && ALL_STOCKS.length > 0) {
+    var ind = currentStock.industry || currentStock.sector || '';
+    if (ind) {
+      var totalCap = 0, sectorCaps = [];
+      for (var i = 0; i < ALL_STOCKS.length; i++) {
+        var s = ALL_STOCKS[i];
+        if ((s.industry || s.sector || '') === ind && s.marketCap > 0) {
+          sectorCaps.push(s.marketCap);
+          totalCap += s.marketCap;
+        }
+      }
+      if (sectorCaps.length >= 2 && totalCap > 0) {
+        var hhi = 0;
+        for (var j = 0; j < sectorCaps.length; j++) {
+          var sh = sectorCaps[j] / totalCap;
+          hhi += sh * sh;
+        }
+        // HHI_MEAN_REV_COEFF = 0.10 (#119, Doc33 §6.2)
+        hhiBoost = 0.10 * hhi;
+      }
+    }
+  }
+
+  _microContext = { illiq: illiq, hhiBoost: hhiBoost };
+}
+
+// ══════════════════════════════════════════════════════════════
+// [Phase 2-D] 미시경제 지표 기반 패턴 신뢰도 보정
+// ══════════════════════════════════════════════════════════════
+// Amihud ILLIQ (Doc18 §3.1) — 유동성 할인
+// HHI Mean-Reversion Boost (Doc33 §6.2) — 업종 집중도
+// _applyMacroConfidenceToPatterns() 직후 호출
+// clamp: [0.80, 1.15] (미시 보정은 매크로보다 좁은 범위)
+// ══════════════════════════════════════════════════════════════
+function _applyMicroConfidenceToPatterns(patterns, microCtx) {
+  if (!patterns || patterns.length === 0 || !microCtx) return;
+
+  var MEAN_REV_TYPES = {
+    doubleBottom: true, doubleTop: true,
+    headAndShoulders: true, inverseHeadAndShoulders: true
+  };
+
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var p = patterns[pi];
+    var adj = 1.0;
+
+    // 1. Amihud ILLIQ 유동성 할인 (Doc18 §3.1, Kyle 1985)
+    if (microCtx.illiq && microCtx.illiq.confDiscount < 1.0) {
+      adj *= microCtx.illiq.confDiscount;
+    }
+
+    // 2. HHI Mean-Reversion Boost (Doc33 §6.2, #119 HHI_MEAN_REV_COEFF=0.10)
+    var pType = p.type || p.pattern || '';
+    if (MEAN_REV_TYPES[pType] && microCtx.hhiBoost > 0) {
+      adj *= (1 + microCtx.hhiBoost);
+    }
+
+    // clamp [0.80, 1.15]
+    adj = Math.max(0.80, Math.min(1.15, adj));
 
     if (adj !== 1.0) {
       p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
@@ -2679,6 +2876,9 @@ function _analyzeOnMainThread() {
   _applyMarketContextToPatterns(detectedPatterns);
   // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
   _applyMacroConfidenceToPatterns(detectedPatterns);
+  // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
+  _updateMicroContext(candles);
+  _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   _applyMacroConditionsToSignals(detectedSignals);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;

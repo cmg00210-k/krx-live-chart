@@ -614,20 +614,31 @@ class PatternEngine {
     const meanRevWeight = Math.max(0.6, Math.min(Math.exp(-0.1386 * excess), 1.0));
 
     // r(regime): Jeffrey 발산 기반 레짐 변화 보정 — 대칭 KL (core_data/13_information_geometry.md §4.3)
-    // [Phase I-L2] HMM regime override — Hamilton (1989), core_data/21 §2
-    // HMM 고변동 레짐(bull_prob > 0.5, σ=3.4%) → regimeWeight 감산
-    // Fallback: Mahalanobis 거리 (core_data/13 §6.4)
+    // [Phase TA-3 C-2] VKOSPI/VIX → HMM → Mahalanobis 3-tier fallback (Doc26 §2)
+    // 고변동 레짐 → regimeWeight 감산 (패턴 근거 불충분)
     let regimeWeight = 1.0;
-    var _hmmData = (typeof backtester !== 'undefined' && backtester._behavioralData
-      && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
-    if (_hmmData && _hmmData.daily && _hmmData.daily.length > 0) {
-      // Use most recent regime assignment
-      var lastRegime = _hmmData.daily[_hmmData.daily.length - 1];
-      if (lastRegime && lastRegime.bull_prob > 0.5) {
-        // High-volatility episode (KRX "bull" = high-vol, σ=3.4x normal)
-        regimeWeight = 0.7 + 0.3 * (1 - lastRegime.bull_prob);
+
+    // Tier 1: VKOSPI/VIX regime (macro data available)
+    var _vkospiRegime = (typeof SignalEngine !== 'undefined' && SignalEngine._classifyVolRegimeFromVKOSPI)
+      ? SignalEngine._classifyVolRegimeFromVKOSPI() : null;
+    if (_vkospiRegime !== null) {
+      // crisis(>35): 0.65, high(25-35): 0.80, normal(15-25): 1.0, low(<15): 1.0
+      if (_vkospiRegime === 'crisis') regimeWeight = 0.65;
+      else if (_vkospiRegime === 'high') regimeWeight = 0.80;
+    }
+    // Tier 2: HMM regime (hmm_regimes.json available)
+    else {
+      var _hmmData = (typeof backtester !== 'undefined' && backtester._behavioralData
+        && backtester._behavioralData['hmm_regimes']) ? backtester._behavioralData['hmm_regimes'] : null;
+      if (_hmmData && _hmmData.daily && _hmmData.daily.length > 0) {
+        var lastRegime = _hmmData.daily[_hmmData.daily.length - 1];
+        if (lastRegime && lastRegime.bull_prob > 0.5) {
+          regimeWeight = 0.7 + 0.3 * (1 - lastRegime.bull_prob);
+        }
       }
-    } else if (closes.length >= 80) {
+    }
+    // Tier 3: Mahalanobis distance fallback (no external data)
+    if (regimeWeight === 1.0 && _vkospiRegime === null && closes.length >= 80) {
       const returns60 = [], returns20 = [];
       for (let ri = closes.length - 80; ri < closes.length - 20; ri++) {
         if (closes[ri] > 0) returns60.push((closes[ri + 1] - closes[ri]) / closes[ri]);
@@ -925,12 +936,29 @@ class PatternEngine {
       rMarket = lastCSAD.r_market || 0;
     }
 
-    // HMM 고변동 레짐
+    // [Phase TA-3 C-2] VKOSPI/VIX → HMM fallback for high-vol regime (Doc26 §2)
     var hmmBullProb = 0;
-    if (bd['hmm_regimes'] && bd['hmm_regimes'].daily && bd['hmm_regimes'].daily.length > 0) {
-      var lastHMM = bd['hmm_regimes'].daily[bd['hmm_regimes'].daily.length - 1];
-      hmmBullProb = lastHMM.bull_prob || 0;
+    var _useVKOSPIRegime = false;
+    var _vkospiRegime = null;
+
+    // Priority: VKOSPI/VIX (macro data) → HMM (behavioral data)
+    if (typeof SignalEngine !== 'undefined' && SignalEngine._classifyVolRegimeFromVKOSPI) {
+      _vkospiRegime = SignalEngine._classifyVolRegimeFromVKOSPI();
+      if (_vkospiRegime !== null) _useVKOSPIRegime = true;
     }
+
+    if (!_useVKOSPIRegime) {
+      // HMM fallback
+      if (bd['hmm_regimes'] && bd['hmm_regimes'].daily && bd['hmm_regimes'].daily.length > 0) {
+        var lastHMM = bd['hmm_regimes'].daily[bd['hmm_regimes'].daily.length - 1];
+        hmmBullProb = lastHMM.bull_prob || 0;
+      }
+    }
+
+    // VKOSPI/VIX 기반: crisis/high 레짐에서 반전 패턴 오신호 감산
+    var _isHighVol = _useVKOSPIRegime
+      ? (_vkospiRegime === 'crisis' || _vkospiRegime === 'high')
+      : (hmmBullProb > 0.7);
 
     for (var ci = 0; ci < patterns.length; ci++) {
       var p = patterns[ci];
@@ -948,11 +976,10 @@ class PatternEngine {
         p.confidence = Math.max(10, Math.round(p.confidence * 0.76));
         if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.76));
       }
-      // [H-3 FIX] else if → CSAD 조건과 중복 적용 방지 (이중 페널티 ×0.57 해소)
-      // HMM 고변동 레짐(bull_prob>0.7) → 매수 패턴 신뢰도 ×0.75 (CSAD 미적용 + marubozu 제외)
-      // 근거: KRX HMM σ=3.4% 레짐에서 단기 반전 패턴 오신호 급증 (core_data/21 §2)
+      // [Phase TA-3 C-2] VKOSPI/VIX high-vol or HMM bull_prob>0.7 → 매수 반전 패턴 감산
+      // CSAD 조건 미적용 시에만 (이중 페널티 방지)
       // bullishMarubozu 제외: 고변동 레짐에서 강한 방향성 지속 신호이므로 페널티 부적합
-      else if (p.signal === 'buy' && hmmBullProb > 0.7 && p.type !== 'bullishMarubozu') {
+      else if (p.signal === 'buy' && _isHighVol && p.type !== 'bullishMarubozu') {
         p.confidence = Math.max(10, Math.round(p.confidence * 0.75));
         if (p.confidencePred != null) p.confidencePred = Math.max(10, Math.round(p.confidencePred * 0.75));
       }
@@ -972,7 +999,19 @@ class PatternEngine {
         returns.push(0);
       }
     }
-    var cusum = calcOnlineCUSUM(returns, 2.5);
+    // [Phase TA-3 C-1] Volatility-adaptive CUSUM threshold (Doc34 §2.3)
+    // EWMA 변동성 레짐 → 임계값 자동 적응 (classifyVolRegime 사용)
+    var lastVolRegime = null;
+    if (typeof calcEWMAVol === 'function' && typeof classifyVolRegime === 'function') {
+      var ewmaVol = calcEWMAVol(closes, 0.94);
+      if (ewmaVol && ewmaVol.length > 0) {
+        var vrArr = classifyVolRegime(ewmaVol);
+        for (var vri = vrArr.length - 1; vri >= 0; vri--) {
+          if (vrArr[vri] !== null) { lastVolRegime = vrArr[vri]; break; }
+        }
+      }
+    }
+    var cusum = calcOnlineCUSUM(returns, 2.5, lastVolRegime);
     if (!cusum.isRecent || cusum.breakpoints.length === 0) return;
     var lastBP = cusum.breakpoints[cusum.breakpoints.length - 1];
     var barsSince = returns.length - 1 - lastBP.index;
@@ -2615,10 +2654,28 @@ class PatternEngine {
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
       const priceTarget = +(supportLevel - patternHeight).toFixed(0);
 
+      // [Phase TA-2][B-2] 인라인 돌파 확인 — Edwards & Magee (1948), Bulkowski (2005)
+      // 하락 삼각형은 수평 지지선 하방 돌파가 핵심 시그널.
+      // endIndex 이후 캔들이 지지선을 ATR*0.5 이상 하회하면 돌파 확인.
+      // 시장 심리: 수평 지지선은 반복 매수세 집결점. 이탈 시 매수 포기 → 투매 가속.
+      let breakConfirmed = false;
+      const breakThreshold = a * 0.5;
+      // endIndex 이후 최근 봉까지 검사 (최대 lookforward 범위)
+      const breakLookLimit = Math.min(endIdx + (PatternEngine.TRIANGLE_BREAK_LOOKFORWARD || 15), candles.length - 1);
+      for (let bi = endIdx; bi <= breakLookLimit; bi++) {
+        if (candles[bi].close < supportLevel - breakThreshold) {
+          breakConfirmed = true;
+          break;
+        }
+      }
+
+      const breakBoost = breakConfirmed ? 5 : 0;
+
       results.push({
         type: 'descendingTriangle', name: '하락 삼각형 (Descending Triangle)', nameShort: '하락삼각',
-        signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
-        description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 형태 점수 ${confidence}%`,
+        signal: 'sell', strength: 'strong', confidence: confidence + breakBoost, stopLoss, priceTarget,
+        breakConfirmed, // [Phase TA-2][B-2] 돌파 확인 플래그
+        description: `수평 지지 + 하락 저항 — 하방 돌파 ${breakConfirmed ? '확인됨' : '가능'}. 형태 점수 ${confidence + breakBoost}%`,
         startIndex: startIdx, endIndex: endIdx,
         marker: { time: candles[endIdx].time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
         trendlines: [
