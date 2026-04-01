@@ -373,7 +373,7 @@ Current `?v=N` values are maintained in `index.html` (lines 633-648) and `js/ana
 python scripts/stage_deploy.py
 npx wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message="deploy"
 ```
-Note: wrangler .cfignore is broken (ignored since 4.75). stage_deploy.py handles all exclusions.
+Note: `wrangler pages deploy` has NO file exclusion mechanism (no .cfignore, no --exclude flag, no .gitignore support). `stage_deploy.py` is the sole gatekeeper — it hard-links deployable files into `deploy/` (zero disk cost on NTFS).
 
 ### Verification
 ```bash

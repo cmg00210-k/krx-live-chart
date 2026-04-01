@@ -5,7 +5,8 @@
   "description": "KRX Live Chart (CheeseStock) - Korean stock market charting web app",
   "scripts": {
     "serve": "npx serve -l 5500 -s",
-    "deploy": "wrangler pages deploy . --project-name cheesestock --branch main --commit-dirty=true --commit-message=\"deploy\"",
+    "stage": "python scripts/stage_deploy.py",
+    "deploy": "python scripts/stage_deploy.py && wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message=\"deploy\"",
     "backtest": "node scripts/backtest_runner.js --batch"
   },
   "devDependencies": {

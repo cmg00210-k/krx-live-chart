@@ -8,7 +8,7 @@ REM   1. Runs stage_deploy.py to build deploy\ (hard-linked, no disk copy)
 REM   2. Verifies file count is under 20,000
 REM   3. Runs wrangler pages deploy deploy\
 REM
-REM stage_deploy.py is the sole deploy gatekeeper (wrangler .cfignore is broken).
+REM stage_deploy.py is the sole deploy gatekeeper (wrangler has no file exclusion mechanism).
 REM ASCII-only commit message (Korean breaks Cloudflare API).
 
 cd /d "%~dp0\.."
