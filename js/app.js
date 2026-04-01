@@ -1836,6 +1836,9 @@ function _initAnalysisWorker() {
         detectedSignals = msg.signals;
         // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
         _applyMarketContextToPatterns(detectedPatterns);
+        // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
+        _applyMacroConfidenceToPatterns(detectedPatterns);
+        _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
 
@@ -2440,6 +2443,191 @@ function _applyMarketContextToPatterns(patterns) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════
+// [Phase ECOS] 매크로 경제지표 기반 패턴·시그널 신뢰도 승수
+// ══════════════════════════════════════════════════════════════
+// 소스: macro_latest.json (ECOS API) + bonds_latest.json (ECOS 채권)
+// 이론: IS-LM (Doc30), AD-AS (Doc30 §2), Mundell-Fleming (Doc30 §1.4),
+//       Yield Curve Regime (Doc35 §3), MCS (Doc29 §6.2)
+//
+// 5개 독립 팩터 (곱셈 결합, clamp [0.70, 1.25]):
+//   1. 경기국면 (cycle_phase) — IS-LM 균형점 방향
+//   2. 수익률곡선 (slope_10y3y) — 경기 선행 시그널
+//   3. 크레딧 레짐 (aa_spread) — 위험 프리미엄
+//   4. 외인 시그널 (foreigner_signal) — UIP/Mundell-Fleming 자본유입
+//   5. 패턴-특화 오버라이드 — doubleTop/Bottom 등 고WR 패턴 강화
+// ══════════════════════════════════════════════════════════════
+function _applyMacroConfidenceToPatterns(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  var macro = _macroLatest;
+  var bonds = _bondsLatest;
+  if (!macro && !bonds) return;
+
+  // ── 매크로 상태 추출 (null-safe) ──
+  var cp = macro && macro.cycle_phase;
+  var phase = cp ? cp.phase : null;          // expansion|peak|contraction|trough
+  var cliDelta = cp ? cp.delta : null;       // 월간 CLI 변화량
+  var slope = bonds ? bonds.slope_10y3y : (macro ? macro.term_spread : null);
+  var inverted = bonds ? bonds.curve_inverted : false;
+  var aaSpread = bonds && bonds.credit_spreads ? bonds.credit_spreads.aa_spread : null;
+  var creditRegime = bonds ? bonds.credit_regime : null;
+  var fSignal = macro ? macro.foreigner_signal : null;
+
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var p = patterns[pi];
+    var isBuy = (p.signal === 'buy');
+    var adj = 1.0;
+
+    // ── 1. 경기국면 (IS-LM 균형점 방향, Doc30 §1) ──
+    // expansion: AD 우측 → 추세추종 유리, 반전 매도 약화
+    // contraction: AD 좌측 → 반전 매수 강화, 추세추종 약화
+    if (phase === 'expansion') {
+      adj *= isBuy ? 1.06 : 0.94;   // 확장기: 매수 +6%, 매도 -6%
+    } else if (phase === 'peak') {
+      adj *= isBuy ? 0.95 : 1.08;   // 후퇴기: 매수 -5%, 매도 +8%
+    } else if (phase === 'contraction') {
+      adj *= isBuy ? 0.92 : 1.08;   // 수축기: 매수 -8%, 매도 +8%
+    } else if (phase === 'trough') {
+      adj *= isBuy ? 1.10 : 0.90;   // 회복기: 매수 +10%, 매도 -10%
+    }
+
+    // ── 2. 수익률곡선 레짐 (Doc35 §3, Nelson-Siegel slope) ──
+    // 역전: 12-18개월 경기침체 선행 → 매수 억제, 매도 강화
+    // 정상(steep): 유동성 확장 → 매수 소폭 지지
+    if (slope != null) {
+      if (inverted || slope < 0) {
+        adj *= isBuy ? 0.88 : 1.12;  // 역전: 매수 -12%, 매도 +12%
+      } else if (slope < 0.15) {
+        adj *= isBuy ? 0.96 : 1.04;  // 평탄: 매수 -4%, 매도 +4%
+      } else if (slope > 0.5) {
+        adj *= isBuy ? 1.04 : 0.97;  // 가파름: 매수 +4%, 매도 -3%
+      }
+      // 0.15~0.5 (정상 범위): 조정 없음
+    }
+
+    // ── 3. 크레딧 레짐 (Doc35 §4, AA- 스프레드) ──
+    // 스트레스: 신용위험 확대 → 모든 패턴 신뢰도 감소
+    if (aaSpread != null) {
+      if (aaSpread > 1.5 || creditRegime === 'stress') {
+        adj *= 0.85;                  // 스트레스: -15% (전체)
+      } else if (aaSpread > 1.0 || creditRegime === 'elevated') {
+        adj *= isBuy ? 0.93 : 1.04;  // 주의: 매수 -7%, 매도 +4%
+      }
+      // normal: 조정 없음
+    }
+
+    // ── 4. 외인 시그널 (UIP, Mundell-Fleming 자본유입, Doc28 §8) ──
+    // foreigner_signal > +0.3: 외인 순유입 → 매수 패턴 지지
+    // foreigner_signal < -0.3: 외인 순유출 → 매도 패턴 지지
+    if (fSignal != null) {
+      if (fSignal > 0.3) {
+        adj *= isBuy ? 1.05 : 0.96;  // 유입: 매수 +5%, 매도 -4%
+      } else if (fSignal < -0.3) {
+        adj *= isBuy ? 0.95 : 1.05;  // 유출: 매수 -5%, 매도 +5%
+      }
+    }
+
+    // ── 5. 패턴-특화 오버라이드 (S-tier 고WR 패턴 매크로 연동) ──
+    var pType = p.type || p.pattern || '';
+    // doubleTop (WR=74.7%): contraction/peak + 역전 시 강화 (Doc30 §2 negative demand shock)
+    if (pType === 'doubleTop' && !isBuy) {
+      if ((phase === 'contraction' || phase === 'peak') && (inverted || (slope != null && slope < 0.15))) {
+        adj *= 1.10;  // 경기하강+역전: 추가 +10%
+      }
+    }
+    // doubleBottom (WR=62.1%): trough + steep curve 시 강화 (Doc30 §2 positive demand shock)
+    if (pType === 'doubleBottom' && isBuy) {
+      if (phase === 'trough' && slope != null && slope > 0.3) {
+        adj *= 1.12;  // 회복기+정상곡선: 추가 +12%
+      }
+    }
+    // bearishEngulfing (n=113K): BSI/CLI 하락 구간에서 신뢰도 증가
+    if (pType === 'bearishEngulfing' && !isBuy && cliDelta != null && cliDelta < -0.1) {
+      adj *= 1.06;    // CLI 하락 모멘텀: 추가 +6%
+    }
+
+    // ── clamp [0.70, 1.25] ──
+    adj = Math.max(0.70, Math.min(1.25, adj));
+
+    if (adj !== 1.0) {
+      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      if (p.confidencePred != null) {
+        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// [Phase ECOS-2] 복합 시그널 매크로 조건 조정
+// ══════════════════════════════════════════════════════════════
+// 5개 S/A-tier composite 시그널에 매크로 상태 기반 신뢰도 조정
+// _applyMacroConfidenceToPatterns와 동일한 매크로 상태를 사용하되,
+// 복합 시그널의 compositeId에 따라 특화된 조정 적용
+// ══════════════════════════════════════════════════════════════
+function _applyMacroConditionsToSignals(signals) {
+  if (!signals || signals.length === 0) return;
+  var macro = _macroLatest;
+  var bonds = _bondsLatest;
+  if (!macro && !bonds) return;
+
+  var cp = macro && macro.cycle_phase;
+  var phase = cp ? cp.phase : null;
+  var slope = bonds ? bonds.slope_10y3y : (macro ? macro.term_spread : null);
+  var inverted = bonds ? bonds.curve_inverted : false;
+  var creditRegime = bonds ? bonds.credit_regime : null;
+  var fSignal = macro ? macro.foreigner_signal : null;
+
+  for (var si = 0; si < signals.length; si++) {
+    var s = signals[si];
+    if (s.type !== 'composite') continue;
+    var cid = s.compositeId || '';
+    var adj = 1.0;
+
+    // sell_doubleTopNeckVol (baseConf=75): contraction/peak + 역전 → 강화
+    if (cid === 'sell_doubleTopNeckVol') {
+      if (phase === 'contraction' || phase === 'peak') adj *= 1.08;
+      if (inverted || (slope != null && slope < 0)) adj *= 1.10;
+      if (creditRegime === 'stress') adj *= 1.06;
+    }
+
+    // buy_doubleBottomNeckVol (baseConf=72): trough + 정상곡선 → 강화
+    if (cid === 'buy_doubleBottomNeckVol') {
+      if (phase === 'trough') adj *= 1.12;
+      else if (phase === 'contraction') adj *= 0.90;
+      if (slope != null && slope > 0.3) adj *= 1.05;
+      if (fSignal != null && fSignal > 0.3) adj *= 1.06;
+    }
+
+    // strongSell_shootingMacdVol (baseConf=69): tightening + 역전 → 강화
+    if (cid === 'strongSell_shootingMacdVol') {
+      if (phase === 'peak' || phase === 'contraction') adj *= 1.06;
+      if (inverted) adj *= 1.08;
+    }
+
+    // sell_shootingStarBBVol (baseConf=69): 고변동 레짐에서 BB 저항 강화
+    if (cid === 'sell_shootingStarBBVol') {
+      if (creditRegime === 'elevated' || creditRegime === 'stress') adj *= 1.05;
+      if (phase === 'peak') adj *= 1.04;
+    }
+
+    // sell_engulfingMacdAlign (baseConf=66): CLI 하락 모멘텀 → 강화
+    if (cid === 'sell_engulfingMacdAlign') {
+      if (phase === 'peak' || phase === 'contraction') adj *= 1.06;
+      if (fSignal != null && fSignal < -0.3) adj *= 1.05;
+    }
+
+    adj = Math.max(0.70, Math.min(1.25, adj));
+
+    if (adj !== 1.0) {
+      s.confidence = Math.max(10, Math.min(95, Math.round(s.confidence * adj)));
+      if (s.confidencePred != null) {
+        s.confidencePred = Math.max(10, Math.min(95, Math.round(s.confidencePred * adj)));
+      }
+    }
+  }
+}
+
 /**
  * Signal에 Wc 주입 — detectedPatterns의 평균 wc를 모든 시그널에 매칭
  * wc가 없는 패턴(seed/null)은 평균 계산에서 제외
@@ -2473,6 +2661,9 @@ function _analyzeOnMainThread() {
   }
   // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
   _applyMarketContextToPatterns(detectedPatterns);
+  // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
+  _applyMacroConfidenceToPatterns(detectedPatterns);
+  _applyMacroConditionsToSignals(detectedSignals);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;
 

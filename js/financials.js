@@ -205,6 +205,52 @@ function _renderCyclePhase() {
 }
 
 /**
+ * [Phase ECOS-4] 수익률곡선 레짐 렌더링
+ * bonds_latest.json: slope_10y3y, curve_inverted, nss_params, credit_regime
+ * Doc35 §3: Normal/Flat/Inverted → 경기 선행 시그널
+ */
+function _renderYieldCurve() {
+  var slopeEl = document.getElementById('fin-yield-slope');
+  var regimeEl = document.getElementById('fin-yield-regime');
+  if (!slopeEl) return;
+
+  var bonds = (typeof _bondsLatest !== 'undefined') ? _bondsLatest : null;
+  if (!bonds) {
+    slopeEl.textContent = '\u2014';
+    if (regimeEl) regimeEl.textContent = '';
+    return;
+  }
+
+  var slope = bonds.slope_10y3y;
+  var inverted = bonds.curve_inverted;
+
+  // slope 표시
+  if (slope != null) {
+    slopeEl.textContent = (slope >= 0 ? '+' : '') + slope.toFixed(2) + '%p';
+    slopeEl.style.color = inverted ? 'var(--up)' : (slope < 0.15 ? 'var(--neutral)' : 'var(--fin-good)');
+  } else {
+    slopeEl.textContent = '\u2014';
+  }
+
+  // regime 배지
+  if (regimeEl) {
+    if (inverted || (slope != null && slope < 0)) {
+      regimeEl.textContent = '\uC5ED\uC804';  // 역전
+      regimeEl.className = 'fin-yield-regime inverted';
+    } else if (slope != null && slope < 0.15) {
+      regimeEl.textContent = '\uD3C9\uD0C4';  // 평탄
+      regimeEl.className = 'fin-yield-regime flat';
+    } else if (slope != null) {
+      regimeEl.textContent = '\uC815\uC0C1';  // 정상
+      regimeEl.className = 'fin-yield-regime normal';
+    } else {
+      regimeEl.textContent = '';
+      regimeEl.className = 'fin-yield-regime';
+    }
+  }
+}
+
+/**
  * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
  * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
  */
@@ -541,8 +587,10 @@ async function updateFinancials() {
   // 양수 → 주식이 채권 대비 저평가 (bullish), 음수 → 고평가 (bearish)
   if (perVal && perVal > 0) {
     var earningsYield = (1 / perVal) * 100; // E/P (%)
-    // KTB10Y: 매크로 데이터에서 로드, 실패 시 기본값 3.5%
-    var ktb10y = (_macroData && _macroData.ktb10y != null) ? _macroData.ktb10y : 3.5;
+    // KTB10Y: macro → bonds_latest → fallback 3.5%
+    var ktb10y = (_macroData && _macroData.ktb10y != null) ? _macroData.ktb10y
+      : (_bondsLatest && _bondsLatest.yields && _bondsLatest.yields.ktb_10y != null) ? _bondsLatest.yields.ktb_10y
+      : 3.5;
     var yieldGapVal = +(earningsYield - ktb10y).toFixed(2);
     var yieldGapStr = (yieldGapVal >= 0 ? '+' : '') + yieldGapVal.toFixed(2) + '%p';
     set('fin-yield-gap', yieldGapStr);
@@ -570,6 +618,8 @@ async function updateFinancials() {
 
   // ── 경기순환 국면 표시 (OECD CLI 4-phase, core_data/29 §1.2) ──
   _renderCyclePhase();
+  // ── 수익률곡선 레짐 (Doc35 §3, NSS slope) ──
+  _renderYieldCurve();
 
   // YoY/QoQ 변화율 계산
   _calcFinChanges(data);

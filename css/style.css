@@ -1918,6 +1918,26 @@ html, body {
   font-size: var(--fs-nano);
   color: var(--text-muted);
 }
+/* 수익률곡선 (Phase ECOS-4) */
+.fin-yield-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-nano);
+}
+.fin-yield-label { color: var(--text-muted); }
+.fin-yield-slope { font-weight: 700; font-family: var(--mono); }
+.fin-yield-regime {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.fin-yield-regime.normal { background: rgba(107,203,119,0.15); color: var(--fin-good); }
+.fin-yield-regime.flat { background: rgba(255,235,59,0.15); color: var(--neutral); }
+.fin-yield-regime.inverted { background: rgba(224,80,80,0.15); color: var(--up); }
 
 .fin-score-badge {
   display: flex;

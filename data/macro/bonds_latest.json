@@ -1,23 +1,28 @@
 {
-  "updated": "2026-03-30",
+  "updated": "2026-04-01",
   "yields": {
-    "ktb_1y": null,
-    "ktb_2y": null,
-    "ktb_3y": null,
-    "ktb_5y": null,
-    "ktb_10y": null,
-    "ktb_20y": null,
-    "ktb_30y": null
+    "ktb_1y": 3.567,
+    "ktb_3y": 3.37,
+    "ktb_10y": 3.689,
+    "ktb_20y": 3.68,
+    "ktb_30y": 3.609
   },
   "credit_spreads": {
-    "aa_minus": null,
-    "bbb_minus": null,
-    "aa_spread": null,
-    "bbb_spread": null
+    "aa_minus": 4.011,
+    "bbb_minus": 2.522,
+    "aa_spread": 0.64,
+    "bbb_spread": -0.85
   },
-  "nss_params": null,
-  "slope_10y3y": null,
+  "nss_params": {
+    "beta1": 3.4015,
+    "beta2": 0.768,
+    "beta3": -2.3356,
+    "beta4": 1.692,
+    "lambda1": 1.3868,
+    "lambda2": 5.0564
+  },
+  "slope_10y3y": 0.32,
   "slope_10y2y": null,
-  "curve_inverted": null,
-  "credit_regime": "unknown"
+  "curve_inverted": false,
+  "credit_regime": "normal"
 }

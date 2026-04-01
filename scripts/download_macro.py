@@ -76,22 +76,24 @@ ECOS_SERIES = {
         "name": "한국은행 기준금리",
         "freq": "M",
     },
+    # FIX: 817Y002(일별전용) → 721Y001(월별), item_code도 변경
     "ktb10y": {
-        "stat_code": "817Y002",
-        "item_code": "010210000",
-        "name": "국고채 10년",
+        "stat_code": "721Y001",
+        "item_code": "5050000",
+        "name": "국고채 10년 (월별)",
         "freq": "M",
     },
     "ktb3y": {
-        "stat_code": "817Y002",
-        "item_code": "010200000",
-        "name": "국고채 3년",
+        "stat_code": "721Y001",
+        "item_code": "5020000",
+        "name": "국고채 3년 (월별)",
         "freq": "M",
     },
+    # FIX: 101Y003(2004폐기) → 161Y006(신지표), item_code BBGA00→BBHA00
     "m2": {
-        "stat_code": "101Y003",
-        "item_code": "BBGA00",
-        "name": "M2 광의통화 (평잔, 원계열)",
+        "stat_code": "161Y006",
+        "item_code": "BBHA00",
+        "name": "M2 광의통화 (평잔, 원계열, 신지표)",
         "freq": "M",
     },
     "cli": {
@@ -104,6 +106,31 @@ ECOS_SERIES = {
         "stat_code": "901Y009",
         "item_code": "0",
         "name": "소비자물가지수 총지수",
+        "freq": "M",
+    },
+    # ── NEW: 4 CRITICAL series (Phase ECOS-3) ──
+    "bsi_mfg": {
+        "stat_code": "512Y013",
+        "item_code": "C0000/AA",
+        "name": "제조업 BSI 업황실적 (Doc29 §2.2)",
+        "freq": "M",
+    },
+    "export_value": {
+        "stat_code": "901Y118",
+        "item_code": "T002",
+        "name": "통관기준 수출액 (천불, Doc29 §2.5)",
+        "freq": "M",
+    },
+    "ipi": {
+        "stat_code": "901Y033",
+        "item_code": "A00/2",
+        "name": "산업생산지수 전산업 계절조정 (Doc30 §2)",
+        "freq": "M",
+    },
+    "foreign_equity": {
+        "stat_code": "301Y013",
+        "item_code": "BOPF22100000",
+        "name": "외인 주식투자 순유입 (백만불, Doc29 §5.2)",
         "freq": "M",
     },
 }
@@ -163,6 +190,7 @@ def fetch_ecos_series(api_key, stat_code, item_code, freq="M",
         start_dt = today - timedelta(days=365 * 2 + 90)
         start_ym = start_dt.strftime("%Y%m")
 
+    # item_code에 '/'가 포함된 경우 다중 코드 (예: "C0000/AA" → 2개 항목)
     url = (
         f"{ECOS_BASE}/StatisticSearch/{api_key}/json/kr/1/{limit}/"
         f"{stat_code}/{freq}/{start_ym}/{end_ym}/{item_code}"
@@ -758,6 +786,16 @@ def build_latest(all_data):
         cpi_values = [d["value"] for d in cpi_data]
         cpi_yoy = _calc_yoy(cpi_values)
 
+    # Export YoY (수출 전년동월비)
+    export_data = all_data.get("export_value")
+    export_yoy = None
+    if export_data and len(export_data) >= 13:
+        export_vals = [d["value"] for d in export_data]
+        export_yoy = _calc_yoy(export_vals)
+
+    # IPI (산업생산지수 최신값)
+    ipi_latest = _latest_value(all_data.get("ipi"))
+
     latest = {
         "updated": today,
         "ktb10y": ktb10y,
@@ -775,6 +813,11 @@ def build_latest(all_data):
         "m2_yoy": m2_yoy,
         "cpi_yoy": cpi_yoy,
         "foreigner_signal": foreigner_signal,
+        # Phase ECOS-3: 4 CRITICAL series
+        "bsi_mfg": _latest_value(all_data.get("bsi_mfg")),
+        "export_yoy": export_yoy,
+        "ipi": ipi_latest,
+        "foreign_equity": _latest_value(all_data.get("foreign_equity")),
         "cycle_phase": classify_business_cycle(
             [d["value"] for d in all_data.get("korea_cli", []) if d.get("value") is not None]
             if all_data.get("korea_cli") else None
@@ -813,6 +856,7 @@ def build_history(all_data):
         "ktb10y", "ktb3y", "bok_rate", "fed_rate", "vix", "dxy",
         "usdkrw", "korea_cli", "china_cli", "us_cli", "m2", "cpi",
         "cli",  # ECOS CLI
+        "bsi_mfg", "export_value", "ipi", "foreign_equity",  # Phase ECOS-3
     ]
 
     for key in series_keys:
@@ -930,6 +974,10 @@ def print_summary(latest, source_stats):
         ("M2 YoY", "m2_yoy", "%"),
         ("CPI YoY", "cpi_yoy", "%"),
         ("외인시그널", "foreigner_signal", ""),
+        ("제조업BSI", "bsi_mfg", ""),
+        ("수출YoY", "export_yoy", "%"),
+        ("산업생산(IPI)", "ipi", ""),
+        ("외인주식유입", "foreign_equity", "백만$"),
     ]
 
     for label, key, unit in indicators:
@@ -970,6 +1018,22 @@ def main():
     )
     args = parser.parse_args()
     VERBOSE = args.verbose
+
+    # .env 파일에서 API 키 자동 로드
+    if not args.api_key or not args.fred_key:
+        env_path = os.path.join(PROJECT_ROOT, ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("ECOS_API_KEY=") and not args.api_key:
+                        args.api_key = line.split("=", 1)[1].strip()
+                        log(".env에서 ECOS API 키 로드 완료")
+                    elif line.startswith("FRED_API_KEY=") and not args.fred_key:
+                        args.fred_key = line.split("=", 1)[1].strip()
+                        log(".env에서 FRED API 키 로드 완료")
 
     log("거시경제 지표 수집 시작")
     log(f"  날짜: {datetime.today().strftime('%Y-%m-%d %H:%M')}")

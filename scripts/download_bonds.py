@@ -620,6 +620,18 @@ def main():
 
     args = parser.parse_args()
 
+    # .env 파일에서 ECOS API 키 자동 로드
+    if not args.api_key and not args.offline:
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("ECOS_API_KEY="):
+                        args.api_key = line.split("=", 1)[1].strip()
+                        print("[BONDS] .env에서 ECOS API 키 로드 완료")
+                        break
+
     print("=" * 60)
     print("  한국 채권시장 데이터 다운로더")
     print("  데이터 소스: BOK ECOS (한국은행 경제통계시스템)")
