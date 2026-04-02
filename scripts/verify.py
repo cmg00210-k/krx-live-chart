@@ -165,7 +165,9 @@ def check_patterns(strict=False):
     renderer_src   = read(JS / "patternRenderer.js")
     backtester_src = read(JS / "backtester.js")
     panel_src      = read(JS / "patternPanel.js")
+    # app.js 4-split: 상태/설정은 appState.js, 나머지는 app.js
     app_src        = read(JS / "app.js")
+    appstate_src   = read(JS / "appState.js") if (JS / "appState.js").exists() else ""
 
     # Derive canonical from analyze() detect calls
     detect_calls = set(re.findall(r"this\.detect(\w+)\(", patterns_src))
@@ -224,10 +226,12 @@ def check_patterns(strict=False):
     )
 
     # --- app.js viz sets (spread-composed) + D-tier exclusions ---
-    viz_candle   = _extract_set_literal(app_src, "_VIZ_CANDLE_TYPES")
-    viz_chart    = _extract_set_literal(app_src, "_VIZ_CHART_TYPES")
-    suppressed   = _extract_set_literal(app_src, "_SUPPRESS_PATTERNS")
-    context_only = _extract_set_literal(app_src, "_CONTEXT_ONLY_PATTERNS")
+    # appState.js가 있으면 거기서 읽기 (4-split), 없으면 app.js 폴백
+    state_src    = appstate_src if appstate_src else app_src
+    viz_candle   = _extract_set_literal(state_src, "_VIZ_CANDLE_TYPES")
+    viz_chart    = _extract_set_literal(state_src, "_VIZ_CHART_TYPES")
+    suppressed   = _extract_set_literal(state_src, "_SUPPRESS_PATTERNS")
+    context_only = _extract_set_literal(state_src, "_CONTEXT_ONLY_PATTERNS")
 
     # Helper: validate one location
     def check_location(name, actual, expected, allow_extra=False):
@@ -440,14 +444,18 @@ FILE_EXPORTS = {
     "patternPanel.js":     {"PATTERN_ACADEMIC_META", "renderPatternPanel"},
     "financials.js":       {"updateFinancials", "drawFinTrendChart"},
     "drawingTools.js":     {"drawingTools"},
-    "app.js":              set(),  # consumer, not exporter
+    "appState.js":         set(),  # shared state (global vars)
+    "appWorker.js":        set(),  # worker + analysis pipeline
+    "appUI.js":            set(),  # DOM events + rendering
+    "app.js":              set(),  # init orchestration
 }
 
 LOAD_ORDER = [
     "colors.js", "data.js", "api.js", "realtimeProvider.js",
     "indicators.js", "patterns.js", "signalEngine.js", "chart.js",
     "patternRenderer.js", "signalRenderer.js", "backtester.js",
-    "sidebar.js", "patternPanel.js", "financials.js", "drawingTools.js", "app.js",
+    "sidebar.js", "patternPanel.js", "financials.js", "drawingTools.js",
+    "appState.js", "appWorker.js", "appUI.js", "app.js",
 ]
 
 
