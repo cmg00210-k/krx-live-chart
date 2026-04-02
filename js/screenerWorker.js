@@ -23,10 +23,10 @@ var _workerReady = false;
 try {
   importScripts(
     'colors.js?v=13',
-    'indicators.js?v=21',
-    'patterns.js?v=38',
-    'signalEngine.js?v=31',
-    'backtester.js?v=32'
+    'indicators.js?v=25',
+    'patterns.js?v=42',
+    'signalEngine.js?v=34',
+    'backtester.js?v=36'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });

@@ -257,6 +257,47 @@ const COMPOSITE_SIGNAL_DEFS = [
     window: 5,  // [ACC] 3→5: 복합 시그널 수렴 시간 확대
     description: '볼린저 상단 돌파 + RSI 과매수 영역 — 과열 후 조정 가능',
   },
+
+  // Tier 2 (Phase KRX-API): 파생상품·수급 교차 복합 신호
+  {
+    id: 'buy_flowPcrConvergence',
+    nameShort: '매수: 수급+PCR 수렴',
+    signal: 'buy',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 63,
+    required: ['flowAlignedBuy'],
+    optional: ['pcrFearExtreme', 'basisContango'],
+    optionalBonus: 5,
+    window: 5,
+    description: '외국인+기관 동반매수 + PCR 극단적 공포 + 베이시스 contango — 다중 수급 매수 합류',
+  },
+  {
+    id: 'sell_flowPcrConvergence',
+    nameShort: '매도: 수급+PCR 수렴',
+    signal: 'sell',
+    strength: 'medium',
+    tier: 2,
+    baseConfidence: 63,
+    required: ['flowAlignedSell'],
+    optional: ['pcrGreedExtreme', 'basisBackwardation'],
+    optionalBonus: 5,
+    window: 5,
+    description: '외국인+기관 동반매도 + PCR 극단적 탐욕 + 베이시스 backwardation — 다중 수급 매도 합류',
+  },
+  {
+    id: 'buy_shortSqueezeFlow',
+    nameShort: '매수: 숏스퀴즈+수급',
+    signal: 'buy',
+    strength: 'strong',
+    tier: 1,
+    baseConfidence: 66,
+    required: ['shortSqueeze', 'flowForeignBuy'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 5,
+    window: 5,
+    description: '숏스퀴즈 후보 + 외국인 순매수 + 거래량 급증 — 강력한 숏커버 rally 신호',
+  },
 ];
 
 
@@ -295,6 +336,14 @@ class SignalEngine {
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
       // [Phase TA-2] OBV 다이버전스 — Granville (1963): 가격-거래량 괴리
       obvBullishDivergence: 2.5, obvBearishDivergence: -2.5,
+      // [Phase KRX-API] 파생상품·수급 시그널 — Doc36-41 학술 근거
+      basisContango: 1.5, basisBackwardation: -1.5,       // Doc36 §3
+      pcrFearExtreme: 2.0, pcrGreedExtreme: -2.0,         // Doc37 §6
+      flowAlignedBuy: 2.5, flowAlignedSell: -2.5,         // Doc39 §6
+      flowForeignBuy: 1.5, flowForeignSell: -1.5,         // Doc39 §3
+      erpUndervalued: 2.0, erpOvervalued: -2.0,            // Doc41 §2
+      etfBullishExtreme: -1.0, etfBearishExtreme: 1.0,    // Doc38 §3 (역발상)
+      shortHighSIR: 1.5, shortSqueeze: 2.5,               // Doc40 §4-5
       // 복합 (가중치 = tier별 증폭)
       composite: 0,  // 개별 계산
     };
@@ -333,6 +382,14 @@ class SignalEngine {
     indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
     indicatorSignals.push(...this._detectStochasticSignals(candles, cache));
     indicatorSignals.push(...this._detectKalmanSignals(candles, cache));
+
+    // [Phase KRX-API] 파생상품·수급 시그널 — 외부 데이터 기반 (Doc36-41)
+    indicatorSignals.push(...this._detectBasisSignal(candles));
+    indicatorSignals.push(...this._detectPCRSignal(candles));
+    indicatorSignals.push(...this._detectFlowSignal(candles));
+    indicatorSignals.push(...this._detectERPSignal(candles));
+    indicatorSignals.push(...this._detectETFSentiment(candles));
+    indicatorSignals.push(...this._detectShortInterest(candles));
 
     // 캔들 패턴 → 시그널 타입 맵 (복합 매칭용)
     const candleSignalMap = this._buildCandleSignalMap(candlePatterns);
@@ -423,11 +480,8 @@ class SignalEngine {
     var _appliedVolDiscount = false;
 
     if (_vkospiRegime !== null) {
-      // VKOSPI/VIX 기반 레짐 할인 — Whaley (2000), Carr & Wu (2009)
-      var volScale = 1.0;
-      if (_vkospiRegime === 'crisis') volScale = 0.65;       // VIX>35: 극단적 불확실성
-      else if (_vkospiRegime === 'high') volScale = 0.80;    // VIX 25-35: 고변동
-      // normal/low: no discount
+      // VKOSPI-calibrated regime discount (Doc26 §2.3) — replaces old VIX-based 0.65/0.80
+      var volScale = SignalEngine._volRegimeDiscount(_vkospiRegime);
       if (volScale < 1.0) {
         for (var vi = 0; vi < signals.length; vi++) {
           if (signals[vi].confidence) {
@@ -435,6 +489,31 @@ class SignalEngine {
           }
         }
         _appliedVolDiscount = true;
+      }
+    }
+
+    // [Phase 3-E] 만기일 근접 할인 (Doc27 §4) — D-2~D+1 conf × 0.70
+    if (candles && candles.length > 0) {
+      var lastDate = candles[candles.length - 1].time;
+      if (typeof lastDate === 'string' && SignalEngine._isNearExpiry(lastDate)) {
+        for (var ei = 0; ei < signals.length; ei++) {
+          if (signals[ei].confidence) {
+            signals[ei].confidence = Math.max(10, Math.round(signals[ei].confidence * 0.70));
+          }
+        }
+      }
+    }
+
+    // [Phase 4-C] Crisis severity discount (Doc28 §1.2) — 위기 > 0.7 시 반전형 패턴 할인
+    var _crisisSev = SignalEngine._calcCrisisSeverity();
+    if (_crisisSev > 0.7) {
+      var crisisScale = 1 - _crisisSev * 0.40; // severity 1.0 → 0.60 할인
+      for (var ci = 0; ci < signals.length; ci++) {
+        // 반전형 패턴만 할인 (지속형은 위기에도 유효)
+        var sig = signals[ci];
+        if (sig.confidence && sig.type !== 'continuation') {
+          sig.confidence = Math.max(10, Math.round(sig.confidence * crisisScale));
+        }
       }
     }
 
@@ -1542,8 +1621,9 @@ class SignalEngine {
   // ══════════════════════════════════════════════════════
 
   /**
-   * VKOSPI/VIX 기반 변동성 레짐 분류 (Doc26 §2)
-   * @returns {string|null} 'low' (vol<15) | 'normal' (15-25) | 'high' (25-35) | 'crisis' (>35) | null
+   * VKOSPI/VIX 기반 변동성 레짐 분류 (Doc26 §2.3 VKOSPI 4-tier)
+   * Regime confidence discount: low=1.0, normal=0.95, high=0.80, crisis=0.60
+   * @returns {string|null} 'low' (vol<15) | 'normal' (15-22) | 'high' (22-30) | 'crisis' (>30) | null
    */
   static _classifyVolRegimeFromVKOSPI() {
     // 1차: _macroLatest (app.js 전역) — macro_latest.json에서 로드
@@ -1566,13 +1646,87 @@ class SignalEngine {
     }
 
     if (vol == null) return null;
-    // NOTE: Thresholds (15/20/25/30) transplanted from VIX; pending VKOSPI-specific calibration
+    // VKOSPI-calibrated thresholds (Doc26 §2.3): <15 low, 15-22 normal, 22-30 high, >30 crisis
     if (vol < 15) return 'low';
-    if (vol <= 25) return 'normal';
-    if (vol <= 35) return 'high';
+    if (vol <= 22) return 'normal';
+    if (vol <= 30) return 'high';
     return 'crisis';
   }
 
+  /**
+   * KRX 옵션/선물 월물 만기일 근접 여부 (Doc27 §4)
+   * 매월 둘째 목요일 기준 D-2 ~ D+1 범위
+   * 만기 근접 시 패턴 confidence × 0.70 할인 권고
+   * @param {string} dateStr - "YYYY-MM-DD" 형식
+   * @returns {boolean} 만기 근접 여부
+   */
+  static _isNearExpiry(dateStr) {
+    if (!dateStr || dateStr.length < 10) return false;
+    var parts = dateStr.split('-');
+    var year = parseInt(parts[0], 10);
+    var month = parseInt(parts[1], 10) - 1; // JS month is 0-based
+    var day = parseInt(parts[2], 10);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+
+    // 해당 월의 둘째 목요일 계산
+    var firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+    // 첫째 목요일: day = (4 - firstDay + 7) % 7 + 1 (목요일=4)
+    var firstThurs = (4 - firstDay + 7) % 7 + 1;
+    var secondThurs = firstThurs + 7; // 둘째 목요일
+
+    // D-2 ~ D+1 범위 (영업일 기준 근사: 달력일 기준)
+    return day >= (secondThurs - 2) && day <= (secondThurs + 1);
+  }
+
+  /**
+   * 변동성 레짐 기반 패턴 신뢰도 할인 계수 (Doc26 §2.3)
+   * @param {string} regime - 'low'|'normal'|'high'|'crisis'
+   * @returns {number} 할인 계수 (0.60 ~ 1.0)
+   */
+  static _volRegimeDiscount(regime) {
+    switch (regime) {
+      case 'low':    return 1.00;
+      case 'normal': return 0.95;
+      case 'high':   return 0.80;
+      case 'crisis': return 0.60;
+      default:       return 1.00;
+    }
+  }
+
+  /**
+   * 위기 심각도 점수 (Doc28 §1.2 Longin & Solnik 2001)
+   * VIX, VKOSPI, USD/KRW 종합 → 0~1 스코어
+   * crisis > 0.7 → 반전형 패턴 conf discount 적용
+   *
+   * @returns {number} 0~1 (0=평온, 1=극단적 위기)
+   */
+  static _calcCrisisSeverity() {
+    var macro = (typeof _macroLatest !== 'undefined') ? _macroLatest : null;
+    if (!macro) return 0;
+
+    var score = 0;
+    var components = 0;
+
+    // VIX 기여 (0~1): VIX < 15 → 0, VIX > 40 → 1
+    if (macro.vix != null) {
+      score += Math.min(1, Math.max(0, (macro.vix - 15) / 25));
+      components++;
+    }
+
+    // USD/KRW 기여: 1200 이하 → 0, 1500 이상 → 1 (원화 약세 = 위기)
+    if (macro.usdkrw != null) {
+      score += Math.min(1, Math.max(0, (macro.usdkrw - 1200) / 300));
+      components++;
+    }
+
+    // DXY 기여: 95 이하 → 0, 110 이상 → 1 (달러 강세 = EM 위기)
+    if (macro.dxy != null) {
+      score += Math.min(1, Math.max(0, (macro.dxy - 95) / 15));
+      components++;
+    }
+
+    return components > 0 ? score / components : 0;
+  }
 
   static _interpIsotonic(val, breakpoints) {
     if (!breakpoints || breakpoints.length < 2) return 0;  // degenerate → neutral
@@ -2074,6 +2228,190 @@ class SignalEngine {
 
 
   // ══════════════════════════════════════════════════════
+  //  [Phase KRX-API] 파생상품·수급 시그널 탐지 (Doc36-41)
+  //  외부 JSON 데이터 기반 — 데이터 미로드 시 graceful no-op
+  // ══════════════════════════════════════════════════════
+
+  /**
+   * 선물 베이시스 신호 (Doc36 §3, Bessembinder & Seguin 1993)
+   * contango(양) = 시장 낙관, backwardation(음) = 시장 비관
+   */
+  _detectBasisSignal(candles) {
+    var deriv = (typeof _derivativesData !== 'undefined') ? _derivativesData : null;
+    // [C-1 FIX] 배열(per-date list) → 최신 항목 추출
+    if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
+    if (!deriv || deriv.basis == null) return [];
+    var lastIdx = candles.length - 1;
+    var basis = deriv.basis;
+
+    if (basis > 0.5) {
+      return [{ type: 'basisContango', signal: 'buy', strength: 'weak',
+        confidence: 55, index: lastIdx, category: 'derivatives',
+        description: '선물 베이시스 양(+' + basis.toFixed(2) + '): 시장 낙관 (contango)' }];
+    } else if (basis < -0.5) {
+      return [{ type: 'basisBackwardation', signal: 'sell', strength: 'weak',
+        confidence: 55, index: lastIdx, category: 'derivatives',
+        description: '선물 베이시스 음(' + basis.toFixed(2) + '): 시장 비관 (backwardation)' }];
+    }
+    return [];
+  }
+
+  /**
+   * PCR 역발상 신호 (Doc37 §6, Pan & Poteshman 2006)
+   * PCR > 1.3 = 극단적 공포 → 역발상 매수, PCR < 0.5 = 극단적 탐욕 → 역발상 매도
+   */
+  _detectPCRSignal(candles) {
+    var deriv = (typeof _derivativesData !== 'undefined') ? _derivativesData : null;
+    if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
+    if (!deriv || deriv.pcr == null) return [];
+    var lastIdx = candles.length - 1;
+    var pcr = deriv.pcr;
+
+    if (pcr > 1.3) {
+      return [{ type: 'pcrFearExtreme', signal: 'buy', strength: 'medium',
+        confidence: 62, index: lastIdx, category: 'derivatives',
+        description: 'PCR ' + pcr.toFixed(2) + ' (극단적 공포): 역발상 매수 신호' }];
+    } else if (pcr < 0.5) {
+      return [{ type: 'pcrGreedExtreme', signal: 'sell', strength: 'medium',
+        confidence: 62, index: lastIdx, category: 'derivatives',
+        description: 'PCR ' + pcr.toFixed(2) + ' (극단적 탐욕): 역발상 매도 신호' }];
+    }
+    return [];
+  }
+
+  /**
+   * 투자자 수급 신호 (Doc39 §6, Choe/Kho/Stulz 2005, LSV 1992)
+   * 외국인+기관 동반 매수/매도 = alignment 신호
+   * 외국인 단독 순매수 = foreign flow 신호
+   */
+  _detectFlowSignal(candles) {
+    var investor = (typeof _investorData !== 'undefined') ? _investorData : null;
+    if (!investor) return [];
+    var lastIdx = candles.length - 1;
+    var signals = [];
+
+    // [C-2 FIX] alignment: object {signal_1d, signal_5d} 또는 string 모두 지원
+    var alignVal = investor.alignment;
+    if (alignVal && typeof alignVal === 'object') alignVal = alignVal.signal_1d;
+    if (alignVal === 'aligned_buy') {
+      signals.push({ type: 'flowAlignedBuy', signal: 'buy', strength: 'medium',
+        confidence: 65, index: lastIdx, category: 'flow',
+        description: '외국인+기관 동반 순매수: 강한 수급 매수 신호' });
+    } else if (alignVal === 'aligned_sell') {
+      signals.push({ type: 'flowAlignedSell', signal: 'sell', strength: 'medium',
+        confidence: 65, index: lastIdx, category: 'flow',
+        description: '외국인+기관 동반 순매도: 강한 수급 매도 신호' });
+    }
+
+    // [C-3 FIX] 외국인 20일 누적: nested foreign.net_20d_eok 또는 flat foreign_net_20d
+    var fNet20 = (investor.foreign && investor.foreign.net_20d_eok != null)
+      ? investor.foreign.net_20d_eok : investor.foreign_net_20d;
+    if (fNet20 != null) {
+      if (fNet20 > 5000) {  // 5000억원 이상 누적 순매수
+        signals.push({ type: 'flowForeignBuy', signal: 'buy', strength: 'weak',
+          confidence: 58, index: lastIdx, category: 'flow',
+          description: '외국인 20일 누적 순매수 ' + Math.round(fNet20) + '억원' });
+      } else if (fNet20 < -5000) {
+        signals.push({ type: 'flowForeignSell', signal: 'sell', strength: 'weak',
+          confidence: 58, index: lastIdx, category: 'flow',
+          description: '외국인 20일 누적 순매도 ' + Math.round(Math.abs(fNet20)) + '억원' });
+      }
+    }
+
+    return signals;
+  }
+
+  /**
+   * ERP (Equity Risk Premium) 신호 (Doc41 §2, Asness 2003 / Damodaran)
+   * ERP = E/P - KTB10Y. 높으면 주식 저평가, 낮으면 고평가.
+   */
+  _detectERPSignal(candles) {
+    var bonds = (typeof _bondsLatest !== 'undefined') ? _bondsLatest : null;
+    if (!bonds || !bonds.yields) return [];
+    var ktb10y = bonds.yields.ktb_10y;
+    if (ktb10y == null || ktb10y <= 0) return [];
+    var lastIdx = candles.length - 1;
+
+    // [FIX-YG1] 시장 평균 PER: sector_fundamentals → macro → fallback 12
+    var marketPER = 12;
+    if (typeof _sectorData !== 'undefined' && _sectorData) {
+      var avg = _sectorData.kospiAvg || _sectorData.kosdaqAvg;
+      if (avg && avg.per > 0) marketPER = avg.per;
+    } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.market_per > 0) {
+      marketPER = _macroLatest.market_per;
+    }
+    var erp = (1 / marketPER) * 100 - ktb10y;  // E/P(%) - KTB10Y(%)
+
+    if (erp > 5.5) {
+      return [{ type: 'erpUndervalued', signal: 'buy', strength: 'medium',
+        confidence: 60, index: lastIdx, category: 'macro',
+        description: 'ERP ' + erp.toFixed(1) + '%: 주식 채권 대비 저평가' }];
+    } else if (erp < 1.0) {
+      return [{ type: 'erpOvervalued', signal: 'sell', strength: 'medium',
+        confidence: 60, index: lastIdx, category: 'macro',
+        description: 'ERP ' + erp.toFixed(1) + '%: 주식 채권 대비 고평가' }];
+    }
+    return [];
+  }
+
+  /**
+   * ETF 레버리지/인버스 센티먼트 (Doc38 §3, Cheng & Madhavan 2009)
+   * leverageRatio > 3.0 = 극단적 낙관 (역발상 매도)
+   * leverageRatio < 0.3 = 극단적 비관 (역발상 매수)
+   */
+  _detectETFSentiment(candles) {
+    var etf = (typeof _etfData !== 'undefined') ? _etfData : null;
+    if (!etf || !etf.leverageSentiment) return [];
+    var lastIdx = candles.length - 1;
+    var sentiment = etf.leverageSentiment.sentiment;
+    var ratio = etf.leverageSentiment.leverageRatio;
+
+    if (sentiment === 'strong_bullish' && ratio > 3.0) {
+      return [{ type: 'etfBullishExtreme', signal: 'sell', strength: 'weak',
+        confidence: 55, index: lastIdx, category: 'sentiment',
+        description: 'ETF 레버리지/인버스 비율 ' + ratio.toFixed(1) + ': 극단적 낙관 (과열 경고)' }];
+    } else if (sentiment === 'strong_bearish' && ratio < 0.3) {
+      return [{ type: 'etfBearishExtreme', signal: 'buy', strength: 'weak',
+        confidence: 55, index: lastIdx, category: 'sentiment',
+        description: 'ETF 레버리지/인버스 비율 ' + ratio.toFixed(1) + ': 극단적 비관 (바닥 신호)' }];
+    }
+    return [];
+  }
+
+  /**
+   * 공매도 비율 신호 (Doc40 §4-5, Desai et al. 2002, Lamont & Thaler 2003)
+   * 시장 전체 SIR 높음 → 숏커버 가능성 (역발상 매수)
+   * 개별 종목 숏스퀴즈 감지
+   */
+  _detectShortInterest(candles) {
+    var shorts = (typeof _shortSellingData !== 'undefined') ? _shortSellingData : null;
+    if (!shorts) return [];
+    var lastIdx = candles.length - 1;
+    var signals = [];
+
+    // [C-4 FIX] 시장 공매도 비율: market_short_ratio(flat) 또는 marketTrend[-1].shortRatio
+    var msr = shorts.market_short_ratio;
+    if (msr == null && shorts.marketTrend && shorts.marketTrend.length > 0) {
+      msr = shorts.marketTrend[shorts.marketTrend.length - 1].shortRatio;
+    }
+    if (msr != null && msr > 8) {
+      signals.push({ type: 'shortHighSIR', signal: 'buy', strength: 'weak',
+        confidence: 56, index: lastIdx, category: 'flow',
+        description: '시장 공매도 비율 ' + msr.toFixed(1) + '%: 숏커버 rally 가능' });
+    }
+
+    // 숏스퀴즈 후보 감지
+    if (shorts.squeeze_candidates && shorts.squeeze_candidates.length > 0) {
+      signals.push({ type: 'shortSqueeze', signal: 'buy', strength: 'medium',
+        confidence: 63, index: lastIdx, category: 'flow',
+        description: '숏스퀴즈 후보 ' + shorts.squeeze_candidates.length + '종목 감지' });
+    }
+
+    return signals;
+  }
+
+
+  // ══════════════════════════════════════════════════════
   //  시장 심리 + 통계
   // ══════════════════════════════════════════════════════
 
@@ -2096,7 +2434,7 @@ class SignalEngine {
     let neutralCount = 0;
 
     const categoryCounts = {
-      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0,
+      ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, derivatives: 0, flow: 0, macro: 0, sentiment: 0, composite: 0, adv: 0, volRegime: 0,
     };
 
     for (const s of signals) {
@@ -2181,6 +2519,11 @@ class SignalEngine {
     if (type.startsWith('stochRsi')) return 'rsi'; // StochRSI는 RSI 카테고리 귀속
     if (type.startsWith('stochastic')) return 'stochastic'; // Lane (1984) Slow Stochastic — RSI와 별도
     if (type.startsWith('kalman'))  return 'kalman'; // [E-4] Kalman 필터 카테고리
+    // [H-1 FIX] Phase KRX-API 파생상품·수급 신호 카테고리
+    if (type.startsWith('basis') || type.startsWith('pcr')) return 'derivatives';
+    if (type.startsWith('flow') || type.startsWith('short')) return 'flow';
+    if (type.startsWith('erp'))     return 'macro';
+    if (type.startsWith('etf'))     return 'sentiment';
     return 'ma'; // fallback
   }
 
@@ -2320,10 +2663,26 @@ class SignalEngine {
       multiplier = 1.00;
     }
 
+    // [FIX-H14] 실제 VRP (IV² - RV²) 계산 — VKOSPI + Parkinson HV
+    var vrp = null;
+    if (typeof calcVRP === 'function' && typeof calcHV === 'function') {
+      var vkospi = null;
+      if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vkospi != null) {
+        vkospi = _macroLatest.vkospi;
+      } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vix != null) {
+        vkospi = _macroLatest.vix * 1.12;  // VIX→VKOSPI proxy
+      }
+      var hv = calcHV(candles, 20);
+      if (vkospi != null && hv != null) {
+        vrp = calcVRP(vkospi, hv);
+      }
+    }
+
     return {
       regime: regime,
       ratio: +ratio.toFixed(3),
       multiplier: multiplier,
+      vrp: vrp,
     };
   }
 
@@ -2338,7 +2697,7 @@ class SignalEngine {
       recentBuy: 0,
       recentSell: 0,
       recentNeutral: 0,
-      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, composite: 0, adv: 0, volRegime: 0 },
+      categoryCounts: { ma: 0, macd: 0, rsi: 0, bb: 0, volume: 0, obv: 0, ichimoku: 0, hurst: 0, kalman: 0, stochastic: 0, derivatives: 0, flow: 0, macro: 0, sentiment: 0, composite: 0, adv: 0, volRegime: 0 },
       entropy: 0,
       entropyNorm: 0,
       advLevel: 0,

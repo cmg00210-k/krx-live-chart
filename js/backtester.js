@@ -93,6 +93,8 @@ class PatternBacktester {
       threeInsideDown:        { name: '하락삼내형',     signal: 'sell' },
       channel:                { name: '채널',           signal: 'neutral' },
       cupAndHandle:           { name: '컵앤핸들',       signal: 'buy'  },
+      risingThreeMethods:    { name: '상승삼법',       signal: 'buy'  },
+      fallingThreeMethods:   { name: '하락삼법',       signal: 'sell' },
     };
 
     /** 캐시 키 (종목코드 + 캔들길이) → 결과 */
@@ -375,6 +377,24 @@ class PatternBacktester {
     return result;
   }
 
+
+  /**
+   * Jensen's Alpha 계산 — 시장 조정 초과수익 (Doc25 §1.3)
+   * α = R_pattern - [R_f + β × (R_m - R_f)]
+   *
+   * @param {number} rawReturn - 패턴 N-day raw return (%)
+   * @param {number} nDays - 보유 기간 (거래일)
+   * @param {number} beta - CAPM beta (calcCAPMBeta 결과)
+   * @param {number} rfAnnual - 연간 무위험이자율 (%, KTB10Y)
+   * @param {number} marketReturnPct - 동일 기간 시장 수익률 (%)
+   * @returns {number|null} Jensen's alpha (%), 입력 부족 시 null
+   */
+  _calcJensensAlpha(rawReturn, nDays, beta, rfAnnual, marketReturnPct) {
+    if (beta == null || rfAnnual == null || marketReturnPct == null) return null;
+    var rfDaily = Math.pow(1 + rfAnnual / 100, 1 / 250) - 1;
+    var rfPeriod = rfDaily * nDays * 100; // %
+    return rawReturn - (rfPeriod + beta * (marketReturnPct - rfPeriod));
+  }
 
   // ══════════════════════════════════════════════════════
   //  2. 전체 패턴 일괄 백테스트

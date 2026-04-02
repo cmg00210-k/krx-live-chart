@@ -471,6 +471,71 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
 }
 
 /**
+ * Parkinson (1980) 역사적 변동성 추정기 — 고저 범위 기반
+ *
+ * 학술 근거: core_data/34_volatility_risk_premium_harv.md §3.1
+ *   "Parkinson uses high-low range, ~5× more efficient than close-to-close"
+ *
+ * HV_Parkinson = sqrt(1/(4n·ln2) × Σ[ln(H_i/L_i)]²) × sqrt(KRX_TRADING_DAYS)
+ *
+ * @param {Array<{high: number, low: number}>} candles - OHLCV 캔들 배열
+ * @param {number} [period=20] - 룩백 윈도우 (거래일 수)
+ * @returns {number|null} 연율화 HV (소수, 예: 0.30 = 30%). 데이터 부족 시 null
+ */
+function calcHV(candles, period) {
+  var n = period || 20;
+  if (!candles || candles.length < n) return null;
+
+  // 최근 n봉의 ln(H/L)² 합산
+  var sumLogSq = 0;
+  var validCount = 0;
+  var start = candles.length - n;
+
+  for (var i = start; i < candles.length; i++) {
+    var hi = candles[i].high;
+    var lo = candles[i].low;
+    // 방어: 0 이하 또는 결측 → 건너뜀
+    if (!hi || !lo || lo <= 0 || hi <= 0) continue;
+    var logHL = Math.log(hi / lo);
+    sumLogSq += logHL * logHL;
+    validCount++;
+  }
+
+  // 유효 관측수가 period의 절반 미만이면 신뢰 불가
+  if (validCount < Math.max(n / 2, 5)) return null;
+
+  // Parkinson: σ² = 1/(4n·ln2) × Σ[ln(H/L)]²
+  var LN2 = 0.6931471805599453;  // Math.LN2
+  var variance = sumLogSq / (4 * validCount * LN2);
+
+  // 연율화: σ_annual = σ_daily × √(KRX_TRADING_DAYS)
+  var hv = Math.sqrt(variance) * Math.sqrt(KRX_TRADING_DAYS);
+
+  return hv;
+}
+
+/**
+ * 변동성 위험 프리미엄 (VRP) — IV² - HV²
+ *
+ * 학술 근거: core_data/34_volatility_risk_premium_harv.md §3.1
+ *   VRP = σ²_implied - σ²_realized
+ *   양수 → IV가 HV 대비 고평가 (옵션 매도 유리)
+ *   음수 → IV가 HV 대비 저평가 (옵션 매수 유리)
+ *
+ * @param {number} vkospi - VKOSPI 지수값 (예: 20.5 → 20.5%)
+ * @param {number} hvAnnualized - calcHV() 출력 (소수, 예: 0.30 = 30%)
+ * @returns {number|null} VRP (소수, 분산 차이). 입력 누락 시 null
+ */
+function calcVRP(vkospi, hvAnnualized) {
+  if (vkospi == null || hvAnnualized == null) return null;
+  if (vkospi < 0 || hvAnnualized < 0) return null;
+
+  // VKOSPI는 %단위(20.5) → 소수(0.205)로 변환 후 제곱
+  var ivDecimal = vkospi / 100;
+  return ivDecimal * ivDecimal - hvAnnualized * hvAnnualized;
+}
+
+/**
  * 가중 다중 선형 회귀 (WLS — Weighted Least Squares)
  *
  * 학술 근거: Reschenhofer et al. (2021)

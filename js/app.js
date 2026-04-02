@@ -112,6 +112,8 @@ var _TIER_B_CANDLE = new Set([
   'threeInsideUp',        // WR=42.4%, 삼내형 대칭
   'invertedHammer',       // WR=48.9%, 해머 계열 완결
   'bullishMarubozu',      // WR=41.8%, 복합시그널 goldenMarubozuVol 입력
+  'risingThreeMethods',   // 상승삼법 — 연속형(continuation), Nison(1991), WR미검증
+  'fallingThreeMethods',  // 하락삼법 — 연속형(continuation), Nison(1991), WR미검증
 ]);
 
 // ── B-Tier 차트 패턴 ──
@@ -480,6 +482,11 @@ let _marketContext = null;   // [Phase I-L2] 시장 맥락 (market_context.json 
 var _macroLatest = null;     // 매크로 데이터 캐시 (macro_latest.json — KTB10Y/USD/CPI 등)
 var _bondsLatest = null;     // 채권 데이터 캐시 (bonds_latest.json — 수익률곡선 등)
 var _microContext = null;    // 미시경제 지표 캐시 (ILLIQ, HHI boost) — Phase 2-D
+var _derivativesData = null; // 파생상품 요약 (derivatives_summary.json — basis, PCR, OI)
+var _investorData = null;    // 투자자 수급 요약 (investor_summary.json — 외국인/기관 순매수)
+var _etfData = null;         // ETF 센티먼트 요약 (etf_summary.json — 레버리지/인버스 비율)
+var _shortSellingData = null;// 공매도 요약 (shortselling_summary.json — SIR, DTC)
+var _kosisLatest = null;     // [FIX-H12] KOSIS 경제 지표 (kosis_latest.json — CLI/ESI/소매판매)
 var _lastAdvLevel = 0;       // 최근 Worker 분석의 ADV 유동성 등급 (signalEngine.calcADVLevel)
 var _lastVolRegime = 'neutral';  // [Phase0-#6] 최근 Worker 분석의 VolRegime 레짐 (signalEngine.calcVolRegime)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
@@ -993,10 +1000,12 @@ function _showConnectionGuide(onResolved) {
   if (guide) guide.style.display = '';
   if (urlInput) urlInput.value = KRX_API_CONFIG.wsUrl || _defaultWsUrl;
 
-  // 연결 시도 버튼
+  // [FIX-H6] 이벤트 리스너 중복 등록 방지 — replaceChildren으로 기존 리스너 제거
   var retryBtn = document.getElementById('conn-guide-retry');
   if (retryBtn) {
-    retryBtn.addEventListener('click', async function() {
+    var newRetry = retryBtn.cloneNode(true);
+    retryBtn.parentNode.replaceChild(newRetry, retryBtn);
+    newRetry.addEventListener('click', async function() {
       var url = urlInput.value.trim();
       if (!url) return;
       this.textContent = '연결 중...'; this.disabled = true;
@@ -1020,7 +1029,9 @@ function _showConnectionGuide(onResolved) {
   // 파일 모드 버튼
   var fileBtn = document.getElementById('conn-guide-file');
   if (fileBtn) {
-    fileBtn.addEventListener('click', function() {
+    var newFile = fileBtn.cloneNode(true);
+    fileBtn.parentNode.replaceChild(newFile, fileBtn);
+    newFile.addEventListener('click', function() {
       KRX_API_CONFIG.mode = 'file';
       guide.style.display = 'none';
       onResolved();
@@ -1030,7 +1041,9 @@ function _showConnectionGuide(onResolved) {
   // 데모 모드 버튼
   var demoBtn = document.getElementById('conn-guide-demo');
   if (demoBtn) {
-    demoBtn.addEventListener('click', function() {
+    var newDemo = demoBtn.cloneNode(true);
+    demoBtn.parentNode.replaceChild(newDemo, demoBtn);
+    newDemo.addEventListener('click', function() {
       KRX_API_CONFIG.mode = 'demo';
       guide.style.display = 'none';
       onResolved();
@@ -1190,6 +1203,7 @@ async function _continueInit() {
 
   // 매크로/채권 데이터 로드 (비차단 — 차트 오버레이 정보용)
   _loadMarketData();
+  _loadDerivativesData();
 
   // 복원된 환경설정을 UI에 반영
   _applyPrefsToUI();
@@ -1881,6 +1895,8 @@ function _initAnalysisWorker() {
         // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
         _updateMicroContext(candles);
         _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
+        // [Phase KRX-API] 파생상품·수급 데이터 기반 신뢰도 조정
+        _applyDerivativesConfidenceToPatterns(detectedPatterns);
         _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
@@ -2400,15 +2416,217 @@ async function _loadMarketData() {
     var results = await Promise.allSettled([
       fetch('data/macro/macro_latest.json', { signal: AbortSignal.timeout(5000) }),
       fetch('data/macro/bonds_latest.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/macro/kosis_latest.json', { signal: AbortSignal.timeout(5000) }),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       _macroLatest = await results[0].value.json();
     if (results[1].status === 'fulfilled' && results[1].value.ok)
       _bondsLatest = await results[1].value.json();
+    if (results[2].status === 'fulfilled' && results[2].value.ok)
+      _kosisLatest = await results[2].value.json();
     if (_macroLatest || _bondsLatest) {
       console.log('[KRX] 매크로/채권 데이터 로드 완료');
     }
+    if (_kosisLatest) {
+      console.log('[KRX] KOSIS 경제지표 로드 완료:', Object.keys(_kosisLatest).length, '개 필드');
+    }
+    // [H-2] 매크로 데이터에 VKOSPI/VIX가 있으면 Worker에 전달
+    // _loadDerivativesData()와 병렬 실행되므로 양쪽 모두에서 호출 (중복 전송 안전)
+    _sendMarketContextToWorker();
   } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+}
+
+/**
+ * [Phase KRX-API] 파생상품·수급·ETF·공매도 데이터 비동기 로드
+ * data/derivatives/ 하위 4개 summary JSON (download_*.py 생성)
+ * 선택적 데이터: 로드 실패 시 무시 (기존 기능에 영향 없음)
+ *
+ * 이론: Doc36 (선물 미시구조), Doc37 (옵션 IV 곡면), Doc38 (ETF 생태계),
+ *       Doc39 (투자자 수급), Doc40 (공매도), Doc41 (채권-주식 상대가치)
+ */
+async function _loadDerivativesData() {
+  try {
+    var results = await Promise.allSettled([
+      fetch('data/derivatives/derivatives_summary.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/derivatives/investor_summary.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/derivatives/etf_summary.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/derivatives/shortselling_summary.json', { signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (results[0].status === 'fulfilled' && results[0].value.ok)
+      _derivativesData = await results[0].value.json();
+    if (results[1].status === 'fulfilled' && results[1].value.ok)
+      _investorData = await results[1].value.json();
+    if (results[2].status === 'fulfilled' && results[2].value.ok)
+      _etfData = await results[2].value.json();
+    if (results[3].status === 'fulfilled' && results[3].value.ok)
+      _shortSellingData = await results[3].value.json();
+    var loaded = [_derivativesData, _investorData, _etfData, _shortSellingData].filter(Boolean).length;
+    if (loaded > 0) {
+      console.log('[KRX] 파생상품/수급 데이터 로드 완료 (' + loaded + '/4)');
+    }
+
+    // [H-2] Worker에 시장 맥락 데이터 주입 — signalEngine 레짐 분류용
+    // 메인 스레드: 멀티플라이어 적용 (_applyDerivativesConfidenceToPatterns)
+    // Worker: 레짐 분류만 (signalEngine._classifyVolRegimeFromVKOSPI 등)
+    _sendMarketContextToWorker();
+  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+}
+
+/**
+ * [H-2] Worker에 시장 맥락 데이터 전송
+ *
+ * signalEngine._classifyVolRegimeFromVKOSPI()가 Worker 내부에서 _marketContext.vkospi를 읽고,
+ * signalEngine._detect*Signal()이 _derivativesData/_investorData/_etfData를 읽는다.
+ * 메인 스레드에서 로드된 데이터를 Worker 전역에 주입하여 레짐 분류를 가능하게 한다.
+ *
+ * VKOSPI 소스 우선순위: _marketContext.vkospi → _macroLatest.vkospi → _macroLatest.vix×proxy
+ * (signalEngine._classifyVolRegimeFromVKOSPI와 동일한 fallback chain)
+ */
+function _sendMarketContextToWorker() {
+  if (!_analysisWorker || !_workerReady) return;
+
+  // VKOSPI: market_context.json → macro_latest.json (VKOSPI 직접 또는 VIX proxy)
+  var vkospi = null;
+  if (_marketContext && _marketContext.vkospi != null) {
+    vkospi = _marketContext.vkospi;
+  } else if (_macroLatest && _macroLatest.vkospi != null) {
+    vkospi = _macroLatest.vkospi;
+  } else if (_macroLatest && _macroLatest.vix != null) {
+    // VIX→VKOSPI proxy (same heuristic as signalEngine._classifyVolRegimeFromVKOSPI)
+    var vix = _macroLatest.vix;
+    var scale = vix < 20 ? 1.0 : vix < 30 ? 1.1 : 1.25;
+    vkospi = vix * scale;
+  }
+
+  // derivatives_summary.json: PCR, basis
+  var deriv = _derivativesData;
+  if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
+  var pcr = (deriv && deriv.pcr != null) ? deriv.pcr : null;
+  var basis = (deriv && deriv.basis != null) ? deriv.basis : null;
+
+  // etf_summary.json: leverageRatio
+  var leverageRatio = null;
+  if (_etfData && _etfData.leverageSentiment && _etfData.leverageSentiment.leverageRatio != null) {
+    leverageRatio = _etfData.leverageSentiment.leverageRatio;
+  }
+
+  // investor_summary.json: foreignAlignment
+  var foreignAlignment = null;
+  if (_investorData && _investorData.alignment) {
+    var align = _investorData.alignment;
+    foreignAlignment = (typeof align === 'object') ? align.signal_1d : align;
+  }
+
+  // 데이터가 하나라도 있을 때만 전송
+  if (vkospi == null && pcr == null && basis == null && leverageRatio == null && foreignAlignment == null) return;
+
+  _analysisWorker.postMessage({
+    type: 'marketContext',
+    vkospi: vkospi,
+    pcr: pcr,
+    basis: basis,
+    leverageRatio: leverageRatio,
+    foreignAlignment: foreignAlignment,
+  });
+}
+
+/**
+ * [Phase KRX-API] 파생상품·수급 데이터 기반 패턴 신뢰도 조정
+ *
+ * 6개 독립 팩터 (곱셈 결합, clamp [0.70, 1.30]):
+ *  1. 선물 베이시스 (Doc36 §3) — 베이시스 방향과 패턴 방향 일치 시 boost
+ *  2. PCR (Doc37 §6) — Put/Call Ratio 극단값 역발상 신호
+ *  3. 투자자 수급 (Doc39 §6) — 외국인+기관 alignment 신호
+ *  4. ETF 센티먼트 (Doc38 §3) — 레버리지/인버스 비율 극단값
+ *  5. 공매도 비율 (Doc40 §4) — 시장 전체 공매도 비율 레짐
+ *  6. ERP (Doc41 §2) — 채권-주식 상대가치 z-score
+ *
+ * @param {Array} patterns - patternEngine.analyze() 결과
+ */
+function _applyDerivativesConfidenceToPatterns(patterns) {
+  if (!patterns || patterns.length === 0) return;
+
+  // [C-1 FIX] derivatives_summary.json: 배열(per-date) 또는 단일 객체 모두 지원
+  var deriv = _derivativesData;
+  if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
+  var investor = _investorData;
+  var etf = _etfData;
+  var shorts = _shortSellingData;
+
+  // 데이터 전무 시 no-op
+  if (!deriv && !investor && !etf && !shorts) return;
+
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var p = patterns[pi];
+    var isBuy = (p.signal === 'buy');
+    var adj = 1.0;
+
+    // ── 1. 선물 베이시스 (Doc36 §3, Bessembinder & Seguin 1993) ──
+    // 양의 베이시스(contango) = 낙관, 음의 베이시스(backwardation) = 비관
+    if (deriv && deriv.basis != null) {
+      var basis = deriv.basis;
+      if (basis > 0.5) {          // contango: 시장 낙관
+        adj *= isBuy ? 1.05 : 0.95;
+      } else if (basis < -0.5) {  // backwardation: 시장 비관
+        adj *= isBuy ? 0.95 : 1.05;
+      }
+    }
+
+    // ── 2. PCR 역발상 (Doc37 §6, Pan & Poteshman 2006) ──
+    // PCR > 1.3 = 극도의 공포 → 역발상 매수, PCR < 0.5 = 극도의 탐욕 → 역발상 매도
+    if (deriv && deriv.pcr != null) {
+      var pcr = deriv.pcr;
+      if (pcr > 1.3) {
+        adj *= isBuy ? 1.08 : 0.92;   // 극단적 공포 → 매수 유리
+      } else if (pcr < 0.5) {
+        adj *= isBuy ? 0.92 : 1.08;   // 극단적 탐욕 → 매도 유리
+      }
+    }
+
+    // ── 3. 투자자 수급 alignment (Doc39 §6, Choe/Kho/Stulz 2005) ──
+    // [C-2 FIX] alignment: object {signal_1d} 또는 string 모두 지원
+    if (investor && investor.alignment) {
+      var align = investor.alignment;
+      if (align && typeof align === 'object') align = align.signal_1d;
+      if (align === 'aligned_buy') {
+        adj *= isBuy ? 1.08 : 0.93;   // 외국인+기관 동반 매수
+      } else if (align === 'aligned_sell') {
+        adj *= isBuy ? 0.93 : 1.08;   // 외국인+기관 동반 매도
+      }
+      // divergent/neutral: 조정 없음
+    }
+
+    // ── 4. ETF 레버리지 센티먼트 (Doc38 §3, Cheng & Madhavan 2009) ──
+    if (etf && etf.leverageSentiment) {
+      var sentiment = etf.leverageSentiment.sentiment;
+      if (sentiment === 'strong_bullish') {
+        adj *= isBuy ? 0.95 : 1.05;   // 극단적 낙관 → 역발상 (과열 경고)
+      } else if (sentiment === 'strong_bearish') {
+        adj *= isBuy ? 1.05 : 0.95;   // 극단적 비관 → 역발상 (바닥 근접)
+      }
+    }
+
+    // ── 5. 공매도 비율 (Doc40 §4, Desai et al. 2002) ──
+    // [C-4 FIX] market_short_ratio(flat) 또는 marketTrend[-1].shortRatio
+    if (shorts) {
+      var msr = shorts.market_short_ratio;
+      if (msr == null && shorts.marketTrend && shorts.marketTrend.length > 0)
+        msr = shorts.marketTrend[shorts.marketTrend.length - 1].shortRatio;
+      if (msr != null && msr > 10) {    // 시장 공매도 비율 > 10%
+        adj *= isBuy ? 1.06 : 0.94;   // 높은 공매도 → 숏커버 rally 가능 (매수 유리)
+      } else if (msr != null && msr < 2) {
+        adj *= isBuy ? 0.97 : 1.03;   // 낮은 공매도 → 하방 보험 부족
+      }
+    }
+
+    // [C-6 FIX] ERP는 signalEngine._detectERPSignal()에서만 처리 — 이중 적용 방지
+
+    // clamp [0.70, 1.30]
+    adj = Math.max(0.70, Math.min(1.30, adj));
+    if (adj !== 1.0) {
+      p.confidence = Math.max(10, Math.min(95, Math.round(p.confidence * adj)));
+    }
+  }
 }
 
 /**
@@ -3440,7 +3658,7 @@ function _filterSignalsByCategory(signals) {
       // B-Tier 복합시그널 비활성 (학술 검증 후 승격 가능)
       if (_TIER_B_COMPOSITES.has(compId)) return false;
       // S+A Tier만 렌더링
-      return _ACTIVE_COMPOSITES.has(compId) || true;
+      return _ACTIVE_COMPOSITES.has(compId);
     }
     // B-Tier 개별 시그널: 차트 렌더링 비활성
     if (_TIER_B_SIGNALS.has(sType)) return false;

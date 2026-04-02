@@ -405,6 +405,26 @@ const PATTERN_ACADEMIC_META = Object.freeze({
     invalidation: '가격이 채널 상단/하단을 ATR×1.5 이상 이탈하면 채널 패턴 소멸. 채널 폭이 ATR×1.5 미만으로 좁아지면 수렴 패턴(삼각형)으로 전환.'
   },
 
+  risingThreeMethods: {
+    nameKo: '상승삼법',
+    category: '캔들스틱 (지속)',
+    candles: 5,
+    academicDesc: '큰 양봉(기준봉) 이후 3개의 소형 음봉이 기준봉 범위 내에서 조정, 마지막에 큰 양봉(확인봉)이 기준봉 고가를 돌파하며 상승 지속을 확인. Nison (1991) "Japanese Candlestick Charting Techniques".',
+    psychology: '기준봉에서 강한 매수세 발현 후 이익실현 매도가 3일간 진행되나, 매도 압력이 기준봉 범위를 벗어나지 못함. 확인봉의 신고가 돌파가 매수세 재개를 증명하며 추세 지속.',
+    bulkowskiWinRate: 65,
+    invalidation: '소형봉 중 하나라도 기준봉의 저가를 하향 이탈하면 패턴 무효. 확인봉이 기준봉 고가를 돌파하지 못하면 실패.'
+  },
+
+  fallingThreeMethods: {
+    nameKo: '하락삼법',
+    category: '캔들스틱 (지속)',
+    candles: 5,
+    academicDesc: '큰 음봉(기준봉) 이후 3개의 소형 양봉이 기준봉 범위 내에서 반등, 마지막에 큰 음봉(확인봉)이 기준봉 저가를 하향 돌파하며 하락 지속을 확인. Rising Three Methods의 대칭 패턴.',
+    psychology: '강한 매도세 이후 단기 반등이 3일간 시도되나 기준봉 고가를 넘지 못함. 확인봉의 신저가 갱신이 매도세 재개를 증명하며 하락 추세 지속.',
+    bulkowskiWinRate: 63,
+    invalidation: '소형봉 중 하나라도 기준봉의 고가를 상향 이탈하면 패턴 무효. 확인봉이 기준봉 저가를 하향 돌파하지 못하면 실패.'
+  },
+
   cupAndHandle: {
     nameKo: '컵앤핸들',
     category: '차트패턴 (지속)',

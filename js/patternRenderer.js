@@ -65,6 +65,8 @@ const patternRenderer = (() => {
     stickSandwich:      { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
     abandonedBabyBullish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
     abandonedBabyBearish:  { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 3 },
+    risingThreeMethods:    { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 5 },
+    fallingThreeMethods:   { color: CANDLE_COLOR, fill: CANDLE_FILL, candles: 5 },
   };
 
   const SINGLE_PATTERNS = {
@@ -106,6 +108,7 @@ const patternRenderer = (() => {
     'bullishHaramiCross', 'bearishHaramiCross',
     'stickSandwich',
     'abandonedBabyBullish', 'abandonedBabyBearish',
+    'risingThreeMethods', 'fallingThreeMethods',
   ]);
 
   // ── 패턴 한글 이름 (간결) ──
@@ -127,6 +130,7 @@ const patternRenderer = (() => {
     bullishHaramiCross: '강세잉태십자', bearishHaramiCross: '약세잉태십자',
     stickSandwich: '스틱샌드위치',
     abandonedBabyBullish: '강세버림받은아기', abandonedBabyBearish: '약세버림받은아기',
+    risingThreeMethods: '상승삼법', fallingThreeMethods: '하락삼법',
     doubleBottom: '이중바닥', doubleTop: '이중천장',
     headAndShoulders: '머리어깨형', inverseHeadAndShoulders: '역머리어깨형',
     ascendingTriangle: '상승삼각형', descendingTriangle: '하락삼각형',
@@ -143,6 +147,7 @@ const patternRenderer = (() => {
     'ascendingTriangle', 'piercingLine', 'cupAndHandle',
     'dragonflyDoji', 'tweezerBottom', 'bullishMarubozu',
     'bullishBeltHold', 'bullishHaramiCross', 'stickSandwich', 'abandonedBabyBullish',
+    'risingThreeMethods',
   ]);
   const BEARISH_TYPES = new Set([
     'shootingStar', 'hangingMan', 'bearishEngulfing', 'bearishHarami',
@@ -150,6 +155,7 @@ const patternRenderer = (() => {
     'risingWedge', 'descendingTriangle',
     'darkCloud', 'gravestoneDoji', 'tweezerTop', 'bearishMarubozu',
     'bearishBeltHold', 'bearishHaramiCross', 'abandonedBabyBearish',
+    'fallingThreeMethods',
   ]);
 
 

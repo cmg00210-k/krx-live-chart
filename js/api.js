@@ -390,7 +390,8 @@ class KRXDataService {
 
     // [FIX-TRUST] 캔들 데이터 출처 추적 — 가짜 데이터를 실제처럼 표시 방지
     // candles._dataSource: 'ws' | 'file' | 'demo' | 'idb' | 'koscom'
-    var candleSource = KRX_API_CONFIG.mode;
+    // [FIX-DQ1] synthetic 태그가 이미 있으면 보존, 아니면 모드 사용
+    var candleSource = (candles._dataSource === 'synthetic') ? 'synthetic' : KRX_API_CONFIG.mode;
 
     if (candles.length > 0) {
       // 캔들 정제: 검증 + 시간순 정렬 + 메모리 상한
@@ -650,7 +651,7 @@ class KRXDataService {
       if (!data.candles || !data.candles.length) return [];
 
       // 분봉 time은 Unix 타임스탬프 (숫자) — LWC가 직접 지원
-      return data.candles.map(c => ({
+      var result = data.candles.map(c => ({
         time: c.time,
         open: c.open,
         high: c.high,
@@ -658,6 +659,15 @@ class KRXDataService {
         close: c.close,
         volume: c.volume,
       }));
+
+      // [FIX-DQ1] Brownian bridge 보간 데이터 식별 — 가짜 데이터로 패턴 학습 방지
+      if (data.generated === true) {
+        Object.defineProperty(result, '_dataSource', {
+          value: 'synthetic', writable: true, enumerable: false, configurable: true,
+        });
+      }
+
+      return result;
     } catch (e) {
       clearTimeout(timeoutId);
       // 분봉 파일 없음 — 조용히 빈 배열 반환 (일봉 폴백으로 진행)

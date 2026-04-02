@@ -734,6 +734,9 @@ class PatternEngine {
     if (_cc('threeInsideUp'))  patterns.push(...this.detectThreeInsideUp(candles, ctx));
     if (_cc('threeInsideDown'))patterns.push(...this.detectThreeInsideDown(candles, ctx));
     if (_cc('abandonedBaby') || _cc('abandonedBabyBullish') || _cc('abandonedBabyBearish'))  patterns.push(...this.detectAbandonedBaby(candles, ctx));
+    // 5봉 지속 패턴 (Nison 1991, Doc07 §8.1)
+    if (_cc('risingThreeMethods'))  patterns.push(...this.detectRisingThreeMethods(candles, ctx));
+    if (_cc('fallingThreeMethods')) patterns.push(...this.detectFallingThreeMethods(candles, ctx));
 
     // [PERF] 스윙 포인트 탐지 — 차트 패턴 + S/R 모두 사용
     const swingFrom = Math.max(0, (_detectFrom || 0) - PatternEngine.HS_WINDOW - 10);
@@ -1135,6 +1138,128 @@ class PatternEngine {
         description: `3연속 음봉 하락 — 강한 매도 신호. 형태 점수 ${confidence}%`,
         startIndex: i - 2, endIndex: i,
         marker: { time: c2.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  상승삼법 (Rising Three Methods) — 상승 지속
+  //  Nison (1991), core_data/07 §8.1
+  //  5봉: 큰 양봉 → 3소형 음봉(범위 내) → 큰 양봉(확인)
+  // ══════════════════════════════════════════════════
+  detectRisingThreeMethods(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = Math.max(4, ctx.detectFrom || 0); i < candles.length; i++) {
+      const c0 = candles[i - 4], c1 = candles[i - 3], c2 = candles[i - 2], c3 = candles[i - 1], c4 = candles[i];
+      const a = this._atr(atr, i, candles);
+
+      // 봉0: 큰 양봉 (body/ATR > 0.7)
+      const body0 = c0.close - c0.open;
+      if (body0 <= 0 || body0 / a < 0.7) continue;
+      const range0 = c0.high - c0.low;
+      if (range0 <= 0) continue;
+
+      // 봉1~3: 소형 음봉, 기준봉 범위 내 유지
+      const inner = [c1, c2, c3];
+      let innerValid = true;
+      let maxPenetration = 0;
+      for (let j = 0; j < 3; j++) {
+        const cj = inner[j];
+        if (cj.close >= cj.open) { innerValid = false; break; } // 음봉이어야 함
+        if (cj.high > c0.high || cj.low < c0.low) { innerValid = false; break; } // 범위 내
+        const bodyJ = cj.open - cj.close;
+        if (bodyJ >= body0 * 0.5) { innerValid = false; break; } // 소형 (기준봉의 50% 미만)
+        const penetration = c0.low > 0 ? (c0.close - cj.close) / range0 : 0;
+        if (penetration > maxPenetration) maxPenetration = penetration;
+      }
+      if (!innerValid) continue;
+
+      // 봉4: 큰 양봉 확인 (종가 > 봉0 고가)
+      const body4 = c4.close - c4.open;
+      if (body4 <= 0 || c4.close <= c0.high) continue;
+
+      // 지속 패턴: 상승추세에서 발생해야 함
+      const trend = this._detectTrend(candles, i - 4, 10, a);
+      if (trend.direction === 'down') continue;
+
+      // 품질 점수 (Doc07 §8.1)
+      const bodyScore = Math.min(body0 / a, 1);
+      const breakoutScore = Math.min((c4.close - c0.high) / a, 1);
+      const containScore = 1 - maxPenetration;
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction === 'up' ? Math.min(trend.strength, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, shadow: containScore, volume: volumeScore, trend: trendScore, extra: breakoutScore });
+      const stopLoss = this._stopLoss(candles, i, 'buy', atr);
+      const priceTarget = this._candleTarget(candles, i, 'buy', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
+
+      results.push({
+        type: 'risingThreeMethods', name: '상승삼법 (Rising Three Methods)', nameShort: '상승삼법',
+        signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
+        description: `5봉 상승 지속 — 큰 양봉+3소형 조정+확인 돌파. 형태 점수 ${confidence}%`,
+        startIndex: i - 4, endIndex: i,
+        marker: { time: c4.time, position: 'belowBar', color: KRX_COLORS.PTN_MARKER_BUY, shape: 'arrowUp', text: '' },
+      });
+    }
+    return results;
+  }
+
+  // ══════════════════════════════════════════════════
+  //  하락삼법 (Falling Three Methods) — 하락 지속
+  //  Nison (1991), core_data/07 §8.1 대칭
+  // ══════════════════════════════════════════════════
+  detectFallingThreeMethods(candles, ctx = {}) {
+    const results = [];
+    const { atr = [], vma = [] } = ctx;
+    for (let i = Math.max(4, ctx.detectFrom || 0); i < candles.length; i++) {
+      const c0 = candles[i - 4], c1 = candles[i - 3], c2 = candles[i - 2], c3 = candles[i - 1], c4 = candles[i];
+      const a = this._atr(atr, i, candles);
+
+      // 봉0: 큰 음봉 (body/ATR > 0.7)
+      const body0 = c0.open - c0.close;
+      if (body0 <= 0 || body0 / a < 0.7) continue;
+      const range0 = c0.high - c0.low;
+      if (range0 <= 0) continue;
+
+      // 봉1~3: 소형 양봉, 기준봉 범위 내 유지
+      const inner = [c1, c2, c3];
+      let innerValid = true;
+      let maxPenetration = 0;
+      for (let j = 0; j < 3; j++) {
+        const cj = inner[j];
+        if (cj.close <= cj.open) { innerValid = false; break; } // 양봉이어야 함
+        if (cj.high > c0.high || cj.low < c0.low) { innerValid = false; break; } // 범위 내
+        const bodyJ = cj.close - cj.open;
+        if (bodyJ >= body0 * 0.5) { innerValid = false; break; } // 소형
+        const penetration = range0 > 0 ? (cj.close - c0.close) / range0 : 0;
+        if (penetration > maxPenetration) maxPenetration = penetration;
+      }
+      if (!innerValid) continue;
+
+      // 봉4: 큰 음봉 확인 (종가 < 봉0 저가)
+      const body4 = c4.open - c4.close;
+      if (body4 <= 0 || c4.close >= c0.low) continue;
+
+      // 지속 패턴: 하락추세에서 발생해야 함
+      const trend = this._detectTrend(candles, i - 4, 10, a);
+      if (trend.direction === 'up') continue;
+
+      const bodyScore = Math.min(body0 / a, 1);
+      const breakoutScore = Math.min((c0.low - c4.close) / a, 1);
+      const containScore = 1 - maxPenetration;
+      const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
+      const trendScore = trend.direction === 'down' ? Math.min(trend.strength, 1) : 0.3;
+      const confidence = this._quality({ body: bodyScore, shadow: containScore, volume: volumeScore, trend: trendScore, extra: breakoutScore });
+      const stopLoss = this._stopLoss(candles, i, 'sell', atr);
+      const priceTarget = this._candleTarget(candles, i, 'sell', 'strong', atr, ctx.hurstWeight, ctx.meanRevWeight);
+
+      results.push({
+        type: 'fallingThreeMethods', name: '하락삼법 (Falling Three Methods)', nameShort: '하락삼법',
+        signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
+        description: `5봉 하락 지속 — 큰 음봉+3소형 반등+확인 하락. 형태 점수 ${confidence}%`,
+        startIndex: i - 4, endIndex: i,
+        marker: { time: c4.time, position: 'aboveBar', color: KRX_COLORS.PTN_MARKER_SELL, shape: 'arrowDown', text: '' },
       });
     }
     return results;

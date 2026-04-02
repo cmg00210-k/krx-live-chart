@@ -16,6 +16,9 @@
 //    → { type: 'backtest', candles, version }
 //    ← { type: 'backtestResult', results, learnedWeights, backtestEpochMs, candleLength, version }
 //
+//    → { type: 'marketContext', vkospi, pcr, basis, leverageRatio, foreignAlignment }
+//    (no response — one-way injection into Worker-scope globals for signalEngine)
+//
 //    ← { type: 'ready' }   Worker 초기화 완료
 //    ← { type: 'error', message, version }   처리 중 에러
 // ══════════════════════════════════════════════════════
@@ -24,6 +27,17 @@
 
 // ── Worker 초기화 상태 ────────────────────────────────
 let _workerReady = false;
+
+// ── [H-2] 시장 맥락 데이터 — signalEngine 전역 참조용 ────
+// signalEngine._classifyVolRegimeFromVKOSPI()가 `typeof _marketContext`로 참조.
+// signalEngine._detect*Signal()이 `typeof _derivativesData` 등으로 참조.
+// app.js가 postMessage({type:'marketContext'})로 주입하면 여기에 저장.
+// var 선언: Worker 전역 스코프에 등록되어 signalEngine typeof 체크가 작동.
+var _marketContext = null;
+var _derivativesData = null;
+var _investorData = null;
+var _etfData = null;
+var _shortSellingData = null;
 
 // ── [PERF] 분석 결과 캐시 — 동일 캔들 재분석 방지 ────
 // 캔들 길이 + 마지막 캔들의 time + open + close로 변경 감지
@@ -60,10 +74,10 @@ function _makeCacheKey(candles, timeframe) {
 try {
   importScripts(
     'colors.js?v=13',
-    'indicators.js?v=24',
-    'patterns.js?v=41',
-    'signalEngine.js?v=33',
-    'backtester.js?v=35'
+    'indicators.js?v=25',
+    'patterns.js?v=42',
+    'signalEngine.js?v=34',
+    'backtester.js?v=36'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -473,6 +487,56 @@ self.onmessage = function (e) {
         message: '[Worker backtest] ' + err.message,
         version: msg.version || -1,
       });
+    }
+  }
+
+  // ── [H-2] 시장 맥락 주입 ────────────────────────────
+  // app.js → Worker: 파생상품/수급/ETF/VKOSPI 데이터를 Worker 전역에 주입.
+  // signalEngine._classifyVolRegimeFromVKOSPI()는 _marketContext.vkospi를 읽고,
+  // signalEngine._detect*Signal()은 _derivativesData/_investorData/_etfData/_shortSellingData를 읽는다.
+  // 레짐 분류만 Worker 내부 수행, 멀티플라이어 적용은 메인 스레드 (이중 적용 방지).
+  else if (msg.type === 'marketContext') {
+    try {
+      // _marketContext: signalEngine._classifyVolRegimeFromVKOSPI()가 vkospi 읽기
+      if (msg.vkospi != null) {
+        _marketContext = _marketContext || {};
+        _marketContext.vkospi = msg.vkospi;
+      }
+
+      // _derivativesData: signalEngine._detectBasisSignal(), _detectPCRSignal()
+      if (msg.pcr != null || msg.basis != null) {
+        _derivativesData = _derivativesData || {};
+        if (msg.pcr != null) _derivativesData.pcr = msg.pcr;
+        if (msg.basis != null) _derivativesData.basis = msg.basis;
+      }
+
+      // _etfData: signalEngine._detectETFSentiment()
+      if (msg.leverageRatio != null) {
+        _etfData = _etfData || {};
+        _etfData.leverageSentiment = _etfData.leverageSentiment || {};
+        _etfData.leverageSentiment.leverageRatio = msg.leverageRatio;
+        // Derive sentiment string from ratio (same thresholds as download_etf.py)
+        if (msg.leverageRatio > 2.0) _etfData.leverageSentiment.sentiment = 'strong_bullish';
+        else if (msg.leverageRatio > 1.0) _etfData.leverageSentiment.sentiment = 'bullish';
+        else if (msg.leverageRatio > 0.5) _etfData.leverageSentiment.sentiment = 'neutral';
+        else _etfData.leverageSentiment.sentiment = 'strong_bearish';
+      }
+
+      // _investorData: signalEngine._detectFlowSignal()
+      if (msg.foreignAlignment != null) {
+        _investorData = _investorData || {};
+        _investorData.alignment = msg.foreignAlignment;
+      }
+
+      // Invalidate analyze cache — regime data changed, signals need recalculation
+      _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
+
+      console.log('[Worker] marketContext 주입 완료',
+        'vkospi=' + (msg.vkospi != null ? msg.vkospi : '-'),
+        'pcr=' + (msg.pcr != null ? msg.pcr : '-'),
+        'basis=' + (msg.basis != null ? msg.basis : '-'));
+    } catch (err) {
+      console.warn('[Worker] marketContext 처리 실패:', err.message);
     }
   }
 

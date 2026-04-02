@@ -412,8 +412,18 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
 
     if ktb_3y is not None and aa_yield is not None:
         aa_spread = round(aa_yield - ktb_3y, 2)
+        # [FIX-CS1] AA- 수익률이 국고채보다 낮으면 데이터 오류
+        if aa_spread < 0:
+            print(f"  WARNING: AA- spread={aa_spread} < 0 (AA-={aa_yield}, KTB3Y={ktb_3y}) — data anomaly, nullifying")
+            aa_yield = None
+            aa_spread = None
     if ktb_3y is not None and bbb_yield is not None:
         bbb_spread = round(bbb_yield - ktb_3y, 2)
+        # [FIX-CS1] BBB- 수익률이 국고채보다 낮으면 경제적 불가능 → 데이터 오류
+        if bbb_spread < 0:
+            print(f"  WARNING: BBB- spread={bbb_spread} < 0 (BBB-={bbb_yield}, KTB3Y={ktb_3y}) — data anomaly, nullifying")
+            bbb_yield = None
+            bbb_spread = None
 
     credit_spreads = {
         "aa_minus": credit_data.get("aa_minus"),
