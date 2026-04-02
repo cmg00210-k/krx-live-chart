@@ -30,6 +30,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 INDICES = {
     "kospi": "1001",   # KOSPI 종합
     "kosdaq": "2001",  # KOSDAQ 종합
+    "kospi200": "1028", # KOSPI 200 (선물 basis 계산용, Doc27 §1)
 }
 
 

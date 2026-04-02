@@ -45,6 +45,12 @@
 | 33 | [33_agency_costs_industry_concentration.md](33_agency_costs_industry_concentration.md) | 대리인 비용·산업 집중도 | Jensen-Meckling 대리인 비용, Holmstrom 최적계약, 재벌 터널링, ARI 지수, HHI-패턴신뢰도, 코즈 거래비용, 규제 포획 |
 | 34 | [34_volatility_risk_premium_harv.md](34_volatility_risk_premium_harv.md) | VRP·HAR-RV·점프확산 | Bollerslev VRP, Corsi HAR-RV(일/주/월 RV 분해), Merton 점프-확산, 변동성 기간구조, 분산 트레이딩, GEX 심화, Student-t CI |
 | 35 | [35_bond_signals_yield_curve.md](35_bond_signals_yield_curve.md) | 채권시장 신호·수익률 곡선 | NSS 수익률 곡선, 10Y-3Y 기울기 선행성, Fed/BOK Yield Gap, AA-/BBB- 크레딧 스프레드 4체제, Merton DD, Rate Beta, 채권-주식 상관관계 레짐 |
+| 36 | [36_futures_microstructure_oi.md](36_futures_microstructure_oi.md) | 선물 미시구조·OI 분석 | OI-Price 4사분면, Bessembinder-Seguin 변동성, 베이시스 미시구조, Hasbrouck 가격발견, 만기일 효과(Stoll-Whaley), 프로그램매매, 사이드카 |
+| 37 | [37_options_iv_surface_skew.md](37_options_iv_surface_skew.md) | 옵션 IV 곡면·스큐 분석 | SVI 파라미터화(Gatheral), 무차익 조건, 25δ RR/BF 신호, SKEW 지수, GEX 심화(딜러 핀닝·MM 의무), 옵션 흐름(UOA·블록거래), 스큐 기간구조, 심리 극단치 종합 |
+| 38 | [38_etf_ecosystem_fund_flow.md](38_etf_ecosystem_fund_flow.md) | ETF 생태계·자금흐름 분석 | Creation/Redemption 차익, 레버리지/인버스 센티먼트, ETF 자금흐름, ETF-기초자산 피드백 루프, 괴리율 신호, ETF 보유 비중별 패턴 신뢰도, 체계적 위험 |
+| 39 | [39_investor_flow_information.md](39_investor_flow_information.md) | 투자자 수급·정보 비대칭 | Grossman-Stiglitz 역설, Kyle 3유형, 외국인 흐름(Kang-Stulz), LSV 군집, 개미 역발상, 복합 수급 신호, 수급-가격 괴리 |
+| 40 | [40_short_selling_securities_lending.md](40_short_selling_securities_lending.md) | 공매도·대차거래 분석 | Miller 고평가, Diamond-Verrecchia, SIR/DTC, 숏스퀴즈 탐지(Lamont-Thaler), 대차수수료(D'Avolio), 비선형성, 제도적 이벤트 |
+| 41 | [41_bond_equity_relative_value.md](41_bond_equity_relative_value.md) | 채권-주식 상대가치·위험선호 전환 | Fed Model/ERP z-score, RORO 레짐(inflation beta), 듀레이션·볼록성, 크레딧 사이클 4국면(EBP), BOK 이벤트 스터디, 크로스에셋 복합 신호, CRAI |
 
 ---
 
@@ -91,13 +97,16 @@
   └── CNN/LSTM/Attention 패턴 인식 → 전이학습 → SHAP 해석
   └── 워크포워드 검증 → 다중 가설 검정 → 부트스트랩
 
-[Stage 8] 고급 이론                             → 03, 13, 09, 12, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
+[Stage 8] 고급 이론                             → 03, 13, 09, 12, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 38, 41
   └── 경제물리학(멱법칙, 임계현상) → 정보기하학(KL 발산, 전이 엔트로피)
   └── 게임 이론(내쉬 균형) → 극단값 이론(GEV, GPD)
   └── 파생상품(옵션/선물) → 교차시장 상관 → 거시경제·섹터 회전
+  └── IV 곡면(SVI, 스큐, GEX 심화) → 옵션 흐름(UOA, 스마트 머니)
   └── 거시경제학(IS-LM, AD-AS, 테일러 준칙) → 미시경제학(탄력성, 시장구조, 한계분석)
   └── 탐색이론(Stigler, 주의 제한) → 대리인 비용(Jensen-Meckling, HHI)
   └── 채권시장 신호(NSS 수익률 곡선, 크레딧 스프레드, Merton DD)
+  └── 채권-주식 상대가치(ERP, RORO 레짐, 크레딧 사이클, BOK 이벤트)
+  └── ETF 생태계(레버리지 센티먼트, 자금흐름, 괴리율, 보유 비중 패턴 보정)
 
 [Stage 9] 최적 제어와 RL 기초                   → 10, 11
   └── HJB 방정식 → 머튼 포트폴리오 → 최적 실행
@@ -158,3 +167,17 @@
 | 크레딧 스프레드 체제 (creditRegime) | 35_bond_signals_yield_curve.md §5 AA- 4체제 분류, 패턴 신뢰도 조정 |
 | Merton DD 부도 위험 경고 | 35_bond_signals_yield_curve.md §6 Distance-to-Default, DART 부채 활용 |
 | 섹터별 금리 베타 (rateBetaAdj) | 35_bond_signals_yield_curve.md §7 금리 변화 × 섹터 민감도 |
+| IV 곡면 SVI 파라미터화 (ivSurface) | 37_options_iv_surface_skew.md §2 Gatheral SVI, 무차익 조건, KOSPI200 곡면 특성 |
+| 스큐 신호 (ivSkewLevel, skewMomentum) | 37_options_iv_surface_skew.md §4 25δ RR/BF, SKEW 지수, 스큐 변화율 |
+| GEX 심화 (gexLevel, gexFlipDistance) | 37_options_iv_surface_skew.md §5 딜러 포지셔닝, 핀닝, GEX-VRP 교차 |
+| 옵션 흐름 분석 (uoaAlert, pcrAdvanced) | 37_options_iv_surface_skew.md §6 UOA 탐지, 스마트 머니, PCR 고급 분해 |
+| 변동성 기간구조 곡면 (volTermRegime) | 37_options_iv_surface_skew.md §7 스큐 기간구조, 복합 레짐 4분류 |
+| ETF 센티먼트 레짐 (etfSentiment) | 38_etf_ecosystem_fund_flow.md §3 레버리지 비율, §8 복합 센티먼트 4레짐 |
+| ETF 자금흐름 섹터 회전 (etfFlow) | 38_etf_ecosystem_fund_flow.md §4 순설정 흐름, 섹터별 FlowMomentum |
+| ETF 괴리율 신호 (etfPremium) | 38_etf_ecosystem_fund_flow.md §6 프리미엄/디스카운트, 국제 ETF FX 프록시 |
+| ETF 보유 비중 패턴 보정 (etfOwnership) | 38_etf_ecosystem_fund_flow.md §9 Grade A-D, reliabilityMult |
+| ERP z-score 상대가치 (erpSignal) | 41_bond_equity_relative_value.md §2 Fed Model, ERP 정규화, 504일 롤링 |
+| 위험선호 레짐 (riskAppetiteRegime) | 41_bond_equity_relative_value.md §3 RORO, inflation beta, CRAI 복합지수 |
+| 크레딧 사이클 국면 (creditCyclePhase) | 41_bond_equity_relative_value.md §5 EBP 근사, 7-state 국면 판정 |
+| BOK 이벤트 감쇠 (bokEventDamping) | 41_bond_equity_relative_value.md §6 서프라이즈, 반응 비대칭성 |
+| 채권-주식 복합 신호 (bondEquitySignal) | 41_bond_equity_relative_value.md §7 ERP+크레딧+RORO 가중 복합, 위기 오버라이드 |

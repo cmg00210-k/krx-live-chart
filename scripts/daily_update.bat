@@ -11,7 +11,7 @@
 
 chcp 65001 >nul
 echo [%date% %time%] ========================================
-echo [%date% %time%] KRX Daily Data Update - START
+echo [%date% %time%] KRX Daily Data Update - START (v52)
 echo [%date% %time%] ========================================
 
 :: Move to project root (one level up from bat location)
@@ -26,10 +26,19 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
+:: -- Step 0: API Health Check (Open API quick probe) --
+echo.
+echo [%date% %time%] [0/10] API Health Check...
+"%PYTHON%" scripts/krx_probe_phase0.py --quick --save-health
+if errorlevel 1 (
+    echo [%date% %time%] ERROR: KRX API health check FAILED - aborting pipeline
+    exit /b 1
+)
+
 :: -- Step 1: KOSIS economic indicators (22 composite indices) --
 :: NOTE: KOSIS runs before macro so MCS CSI uses today's KOSIS data
 echo.
-echo [%date% %time%] [1/7] KOSIS download...
+echo [%date% %time%] [1/10] KOSIS download...
 "%PYTHON%" scripts/download_kosis.py
 if errorlevel 1 (
     echo [%date% %time%] WARNING: KOSIS download failed
@@ -37,7 +46,7 @@ if errorlevel 1 (
 
 :: -- Step 2: Macro indicators (ECOS/FRED/OECD) --
 echo.
-echo [%date% %time%] [2/7] Macro indicators download...
+echo [%date% %time%] [2/10] Macro indicators download...
 "%PYTHON%" scripts/download_macro.py
 if errorlevel 1 (
     echo [%date% %time%] WARNING: Macro download failed
@@ -45,7 +54,7 @@ if errorlevel 1 (
 
 :: -- Step 3: Bond / yield curve + credit spread --
 echo.
-echo [%date% %time%] [3/7] Bonds download...
+echo [%date% %time%] [3/10] Bonds download...
 "%PYTHON%" scripts/download_bonds.py
 if errorlevel 1 (
     echo [%date% %time%] WARNING: Bonds download failed
@@ -53,31 +62,57 @@ if errorlevel 1 (
 
 :: -- Step 4: Market context (CCSI, VKOSPI, investor flow) --
 echo.
-echo [%date% %time%] [4/7] Market context download...
+echo [%date% %time%] [4/10] Market context download...
 "%PYTHON%" scripts/download_market_context.py
 if errorlevel 1 (
     echo [%date% %time%] WARNING: Market context download failed
 )
 
-:: -- Step 5: OHLCV download (cron mode - log to file) --
+:: -- Step 5: KRX Open API derivatives (futures + options) --
 echo.
-echo [%date% %time%] [5/7] OHLCV download (cron mode)...
+echo [%date% %time%] [5/10] Derivatives download (Open API)...
+"%PYTHON%" scripts/download_derivatives.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Derivatives download failed
+)
+
+:: -- Step 6: KRX Open API - VKOSPI + ETF --
+echo.
+echo [%date% %time%] [6/10] VKOSPI + ETF download (Open API)...
+"%PYTHON%" scripts/download_vkospi.py
+"%PYTHON%" scripts/download_etf.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: VKOSPI/ETF download failed
+)
+
+:: -- Step 7: KRX OTP - Investor + Short Selling --
+echo.
+echo [%date% %time%] [7/10] Investor + Short Selling (OTP)...
+"%PYTHON%" scripts/download_investor.py
+"%PYTHON%" scripts/download_shortselling.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Investor/ShortSelling download failed
+)
+
+:: -- Step 8: OHLCV download (cron mode - log to file) --
+echo.
+echo [%date% %time%] [8/10] OHLCV download (cron mode)...
 "%PYTHON%" scripts/download_ohlcv.py --cron --years 1
 if errorlevel 1 (
     echo [%date% %time%] WARNING: OHLCV download failed (partial)
 )
 
-:: -- Step 6: Intraday candle generation (5m) --
+:: -- Step 9: Intraday candle generation (5m) --
 echo.
-echo [%date% %time%] [6/7] Intraday generation (5m)...
+echo [%date% %time%] [9/10] Intraday generation (5m)...
 "%PYTHON%" scripts/generate_intraday.py --timeframe 5m
 if errorlevel 1 (
     echo [%date% %time%] WARNING: Intraday generation failed
 )
 
-:: -- Step 7: Index price / change update (OHLCV-based, no FDR) --
+:: -- Step 10: Index price / change update (OHLCV-based, no FDR) --
 echo.
-echo [%date% %time%] [7/7] Index price update...
+echo [%date% %time%] [10/10] Index price update...
 "%PYTHON%" scripts/update_index_prices.py --offline
 if errorlevel 1 (
     echo [%date% %time%] WARNING: Index update failed
@@ -85,6 +120,6 @@ if errorlevel 1 (
 
 echo.
 echo [%date% %time%] ========================================
-echo [%date% %time%] KRX Daily Data Update - DONE (7 steps)
+echo [%date% %time%] KRX Daily Data Update - DONE (v52, 10 steps)
 echo [%date% %time%] ========================================
 exit /b 0

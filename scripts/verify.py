@@ -99,6 +99,8 @@ CANONICAL_PATTERNS = {
     "bullishHaramiCross", "bearishHaramiCross",
     "stickSandwich",
     "abandonedBabyBullish", "abandonedBabyBearish",
+    "risingThreeMethods", "fallingThreeMethods",
+    "cupAndHandle",
     "ascendingTriangle", "descendingTriangle",
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
@@ -115,7 +117,7 @@ CHART_PATTERNS_SET = {
     "risingWedge", "fallingWedge", "symmetricTriangle",
     "doubleBottom", "doubleTop",
     "headAndShoulders", "inverseHeadAndShoulders",
-    "channel",
+    "channel", "cupAndHandle",
 }
 
 CANDLE_PATTERNS_SET = CANONICAL_PATTERNS - CHART_PATTERNS_SET
