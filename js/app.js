@@ -257,7 +257,9 @@ var _VIZ_CHART_TYPES = new Set([
  *  D Tier (CONTEXT_ONLY): 표시하되 경고 배지 부착 */
 function _filterPatternsForViz(patterns) {
   if (!patterns || !patterns.length) return patterns;
-  return patterns.filter(function(p) {
+  var result = [];
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
     var t = p.type;
     // [D-1] bullishBeltHold 조건부 복원 — Morris (2006), Graham (1949)
     // D-Tier(WR 51.4%, p=0.17) 이지만 경기 저점 + PBR<1.0 조합 시 가치 반전 신호로 유의미
@@ -268,7 +270,6 @@ function _filterPatternsForViz(patterns) {
       var _d1Macro = _macroLatest;
       var _d1Phase = (_d1Macro && _d1Macro.cycle_phase) ? _d1Macro.cycle_phase.phase : null;
       if (_d1Phase === 'trough') {
-        // PBR 계산: _financialCache에서 BPS 추출 후 현재가와 비교
         var _d1Pbr = null;
         if (typeof _financialCache !== 'undefined' && currentStock) {
           var _d1Fin = _financialCache[currentStock.code];
@@ -276,7 +277,6 @@ function _filterPatternsForViz(patterns) {
             var _d1Arr = (_d1Fin.quarterly && _d1Fin.quarterly.length) ? _d1Fin.quarterly : _d1Fin.annual;
             if (_d1Arr && _d1Arr.length && _d1Arr[0].bps) {
               var _d1Bps = Number(_d1Arr[0].bps);
-              // 현재가: currentStock.prevClose 또는 candles 마지막 종가
               var _d1Price = (currentStock && currentStock.prevClose) ? currentStock.prevClose
                 : (typeof candles !== 'undefined' && candles.length) ? candles[candles.length - 1].close : null;
               if (_d1Bps > 0 && _d1Price > 0) {
@@ -290,30 +290,44 @@ function _filterPatternsForViz(patterns) {
         }
       }
       if (_d1Restore) {
-        // SUPPRESS 해제 → CONTEXT_ONLY로 표시 (경고 배지 + 조건부 복원 설명)
-        p._contextOnly = true;
-        p._conditionalRestore = 'trough+PBR<1.0';
-        return vizToggles.candle;
+        // shallow copy → 원본 mutation 방지
+        var copy = Object.assign({}, p);
+        copy._contextOnly = true;
+        copy._conditionalRestore = 'trough+PBR<1.0';
+        if (vizToggles.candle) result.push(copy);
       }
-      // 조건 미충족: 기존 SUPPRESS 유지
-      return false;
+      continue;
     }
     // D-Tier SUPPRESS: UI 표시 완전 off (백테스트 데이터 수집은 계속)
-    if (_SUPPRESS_PATTERNS.has(t)) return false;
-    // D-Tier CONTEXT_ONLY: 표시하되 플래그 부착
-    if (_CONTEXT_ONLY_PATTERNS.has(t)) p._contextOnly = true;
+    if (_SUPPRESS_PATTERNS.has(t)) continue;
+    // D-Tier CONTEXT_ONLY: shallow copy 후 플래그 부착
+    if (_CONTEXT_ONLY_PATTERNS.has(t)) {
+      var copy2 = Object.assign({}, p);
+      copy2._contextOnly = true;
+      if (t === 'support' || t === 'resistance') {
+        if (vizToggles.chart) result.push(copy2);
+      } else if (_ACTIVE_CANDLE_TYPES.has(t)) {
+        if (vizToggles.candle) result.push(copy2);
+      } else if (_ACTIVE_CHART_TYPES.has(t)) {
+        if (vizToggles.chart) result.push(copy2);
+      } else {
+        result.push(copy2);
+      }
+      continue;
+    }
     // S/R: 항상 S-Tier (vizToggles 적용)
-    if (t === 'support' || t === 'resistance') return vizToggles.chart;
+    if (t === 'support' || t === 'resistance') { if (vizToggles.chart) result.push(p); continue; }
     // S+A Tier 캔들 패턴만 렌더링
-    if (_ACTIVE_CANDLE_TYPES.has(t)) return vizToggles.candle;
-    // B-Tier 캔들: 차트 렌더링 제외 (백테스트 데이터만 수집)
-    if (_TIER_B_CANDLE.has(t)) { p._tierB = true; return false; }
+    if (_ACTIVE_CANDLE_TYPES.has(t)) { if (vizToggles.candle) result.push(p); continue; }
+    // B-Tier 캔들: 차트 렌더링 제외 (백테스트 데이터만 수집, 원본 mutation 없음)
+    if (_TIER_B_CANDLE.has(t)) continue;
     // S+A Tier 차트 패턴만 렌더링
-    if (_ACTIVE_CHART_TYPES.has(t)) return vizToggles.chart;
+    if (_ACTIVE_CHART_TYPES.has(t)) { if (vizToggles.chart) result.push(p); continue; }
     // B-Tier 차트: 차트 렌더링 제외
-    if (_TIER_B_CHART.has(t)) { p._tierB = true; return false; }
-    return true;
-  });
+    if (_TIER_B_CHART.has(t)) continue;
+    result.push(p);
+  }
+  return result;
 }
 
 // ══════════════════════════════════════════════════════

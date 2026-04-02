@@ -489,6 +489,57 @@ class PatternEngine {
     return candles[idx].volume / vma[idx];
   }
 
+  /** [C-5] 피봇 거래량 점진 감소 점수 — Bulkowski (2005)
+   *  H&S: LS→Head→RS 순으로 거래량 감소 여부 평가.
+   *  피봇 ±1봉 평균으로 단일봉 노이즈 완화.
+   *  @param {Array} candles
+   *  @param {number[]} pivotIndices - [ls, head, rs] 인덱스 배열
+   *  @returns {number} 0.3(미감소)~1.0(전체 감소)
+   */
+  _pivotVolumeDecline(candles, pivotIndices) {
+    if (!pivotIndices || pivotIndices.length < 3) return 0.5;
+    const avgVol = (idx) => {
+      let sum = 0, cnt = 0;
+      for (let k = Math.max(0, idx - 1); k <= Math.min(candles.length - 1, idx + 1); k++) {
+        if (candles[k] && candles[k].volume > 0) { sum += candles[k].volume; cnt++; }
+      }
+      return cnt > 0 ? sum / cnt : 0;
+    };
+    const v0 = avgVol(pivotIndices[0]);
+    const v1 = avgVol(pivotIndices[1]);
+    const v2 = avgVol(pivotIndices[2]);
+    if (v0 <= 0 || v1 <= 0 || v2 <= 0) return 0.5;
+    const d01 = v1 < v0;  // head < LS
+    const d12 = v2 < v1;  // RS < head
+    if (d01 && d12) return 1.0;   // 전체 감소
+    if (d01 || d12) return 0.7;   // 부분 감소
+    return 0.3;                    // 미감소
+  }
+
+  /** [C-5] 거래량 수축 점수 — Edwards & Magee (2018)
+   *  삼각형/쐐기 수렴 중 전반부 대비 후반부 거래량 감소 여부.
+   *  수축 비율 = 후반부 평균 / 전반부 평균. 비율 < 1 = 수축(양호).
+   *  @param {Array} candles
+   *  @param {number} startIdx
+   *  @param {number} endIdx
+   *  @returns {number} 0.2(팽창)~1.0(강한 수축)
+   */
+  _volumeContraction(candles, startIdx, endIdx) {
+    if (startIdx >= endIdx || endIdx >= candles.length) return 0.5;
+    const midIdx = Math.floor((startIdx + endIdx) / 2);
+    let firstSum = 0, firstCnt = 0, secondSum = 0, secondCnt = 0;
+    for (let k = startIdx; k <= endIdx; k++) {
+      if (candles[k] && candles[k].volume > 0) {
+        if (k <= midIdx) { firstSum += candles[k].volume; firstCnt++; }
+        else { secondSum += candles[k].volume; secondCnt++; }
+      }
+    }
+    if (firstCnt === 0 || secondCnt === 0) return 0.5;
+    const ratio = (secondSum / secondCnt) / (firstSum / firstCnt);
+    // ratio < 0.5 → 강한 수축 (1.0), ratio = 1.0 → 변화 없음 (0.5), ratio > 1.5 → 팽창 (0.2)
+    return Math.max(0.2, Math.min(1.0, 1.5 - ratio));
+  }
+
   /** 다요인 품질 점수 (0-100)
    *  extra 기본값 0.3: 확인 요인 부재 시 보수적 평가 (Nison/Morris 원칙)
    *  0.5는 "추가 확인 없이도 절반 점수"를 의미하여 신뢰도 인플레이션 유발
@@ -2730,7 +2781,9 @@ class PatternEngine {
       if (endIdx >= candles.length) continue;
 
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      const confidence = this._adaptiveQuality('ascendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
+      // [C-5] Edwards & Magee: 삼각형 수렴 중 거래량 수축 확인
+      const volContraction = this._volumeContraction(candles, startIdx, endIdx);
+      const confidence = this._adaptiveQuality('ascendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6, extra: volContraction });
       const stopLoss = +(relevantLows[relevantLows.length - 1].price - a).toFixed(0);
       const raw = resistanceLevel - relevantLows[0].price;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
@@ -2792,7 +2845,9 @@ class PatternEngine {
       if (endIdx >= candles.length) continue;
 
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-      let confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6 });
+      // [C-5] Edwards & Magee: 삼각형 수렴 중 거래량 수축 확인
+      const volContraction = this._volumeContraction(candles, startIdx, endIdx);
+      let confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6, extra: volContraction });
       confidence = Math.min(90, confidence);  // [M-8] Taleb-motivated ceiling
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
       const raw = relevantHighs[0].price - supportLevel;
@@ -2867,7 +2922,10 @@ class PatternEngine {
         if (endIdx >= candles.length) continue;
 
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-        const confidence = this._adaptiveQuality('risingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
+        // [C-5] Edwards & Magee: 쐐기 수렴 중 거래량 수축 확인
+        const startIdxRW = Math.min(h1.index, l1.index);
+        const volContraction = this._volumeContraction(candles, startIdxRW, endIdx);
+        const confidence = this._adaptiveQuality('risingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: volContraction });
         const stopLoss = +(h2.price + a).toFixed(0);
         const wedgeHeight = h2.price - l2.price;
         const priceTarget = +(Math.max(l1.price, candles[endIdx].close - Math.min(wedgeHeight * hw * mw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP)))).toFixed(0);
@@ -2939,7 +2997,10 @@ class PatternEngine {
         if (endIdx >= candles.length) continue;
 
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
-        const confidence = this._adaptiveQuality('fallingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: 0.6 });
+        // [C-5] Edwards & Magee: 쐐기 수렴 중 거래량 수축 확인
+        const startIdxFW = Math.min(h1.index, l1.index);
+        const volContraction = this._volumeContraction(candles, startIdxFW, endIdx);
+        const confidence = this._adaptiveQuality('fallingWedge', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: volContraction });
         const stopLoss = +(l2.price - a).toFixed(0);
         const wedgeHeight = h2.price - l2.price;
         const priceTarget = +(Math.min(h1.price, candles[endIdx].close + Math.min(wedgeHeight * hw * mw, wedgeHeight * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP)))).toFixed(0);
@@ -3023,10 +3084,13 @@ class PatternEngine {
 
         // 거래량 분석: 삼각형 내부에서 거래량 감소가 전형적 (수렴 에너지 압축)
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
+        // [C-5] Edwards & Magee: 삼각형 수렴 중 거래량 수축 확인
+        const startIdx = Math.min(h1.index, l1.index);
+        const volContraction = this._volumeContraction(candles, startIdx, endIdx);
 
         // 대칭성이 좋을수록 신뢰도 보너스 (1.0에 가까울수록 완벽한 대칭)
         const symmetryScore = 1 - Math.abs(1 - slopeRatio) / 2;
-        const confidence = this._adaptiveQuality('symmetricTriangle', { body: 0.6, volume: volumeScore, trend: 0.5, extra: symmetryScore });
+        const confidence = this._adaptiveQuality('symmetricTriangle', { body: 0.6, volume: volumeScore, trend: 0.5, shadow: volContraction, extra: symmetryScore });
 
         results.push({
           type: 'symmetricTriangle', name: '대칭 삼각형 (Symmetric Triangle)', nameShort: '대칭삼각',
@@ -3198,6 +3262,10 @@ class PatternEngine {
       const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
 
+      // [C-5] Bulkowski (2005): H&S 거래량 점진 감소 — LS > Head > RS
+      // 피봇 ±1봉 평균으로 노이즈 완화. 전체 감소=1.0, 부분=0.7, 없음=0.3
+      const volDecline = this._pivotVolumeDecline(candles, [ls.index, head.index, rs.index]);
+
       // [Fix H&S 대칭] trend 점수를 선행 추세 기반으로 동적 계산
       let trendScoreHS = 0.5;
       if (preLookbackHS >= 3) {
@@ -3206,7 +3274,7 @@ class PatternEngine {
         const rise = (ls.price - prePriceHS) / (preATR_HS * preLookbackHS);
         trendScoreHS = Math.max(0.3, Math.min(1.0, rise * 2));
       }
-      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScoreHS, shadow: symmetry });
+      const confidence = this._adaptiveQuality('headAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScoreHS, shadow: symmetry, extra: volDecline });
 
       results.push({
         type: 'headAndShoulders', name: '머리어깨형 (Head & Shoulders)', nameShort: 'H&S',
@@ -3279,6 +3347,9 @@ class PatternEngine {
       const symmetry = Math.max(0, 1 - shoulderAsym / PatternEngine.HS_SHOULDER_TOLERANCE);
       const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
 
+      // [C-5] Bulkowski (2005): 역H&S 거래량 점진 감소 — LS > Head > RS
+      const volDecline = this._pivotVolumeDecline(candles, [ls.index, head.index, rs.index]);
+
       // [Fix invH&S-gap] trend 점수를 선행 추세 기반으로 동적 계산 (기존 0.7 하드코딩 제거)
       // Bulkowski: 깊은 선행 하락 → 반전 성공률 상승. ATR 정규화 기울기로 정량화.
       let trendScore = 0.5;
@@ -3289,7 +3360,7 @@ class PatternEngine {
         const decline = (prePrice - ls.price) / (preATR * preLookback);
         trendScore = Math.max(0.3, Math.min(1.0, decline * 2));
       }
-      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScore, shadow: symmetry });
+      const confidence = this._adaptiveQuality('inverseHeadAndShoulders', { body: Math.min(patternHeight / a / 3, 1), volume: volumeScore, trend: trendScore, shadow: symmetry, extra: volDecline });
 
       results.push({
         type: 'inverseHeadAndShoulders', name: '역머리어깨형 (Inverse H&S)', nameShort: '역H&S',
@@ -3968,6 +4039,7 @@ class PatternEngine {
     pattern.breakoutConfirmed = false;
     pattern.breakIndex = null;
     pattern.breakPrice = null;
+    pattern.breakoutVolumeConfirmed = false;
 
     const ei = pattern.endIndex;
     if (ei == null || ei >= candles.length - 1) return;
@@ -4005,51 +4077,45 @@ class PatternEngine {
       const line1AtJ = tl1[0].value + slope1 * (j - i1a);
 
       if (type === 'ascendingTriangle') {
-        // 수평 저항 상방 돌파
         if (close > line0AtJ + threshold) {
           pattern.breakoutConfirmed = true;
           pattern.breakIndex = j;
           pattern.breakPrice = close;
-          return;
+          break;
         }
       } else if (type === 'descendingTriangle') {
-        // 수평 지지 하방 돌파
         if (close < line1AtJ - threshold) {
           pattern.breakoutConfirmed = true;
           pattern.breakIndex = j;
           pattern.breakPrice = close;
-          return;
+          break;
         }
       } else if (type === 'risingWedge') {
-        // 하향 이탈 (하단 트렌드라인 아래)
         if (close < line1AtJ - threshold) {
           pattern.breakoutConfirmed = true;
           pattern.breakIndex = j;
           pattern.breakPrice = close;
-          return;
+          break;
         }
       } else if (type === 'fallingWedge') {
-        // 상향 이탈 (상단 트렌드라인 위)
         if (close > line0AtJ + threshold) {
           pattern.breakoutConfirmed = true;
           pattern.breakIndex = j;
           pattern.breakPrice = close;
-          return;
+          break;
         }
       } else if (type === 'symmetricTriangle') {
-        // 양방향 — 돌파 방향에 따라 signal 동적 전환
         if (close > line0AtJ + threshold) {
           pattern.breakoutConfirmed = true;
           pattern.breakIndex = j;
           pattern.breakPrice = close;
           pattern.signal = 'buy';
           pattern.strength = 'strong';
-          // 목표가/손절 설정 — 삼각형 높이 측정이동
           const triHeight = Math.abs(tl0[0].value - tl1[0].value);
           const capA = this._atr(atr, ei, candles);
           pattern.priceTarget = +(close + Math.min(triHeight, capA * PatternEngine.CHART_TARGET_ATR_CAP)).toFixed(0);
           pattern.stopLoss = +(line1AtJ - capA).toFixed(0);
-          return;
+          break;
         }
         if (close < line1AtJ - threshold) {
           pattern.breakoutConfirmed = true;
@@ -4061,8 +4127,26 @@ class PatternEngine {
           const capA = this._atr(atr, ei, candles);
           pattern.priceTarget = +(close - Math.min(triHeight, capA * PatternEngine.CHART_TARGET_ATR_CAP)).toFixed(0);
           pattern.stopLoss = +(line0AtJ + capA).toFixed(0);
-          return;
+          break;
         }
+      }
+    }
+
+    // [C-5] Bulkowski: 돌파 봉 거래량 확인 — 패턴 구간 평균 대비 돌파 봉 거래량 비율
+    // 거래량 증가 시 돌파 신뢰도 상승 (+3), 감소 시 감산 (-2)
+    if (pattern.breakoutConfirmed && pattern.breakIndex != null) {
+      const bi = pattern.breakIndex;
+      const si = pattern.startIndex != null ? pattern.startIndex : ei;
+      let patternVolSum = 0, patternVolCnt = 0;
+      for (let k = si; k <= ei; k++) {
+        if (candles[k] && candles[k].volume > 0) { patternVolSum += candles[k].volume; patternVolCnt++; }
+      }
+      if (patternVolCnt > 0 && candles[bi] && candles[bi].volume > 0) {
+        const avgVol = patternVolSum / patternVolCnt;
+        const breakVolRatio = candles[bi].volume / avgVol;
+        pattern.breakoutVolumeConfirmed = breakVolRatio >= 1.2;
+        if (breakVolRatio >= 1.5) pattern.confidence = Math.min((pattern.confidence || 0) + 3, 95);
+        else if (breakVolRatio < 0.8) pattern.confidence = Math.max((pattern.confidence || 0) - 2, 10);
       }
     }
   }

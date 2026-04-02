@@ -479,6 +479,9 @@ class PatternBacktester {
       }
     }
 
+    // [C-6] Hansen SPA test — 전체 전략 풀의 데이터 스누핑 보정
+    results._spaTest = this._hansenSPA(results);
+
     return results;
   }
 
@@ -730,6 +733,91 @@ class PatternBacktester {
     }
   }
 
+  /** [C-6] Hansen (2005) SPA Test — "A Test for Superior Predictive Ability"
+   *  다중 패턴 비교에서 데이터 스누핑(Bonferroni 과보수) 대신
+   *  부트스트랩 기반으로 "최고 성과 전략"의 통계적 유의성 검정.
+   *
+   *  H₀: 어떤 패턴도 벤치마크(무작위 진입)를 능가하지 않음
+   *  검정통계량: T_SPA = max_k (√n × d̄_k / σ̂_k) (최대 studentized excess)
+   *  부트스트랩으로 T_SPA의 귀무 분포를 구성, p-value 산출.
+   *
+   *  @param {Object} results — backtestAll 결과 (패턴별 horizons 포함)
+   *  @returns {{ pValue: number, maxTStat: number, bestPattern: string, bestHorizon: number, rejected: boolean }}
+   */
+  _hansenSPA(results) {
+    // Step 1: 모든 (패턴, horizon) 쌍의 t-stat 수집
+    var strategies = [];
+    for (var pType in results) {
+      if (pType === '_spaTest') continue;
+      var r = results[pType];
+      if (!r || !r.horizons) continue;
+      for (var h in r.horizons) {
+        var hs = r.horizons[h];
+        if (!hs || hs.n < 10 || !hs.tStat) continue;
+        strategies.push({
+          pType: pType,
+          horizon: +h,
+          tStat: hs.tStat,
+          wrAlpha: hs.wrAlpha || 0,
+          n: hs.n,
+        });
+      }
+    }
+    if (strategies.length < 2) return { pValue: 1, maxTStat: 0, bestPattern: null, bestHorizon: null, rejected: false };
+
+    // Step 2: 관측된 최대 t-stat
+    var maxT = -Infinity, bestIdx = 0;
+    for (var si = 0; si < strategies.length; si++) {
+      if (strategies[si].tStat > maxT) {
+        maxT = strategies[si].tStat;
+        bestIdx = si;
+      }
+    }
+
+    // Step 3: Hansen SPA 부트스트랩 — 귀무분포 생성
+    // 귀무가설 하에서 각 전략의 excess return은 0-centered.
+    // 부트스트랩: 관측된 t-stat에서 평균을 빼고 랜덤 부호 반전 (stationary bootstrap 근사)
+    var B = 500, bootMaxT = [];
+    var m = strategies.length;
+
+    // Hansen (2005) 개선: 음의 mean을 가진 전략은 0으로 치환 (less conservative than White RC)
+    var adjustedT = [];
+    for (var ai = 0; ai < m; ai++) {
+      adjustedT.push(Math.max(0, strategies[ai].tStat));
+    }
+
+    for (var bi = 0; bi < B; bi++) {
+      var bootMax = -Infinity;
+      for (var ki = 0; ki < m; ki++) {
+        // 정규 랜덤 노이즈로 귀무분포 생성 (Politis & Romano 1994 stationary bootstrap 근사)
+        // Box-Muller transform for normal random
+        var u1 = Math.random(), u2 = Math.random();
+        var z = Math.sqrt(-2 * Math.log(u1 || 1e-10)) * Math.cos(2 * Math.PI * u2);
+        // 귀무가설 하 t-stat: centered at 0, same variance as observed
+        var bootT = z * Math.sqrt(1 + adjustedT[ki] * adjustedT[ki] / (strategies[ki].n || 30));
+        if (bootT > bootMax) bootMax = bootT;
+      }
+      bootMaxT.push(bootMax);
+    }
+
+    // Step 4: SPA p-value = P(T*_SPA >= T_SPA | H₀)
+    var countGE = 0;
+    for (var pi = 0; pi < B; pi++) {
+      if (bootMaxT[pi] >= maxT) countGE++;
+    }
+    var pValue = +(countGE / B).toFixed(3);
+    var rejected = pValue < 0.05;
+
+    return {
+      pValue: pValue,
+      maxTStat: +maxT.toFixed(3),
+      bestPattern: strategies[bestIdx].pType,
+      bestHorizon: strategies[bestIdx].horizon,
+      nStrategies: m,
+      rejected: rejected,  // true = H₀ rejected → 유의미한 전략 존재
+    };
+  }
+
   /**
    * 양측 t-검정 임계값 근사 (Cornish-Fisher 역변환 기반)
    *
@@ -844,6 +932,96 @@ class PatternBacktester {
     var phi = Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
     var tail = phi * t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))));
     return Math.max(0, Math.min(1, 2 * tail)); // 양측
+  }
+
+  /** [C-7] 표준정규 CDF Φ(z) — Abramowitz & Stegun 7.1.26
+   *  |error| < 7.5e-8. BCa bootstrap CI 계산에 필요.
+   *  @param {number} z
+   *  @returns {number} — 0~1
+   */
+  _normCdf(z) {
+    if (z >= 8) return 1;
+    if (z <= -8) return 0;
+    var neg = z < 0;
+    var az = Math.abs(z);
+    var b1 = 0.319381530, b2 = -0.356563782, b3 = 1.781477937;
+    var b4 = -1.821255978, b5 = 1.330274429;
+    var t = 1 / (1 + 0.2316419 * az);
+    var phi = Math.exp(-az * az / 2) / Math.sqrt(2 * Math.PI);
+    var tail = phi * t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))));
+    return neg ? tail : 1 - tail;
+  }
+
+  /** [C-7] 표준정규 역함수 Φ⁻¹(p) — Abramowitz & Stegun 26.2.23
+   *  Rational approximation, |error| < 4.5e-4. BCa bootstrap CI의 z₀ 계산에 필요.
+   *  @param {number} p — 0 < p < 1
+   *  @returns {number}
+   */
+  _normInv(p) {
+    if (p <= 0.0001) return -3.72;
+    if (p >= 0.9999) return 3.72;
+    var neg = p < 0.5;
+    var q = neg ? p : 1 - p;
+    var t = Math.sqrt(-2 * Math.log(q));
+    var c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+    var d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+    var z = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+    return neg ? -z : z;
+  }
+
+  /** [C-7] BCa Bootstrap CI — Efron (1987) "Better Bootstrap Confidence Intervals"
+   *  기존 percentile CI 대비 bias/skewness 보정으로 coverage accuracy 개선.
+   *
+   *  @param {number[]} bootStats — B개 부트스트랩 복제 통계량 (정렬 불필요)
+   *  @param {number} thetaHat — 원본 데이터 통계량
+   *  @param {number[]} jackValues — n개 jackknife 통계량 (i번째 관측 제거 시)
+   *  @param {number} [alpha=0.05] — 유의수준 (양측)
+   *  @returns {number[]} — [lower, upper] BCa CI
+   */
+  _bcaCI(bootStats, thetaHat, jackValues, alpha) {
+    if (!alpha) alpha = 0.05;
+    var B = bootStats.length;
+    if (B < 50) return null;
+
+    // 1. Bias correction z₀ = Φ⁻¹(#{θ̂* < θ̂} / B)
+    var countBelow = 0;
+    for (var i = 0; i < B; i++) { if (bootStats[i] < thetaHat) countBelow++; }
+    var z0 = this._normInv(countBelow / B);
+
+    // 2. Acceleration â (jackknife)
+    var aHat = 0;
+    if (jackValues && jackValues.length >= 3) {
+      var jn = jackValues.length;
+      var jMean = 0;
+      for (var ji = 0; ji < jn; ji++) jMean += jackValues[ji];
+      jMean /= jn;
+      var num = 0, den = 0;
+      for (var ji2 = 0; ji2 < jn; ji2++) {
+        var d = jMean - jackValues[ji2];
+        num += d * d * d;
+        den += d * d;
+      }
+      if (den > 0) aHat = num / (6 * Math.pow(den, 1.5));
+    }
+
+    // 3. Adjusted percentiles
+    var zAlpha = this._normInv(alpha / 2);
+    var zUpper = this._normInv(1 - alpha / 2);
+
+    var a1Num = z0 + zAlpha;
+    var a1 = this._normCdf(z0 + a1Num / (1 - aHat * a1Num));
+    var a2Num = z0 + zUpper;
+    var a2 = this._normCdf(z0 + a2Num / (1 - aHat * a2Num));
+
+    // Clamp to valid indices
+    a1 = Math.max(0.5 / B, Math.min(1 - 0.5 / B, a1));
+    a2 = Math.max(0.5 / B, Math.min(1 - 0.5 / B, a2));
+
+    var sorted = bootStats.slice().sort(function(a, b) { return a - b; });
+    return [
+      +sorted[Math.floor(a1 * B)].toFixed(1),
+      +sorted[Math.min(B - 1, Math.floor(a2 * B))].toFixed(1)
+    ];
   }
 
 
@@ -1221,10 +1399,24 @@ class PatternBacktester {
             bootWR.push(count_b > 0 ? (wins_b / count_b * 100) : 50);
           }
         }
-        bootWR.sort(function(a, b2) { return a - b2; });
-        winRateCI = [
-          +bootWR[Math.floor(B * 0.025)].toFixed(1),
-          +bootWR[Math.floor(B * 0.975)].toFixed(1)
+        // [C-7] BCa Bootstrap CI — Efron (1987)
+        // Jackknife leave-one-out win rates for acceleration correction
+        var jackWR = [];
+        for (var jki = 0; jki < n; jki++) {
+          var jWins = 0, jCnt = 0;
+          for (var jkj = 0; jkj < n; jkj++) {
+            if (jkj === jki) continue;
+            if ((patternSignal === 'buy' && clippedReturns[jkj] > 0) ||
+                (patternSignal === 'sell' && clippedReturns[jkj] < 0) ||
+                (patternSignal === 'neutral' && clippedReturns[jkj] > 0)) jWins++;
+            jCnt++;
+          }
+          jackWR.push(jCnt > 0 ? (jWins / jCnt * 100) : 50);
+        }
+        var bcaResult = this._bcaCI(bootWR, winRate, jackWR);
+        winRateCI = bcaResult || [
+          +bootWR.slice().sort(function(a, b2) { return a - b2; })[Math.floor(B * 0.025)].toFixed(1),
+          +bootWR.slice().sort(function(a, b2) { return a - b2; })[Math.floor(B * 0.975)].toFixed(1)
         ];
       }
 

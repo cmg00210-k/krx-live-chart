@@ -298,6 +298,119 @@ const COMPOSITE_SIGNAL_DEFS = [
     window: 5,
     description: '숏스퀴즈 후보 + 외국인 순매수 + 거래량 급증 — 강력한 숏커버 rally 신호',
   },
+
+  // ── [C-4] 신규 복합 시그널 10종 — C-3 유휴 지표 활용 ──
+
+  // 1. ADX 추세 + 골든크로스 수렴
+  {
+    id: 'buy_adxGoldenTrend',
+    nameShort: '매수: ADX추세+골든',
+    signal: 'buy', strength: 'strong', tier: 1,
+    baseConfidence: 67,
+    required: ['goldenCross', 'adxBullishCross'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 5, window: 5,
+    description: '골든크로스 + ADX 매수교차(추세 확인) + 거래량 — Wilder 추세추종 합류',
+  },
+  // 2. ADX 추세 + 데드크로스 수렴
+  {
+    id: 'sell_adxDeadTrend',
+    nameShort: '매도: ADX추세+데드',
+    signal: 'sell', strength: 'strong', tier: 1,
+    baseConfidence: 67,
+    required: ['deadCross', 'adxBearishCross'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 5, window: 5,
+    description: '데드크로스 + ADX 매도교차(추세 확인) + 투매 — Wilder 추세하락 합류',
+  },
+  // 3. CCI+RSI 이중 과매도 탈출
+  {
+    id: 'buy_cciRsiDoubleOversold',
+    nameShort: '매수: CCI+RSI 이중과매도',
+    signal: 'buy', strength: 'medium', tier: 2,
+    baseConfidence: 58,
+    required: ['cciOversoldExit', 'rsiOversoldExit'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 4, window: 5,
+    description: 'CCI+RSI 동시 과매도 탈출 — Lambert+Wilder 이중 확인',
+  },
+  // 4. CCI+RSI 이중 과매수 탈출
+  {
+    id: 'sell_cciRsiDoubleOverbought',
+    nameShort: '매도: CCI+RSI 이중과매수',
+    signal: 'sell', strength: 'medium', tier: 2,
+    baseConfidence: 58,
+    required: ['cciOverboughtExit', 'rsiOverboughtExit'],
+    optional: ['volumeSelloff'],
+    optionalBonus: 4, window: 5,
+    description: 'CCI+RSI 동시 과매수 탈출 — Lambert+Wilder 이중 확인',
+  },
+  // 5. BB 스퀴즈 + ATR 확장 = 변동성 돌파 임박
+  {
+    id: 'neutral_squeezeExpansion',
+    nameShort: '중립: 스퀴즈+ATR확장',
+    signal: 'neutral', strength: 'medium', tier: 2,
+    baseConfidence: 52,
+    required: ['bbSqueeze', 'atrExpansion'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 4, window: 5,
+    description: 'BB 스퀴즈 + ATR 확장 — Bollinger 수축→폭발 임박 (방향 미정)',
+  },
+  // 6. Williams %R + Stochastic 이중 과매도
+  {
+    id: 'buy_wrStochOversold',
+    nameShort: '매수: %R+스토캐스틱 과매도',
+    signal: 'buy', strength: 'weak', tier: 3,
+    baseConfidence: 48,
+    required: ['williamsROversold', 'stochasticOversold'],
+    optional: ['rsiOversoldExit'],
+    optionalBonus: 3, window: 5,
+    description: 'Williams %R + Stochastic 동시 과매도 — 오실레이터 삼중 반전',
+  },
+  // 7. Williams %R + Stochastic 이중 과매수
+  {
+    id: 'sell_wrStochOverbought',
+    nameShort: '매도: %R+스토캐스틱 과매수',
+    signal: 'sell', strength: 'weak', tier: 3,
+    baseConfidence: 48,
+    required: ['williamsROverbought', 'stochasticOverbought'],
+    optional: ['rsiOverboughtExit'],
+    optionalBonus: 3, window: 5,
+    description: 'Williams %R + Stochastic 동시 과매수 — 오실레이터 삼중 반전',
+  },
+  // 8. CUSUM 변곡 + 칼만 상향 = 추세 전환 확인
+  {
+    id: 'buy_cusumKalmanTurn',
+    nameShort: '매수: CUSUM+칼만 상향',
+    signal: 'buy', strength: 'medium', tier: 2,
+    baseConfidence: 55,
+    required: ['cusumBreak', 'kalmanUpturn'],
+    optional: ['goldenCross'],
+    optionalBonus: 4, window: 5,
+    description: 'CUSUM 구조변화 + 칼만 상향 전환 — 통계+필터 이중 추세반전',
+  },
+  // 9. CUSUM 변곡 + 칼만 하향 = 추세 전환 확인
+  {
+    id: 'sell_cusumKalmanTurn',
+    nameShort: '매도: CUSUM+칼만 하향',
+    signal: 'sell', strength: 'medium', tier: 2,
+    baseConfidence: 55,
+    required: ['cusumBreak', 'kalmanDownturn'],
+    optional: ['deadCross'],
+    optionalBonus: 4, window: 5,
+    description: 'CUSUM 구조변화 + 칼만 하향 전환 — 통계+필터 이중 추세전환',
+  },
+  // 10. 고변동성 + OBV 다이버전스 = 매집 감지
+  {
+    id: 'buy_volRegimeOBVAccumulation',
+    nameShort: '매수: 고변동성+OBV매집',
+    signal: 'buy', strength: 'medium', tier: 2,
+    baseConfidence: 58,
+    required: ['volRegimeHigh', 'obvBullishDivergence'],
+    optional: ['volumeBreakout'],
+    optionalBonus: 4, window: 5,
+    description: '고변동성 체제 + OBV 매집 다이버전스 — 공포 속 스마트머니 유입',
+  },
 ];
 
 
@@ -332,6 +445,12 @@ class SignalEngine {
       hurstTrending: 0, hurstMeanReverting: 0,
       // 칼만 필터 (composite condition 전용 — A. Harvey 1989, 독립 시그널 아님)
       kalmanUpturn: 0, kalmanDownturn: 0,
+      // [C-3] 유휴 지표 시그널
+      cciOversoldExit: 1.5, cciOverboughtExit: -1.5,      // Lambert (1980)
+      adxBullishCross: 2.0, adxBearishCross: -2.0,         // Wilder (1978)
+      williamsROversold: 1.0, williamsROverbought: -1.0,    // Williams (1979)
+      atrExpansion: 0, cusumBreak: 0,                       // 방향 중립
+      volRegimeExpand: 0, volRegimeHigh: -0.5,             // 고변동성 = 약세 편향
       // 거래량
       volumeBreakout: 2, volumeSelloff: -2, volumeExhaustion: 0,
       // [Phase TA-2] OBV 다이버전스 — Granville (1963): 가격-거래량 괴리
@@ -382,6 +501,14 @@ class SignalEngine {
     indicatorSignals.push(...this._detectStochRSISignals(candles, cache));
     indicatorSignals.push(...this._detectStochasticSignals(candles, cache));
     indicatorSignals.push(...this._detectKalmanSignals(candles, cache));
+
+    // [C-3] 유휴 지표 → 시그널 연결 (6종)
+    indicatorSignals.push(...this._detectCCISignals(candles, cache));
+    indicatorSignals.push(...this._detectADXSignals(candles, cache));
+    indicatorSignals.push(...this._detectWilliamsRSignals(candles, cache));
+    indicatorSignals.push(...this._detectATRExpansion(candles, cache));
+    indicatorSignals.push(...this._detectCUSUMBreak(candles, cache));
+    indicatorSignals.push(...this._detectVolRegimeChange(candles, cache));
 
     // [Phase KRX-API] 파생상품·수급 시그널 — 외부 데이터 기반 (Doc36-41)
     indicatorSignals.push(...this._detectBasisSignal(candles));
@@ -2407,6 +2534,197 @@ class SignalEngine {
         description: '숏스퀴즈 후보 ' + shorts.squeeze_candidates.length + '종목 감지' });
     }
 
+    return signals;
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  [C-3] 유휴 지표 → 시그널 연결 (6종)
+  //  IndicatorCache에 계산됨 but 시그널 미생성이던 지표들
+  // ══════════════════════════════════════════════════════
+
+  /** CCI 과매수/과매도 — Lambert (1980)
+   *  CCI > +100: 과매수 (매도 잠재), CCI < -100: 과매도 (매수 잠재)
+   *  ATR 기반 정규화이므로 종목 가격 수준에 무관.
+   */
+  _detectCCISignals(candles, cache) {
+    var signals = [];
+    var cci = cache.cci(20);
+    if (!cci || cci.length < 3) return signals;
+
+    for (var i = 2; i < cci.length; i++) {
+      if (cci[i] == null || cci[i - 1] == null) continue;
+      // 과매도 이탈: CCI가 -100 아래에서 위로 교차
+      if (cci[i - 1] <= -100 && cci[i] > -100) {
+        signals.push({
+          type: 'cciOversoldExit', signal: 'buy', strength: 'weak',
+          confidence: 45, index: i, time: candles[i].time,
+          nameShort: 'CCI 과매도 이탈', source: 'indicator',
+          description: 'CCI -100 상향 돌파: 과매도 해소',
+        });
+      }
+      // 과매수 이탈: CCI가 +100 위에서 아래로 교차
+      if (cci[i - 1] >= 100 && cci[i] < 100) {
+        signals.push({
+          type: 'cciOverboughtExit', signal: 'sell', strength: 'weak',
+          confidence: 45, index: i, time: candles[i].time,
+          nameShort: 'CCI 과매수 이탈', source: 'indicator',
+          description: 'CCI +100 하향 돌파: 과매수 해소',
+        });
+      }
+    }
+    return signals;
+  }
+
+  /** ADX 추세 강도 — Wilder (1978)
+   *  ADX > 25: 추세 시장 확인, +DI/-DI 교차로 방향 판별.
+   *  ADX < 20: 비추세(횡보) → 추세추종 전략 비활성화 힌트.
+   */
+  _detectADXSignals(candles, cache) {
+    var signals = [];
+    var adx = cache.adx(14);
+    if (!adx || adx.length < 3) return signals;
+
+    for (var i = 2; i < adx.length; i++) {
+      var cur = adx[i], prev = adx[i - 1];
+      if (!cur || !prev) continue;
+      // +DI가 -DI를 상향 돌파 + ADX > 25 (추세 확인)
+      if (prev.plusDI <= prev.minusDI && cur.plusDI > cur.minusDI && cur.adx > 25) {
+        signals.push({
+          type: 'adxBullishCross', signal: 'buy', strength: 'medium',
+          confidence: 55, index: i, time: candles[i].time,
+          nameShort: 'ADX 매수 교차', source: 'indicator',
+          description: '+DI > -DI 교차, ADX ' + Math.round(cur.adx) + ' (추세 확인)',
+        });
+      }
+      // -DI가 +DI를 상향 돌파 + ADX > 25
+      if (prev.minusDI <= prev.plusDI && cur.minusDI > cur.plusDI && cur.adx > 25) {
+        signals.push({
+          type: 'adxBearishCross', signal: 'sell', strength: 'medium',
+          confidence: 55, index: i, time: candles[i].time,
+          nameShort: 'ADX 매도 교차', source: 'indicator',
+          description: '-DI > +DI 교차, ADX ' + Math.round(cur.adx) + ' (추세 확인)',
+        });
+      }
+    }
+    return signals;
+  }
+
+  /** Williams %R 과매수/과매도 — Williams (1979)
+   *  %R < -80: 과매도 (매수 잠재), %R > -20: 과매수 (매도 잠재)
+   *  모멘텀 오실레이터: 현재 종가의 고가-저가 범위 내 상대 위치.
+   */
+  _detectWilliamsRSignals(candles, cache) {
+    var signals = [];
+    var wr = cache.williamsR(14);
+    if (!wr || wr.length < 3) return signals;
+
+    for (var i = 2; i < wr.length; i++) {
+      if (wr[i] == null || wr[i - 1] == null) continue;
+      // 과매도 이탈: %R이 -80 아래에서 위로
+      if (wr[i - 1] <= -80 && wr[i] > -80) {
+        signals.push({
+          type: 'williamsROversold', signal: 'buy', strength: 'weak',
+          confidence: 42, index: i, time: candles[i].time,
+          nameShort: '%R 과매도', source: 'indicator',
+          description: 'Williams %R -80 상향 돌파: 과매도 이탈',
+        });
+      }
+      // 과매수 이탈: %R이 -20 위에서 아래로
+      if (wr[i - 1] >= -20 && wr[i] < -20) {
+        signals.push({
+          type: 'williamsROverbought', signal: 'sell', strength: 'weak',
+          confidence: 42, index: i, time: candles[i].time,
+          nameShort: '%R 과매수', source: 'indicator',
+          description: 'Williams %R -20 하향 돌파: 과매수 이탈',
+        });
+      }
+    }
+    return signals;
+  }
+
+  /** ATR 확장/수축 — Wilder (1978)
+   *  ATR(14)이 ATR MA(20) 대비 급격히 확장: 변동성 돌파 잠재.
+   *  Bollinger (2002) "Bollinger on BBs": 스퀴즈 후 확장 = 폭발적 이동.
+   */
+  _detectATRExpansion(candles, cache) {
+    var signals = [];
+    var atr = cache.atr(14);
+    if (!atr || atr.length < 25) return signals;
+    // ATR의 20봉 이동평균 계산
+    var atrMA = calcMA(atr, 20);
+    if (!atrMA) return signals;
+
+    for (var i = 21; i < atr.length; i++) {
+      if (atr[i] == null || atrMA[i] == null || atrMA[i] <= 0) continue;
+      var ratio = atr[i] / atrMA[i];
+      // ATR이 MA의 1.5배 이상: 변동성 폭발 (Wilder threshold)
+      if (ratio >= 1.5 && (i < 2 || atr[i - 1] / (atrMA[i - 1] || 1) < 1.5)) {
+        signals.push({
+          type: 'atrExpansion', signal: 'neutral', strength: 'medium',
+          confidence: 50, index: i, time: candles[i].time,
+          nameShort: 'ATR 확장', source: 'indicator',
+          description: 'ATR 변동성 확장 ×' + ratio.toFixed(1) + ': 추세 가속 가능',
+        });
+      }
+    }
+    return signals;
+  }
+
+  /** CUSUM 구조적 변화 — Page (1954), Inclan & Tiao (1994)
+   *  Online CUSUM이 임계값 돌파: 수익률 분포의 구조적 변화 감지.
+   *  추세 전환 또는 체제 변환의 조기 경보.
+   */
+  _detectCUSUMBreak(candles, cache) {
+    var signals = [];
+    var cusum = cache.onlineCUSUM();
+    if (!cusum || !cusum.breakpoints || cusum.breakpoints.length === 0) return signals;
+
+    // 최근 20봉 내 breakpoint만 시그널화
+    var lastIdx = candles.length - 1;
+    var recentBPs = cusum.breakpoints.filter(function(bp) { return bp >= lastIdx - 20; });
+    for (var bi = 0; bi < recentBPs.length; bi++) {
+      var bpIdx = recentBPs[bi];
+      if (bpIdx < 0 || bpIdx >= candles.length) continue;
+      signals.push({
+        type: 'cusumBreak', signal: 'neutral', strength: 'medium',
+        confidence: 52, index: bpIdx, time: candles[bpIdx].time,
+        nameShort: 'CUSUM 변곡', source: 'indicator',
+        description: 'CUSUM 구조적 변화 감지: 추세 전환 가능',
+      });
+    }
+    return signals;
+  }
+
+  /** 변동성 체제 변환 — Engle (1982) ARCH, Cont (2001) Stylized Facts
+   *  EWMA Vol → regime 분류: low→normal 전환 = 스퀴즈 해소,
+   *  normal→high 전환 = 위험 경보.
+   */
+  _detectVolRegimeChange(candles, cache) {
+    var signals = [];
+    var regime = cache.volRegime();
+    if (!regime || regime.length < 3) return signals;
+
+    for (var i = 1; i < regime.length; i++) {
+      if (regime[i] == null || regime[i - 1] == null) continue;
+      // low → normal/high: 스퀴즈 해소 (변동성 확장 시작)
+      if (regime[i - 1] === 'low' && regime[i] !== 'low') {
+        signals.push({
+          type: 'volRegimeExpand', signal: 'neutral', strength: 'medium',
+          confidence: 48, index: i, time: candles[i].time,
+          nameShort: '변동성 확장', source: 'indicator',
+          description: '변동성 체제 low→' + regime[i] + ': 스퀴즈 해소',
+        });
+      }
+      // normal/low → high: 위험 경보
+      if (regime[i - 1] !== 'high' && regime[i] === 'high') {
+        signals.push({
+          type: 'volRegimeHigh', signal: 'neutral', strength: 'strong',
+          confidence: 55, index: i, time: candles[i].time,
+          nameShort: '고변동성 진입', source: 'indicator',
+          description: '변동성 체제 high 진입: 위험 관리 강화 필요',
+        });
+      }
+    }
     return signals;
   }
 
