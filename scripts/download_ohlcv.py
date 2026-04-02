@@ -21,6 +21,7 @@ KRX 전체 종목 OHLCV 데이터 다운로더
   python scripts/download_ohlcv.py --market KOSPI  # KOSPI만
   python scripts/download_ohlcv.py --code 005930   # 삼성전자만
   python scripts/download_ohlcv.py --top 100       # 시가총액 상위 100개
+  python scripts/download_ohlcv.py --incremental   # 기존 데이터 이후만 다운로드 (빠름)
 """
 
 import sys
@@ -91,8 +92,28 @@ def get_all_stocks():
     return stocks
 
 
-def download_stock(code, name, market, start_date, end_date, output_dir):
-    """단일 종목 OHLCV 다운로드 → 시장별 폴더에 JSON 저장"""
+def _get_existing_last_date(code, market, output_dir):
+    """기존 JSON 파일에서 마지막 캔들 날짜를 읽어온다. 없으면 None."""
+    filepath = os.path.join(output_dir, market.lower(), f"{code}.json")
+    if not os.path.exists(filepath):
+        return None, None
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        candles = data.get("candles", [])
+        if candles:
+            return candles[-1]["time"], data  # "YYYY-MM-DD", full data object
+    except Exception:
+        pass
+    return None, None
+
+
+def download_stock(code, name, market, start_date, end_date, output_dir, incremental=False):
+    """단일 종목 OHLCV 다운로드 → 시장별 폴더에 JSON 저장
+
+    Args:
+        incremental: True면 기존 JSON의 마지막 날짜+1부터만 다운로드하여 append
+    """
     MAX_ATTEMPTS = 3
     RETRY_SLEEP = 2  # seconds between attempts
 
@@ -101,12 +122,35 @@ def download_stock(code, name, market, start_date, end_date, output_dir):
         msg = str(exc).lower()
         return any(k in msg for k in ("404", "not found", "invalid", "종목코드"))
 
+    # [B-5] incremental: 기존 데이터에서 마지막 날짜 확인 → 다음 날부터 다운로드
+    existing_data = None
+    actual_start = start_date
+    if incremental:
+        last_date, existing_data = _get_existing_last_date(code, market, output_dir)
+        if last_date:
+            # 마지막 날짜의 다음 날부터 다운로드 (당일 중복 방지)
+            next_day = datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)
+            actual_start = next_day.strftime("%Y%m%d")
+            if actual_start > end_date:
+                # 이미 최신 → 스킵 (None이 아닌 기존 데이터 반환)
+                if existing_data and existing_data.get("candles"):
+                    candles = existing_data["candles"]
+                    return {
+                        "code": code, "name": name, "market": market,
+                        "count": len(candles),
+                        "size_kb": 0,
+                        "last_close": candles[-1]["close"],
+                        "file": f"{market.lower()}/{code}.json",
+                        "skipped": True,  # 신규 데이터 없음 표시
+                    }
+                return None
+
     df = None
     last_exc = None
     for attempt in range(MAX_ATTEMPTS):
         try:
             # [C-3] 수정주가 적용: 액면분할/병합 반영 (미반영 시 허위 패턴 발생)
-            df = stock.get_market_ohlcv(start_date, end_date, code, adjusted=True)
+            df = stock.get_market_ohlcv(actual_start, end_date, code, adjusted=True)
             break  # success
         except Exception as e:
             last_exc = e
@@ -119,25 +163,36 @@ def download_stock(code, name, market, start_date, end_date, output_dir):
         return {"error": str(last_exc)}
 
     try:
-        if df.empty:
-            return None
+        new_candles = []
+        if df is not None and not df.empty:
+            for date_idx, row in df.iterrows():
+                o = int(row["시가"])
+                h = int(row["고가"])
+                l = int(row["저가"])
+                c = int(row["종가"])
+                v = int(row["거래량"])
 
-        candles = []
-        for date_idx, row in df.iterrows():
-            o = int(row["시가"])
-            h = int(row["고가"])
-            l = int(row["저가"])
-            c = int(row["종가"])
-            v = int(row["거래량"])
+                if o <= 0 or h <= 0 or l <= 0 or c <= 0:
+                    continue
 
-            if o <= 0 or h <= 0 or l <= 0 or c <= 0:
-                continue
+                new_candles.append({
+                    "time": date_idx.strftime("%Y-%m-%d"),
+                    "open": o, "high": h, "low": l, "close": c,
+                    "volume": v
+                })
 
-            candles.append({
-                "time": date_idx.strftime("%Y-%m-%d"),
-                "open": o, "high": h, "low": l, "close": c,
-                "volume": v
-            })
+        # [B-5] incremental: 기존 캔들 + 새 캔들 병합
+        if incremental and existing_data and existing_data.get("candles"):
+            old_candles = existing_data["candles"]
+            if new_candles:
+                # 중복 방지: 새 캔들의 날짜가 기존에 이미 있으면 제거
+                old_dates = {c["time"] for c in old_candles}
+                new_candles = [c for c in new_candles if c["time"] not in old_dates]
+                candles = old_candles + new_candles
+            else:
+                candles = old_candles  # 새 데이터 없으면 기존 유지
+        else:
+            candles = new_candles
 
         if not candles:
             return None
@@ -165,6 +220,7 @@ def download_stock(code, name, market, start_date, end_date, output_dir):
             "name": name,
             "market": market,
             "count": len(candles),
+            "new_count": len(new_candles) if incremental else len(candles),
             "size_kb": os.path.getsize(filepath) / 1024,
             "last_close": candles[-1]["close"],
             "file": f"{market.lower()}/{code}.json"
@@ -321,6 +377,8 @@ def main():
     parser.add_argument("--code", type=str, help="특정 종목 코드만")
     parser.add_argument("--top", type=int, help="시가총액 상위 N개만")
     parser.add_argument("--delay", type=float, default=0.8, help="요청 간 대기(초, 기본: 0.8)")
+    parser.add_argument("--incremental", action="store_true",
+                        help="증분 다운로드: 기존 JSON의 마지막 날짜 이후만 다운로드")
     parser.add_argument("--cron", action="store_true",
                         help="무인 실행 모드 (프롬프트 없음, 로그 파일 출력)")
     args = parser.parse_args()
@@ -347,9 +405,13 @@ def main():
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=args.years * 365)).strftime("%Y%m%d")
 
+    mode_tag = ' [CRON]' if args.cron else ''
+    mode_tag += ' [INCREMENTAL]' if args.incremental else ''
     logger.info(f"═══════════════════════════════════════════")
-    logger.info(f"  KRX OHLCV 다운로더{' [CRON]' if args.cron else ''}")
+    logger.info(f"  KRX OHLCV 다운로더{mode_tag}")
     logger.info(f"  기간: {start_date} ~ {end_date} ({args.years}년)")
+    if args.incremental:
+        logger.info(f"  모드: 증분 (기존 데이터 이후만 다운로드)")
     logger.info(f"  저장: data/kospi/, data/kosdaq/")
     logger.info(f"═══════════════════════════════════════════")
 
@@ -379,7 +441,8 @@ def main():
     start_time = time.time()
 
     for i, s in enumerate(targets):
-        result = download_stock(s["code"], s["name"], s["market"], start_date, end_date, DATA_DIR)
+        result = download_stock(s["code"], s["name"], s["market"], start_date, end_date, DATA_DIR,
+                               incremental=args.incremental)
 
         if result is None:
             skip += 1
@@ -427,8 +490,12 @@ def main():
                 elapsed = time.time() - start_time
                 rate = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (len(targets) - i - 1) / rate if rate > 0 else 0
+                new_info = ""
+                if args.incremental:
+                    nc = result.get("new_count", result["count"])
+                    new_info = f" (+{nc}신규)" if not result.get("skipped") else " (최신)"
                 logger.info(f"  V [{i+1}/{len(targets)}] {s['name']}({s['code']}): "
-                            f"{result['count']}봉 {result['size_kb']:.0f}KB "
+                            f"{result['count']}봉 {result['size_kb']:.0f}KB{new_info} "
                             f"| 남은 시간: {int(eta//60)}분 {int(eta%60)}초")
 
         # KRX 서버 부하 방지

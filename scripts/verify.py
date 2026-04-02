@@ -535,18 +535,19 @@ def check_scripts(strict=False):
         warn("sw.js not found")
         warnings += 1
 
-    # 5b. daily_deploy.bat includes verify step
-    deploy_bat = ROOT / "scripts" / "daily_deploy.bat"
-    if deploy_bat.exists():
-        bat_src = read(deploy_bat)
-        if "verify.py" in bat_src:
-            ok("daily_deploy.bat includes verify.py pre-check")
+    # 5b. deploy bat files include verify step
+    for bat_name in ("daily_deploy.bat", "deploy.bat"):
+        bat_path = ROOT / "scripts" / bat_name
+        if bat_path.exists():
+            bat_src = read(bat_path)
+            if "verify.py" in bat_src:
+                ok(f"{bat_name} includes verify.py pre-check")
+            else:
+                warn(f"{bat_name} does not call verify.py (add it as step [1/N])")
+                warnings += 1
         else:
-            warn("daily_deploy.bat does not call verify.py (add it as step [1/N])")
+            warn(f"scripts/{bat_name} not found")
             warnings += 1
-    else:
-        warn("scripts/daily_deploy.bat not found")
-        warnings += 1
 
     # 5c. SRI integrity on CDN scripts
     html_path = ROOT / "index.html"
@@ -568,8 +569,9 @@ def check_scripts(strict=False):
         errors += 1
 
     # 5d. Project name in deploy bat
-    if deploy_bat.exists():
-        bat_src = read(deploy_bat)
+    deploy_bat_5d = ROOT / "scripts" / "daily_deploy.bat"
+    if deploy_bat_5d.exists():
+        bat_src = read(deploy_bat_5d)
         if "cheesestock" in bat_src.lower():
             ok("daily_deploy.bat references 'cheesestock' project")
         else:
@@ -621,6 +623,62 @@ def check_scripts(strict=False):
     else:
         warn("5f skipped: index.html or js/analysisWorker.js not found")
         warnings += 1
+
+    # 5g. SW STATIC_ASSETS ↔ index.html local script sync
+    sw_path2 = ROOT / "sw.js"
+    if sw_path2.exists() and index_html.exists():
+        sw_src2   = read(sw_path2)
+        html_src2 = read(index_html) if not index_html.exists() else html_src if 'html_src' in dir() else read(index_html)
+        # Parse STATIC_ASSETS entries
+        sa_m = re.search(r"STATIC_ASSETS\s*=\s*\[(.*?)\]", sw_src2, re.DOTALL)
+        sw_assets = set()
+        if sa_m:
+            # Active (non-commented) entries only
+            for line in sa_m.group(1).splitlines():
+                stripped = line.strip()
+                if stripped.startswith("//"):
+                    continue
+                m = re.search(r"['\"]([^'\"]+)['\"]", stripped)
+                if m:
+                    sw_assets.add(m.group(1))
+        # Local scripts from index.html (js/*.js, not CDN)
+        html_local_scripts = set()
+        for m in re.finditer(r'<script\b[^>]*src=["\']([^"\'?]+)(?:\?[^"\']*)?["\']', html_src2):
+            src = m.group(1)
+            if not src.startswith("http"):
+                html_local_scripts.add("/" + src if not src.startswith("/") else src)
+        # CSS from index.html
+        html_local_css = set()
+        for m in re.finditer(r'<link\b[^>]*href=["\']([^"\'?]+\.css)(?:\?[^"\']*)?["\']', html_src2):
+            href = m.group(1)
+            if not href.startswith("http"):
+                html_local_css.add("/" + href if not href.startswith("/") else href)
+        # Check: every local script in index.html should be in STATIC_ASSETS
+        missing_in_sw = (html_local_scripts | html_local_css) - sw_assets
+        if missing_in_sw:
+            fail(f"sw.js STATIC_ASSETS missing {len(missing_in_sw)} file(s) from index.html:")
+            for f in sorted(missing_in_sw):
+                info(f"  {f}")
+            errors += 1
+        else:
+            ok(f"sw.js STATIC_ASSETS covers all {len(html_local_scripts)} scripts + {len(html_local_css)} CSS from index.html")
+
+    # 5h. SW STATIC_ASSETS file existence check
+    if sw_assets:
+        missing_files = []
+        for asset in sorted(sw_assets):
+            if asset == "/":
+                continue
+            fpath = ROOT / asset.lstrip("/")
+            if not fpath.exists():
+                missing_files.append(asset)
+        if missing_files:
+            fail(f"sw.js STATIC_ASSETS references {len(missing_files)} non-existent file(s):")
+            for f in missing_files:
+                info(f"  {f}")
+            errors += 1
+        else:
+            ok(f"sw.js STATIC_ASSETS - all {len(sw_assets) - 1} files exist on disk")
 
     return errors, warnings
 

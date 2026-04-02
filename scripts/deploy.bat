@@ -13,7 +13,16 @@ REM ASCII-only commit message (Korean breaks Cloudflare API).
 
 cd /d "%~dp0\.."
 
-echo [1/2] Staging deploy directory...
+echo [1/3] Pre-deploy verification...
+python scripts/verify.py
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Verification failed -- fix errors before deploying
+    pause
+    exit /b 1
+)
+
+echo.
+echo [2/3] Staging deploy directory...
 python scripts/stage_deploy.py
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Staging failed -- file count over limit or script error
@@ -22,7 +31,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [2/2] Deploying to Cloudflare Pages...
+echo [3/3] Deploying to Cloudflare Pages...
 call npx wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message="deploy"
 
 if %ERRORLEVEL% NEQ 0 (

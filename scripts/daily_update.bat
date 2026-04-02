@@ -97,7 +97,7 @@ if errorlevel 1 (
 :: -- Step 8: OHLCV download (cron mode - log to file) --
 echo.
 echo [%date% %time%] [8/10] OHLCV download (cron mode)...
-"%PYTHON%" scripts/download_ohlcv.py --cron --years 1
+"%PYTHON%" scripts/download_ohlcv.py --cron --incremental --years 1
 if errorlevel 1 (
     echo [%date% %time%] WARNING: OHLCV download failed (partial)
 )

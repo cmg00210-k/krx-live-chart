@@ -2430,6 +2430,24 @@ async function _loadMarketData() {
     if (_kosisLatest) {
       console.log('[KRX] KOSIS 경제지표 로드 완료:', Object.keys(_kosisLatest).length, '개 필드');
     }
+    // [B-4] VKOSPI 시계열 로드 → 최신 close를 _macroLatest.vkospi에 주입
+    // data/vkospi.json: [{time,open,high,low,close}, ...] (download_derivatives.py 생성)
+    try {
+      var vkResp = await fetch('data/vkospi.json', { signal: AbortSignal.timeout(5000) });
+      if (vkResp.ok) {
+        var vkData = await vkResp.json();
+        if (Array.isArray(vkData) && vkData.length > 0) {
+          var latestVK = vkData[vkData.length - 1];
+          if (latestVK && latestVK.close != null) {
+            if (!_macroLatest) _macroLatest = {};
+            if (_macroLatest.vkospi == null) {
+              _macroLatest.vkospi = latestVK.close;
+              console.log('[KRX] VKOSPI 로드:', latestVK.close, '(' + latestVK.time + ')');
+            }
+          }
+        }
+      }
+    } catch (e) { /* vkospi.json 로드 실패 — 기존 VIX proxy fallback 유지 */ }
     // [H-2] 매크로 데이터에 VKOSPI/VIX가 있으면 Worker에 전달
     // _loadDerivativesData()와 병렬 실행되므로 양쪽 모두에서 호출 (중복 전송 안전)
     _sendMarketContextToWorker();
@@ -2702,6 +2720,99 @@ function _applyMarketContextToPatterns(patterns) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// [B-1] Stovall(1996) 섹터 순환 매핑 — KSIC → 대분류 → cycle sensitivity
+// ══════════════════════════════════════════════════════════════
+// Stovall, S. (1996) "Sector Investing" — 경기순환 4단계별 섹터 차등 수익률
+// KSIC 세분류 137개 → GICS-like 11개 대분류로 매핑 후 cycle multiplier 적용
+//
+// _STOVALL_CYCLE[macro_sector][phase] = buy_mult (매수 패턴 신뢰도 승수)
+//   > 1.0: 해당 국면에서 유리 (outperform 기대), < 1.0: 불리 (underperform)
+//   매도 패턴 승수 = 2.0 - buy_mult (대칭 역전)
+var _STOVALL_CYCLE = {
+  // Early Recovery(trough): Financials, ConsDisc, Tech 선도
+  // Mid Expansion: Tech, Industrials 지속
+  // Late Expansion(peak): Energy, Materials — 인플레이션 수혜
+  // Contraction: Utilities, Healthcare, Staples — 방어주
+  //                           trough  expansion  peak  contraction
+  'tech':         { trough: 1.12, expansion: 1.08, peak: 0.93, contraction: 0.90 },
+  'semiconductor': { trough: 1.14, expansion: 1.10, peak: 0.90, contraction: 0.88 },
+  'financial':    { trough: 1.12, expansion: 1.04, peak: 0.94, contraction: 0.92 },
+  'cons_disc':    { trough: 1.10, expansion: 1.06, peak: 0.95, contraction: 0.92 },
+  'industrial':   { trough: 1.06, expansion: 1.08, peak: 0.97, contraction: 0.93 },
+  'material':     { trough: 0.96, expansion: 1.04, peak: 1.08, contraction: 0.94 },
+  'energy':       { trough: 0.94, expansion: 1.02, peak: 1.10, contraction: 0.96 },
+  'healthcare':   { trough: 1.02, expansion: 1.00, peak: 1.02, contraction: 1.06 },
+  'cons_staple':  { trough: 0.98, expansion: 0.98, peak: 1.02, contraction: 1.08 },
+  'utility':      { trough: 0.96, expansion: 0.96, peak: 1.04, contraction: 1.10 },
+  'telecom':      { trough: 1.02, expansion: 1.00, peak: 1.00, contraction: 1.04 },
+  'realestate':   { trough: 1.08, expansion: 1.04, peak: 0.94, contraction: 0.94 },
+};
+
+// KSIC 세분류 → 대분류 매핑 (키워드 기반, 순서 중요: 먼저 매칭되면 확정)
+var _KSIC_MACRO_SECTOR_MAP = [
+  // Semiconductor
+  { keywords: ['반도체'], sector: 'semiconductor' },
+  // Technology
+  { keywords: ['소프트웨어', '자료처리', '호스팅', '포털', '인터넷', '게임', '통신 및 방송 장비',
+               '컴퓨터', '정보서비스', '프로그래밍'], sector: 'tech' },
+  // Financial
+  { keywords: ['은행', '보험', '금융', '증권', '신탁', '저축', '여신', '투자'], sector: 'financial' },
+  // Healthcare
+  { keywords: ['의약', '의료', '바이오', '제약'], sector: 'healthcare' },
+  // Energy
+  { keywords: ['석유', '가스', '석탄', '원유', '에너지'], sector: 'energy' },
+  // Utilities
+  { keywords: ['전기업', '가스 공급', '수도', '폐기물'], sector: 'utility' },
+  // Consumer Discretionary
+  { keywords: ['자동차', '의류', '호텔', '여행', '게임', '엔터테인', '방송', '영화',
+               '광고', '교육', '가전', '가구'], sector: 'cons_disc' },
+  // Consumer Staples
+  { keywords: ['식품', '음료', '담배', '농업', '축산', '수산', '낙농'], sector: 'cons_staple' },
+  // Materials
+  { keywords: ['철강', '비철금속', '화학', '시멘트', '유리', '세라믹', '종이', '고무', '플라스틱',
+               '섬유', '가죽'], sector: 'material' },
+  // Industrials
+  { keywords: ['기계', '건설', '조선', '항공', '운송', '물류', '항만', '전자부품', '전동기',
+               '선박', '중공업', '전지'], sector: 'industrial' },
+  // Real Estate
+  { keywords: ['부동산'], sector: 'realestate' },
+  // Telecom
+  { keywords: ['통신', '전화'], sector: 'telecom' },
+];
+
+// [B-3] Rate Beta 섹터 테이블 — 금리 방향에 대한 섹터별 민감도
+// Damodaran (2012): 금리 상승 → 듀레이션 긴 섹터(Utility, REIT, Growth) 타격
+//                   금리 상승 → 은행 NIM 확대 → Financial 소폭 수혜
+// rate_beta > 0: hawkish 환경에서 매수 패턴 부스트 (금리 상승 수혜)
+// rate_beta < 0: hawkish 환경에서 매수 패턴 할인 (금리 상승 타격)
+// 부호 반전: dovish 환경에서 역방향 적용
+var _RATE_BETA = {
+  'utility':      -0.08,   // 높은 배당 → 금리 상승 시 채권 대체 매력 하락
+  'realestate':   -0.07,   // 부동산: 차입 의존 → 금리 민감
+  'tech':         -0.05,   // Growth: DCF 할인율 상승 → 밸류에이션 하락
+  'semiconductor': -0.04,  // 반도체: 자본집약적이지만 사이클 성장주
+  'cons_disc':    -0.03,   // 소비재: 가계 차입 비용 증가
+  'healthcare':   -0.02,   // 중립에 가까움
+  'telecom':      -0.01,   // 방어적, 약한 금리 민감도
+  'cons_staple':   0.00,   // 비탄력적 수요 → 금리 중립
+  'industrial':    0.01,   // 경기순환 → 금리보다 경기에 민감
+  'material':      0.02,   // 인플레이션 헤지 가능
+  'energy':        0.03,   // 인플레이션 동행 → 금리 상승 환경에서 상대적 수혜
+  'financial':     0.05,   // NIM 확대 → 금리 상승 직접 수혜
+};
+
+function _getStovallSector(industryName) {
+  if (!industryName) return null;
+  for (var i = 0; i < _KSIC_MACRO_SECTOR_MAP.length; i++) {
+    var entry = _KSIC_MACRO_SECTOR_MAP[i];
+    for (var k = 0; k < entry.keywords.length; k++) {
+      if (industryName.indexOf(entry.keywords[k]) !== -1) return entry.sector;
+    }
+  }
+  return null;  // 매핑 실패 → 기본 cycle_phase 적용 (차등 없음)
+}
+
+// ══════════════════════════════════════════════════════════════
 // [Phase ECOS] 매크로 경제지표 기반 패턴·시그널 신뢰도 승수
 // ══════════════════════════════════════════════════════════════
 // 소스: macro_latest.json (ECOS API) + bonds_latest.json (ECOS 채권)
@@ -2740,31 +2851,63 @@ function _applyMacroConfidenceToPatterns(patterns) {
     var isBuy = (p.signal === 'buy');
     var adj = 1.0;
 
-    // ── 1. 경기국면 (IS-LM 균형점 방향, Doc30 §1) ──
-    // expansion: AD 우측 → 추세추종 유리, 반전 매도 약화
-    // contraction: AD 좌측 → 반전 매수 강화, 추세추종 약화
-    if (phase === 'expansion') {
-      adj *= isBuy ? 1.06 : 0.94;   // 확장기: 매수 +6%, 매도 -6%
-    } else if (phase === 'peak') {
-      adj *= isBuy ? 0.95 : 1.08;   // 후퇴기: 매수 -5%, 매도 +8%
-    } else if (phase === 'contraction') {
-      adj *= isBuy ? 0.92 : 1.08;   // 수축기: 매수 -8%, 매도 +8%
-    } else if (phase === 'trough') {
-      adj *= isBuy ? 1.10 : 0.90;   // 회복기: 매수 +10%, 매도 -10%
+    // ── 1. 경기국면 + Stovall(1996) 섹터 순환 (Doc30 §1, B-1) ──
+    // 기본: IS-LM 균형점 방향 (expansion→buy, contraction→sell)
+    // 섹터 차등: Stovall 매핑 (tech/semiconductor→trough 선도, utility→contraction 방어)
+    if (phase) {
+      var _stockIndustry = currentStock ? (currentStock.industry || currentStock.sector) : null;
+      var _macroSector = _getStovallSector(_stockIndustry);
+      var _sectorCycle = _macroSector ? _STOVALL_CYCLE[_macroSector] : null;
+      if (_sectorCycle && _sectorCycle[phase] != null) {
+        // Stovall 차등: 섹터별 buy_mult, sell_mult = 2.0 - buy_mult
+        var buyMult = _sectorCycle[phase];
+        adj *= isBuy ? buyMult : (2.0 - buyMult);
+      } else {
+        // 매핑 실패 시 기존 균일 조정 유지
+        if (phase === 'expansion') {
+          adj *= isBuy ? 1.06 : 0.94;
+        } else if (phase === 'peak') {
+          adj *= isBuy ? 0.95 : 1.08;
+        } else if (phase === 'contraction') {
+          adj *= isBuy ? 0.92 : 1.08;
+        } else if (phase === 'trough') {
+          adj *= isBuy ? 1.10 : 0.90;
+        }
+      }
     }
 
-    // ── 2. 수익률곡선 레짐 (Doc35 §3, Nelson-Siegel slope) ──
-    // 역전: 12-18개월 경기침체 선행 → 매수 억제, 매도 강화
-    // 정상(steep): 유동성 확장 → 매수 소폭 지지
+    // ── 2. 수익률곡선 4-체제 (B-2, Doc35 §3) ──
+    // Bull/Bear: taylor_gap 부호로 추론 (dovish<0=Bull, hawkish>0=Bear)
+    // Steepening/Flattening: slope 수준 (>0.2=Steep, <0.2=Flat)
+    // 역전(slope<0): 최강 bearish → 별도 처리
     if (slope != null) {
       if (inverted || slope < 0) {
-        adj *= isBuy ? 0.88 : 1.12;  // 역전: 매수 -12%, 매도 +12%
-      } else if (slope < 0.15) {
-        adj *= isBuy ? 0.96 : 1.04;  // 평탄: 매수 -4%, 매도 +4%
-      } else if (slope > 0.5) {
-        adj *= isBuy ? 1.04 : 0.97;  // 가파름: 매수 +4%, 매도 -3%
+        // 역전: 12-18개월 경기침체 선행 → 최강 매수 억제
+        adj *= isBuy ? 0.88 : 1.12;
+      } else if (taylorGap != null) {
+        var isBull = taylorGap < 0;     // dovish = Bull (금리 하락 기대)
+        var isSteep = slope > 0.20;     // 정상 이상 → Steepening
+        if (isBull && isSteep) {
+          // Bull Steepening: 초기 완화 → 가장 위험선호적, 매수 강화
+          adj *= isBuy ? 1.06 : 0.95;
+        } else if (isBull && !isSteep) {
+          // Bull Flattening: 장기 금리 하락 주도 → 성장 둔화 우려
+          adj *= isBuy ? 0.97 : 1.03;
+        } else if (!isBull && isSteep) {
+          // Bear Steepening: 장기 금리 상승 → 인플레이션/공급 우려
+          adj *= isBuy ? 0.95 : 1.04;
+        } else {
+          // Bear Flattening: 단기 금리 상승 주도 → 긴축, 경기침체 전조
+          adj *= isBuy ? 0.90 : 1.10;
+        }
+      } else {
+        // taylor_gap 없을 때: 기존 slope 수준 기반 fallback
+        if (slope < 0.15) {
+          adj *= isBuy ? 0.96 : 1.04;
+        } else if (slope > 0.5) {
+          adj *= isBuy ? 1.04 : 0.97;
+        }
       }
-      // 0.15~0.5 (정상 범위): 조정 없음
     }
 
     // ── 3. 크레딧 레짐 (Doc35 §4, AA- 스프레드) ──
@@ -2896,6 +3039,24 @@ function _applyMacroConfidenceToPatterns(patterns) {
         adj *= isBuy ? 0.98 : 1.02;    // 소폭 역전: 매수 -2%, 매도 +2%
       } else if (rateDiff > 1.0) {
         adj *= isBuy ? 1.03 : 0.98;    // 한국 우위: 매수 +3%, 매도 -2%
+      }
+    }
+
+    // ── 10. Rate Beta × 금리 방향 (B-3, Damodaran 2012) ──
+    // Taylor gap + ktb10y 수준 → 섹터별 금리 민감도 차등 적용
+    // hawkish(gap>0): rate_beta<0 섹터 매수 할인, rate_beta>0 섹터 매수 부스트
+    // dovish(gap<0): 역방향 (금리 하락 → Utility/REIT 수혜)
+    if (taylorGap != null && _macroSector) {
+      var rBeta = _RATE_BETA[_macroSector];
+      if (rBeta != null && rBeta !== 0) {
+        // 금리 방향 정규화: taylor_gap을 [-2,+2] → [-1,+1]
+        var rateDir = Math.max(-1, Math.min(1, taylorGap / 2));
+        // 절대 금리 고수준 추가 압력: ktb10y > 4.0 → 민감도 1.5배 증폭
+        var ktb10y = macro ? macro.ktb10y : null;
+        var levelAmp = (ktb10y != null && ktb10y > 4.0) ? 1.5 : 1.0;
+        // adj 적용: rateDir * rBeta * levelAmp (hawkish + 양의 beta = 매수 부스트)
+        var rateAdj = rateDir * rBeta * levelAmp;
+        adj *= isBuy ? (1.0 + rateAdj) : (1.0 - rateAdj);
       }
     }
 
