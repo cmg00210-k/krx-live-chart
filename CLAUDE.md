@@ -10,11 +10,13 @@ KRX Live Chart (CheeseStock) — Korean stock market (KOSPI/KOSDAQ) charting web
 
 **No module system, no bundler, no package.json, no test framework.** All JS files use global variables. Script load order in `index.html` is critical — breaking it causes reference errors.
 
-### Script Load Order (16 files, all `defer`)
+### Script Load Order (19 files, all `defer`)
 
 ```
-colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → drawingTools.js → app.js
+colors.js → data.js → api.js → realtimeProvider.js → indicators.js → patterns.js → signalEngine.js → chart.js → patternRenderer.js → signalRenderer.js → backtester.js → sidebar.js → patternPanel.js → financials.js → drawingTools.js → appState.js → appWorker.js → appUI.js → app.js
 ```
+
+**app.js 4-split** (Phase C-1): `appState.js`(전역 상태/Tier), `appWorker.js`(Worker/분석), `appUI.js`(DOM/UX), `app.js`(init만)
 
 See `.claude/rules/architecture.md` for file responsibilities table and data flow.
 

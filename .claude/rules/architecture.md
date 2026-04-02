@@ -1,6 +1,6 @@
 # Architecture Reference
 
-## File Responsibilities (16 JS + 1 Worker)
+## File Responsibilities (19 JS + 1 Worker)
 
 | File | Globals Exported | Role |
 |------|-----------------|------|
@@ -20,7 +20,10 @@
 | `js/patternPanel.js` | `PATTERN_ACADEMIC_META`, `renderPatternPanel()` | 30+ pattern academic metadata + UI panel |
 | `js/financials.js` | `updateFinancials()`, `drawFinTrendChart()` | Financial panel (D column): PER/PBR/PSR, CAGR, investment score |
 | `js/drawingTools.js` | `drawingTools` | Drawing overlay (trendline, hline, vline, rect, fib, eraser) + localStorage |
-| `js/app.js` | (side effects) | State management, UI events, initialization, Worker orchestration |
+| `js/appState.js` | `currentStock`, `candles`, `vizToggles`, `_macroLatest`, `indParams`, ... | Shared global state, 5-Tier config, Stovall/KSIC/RateBeta tables |
+| `js/appWorker.js` | `_initAnalysisWorker()`, `_loadMarketData()`, ... | Worker lifecycle, analysis pipeline, macro/micro/derivatives confidence |
+| `js/appUI.js` | `showToast()`, `selectStock()`, `updateChartFull()`, ... | DOM events, rendering, toast, prefs, onboarding, screener |
+| `js/app.js` | `init()` | Init orchestration only — calls appState/appWorker/appUI functions |
 
 ## Data Flow
 
