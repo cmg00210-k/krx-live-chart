@@ -739,11 +739,17 @@ def main():
     args = sys.argv[1:]
     horizon = 5
     quick = False
+    pca_mode = False
+    pca_variance = 0.95  # retain 95% variance
     for i, a in enumerate(args):
         if a == "--horizon" and i + 1 < len(args):
             horizon = int(args[i + 1])
         if a == "--quick":
             quick = True
+        if a == "--pca":
+            pca_mode = True
+        if a == "--pca-variance" and i + 1 < len(args):
+            pca_variance = float(args[i + 1])
 
     if not CSV_PATH.exists():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest first.")
@@ -812,6 +818,39 @@ def main():
         v = vifs[fname]
         status = "SEVERE" if v > 10 else ("moderate" if v > 5 else "ok")
         print(f"  {fname:<20} {v:>8.2f} {status:>10}")
+
+    # ── Step 5b: PCA dimensionality reduction (optional) ──
+    X23_pca = None
+    pca_info = None
+    if pca_mode:
+        print(f"\n[4b/9] PCA dimensionality reduction (target variance: {pca_variance:.0%})...")
+        # SVD-based PCA on standardized features (no sklearn dependency)
+        # Must standardize (not just center) so features with different scales
+        # contribute equally -- otherwise high-variance features dominate PC1
+        X_mean = X23.mean(axis=0)
+        X_std_dev = X23.std(axis=0)
+        X_std_dev[X_std_dev < 1e-10] = 1.0  # avoid division by zero
+        X_standardized = (X23 - X_mean) / X_std_dev
+        U, S, Vt = np.linalg.svd(X_standardized, full_matrices=False)
+        explained_var = (S ** 2) / (S ** 2).sum()
+        cumsum_var = np.cumsum(explained_var)
+        n_components = int(np.argmax(cumsum_var >= pca_variance)) + 1
+        n_components = max(n_components, 5)  # minimum 5 components
+        X23_pca = X_standardized @ Vt[:n_components].T
+        pca_cond = compute_condition_number(X23_pca)
+        pca_info = {
+            "n_components": n_components,
+            "variance_explained": round(float(cumsum_var[n_components - 1]), 4),
+            "original_kappa": round(cond_num, 1),
+            "pca_kappa": round(pca_cond, 1),
+            "reduction_ratio": round(cond_num / max(pca_cond, 1), 1),
+            "eigenvalue_spectrum": [round(float(v), 6) for v in explained_var[:n_components]],
+        }
+        print(f"  -> {n_components}/{X23.shape[1]} components explain {cumsum_var[n_components - 1]:.1%} variance")
+        print(f"  -> Condition number: {cond_num:.1f} -> {pca_cond:.1f} "
+              f"(reduction: {cond_num / max(pca_cond, 1):.0f}x)")
+        for i in range(min(n_components, 10)):
+            print(f"     PC{i + 1}: {explained_var[i]:.4f} ({cumsum_var[i]:.4f} cumulative)")
 
     # ── Step 6: OLS baseline + Ridge CV + LASSO CV ──
     print("\n[5/9] Model fitting (OLS, Ridge CV, LASSO CV)...")
@@ -909,13 +948,23 @@ def main():
         wf_12 = walk_forward_ic(X12, y, dates, method="ridge", lam=2.0)
         wf_6 = walk_forward_ic(X6, y, dates, method="ols")
 
+        # PCA walk-forward comparison (if PCA mode enabled)
+        wf_pca = None
+        if pca_mode and X23_pca is not None:
+            wf_pca = walk_forward_ic(X23_pca, y, dates, method="ridge", lam=best_ridge_lam)
+
         for name, wf in [("6-col OLS", wf_6), ("12-col Ridge", wf_12),
                          ("17-col Ridge", wf_17), ("18-col Ridge", wf_18),
                          ("23-col Ridge", wf_23)]:
             if wf:
                 print(f"  -> {name:<15} WF IC={wf['mean_ic']:.6f}, t={wf['t_stat']:.2f}, "
                       f"pos={wf['ic_positive_pct']}%")
+        if wf_pca:
+            nc = pca_info["n_components"] if pca_info else "?"
+            print(f"  -> PCA-{nc} Ridge   WF IC={wf_pca['mean_ic']:.6f}, t={wf_pca['t_stat']:.2f}, "
+                  f"pos={wf_pca['ic_positive_pct']}%")
     else:
+        wf_pca = None
         print("\n[7/9] Walk-Forward skipped (--quick)")
 
     # ── Step 9: Sequential APT factor contribution ──
@@ -1093,7 +1142,9 @@ def main():
             "ridge_17col": _to_native(wf_17) if wf_17 else None,
             "ridge_23col": _to_native(wf_23) if wf_23 else None,
             "regime_26col": _to_native(regime_wf) if regime_wf else None,
+            "pca_reduced": _to_native(wf_pca) if wf_pca else None,
         },
+        "pca_analysis": _to_native(pca_info) if pca_info else None,
         "regime_interaction": {
             "n_features": len(regime_features),
             "feature_names": regime_features,

@@ -221,6 +221,86 @@ class LinUCB:
             self.b[a] = np.zeros(self.d_internal)
             self._n_updates[a] = 0
 
+    def warm_start_from_data(self, contexts, y_pred, y_actual, effective_n=200):
+        """Initialize theta vectors from historical MRA prediction data.
+
+        For each arm a:
+          1. Compute per-sample reward: r_a[i] = compute_reward(y_actual[i], y_pred[i], factor_a)
+          2. Build design matrix X with bias
+          3. Scaled Ridge: A = scale*(X^T X) + I, b = scale*(X^T r_a)
+
+        The `effective_n` parameter controls how strongly the warm-start prior
+        constrains the bandit. With n=18728 raw samples but effective_n=200,
+        the A matrix has eigenvalues ~200 (not ~18728), letting online learning
+        override the prior within ~200 new observations.
+
+        Special handling for trust_mra (factor=1.0): since reward is structurally
+        zero (y_adj - y_mra = 0), we add a small positive prior to b[trust_mra]
+        so the bandit doesn't start with zero confidence in the baseline arm.
+
+        Academic basis: Li et al. (2010) warm-start from logged data,
+        core_data/11_RL section 7.3 (warm-start from technical analysis rules).
+        Effective-n scaling: analogous to prior strength in Bayesian linear regression.
+
+        Parameters
+        ----------
+        contexts : ndarray (n, d)
+            Context vectors (same dim as LinUCB d, without bias).
+        y_pred : array-like (n,)
+            MRA predicted returns.
+        y_actual : array-like (n,)
+            Actual realized returns.
+        effective_n : int
+            Effective warm-start sample size (controls prior strength).
+            Lower = weaker prior = faster adaptation. Default 200.
+        """
+        n = len(y_pred)
+        if n < 10:
+            print(f"  [warm_start] Too few samples ({n}), skipping")
+            return
+
+        # Build design matrix with bias column
+        X = np.zeros((n, self.d_internal))
+        for i in range(n):
+            X[i] = self._add_bias(contexts[i])
+
+        XtX = X.T @ X
+
+        # Scale factor: reduce A/b to effective_n equivalent
+        scale = effective_n / max(n, 1)
+
+        for a in range(self.K):
+            factor = ACTION_FACTORS[a]
+            # Compute reward for this arm across all warm-start samples
+            rewards = np.array([
+                compute_reward(float(y_actual[i]), float(y_pred[i]), factor)
+                for i in range(n)
+            ])
+
+            # Scaled Ridge: A = scale*(X^T X) + I
+            self.A[a] = scale * XtX + np.eye(self.d_internal)
+            try:
+                self.A_inv[a] = np.linalg.inv(self.A[a])
+            except np.linalg.LinAlgError:
+                self.A_inv[a] = np.eye(self.d_internal)
+            self.b[a] = scale * (X.T @ rewards)
+            self._n_updates[a] = effective_n
+
+        # Fix: trust_mra (factor=1.0) has structural zero reward.
+        # Add a small positive prior to its bias term so it competes fairly.
+        # The prior says "trust_mra is a reasonable default" (zero-information prior).
+        trust_idx = ACTION_FACTORS.index(1.0)
+        # Set trust_mra's bias-term b to a small positive value
+        # (equivalent to observing effective_n samples with mean reward ~0.01)
+        self.b[trust_idx][0] = effective_n * 0.01
+
+        # Report warm-start theta norms
+        for a in range(self.K):
+            theta = self.A_inv[a] @ self.b[a]
+            print(f"  [warm_start] {ACTION_NAMES[a]:>15}: "
+                  f"theta_norm={np.linalg.norm(theta):.4f}, "
+                  f"bias={theta[0]:.4f}, n_eff={self._n_updates[a]}")
+
 
 # ──────────────────────────────────────────────
 # Unit Tests

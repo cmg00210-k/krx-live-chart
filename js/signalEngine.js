@@ -2500,6 +2500,30 @@ class SignalEngine {
       }
     }
 
+    // Foreign flow 1-day leadership signal (Kyle 1985, Choe/Kho/Stulz 2005)
+    // Informed foreign traders lead KRX returns by 1-3 days (Doc39 §3.2)
+    // Thresholds: ±2000억 medium (~1σ daily flow), ±5000억 strong (~2.5σ)
+    var fNet1d = investor.foreign_net_1d;
+    if (fNet1d != null) {
+      if (fNet1d > 5000) {
+        signals.push({ type: 'flowLeadershipBuy', signal: 'buy', strength: 'medium',
+          confidence: 68, index: lastIdx, category: 'flow',
+          description: '외국인 1일 대량 순매수 ' + Math.round(fNet1d) + '억원 (강한 선행 신호)' });
+      } else if (fNet1d > 2000) {
+        signals.push({ type: 'flowLeadershipBuy', signal: 'buy', strength: 'weak',
+          confidence: 62, index: lastIdx, category: 'flow',
+          description: '외국인 1일 순매수 ' + Math.round(fNet1d) + '억원 (선행 신호)' });
+      } else if (fNet1d < -5000) {
+        signals.push({ type: 'flowLeadershipSell', signal: 'sell', strength: 'medium',
+          confidence: 68, index: lastIdx, category: 'flow',
+          description: '외국인 1일 대량 순매도 ' + Math.round(Math.abs(fNet1d)) + '억원 (강한 선행 신호)' });
+      } else if (fNet1d < -2000) {
+        signals.push({ type: 'flowLeadershipSell', signal: 'sell', strength: 'weak',
+          confidence: 62, index: lastIdx, category: 'flow',
+          description: '외국인 1일 순매도 ' + Math.round(Math.abs(fNet1d)) + '억원 (선행 신호)' });
+      }
+    }
+
     return signals;
   }
 

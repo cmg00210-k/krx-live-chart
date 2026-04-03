@@ -57,6 +57,7 @@ Usage:
     python scripts/rl_residuals.py --test-days 10    (default: 10)
     python scripts/rl_residuals.py --lambda 2.0      (default: 2.0)
     python scripts/rl_residuals.py --8col             (use 8 core features only, skip APT)
+    python scripts/rl_residuals.py --23col            (use mra_combined 23-col Ridge pipeline)
 """
 
 import csv
@@ -99,6 +100,19 @@ APT_NAMES = [
 
 # Full 13 features (default)
 FEATURE_NAMES = FEATURE_NAMES_CORE + APT_NAMES
+
+# 23-col features (matching mra_combined.py Stage B-1 model)
+FEATURE_NAMES_23COL = [
+    # 12 base
+    "hw", "vw", "mw", "rw", "confidence_norm", "signal_dir",
+    "market_type", "log_confidence", "pattern_tier",
+    "hw_x_signal", "vw_x_signal", "conf_x_signal",
+    # 6 indicators
+    "trendStrength", "volumeRatio", "atrNorm",
+    "rsi_14", "macd_hist", "bb_position",
+    # 5 APT (same as mra_combined: beta_60d, value_inv_pbr instead of stock_ret_5d, market_ret_5d)
+    "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
+]
 
 
 # ──────────────────────────────────────────────
@@ -421,6 +435,46 @@ def load_and_engineer(horizon, use_apt=True):
     return X, y, dates, meta
 
 
+def load_and_engineer_23col(horizon):
+    """Load CSV + 23-col features matching mra_combined.py Stage B-1 model.
+
+    Imports mra_combined's data pipeline: 12 base + 6 indicators + 5 APT factors.
+    Uses the same APT set (momentum_60d, beta_60d, value_inv_pbr, log_size, liquidity_20d)
+    for consistency with mra_combined_coefficients.json (warm-start source).
+    """
+    # Import from mra_combined (same directory)
+    import importlib.util
+    mra_path = Path(__file__).resolve().parent / "mra_combined.py"
+    spec = importlib.util.spec_from_file_location("mra_combined", mra_path)
+    mra = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mra)
+
+    print("  -> Loading 18-col (12 base + 6 indicators) from CSV...")
+    rows, indicator_present = mra.load_csv_with_indicators(horizon)
+    X18, y, dates, meta = mra.rows_to_X18(rows)
+    n = len(y)
+    print(f"     {n:,} samples, indicators_present={indicator_present}")
+
+    # Load APT auxiliary data
+    print("  -> Loading APT auxiliary data for 5 factors...")
+    index_info = mra.load_index()
+    financials = mra.load_financials()
+    ohlcv = mra.load_ohlcv_all(index_info)
+    date_idx = mra.build_date_index(ohlcv)
+    mkt_returns = mra.compute_market_returns(ohlcv, index_info, top_n=100)
+
+    apt_raw = mra.compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials)
+    for j, fname in enumerate(mra.APT_FACTOR_NAMES):
+        valid = np.sum(~np.isnan(apt_raw[:, j]))
+        print(f"     {fname}: {valid:,}/{n:,} ({valid / n * 100:.1f}%)")
+
+    apt_z = mra.zscore_by_date(apt_raw, dates)
+    X23 = np.column_stack([X18, apt_z])
+    print(f"  -> Final: {X23.shape[0]:,} x {X23.shape[1]} features")
+
+    return X23, y, dates, meta
+
+
 # ──────────────────────────────────────────────
 # Regression: Ridge (initial) + Huber-IRLS (robust, primary)
 # ──────────────────────────────────────────────
@@ -490,12 +544,16 @@ def predict(X, beta):
 # Walk-Forward Residual Extraction (core of B-1)
 # ──────────────────────────────────────────────
 
-def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=10, lam=2.0):
+def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=10, lam=2.0, use_huber=True):
     """
     Strict walk-forward: train on T days, predict next T' days.
     Returns per-sample residuals with full metadata.
 
     No overlap, no look-ahead. Each sample appears in exactly one test window.
+
+    Args:
+        use_huber: If True, use Huber-IRLS (robust to fat tails). If False, use standard Ridge
+                   (for consistency with mra_combined_coefficients.json warm-start source).
     """
     unique_dates = sorted(set(dates))
     date_to_idx = defaultdict(list)
@@ -530,7 +588,10 @@ def walk_forward_residuals(X, y, dates, meta, train_days=60, test_days=10, lam=2
         y_lo, y_hi = np.percentile(y_tr, [1, 99])
         y_tr = np.clip(y_tr, y_lo, y_hi)
 
-        beta = huber_ridge_fit(X_tr, y_tr, lam)
+        if use_huber:
+            beta = huber_ridge_fit(X_tr, y_tr, lam)
+        else:
+            beta = ridge_fit(X_tr, y_tr, lam)
 
         # Empirical Bayes per-feature shrinkage (cf. Efron 2010 "Large-Scale Inference")
         # Inspired by Stein shrinkage but applied per-feature (not vector-norm).
@@ -855,6 +916,7 @@ def main():
     test_days = 10
     lam = 2.0
     use_apt = True  # default: 13-col (8 core + 5 APT/momentum)
+    use_23col = False  # --23col: use mra_combined's 23-feature pipeline
 
     i = 0
     while i < len(args):
@@ -869,6 +931,8 @@ def main():
         elif args[i] in ("--8col", "--12col"):
             # --8col: 8 core features only (no APT). --12col kept for backward compat.
             use_apt = False; i += 1
+        elif args[i] == "--23col":
+            use_23col = True; i += 1
         else:
             i += 1
 
@@ -876,20 +940,33 @@ def main():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest first.")
         sys.exit(1)
 
-    feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_CORE
-    mode_label = f"{len(feature_names)}-col" + (" (core + APT)" if use_apt else " (core only)")
+    if use_23col:
+        feature_names = FEATURE_NAMES_23COL
+        mode_label = "23-col (mra_combined: 12 base + 6 indicators + 5 APT)"
+    else:
+        feature_names = FEATURE_NAMES if use_apt else FEATURE_NAMES_CORE
+        mode_label = f"{len(feature_names)}-col" + (" (core + APT)" if use_apt else " (core only)")
 
     print("=" * 60)
     print(f"Stage B-1: Walk-Forward MRA Residual Extraction ({mode_label})")
+    if use_23col:
+        print("  Mode: 23-col Ridge (matching mra_combined_coefficients.json)")
     print("=" * 60)
     print(f"  horizon={horizon}, train={train_days}d, test={test_days}d, lambda={lam}")
 
     # ── Step 1: Load + Feature Engineering ──
     print(f"\n[1/4] Loading CSV + engineering {len(feature_names)} features...")
-    X, y, dates, meta = load_and_engineer(horizon, use_apt=use_apt)
+    if use_23col:
+        X, y, dates, meta = load_and_engineer_23col(horizon)
+    else:
+        X, y, dates, meta = load_and_engineer(horizon, use_apt=use_apt)
     n, p = X.shape
-    # Update feature_names to match actual dimension (APT may fall back to core-only)
-    if p == len(FEATURE_NAMES_CORE):
+    # Update feature_names to match actual dimension
+    if use_23col:
+        if p != 23:
+            print(f"  -> [WARN] Expected 23 features, got {p}. Falling back to 13-col.")
+            feature_names = FEATURE_NAMES
+    elif p == len(FEATURE_NAMES_CORE):
         feature_names = FEATURE_NAMES_CORE
     else:
         feature_names = FEATURE_NAMES
@@ -897,11 +974,15 @@ def main():
 
     # ── Step 2: Walk-Forward Residual Extraction ──
     print(f"\n[2/4] Walk-Forward residual extraction...")
+    # 23-col mode: use standard Ridge (not Huber-IRLS) for consistency
+    # with mra_combined_coefficients.json warm-start source
+    use_huber = not use_23col
     residuals, period_stats = walk_forward_residuals(
         X, y, dates, meta,
         train_days=train_days,
         test_days=test_days,
         lam=lam,
+        use_huber=use_huber,
     )
     print(f"  -> {len(residuals):,} residual samples from {len(period_stats)} periods")
     if residuals:
