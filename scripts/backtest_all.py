@@ -24,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -497,6 +498,8 @@ def generate_wc_return_pairs(results):
     fieldnames = [
         "code", "market", "type", "signal", "date",
         "wc", "hw", "vw", "mw", "rw", "confidence",
+        "signal_direction", "market_type", "log_confidence",
+        "pattern_tier", "hw_x_signal", "vw_x_signal",
         "ret_1", "ret_3", "ret_5", "ret_10", "ret_20",
     ]
 
@@ -524,6 +527,12 @@ def generate_wc_return_pairs(results):
                     "mw": occ.get("mw"),
                     "rw": occ.get("rw"),
                     "confidence": occ.get("confidence"),
+                    "signal_direction": occ.get("signal_direction"),
+                    "market_type": occ.get("market_type"),
+                    "log_confidence": occ.get("log_confidence"),
+                    "pattern_tier": occ.get("pattern_tier"),
+                    "hw_x_signal": occ.get("hw_x_signal"),
+                    "vw_x_signal": occ.get("vw_x_signal"),
                     "ret_1": rets.get("1"),
                     "ret_3": rets.get("3"),
                     "ret_5": rets.get("5"),

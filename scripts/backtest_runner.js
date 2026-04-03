@@ -94,6 +94,31 @@ this.PatternEngine = PatternEngine;
   return sandbox;
 }
 
+// ── Pattern tier mapping (mirrors appState.js _TIER_S/A/B/D) ─────────
+const _PATTERN_TIER = new Map([
+  // S-Tier (4) — candle
+  ...['gravestoneDoji','shootingStar','hangingMan','bearishHarami','darkCloud',
+      'bearishMarubozu','threeBlackCrows','bearishHaramiCross','bearishBeltHold',
+      'bearishEngulfing','eveningStar'].map(p => [p, 4]),
+  // S-Tier (4) — chart
+  ...['doubleTop','doubleBottom'].map(p => [p, 4]),
+  // A-Tier (3) — candle
+  ...['tweezerTop','threeInsideDown'].map(p => [p, 3]),
+  // A-Tier (3) — chart
+  ...['risingWedge','headAndShoulders'].map(p => [p, 3]),
+  // B-Tier (2) — candle
+  ...['hammer','tweezerBottom','piercingLine','dragonflyDoji','threeWhiteSoldiers',
+      'bullishEngulfing','morningStar','bullishHarami','threeInsideUp','invertedHammer',
+      'bullishMarubozu','risingThreeMethods','fallingThreeMethods'].map(p => [p, 2]),
+  // B-Tier (2) — chart
+  ...['channel','descendingTriangle','inverseHeadAndShoulders','cupAndHandle',
+      'fallingWedge','ascendingTriangle','symmetricTriangle'].map(p => [p, 2]),
+  // D-Tier suppress (1)
+  ...['longLeggedDoji','bullishHaramiCross','bullishBeltHold','spinningTop','doji'].map(p => [p, 1]),
+  // D-Tier context-only (0)
+  ...['abandonedBabyBullish','abandonedBabyBearish','stickSandwich'].map(p => [p, 0]),
+]);
+
 // ── Analyze one stock ────────────────────────────────
 function analyzeStock(sandbox, code, market, filePath) {
   const candleFile = filePath
@@ -165,6 +190,7 @@ function analyzeStock(sandbox, code, market, filePath) {
       }
     }
     if (Object.keys(returns).length > 0) {
+      const sigDir = p.signal === 'buy' ? 1 : (p.signal === 'sell' ? -1 : 0);
       occurrenceReturns.push({
         type: p.type,
         signal: p.signal,
@@ -176,6 +202,12 @@ function analyzeStock(sandbox, code, market, filePath) {
         mw: p.mw,
         rw: p.rw,
         confidence: p.confidence,
+        signal_direction: sigDir,
+        market_type: market.toUpperCase() === 'KOSPI' ? 1 : 0,
+        log_confidence: +Math.log((p.confidence || 50) / 100 + 0.001).toFixed(4),
+        pattern_tier: _PATTERN_TIER.get(p.type) ?? 2,
+        hw_x_signal: +((p.hw || 1) * sigDir).toFixed(4),
+        vw_x_signal: +((p.vw || 1) * sigDir).toFixed(4),
         returns,
       });
     }
