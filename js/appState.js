@@ -256,6 +256,9 @@ var _shortSellingData = null;// 공매도 요약 (shortselling_summary.json — 
 var _kosisLatest = null;     // [FIX-H12] KOSIS 경제 지표 (kosis_latest.json — CLI/ESI/소매판매)
 var _lastAdvLevel = 0;       // 최근 Worker 분석의 ADV 유동성 등급 (signalEngine.calcADVLevel)
 var _lastVolRegime = 'neutral';  // [Phase0-#6] 최근 Worker 분석의 VolRegime 레짐 (signalEngine.calcVolRegime)
+var _currentRORORegime = 'neutral';  // [D-2] RORO 3-체제: 'risk-on' | 'risk-off' | 'neutral'
+var _roroScore = 0;                  // [D-2] RORO 복합 스코어 [-1.0, +1.0]
+var _currentDD = null;               // [D-4] Merton Naive DD (비금융주 한정, Bharath & Shumway 2008)
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 let _lastActivePattern = null;     // [Fix-1] 전체 분석의 active 패턴 보존 (드래그 시 HUD 소실 방지)
 

@@ -482,6 +482,19 @@ class PatternBacktester {
     // [C-6] Hansen SPA test — 전체 전략 풀의 데이터 스누핑 보정
     results._spaTest = this._hansenSPA(results);
 
+    // [D-5] SPA→reliabilityTier 연동 (Hansen 2005)
+    // SPA rejected=false: 최고 전략도 데이터 스누핑 위험 → A/B 패턴 C로 강등
+    // SPA rejected=true: 유의미한 전략 존재 확인 → 기존 tier 유지
+    if (results._spaTest && !results._spaTest.rejected) {
+      for (var spaKey in results) {
+        if (spaKey === '_spaTest') continue;
+        var spaR = results[spaKey];
+        if (spaR && (spaR.reliabilityTier === 'A' || spaR.reliabilityTier === 'B')) {
+          spaR.reliabilityTier = 'C';
+        }
+      }
+    }
+
     return results;
   }
 

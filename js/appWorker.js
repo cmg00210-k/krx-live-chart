@@ -89,6 +89,9 @@ function _initAnalysisWorker() {
         detectedSignals = msg.signals;
         // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
         _applyMarketContextToPatterns(detectedPatterns);
+        // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
+        _classifyRORORegime();
+        _applyRORORegimeToPatterns(detectedPatterns);
         // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
         _applyMacroConfidenceToPatterns(detectedPatterns);
         // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
@@ -96,6 +99,9 @@ function _initAnalysisWorker() {
         _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
         // [Phase KRX-API] 파생상품·수급 데이터 기반 신뢰도 조정
         _applyDerivativesConfidenceToPatterns(detectedPatterns);
+        // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
+        _calcNaiveDD(candles.map(function(c) { return c.close; }));
+        _applyMertonDDToPatterns(detectedPatterns);
         _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
@@ -462,6 +468,132 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════
+// [D-4] Merton Distance-to-Default (Naive DD)
+//
+// Merton(1974): 자기자본 = 자산에 대한 유럽식 콜옵션.
+// Bharath & Shumway(2008) 간편법: V≈E+D, σ_V 가중평균.
+// 금융주(은행/보험/증권) 부채=영업자산 → DD 부적합 → 제외.
+// Doc35 §6.1-6.5, 상수 #134 MERTON_DD_WARNING=1.5
+// ══════════════════════════════════════════════════════════════
+
+// ── 표준정규 CDF 근사 (Abramowitz & Stegun 1964, |ε| < 7.5e-8) ──
+function _normalCDF(x) {
+  if (x > 6) return 1;
+  if (x < -6) return 0;
+  var neg = (x < 0);
+  if (neg) x = -x;
+  var t = 1 / (1 + 0.2316419 * x);
+  var d = 0.3989422804014327 * Math.exp(-0.5 * x * x);  // n(x) = φ(x)
+  var p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return neg ? p : 1 - p;
+}
+
+// ── Naive DD 계산 (Bharath & Shumway 2008) ──
+// candleCloses: 일봉 종가 배열 (EWMA 변동성 산출용)
+function _calcNaiveDD(candleCloses) {
+  _currentDD = null;
+  if (!currentStock || !candleCloses || candleCloses.length < 60) return;
+
+  // 금융주 제외: 부채=영업자산이므로 DD 해석 무의미
+  var industry = currentStock.industry || currentStock.sector || '';
+  var sector = _getStovallSector(industry);
+  if (sector === 'financial') return;
+
+  // 재무 데이터: seed 제외 (가짜 데이터로 DD 계산 금지)
+  if (typeof _financialCache === 'undefined') return;
+  var cached = _financialCache[currentStock.code];
+  if (!cached) return;
+  if (cached.source !== 'dart' && cached.source !== 'hardcoded') return;
+  var arr = (cached.quarterly && cached.quarterly.length) ? cached.quarterly : cached.annual;
+  if (!arr || !arr.length) return;
+  var latest = arr[0];
+  var totalLiab = latest.total_liabilities;
+  if (!totalLiab || totalLiab <= 0) return;
+
+  // E: 시총 (억원 — totalLiab와 동일 단위, toEok() 변환 후)
+  var mcapEok = null;
+  if (typeof sidebarManager !== 'undefined' && sidebarManager.MARKET_CAP) {
+    mcapEok = sidebarManager.MARKET_CAP[currentStock.code];
+  }
+  if (!mcapEok && currentStock.marketCap) mcapEok = currentStock.marketCap;
+  if (!mcapEok || mcapEok <= 0) return;
+  var E = mcapEok;  // 억원 (totalLiab와 동일 단위)
+
+  // D: Default Point ≈ total_liabilities × 0.75 (KMV 관행, Doc35 §6.5)
+  var D = totalLiab * 0.75;
+  if (D <= 0) return;
+
+  // σ_E: EWMA 일간 변동성 → 연율화 (×√252)
+  var ewmaVol = calcEWMAVol(candleCloses);
+  var sigmaE = null;
+  for (var i = ewmaVol.length - 1; i >= 0; i--) {
+    if (ewmaVol[i] != null) { sigmaE = ewmaVol[i]; break; }
+  }
+  if (!sigmaE || sigmaE <= 0) return;
+  sigmaE *= Math.sqrt(252);  // 연율화
+
+  // r: 무위험이자율 (KTB 3Y)
+  var r = 0.035;  // fallback (#130 YIELD_GAP_FALLBACK_KTB, Doc35 §10.1)
+  if (_bondsLatest && _bondsLatest.yields && _bondsLatest.yields.ktb_3y != null) {
+    r = _bondsLatest.yields.ktb_3y / 100;
+  } else if (_macroLatest && _macroLatest.ktb3y != null) {
+    r = _macroLatest.ktb3y / 100;
+  }
+
+  // Naive DD 계산
+  var V = E + D;                                          // 자산가치 근사
+  var sigmaV = sigmaE * (E / V) + 0.05 * (D / V);       // 자산변동성 근사
+  if (sigmaV <= 0) return;
+  var T = 1;  // 1년
+
+  var dd = (Math.log(V / D) + (r - 0.5 * sigmaV * sigmaV) * T) / (sigmaV * Math.sqrt(T));
+
+  _currentDD = {
+    dd: dd,
+    edf: _normalCDF(-dd),     // 기대 부도확률
+    V: V, D: D,
+    sigmaV: sigmaV,
+    sector: sector
+  };
+}
+
+// ── DD 기반 패턴 신뢰도 조정 (Doc35 §6.4) ──
+// DD ≥ 2.0: 안전, 조정 없음
+// DD ≥ 1.5: 경계 — 매수 소폭 할인
+// DD < 1.5: 위험 — 매수 강한 할인, 매도 부스트
+// DD < 1.0: 매우 위험 — 최대 할인
+// clamp [0.85, 1.15]: 종목 고유 지표이므로 제한적 범위
+function _applyMertonDDToPatterns(patterns) {
+  if (!patterns || patterns.length === 0 || !_currentDD) return;
+  var dd = _currentDD.dd;
+  if (dd >= 2.0) return;  // 안전 — 조정 없음
+
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    var isBuy = (p.signal === 'buy');
+    var adj;
+
+    if (dd >= 1.5) {
+      // 경계: 매수 소폭 할인, 매도 소폭 부스트
+      adj = isBuy ? 0.95 : 1.02;
+    } else if (dd >= 1.0) {
+      // 위험: 매수 강한 할인, 매도 부스트
+      adj = isBuy ? 0.82 : 1.12;
+    } else {
+      // 매우 위험: 최대 할인
+      adj = isBuy ? 0.75 : 1.15;
+    }
+
+    // clamp [0.85, 1.15]
+    adj = Math.max(0.85, Math.min(1.15, adj));
+    p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+    if (p.confidencePred != null) {
+      p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+    }
+  }
+}
+
 /**
  * 현재 종목의 재무 데이터에서 밸류에이션 S/R용 bps/eps 추출
  * _financialCache (data.js 전역)에서 동기적 접근
@@ -796,6 +928,151 @@ function _applyMacroConfidenceToPatterns(patterns) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// [D-2] RORO 3-체제 프레임워크 (Risk-On / Risk-Off / Neutral)
+//
+// 5-factor 복합 스코어 → 히스테리시스 체제 분류 → 패턴 방향 편향.
+// 기존 10-factor 매크로 조정과 독립 레이어로 운용.
+// clamp [0.92, 1.08]: VIX(Factor8)/credit(Factor3) 이중 적용 방지.
+//
+// 이론: Baele et al.(2019) Flights to Safety, IMF WP/2012/173
+// ══════════════════════════════════════════════════════════════
+function _classifyRORORegime() {
+  var score = 0;
+  var count = 0;
+
+  // ── Factor 1: VKOSPI/VIX 수준 (weight 0.30) ──
+  var vkospi = null;
+  if (_marketContext && _marketContext.vkospi != null) {
+    vkospi = _marketContext.vkospi;
+  } else if (_macroLatest && _macroLatest.vkospi != null) {
+    vkospi = _macroLatest.vkospi;
+  } else if (_macroLatest && _macroLatest.vix != null) {
+    // VIX→VKOSPI proxy: VKOSPI ≈ VIX × 1.15 (historical avg)
+    vkospi = _macroLatest.vix * 1.15;
+  }
+  if (vkospi != null) {
+    var volScore;
+    if (vkospi > 30) volScore = -1.0;       // crisis
+    else if (vkospi > 22) volScore = -0.5;  // elevated
+    else if (vkospi < 15) volScore = 0.5;   // calm
+    else volScore = 0.0;                     // normal (15-22)
+    score += volScore * 0.30;
+    count++;
+  }
+
+  // ── Factor 2: 신용스프레드 (weight 0.20, 양분) ──
+  var aaSpread = _bondsLatest && _bondsLatest.credit_spreads
+    ? _bondsLatest.credit_spreads.aa_spread : null;
+  if (aaSpread != null) {
+    var csScore;
+    if (aaSpread > 1.5) csScore = -1.0;       // stress
+    else if (aaSpread > 1.0) csScore = -0.5;  // elevated
+    else if (aaSpread < 0.5) csScore = 0.3;   // tight (risk-on)
+    else csScore = 0.0;                        // normal
+    score += csScore * 0.10;
+    count++;
+  }
+  var hySpread = _macroLatest ? _macroLatest.us_hy_spread : null;
+  if (hySpread != null) {
+    var hyScore;
+    if (hySpread > 5.0) hyScore = -1.0;
+    else if (hySpread > 4.0) hyScore = -0.5;
+    else if (hySpread < 3.0) hyScore = 0.3;
+    else hyScore = 0.0;
+    score += hyScore * 0.10;
+    count++;
+  }
+
+  // ── Factor 3: USD/KRW 수준 (weight 0.20) ──
+  var usdkrw = _macroLatest ? _macroLatest.usdkrw : null;
+  if (usdkrw != null) {
+    var fxScore;
+    if (usdkrw > 1450) fxScore = -1.0;       // KRW 급약세
+    else if (usdkrw > 1350) fxScore = -0.5;  // 약세
+    else if (usdkrw < 1200) fxScore = 0.5;   // 강세
+    else if (usdkrw < 1100) fxScore = 1.0;   // 급강세
+    else fxScore = 0.0;                       // 중립 (1200-1350)
+    score += fxScore * 0.20;
+    count++;
+  }
+
+  // ── Factor 4: MCS v2 (weight 0.15) ──
+  var mcs = _macroLatest ? _macroLatest.mcs : null;
+  if (mcs != null) {
+    // MCS [0,1] → [-1,+1]: 0.5=neutral, >0.6=risk-on, <0.4=risk-off
+    var mcsScore = (mcs - 0.5) * 2;
+    score += mcsScore * 0.15;
+    count++;
+  }
+
+  // ── Factor 5: 투자자 정렬 (weight 0.15) ──
+  if (_investorData && _investorData.alignment != null) {
+    var flowScore;
+    if (_investorData.alignment === 'aligned_buy') flowScore = 0.8;
+    else if (_investorData.alignment === 'aligned_sell') flowScore = -0.8;
+    else flowScore = 0.0;
+    score += flowScore * 0.15;
+    count++;
+  }
+
+  // ── 정규화: 유효 입력 3개 미만 시 비례 할인 ──
+  if (count === 0) {
+    _currentRORORegime = 'neutral';
+    _roroScore = 0;
+    return;
+  }
+  var normalizedScore = score / Math.min(count / 3, 1.0);
+
+  // ── 히스테리시스 체제 전환 ──
+  var ENTER_ON = 0.25, ENTER_OFF = -0.25;
+  var EXIT_ON = 0.10, EXIT_OFF = -0.10;
+  var prev = _currentRORORegime;
+  var next;
+
+  if (prev === 'neutral') {
+    if (normalizedScore >= ENTER_ON) next = 'risk-on';
+    else if (normalizedScore <= ENTER_OFF) next = 'risk-off';
+    else next = 'neutral';
+  } else if (prev === 'risk-on') {
+    if (normalizedScore <= EXIT_ON) next = (normalizedScore <= ENTER_OFF) ? 'risk-off' : 'neutral';
+    else next = 'risk-on';
+  } else {
+    // prev === 'risk-off'
+    if (normalizedScore >= EXIT_OFF) next = (normalizedScore >= ENTER_ON) ? 'risk-on' : 'neutral';
+    else next = 'risk-off';
+  }
+
+  _currentRORORegime = next;
+  _roroScore = normalizedScore;
+}
+
+// ── RORO 체제 기반 패턴 방향 편향 적용 ──
+// risk-on: 매수 +6%, 매도 -6%  |  risk-off: 매수 -8%, 매도 +8%
+// clamp [0.92, 1.08]: 기존 Factor 3(credit), Factor 8(VIX) 이중 적용 방지
+function _applyRORORegimeToPatterns(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  if (_currentRORORegime === 'neutral') return;
+
+  var buyAdj, sellAdj;
+  if (_currentRORORegime === 'risk-on') {
+    buyAdj = 1.06; sellAdj = 0.94;
+  } else {
+    buyAdj = 0.92; sellAdj = 1.08;
+  }
+
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    var adj = (p.signal === 'buy') ? buyAdj : sellAdj;
+    // clamp [0.92, 1.08]
+    adj = Math.max(0.92, Math.min(1.08, adj));
+    p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+    if (p.confidencePred != null) {
+      p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // [Phase 2-D] 미시경제 지표 계산 + 캐시
 // ══════════════════════════════════════════════════════════════
 function _updateMicroContext(candleData) {
@@ -977,6 +1254,9 @@ function _analyzeOnMainThread() {
   }
   // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
   _applyMarketContextToPatterns(detectedPatterns);
+  // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
+  _classifyRORORegime();
+  _applyRORORegimeToPatterns(detectedPatterns);
   // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
   _applyMacroConfidenceToPatterns(detectedPatterns);
   // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
@@ -984,6 +1264,9 @@ function _analyzeOnMainThread() {
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   // [FIX] Worker 경로와 동일하게 파생상품 신뢰도 조정 추가
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
+  // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
+  _calcNaiveDD(candles.map(function(c) { return c.close; }));
+  _applyMertonDDToPatterns(detectedPatterns);
   _applyMacroConditionsToSignals(detectedSignals);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;
