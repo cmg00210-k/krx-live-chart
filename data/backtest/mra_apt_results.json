@@ -1,0 +1,289 @@
+{
+  "phase": "4-1",
+  "description": "APT Factor Extension (12→17 columns)",
+  "horizon": 5,
+  "n_samples": 237977,
+  "feature_names_12": [
+    "hw",
+    "vw",
+    "mw",
+    "rw",
+    "confidence_norm",
+    "signal_dir",
+    "market_type",
+    "log_confidence",
+    "pattern_tier",
+    "hw_x_signal",
+    "vw_x_signal",
+    "conf_x_signal"
+  ],
+  "feature_names_17": [
+    "hw",
+    "vw",
+    "mw",
+    "rw",
+    "confidence_norm",
+    "signal_dir",
+    "market_type",
+    "log_confidence",
+    "pattern_tier",
+    "hw_x_signal",
+    "vw_x_signal",
+    "conf_x_signal",
+    "momentum_60d",
+    "beta_60d",
+    "value_inv_pbr",
+    "log_size",
+    "liquidity_20d"
+  ],
+  "apt_factors": [
+    "momentum_60d",
+    "beta_60d",
+    "value_inv_pbr",
+    "log_size",
+    "liquidity_20d"
+  ],
+  "apt_factor_coverage": {
+    "momentum_60d": 75.6,
+    "beta_60d": 75.6,
+    "value_inv_pbr": 82.6,
+    "log_size": 100.0,
+    "liquidity_20d": 91.7
+  },
+  "models": {
+    "ridge_12col": {
+      "lambda": 2.0,
+      "in_sample_ic": {
+        "ic": 0.079088,
+        "p_value": 0.0,
+        "n": 237977
+      },
+      "fama_macbeth": {
+        "n_days": 238,
+        "mean_ic": 0.072403,
+        "std_ic": 0.084599,
+        "t_stat": 13.2031,
+        "p_value": 0.0,
+        "ic_positive_pct": 82.4
+      }
+    },
+    "ridge_17col": {
+      "lambda": 2.0,
+      "in_sample_ic": {
+        "ic": 0.126446,
+        "p_value": 0.0,
+        "n": 237977
+      },
+      "fama_macbeth": {
+        "n_days": 238,
+        "mean_ic": 0.123142,
+        "std_ic": 0.08534,
+        "t_stat": 22.2608,
+        "p_value": 0.0,
+        "ic_positive_pct": 92.9
+      },
+      "cv_results": {
+        "0.5": 71.822128,
+        "1.0": 71.822107,
+        "2.0": 71.82208,
+        "5.0": 71.822103,
+        "10.0": 71.82241,
+        "20.0": 71.823704,
+        "50.0": 71.830198
+      }
+    }
+  },
+  "ols_17col_coefficients": {
+    "intercept": {
+      "beta": -8.010089,
+      "t_stat": -6.3882,
+      "p_value": 0.0
+    },
+    "hw": {
+      "beta": 7.735945,
+      "t_stat": 12.7369,
+      "p_value": 0.0
+    },
+    "vw": {
+      "beta": -3.74396,
+      "t_stat": -18.0753,
+      "p_value": 0.0
+    },
+    "mw": {
+      "beta": 0.950278,
+      "t_stat": 2.8471,
+      "p_value": 0.004413
+    },
+    "rw": {
+      "beta": -7.268236,
+      "t_stat": -11.6493,
+      "p_value": 0.0
+    },
+    "confidence_norm": {
+      "beta": -6.380825,
+      "t_stat": -10.3614,
+      "p_value": 0.0
+    },
+    "signal_dir": {
+      "beta": -3.071095,
+      "t_stat": -2.835,
+      "p_value": 0.004583
+    },
+    "market_type": {
+      "beta": 0.378198,
+      "t_stat": 9.4755,
+      "p_value": 0.0
+    },
+    "log_confidence": {
+      "beta": 3.409595,
+      "t_stat": 11.4074,
+      "p_value": 0.0
+    },
+    "pattern_tier": {
+      "beta": -0.200119,
+      "t_stat": -5.2973,
+      "p_value": 0.0
+    },
+    "hw_x_signal": {
+      "beta": 3.176613,
+      "t_stat": 3.1833,
+      "p_value": 0.001456
+    },
+    "vw_x_signal": {
+      "beta": -0.738421,
+      "t_stat": -2.3446,
+      "p_value": 0.019049
+    },
+    "conf_x_signal": {
+      "beta": 1.179352,
+      "t_stat": 6.522,
+      "p_value": 0.0
+    },
+    "momentum_60d": {
+      "beta": -0.098776,
+      "t_stat": -5.6338,
+      "p_value": 0.0
+    },
+    "beta_60d": {
+      "beta": 0.186173,
+      "t_stat": 9.7656,
+      "p_value": 0.0
+    },
+    "value_inv_pbr": {
+      "beta": -0.257524,
+      "t_stat": -13.6101,
+      "p_value": 0.0
+    },
+    "log_size": {
+      "beta": 0.420248,
+      "t_stat": 21.964,
+      "p_value": 0.0
+    },
+    "liquidity_20d": {
+      "beta": -0.374421,
+      "t_stat": -24.691,
+      "p_value": 0.0
+    }
+  },
+  "walk_forward": {
+    "ridge_12col": {
+      "n_periods": 8,
+      "mean_ic": 0.01851,
+      "std_ic": 0.053356,
+      "t_stat": 0.9812,
+      "ic_positive_pct": 62.5,
+      "periods": [
+        {
+          "period": "2025-07-03~2025-07-30",
+          "ic": -0.049929,
+          "n": 18728
+        },
+        {
+          "period": "2025-07-31~2025-08-28",
+          "ic": -0.002854,
+          "n": 18776
+        },
+        {
+          "period": "2025-08-29~2025-09-25",
+          "ic": -0.045181,
+          "n": 19342
+        },
+        {
+          "period": "2025-09-26~2025-10-30",
+          "ic": 0.002217,
+          "n": 19733
+        },
+        {
+          "period": "2025-10-31~2025-11-27",
+          "ic": 0.026386,
+          "n": 19755
+        },
+        {
+          "period": "2025-11-28~2025-12-26",
+          "ic": 0.04871,
+          "n": 19520
+        },
+        {
+          "period": "2025-12-29~2026-01-27",
+          "ic": 0.064136,
+          "n": 20399
+        },
+        {
+          "period": "2026-01-28~2026-02-27",
+          "ic": 0.104591,
+          "n": 22321
+        }
+      ]
+    },
+    "ridge_17col": {
+      "n_periods": 8,
+      "mean_ic": 0.095919,
+      "std_ic": 0.051811,
+      "t_stat": 5.2364,
+      "ic_positive_pct": 100.0,
+      "periods": [
+        {
+          "period": "2025-07-03~2025-07-30",
+          "ic": 0.127983,
+          "n": 18728
+        },
+        {
+          "period": "2025-07-31~2025-08-28",
+          "ic": 0.077199,
+          "n": 18776
+        },
+        {
+          "period": "2025-08-29~2025-09-25",
+          "ic": 0.080148,
+          "n": 19342
+        },
+        {
+          "period": "2025-09-26~2025-10-30",
+          "ic": 0.169849,
+          "n": 19733
+        },
+        {
+          "period": "2025-10-31~2025-11-27",
+          "ic": 0.015118,
+          "n": 19755
+        },
+        {
+          "period": "2025-11-28~2025-12-26",
+          "ic": 0.055833,
+          "n": 19520
+        },
+        {
+          "period": "2025-12-29~2026-01-27",
+          "ic": 0.154836,
+          "n": 20399
+        },
+        {
+          "period": "2026-01-28~2026-02-27",
+          "ic": 0.086389,
+          "n": 22321
+        }
+      ]
+    }
+  },
+  "elapsed_seconds": 44.9
+}

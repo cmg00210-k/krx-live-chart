@@ -1,0 +1,73 @@
+{
+  "model": "ridge_17col",
+  "lambda": 2.0,
+  "horizon": 5,
+  "n_samples": 237977,
+  "feature_names": [
+    "intercept",
+    "hw",
+    "vw",
+    "mw",
+    "rw",
+    "confidence_norm",
+    "signal_dir",
+    "market_type",
+    "log_confidence",
+    "pattern_tier",
+    "hw_x_signal",
+    "vw_x_signal",
+    "conf_x_signal",
+    "momentum_60d",
+    "beta_60d",
+    "value_inv_pbr",
+    "log_size",
+    "liquidity_20d"
+  ],
+  "coefficients": [
+    -7.89112981,
+    7.65943693,
+    -3.73688348,
+    0.94093205,
+    -7.18988547,
+    -6.29532513,
+    -2.89387804,
+    0.37784085,
+    3.368709,
+    -0.19821571,
+    3.00848758,
+    -0.74433565,
+    1.18182739,
+    -0.09875872,
+    0.18604966,
+    -0.25751655,
+    0.42033751,
+    -0.37466503
+  ],
+  "apt_factors": {
+    "momentum_60d": {
+      "description": "60-day return (Jegadeesh & Titman 1993)",
+      "z_scored": true,
+      "coverage_pct": 75.6
+    },
+    "beta_60d": {
+      "description": "60-day rolling beta vs market (Sharpe 1964)",
+      "z_scored": true,
+      "coverage_pct": 75.6
+    },
+    "value_inv_pbr": {
+      "description": "1/PBR value factor (Fama & French 1993)",
+      "z_scored": true,
+      "coverage_pct": 82.6
+    },
+    "log_size": {
+      "description": "log(marketCap) size factor (Fama & French 1993)",
+      "z_scored": true,
+      "coverage_pct": 100.0
+    },
+    "liquidity_20d": {
+      "description": "20-day avg turnover (Amihud 2002)",
+      "z_scored": true,
+      "coverage_pct": 91.7
+    }
+  }
+}
