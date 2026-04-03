@@ -173,6 +173,15 @@ function analyzeStock(sandbox, code, market, filePath) {
   // Per-occurrence Wc + actual return pairs (Phase C input)
   const HORIZONS = [1, 3, 5, 10, 20];
   const KRX_COST = 0.31;  // KRX round-trip: commission 0.03% + tax 0.18% + slippage 0.10% (flat, no horizon scaling)
+
+  // Pre-compute indicator arrays once per stock (MRA A-2: 6 indicator variables)
+  const closes = candles.map(c => c.close);
+  const _atr = sandbox.calcATR(candles, 14);
+  const _vma = sandbox.calcMA(candles.map(c => c.volume || 0), 20);
+  const _rsi = sandbox.calcRSI(closes, 14);
+  const _macd = sandbox.calcMACD(closes);
+  const _bb = sandbox.calcBB(closes, 20, 2);
+
   const occurrenceReturns = [];
   for (const p of patterns) {
     const idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;
@@ -191,6 +200,52 @@ function analyzeStock(sandbox, code, market, filePath) {
     }
     if (Object.keys(returns).length > 0) {
       const sigDir = p.signal === 'buy' ? 1 : (p.signal === 'sell' ? -1 : 0);
+
+      // trendStrength: OLS slope of 10-bar closes / ATR (backtester.js lines 1137-1152)
+      let trendStrength = 0;
+      const lookback = Math.min(10, idx);
+      if (lookback >= 3 && _atr) {
+        const atrVal = _atr[idx] || (candles[idx].close * 0.02);
+        let sx = 0, sy = 0, sxy = 0, sx2 = 0;
+        const n = lookback + 1;
+        for (let ti = 0; ti <= lookback; ti++) {
+          const ci = idx - lookback + ti;
+          sx += ti; sy += candles[ci].close;
+          sxy += ti * candles[ci].close; sx2 += ti * ti;
+        }
+        const denom = n * sx2 - sx * sx;
+        if (Math.abs(denom) > 1e-10 && atrVal > 0) {
+          trendStrength = Math.abs((n * sxy - sx * sy) / denom) / atrVal;
+        }
+      }
+
+      // volumeRatio: current volume / 20-day VMA (backtester.js lines 1156-1159)
+      let volumeRatio = 1;
+      if (_vma && _vma[idx] && _vma[idx] > 0 && candles[idx].volume) {
+        volumeRatio = candles[idx].volume / _vma[idx];
+      }
+
+      // atrNorm: ATR / close price (backtester.js lines 1162-1165)
+      let atrNorm = 0.02;
+      if (_atr && _atr[idx] && candles[idx].close > 0) {
+        atrNorm = _atr[idx] / candles[idx].close;
+      }
+
+      // rsi_14: Wilder RSI at pattern bar
+      const rsi14 = (_rsi && _rsi[idx] != null) ? +_rsi[idx].toFixed(2) : '';
+
+      // macd_hist: MACD histogram at pattern bar
+      const macdHist = (_macd && _macd.histogram[idx] != null) ? +_macd.histogram[idx].toFixed(4) : '';
+
+      // bb_position: (close - lower) / (upper - lower) at pattern bar
+      let bbPos = '';
+      if (_bb && _bb[idx] && _bb[idx].upper != null && _bb[idx].lower != null) {
+        const range = _bb[idx].upper - _bb[idx].lower;
+        if (range > 0) {
+          bbPos = +((candles[idx].close - _bb[idx].lower) / range).toFixed(4);
+        }
+      }
+
       occurrenceReturns.push({
         type: p.type,
         signal: p.signal,
@@ -208,6 +263,12 @@ function analyzeStock(sandbox, code, market, filePath) {
         pattern_tier: _PATTERN_TIER.get(p.type) ?? 2,
         hw_x_signal: +((p.hw || 1) * sigDir).toFixed(4),
         vw_x_signal: +((p.vw || 1) * sigDir).toFixed(4),
+        trendStrength: +trendStrength.toFixed(4),
+        volumeRatio: +volumeRatio.toFixed(4),
+        atrNorm: +atrNorm.toFixed(6),
+        rsi_14: rsi14,
+        macd_hist: macdHist,
+        bb_position: bbPos,
         returns,
       });
     }

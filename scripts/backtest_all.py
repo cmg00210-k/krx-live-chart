@@ -500,6 +500,8 @@ def generate_wc_return_pairs(results):
         "wc", "hw", "vw", "mw", "rw", "confidence",
         "signal_direction", "market_type", "log_confidence",
         "pattern_tier", "hw_x_signal", "vw_x_signal",
+        "trendStrength", "volumeRatio", "atrNorm",
+        "rsi_14", "macd_hist", "bb_position",
         "ret_1", "ret_3", "ret_5", "ret_10", "ret_20",
     ]
 
@@ -533,6 +535,12 @@ def generate_wc_return_pairs(results):
                     "pattern_tier": occ.get("pattern_tier"),
                     "hw_x_signal": occ.get("hw_x_signal"),
                     "vw_x_signal": occ.get("vw_x_signal"),
+                    "trendStrength": occ.get("trendStrength"),
+                    "volumeRatio": occ.get("volumeRatio"),
+                    "atrNorm": occ.get("atrNorm"),
+                    "rsi_14": occ.get("rsi_14"),
+                    "macd_hist": occ.get("macd_hist"),
+                    "bb_position": occ.get("bb_position"),
                     "ret_1": rets.get("1"),
                     "ret_3": rets.get("3"),
                     "ret_5": rets.get("5"),
