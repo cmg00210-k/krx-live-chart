@@ -598,6 +598,35 @@ class SignalEngine {
       }
     }
 
+    // [Phase 3 Tier 2] IV/HV ratio confidence discount (Doc26 §5.3)
+    // When IV > HV, market expects higher volatility → pattern reliability decreases
+    // Formula: conf_adj = conf × (1 - α × max(0, IV/HV - 1)), α = 0.20 [C Tier][L:GCV]
+    // Floor: conf_adj ≥ conf × 0.50 (maximum 50% damping)
+    if (signals.length > 0 && typeof calcHV === 'function') {
+      var _mctx = (typeof _marketContext !== 'undefined') ? _marketContext : null;
+      var _macro = (typeof _macroLatest !== 'undefined') ? _macroLatest : null;
+      var _vkospiVal = null;
+      if (_mctx && _mctx.vkospi != null) _vkospiVal = _mctx.vkospi;
+      else if (_macro && _macro.vkospi != null) _vkospiVal = _macro.vkospi;
+      else if (_macro && _macro.vix != null) _vkospiVal = _macro.vix * 1.12;
+      if (_vkospiVal != null && _vkospiVal > 0) {
+        var _hv = calcHV(candles, 20);
+        if (_hv != null && _hv > 0.01) {
+          var _ivDecimal = _vkospiVal / 100;
+          var _ivHvRatio = _ivDecimal / _hv;
+          var _alpha = 0.20;  // [C Tier] Doc26 §5.3, range [0.1, 0.3]
+          var _ivHvDiscount = Math.max(0.50, 1 - _alpha * Math.max(0, _ivHvRatio - 1));
+          if (_ivHvDiscount < 1.0) {
+            for (var ih = 0; ih < signals.length; ih++) {
+              if (signals[ih].confidence) {
+                signals[ih].confidence = Math.max(10, Math.round(signals[ih].confidence * _ivHvDiscount));
+              }
+            }
+          }
+        }
+      }
+    }
+
     // [Phase TA-3 C-2] VKOSPI/VIX → HMM fallback chain (Doc26 §2)
     // Priority: 1) VKOSPI (KRX 자체 변동성지수, 미구현 시 null)
     //           2) VIX × 1.1 proxy (VKOSPI ≈ VIX × 1.1 for KRX, Whaley 2009)

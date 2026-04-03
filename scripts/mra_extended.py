@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-mra_extended.py — Stage A-1: 12-Column Extended MRA + LASSO/Ridge + Walk-Forward IC
+mra_extended.py — Stage A-3: 18-Column Extended MRA + LASSO/Ridge + Walk-Forward IC
 
-Input:  data/backtest/wc_return_pairs.csv (302,986 rows)
+Input:  data/backtest/wc_return_pairs.csv (28-column with indicators, or 16-column with defaults)
 Output: data/backtest/mra_extended_results.json
 
 Analysis Pipeline:
-  1. Derive 6 new features from existing CSV columns (total 12 regressors)
-  2. OLS baseline (6-col vs 12-col IC comparison)
+  1. Derive 6 features from CSV + read 6 indicator columns (total 18 regressors)
+  2. OLS baseline (6-col vs 12-col vs 18-col IC comparison)
   3. Ridge CV (manual λ grid search, 5-fold)
   4. LASSO CV (coordinate descent, 5-fold)
   5. Stepwise BIC forward selection
@@ -18,7 +18,7 @@ Analysis Pipeline:
 
 References:
   - core_data/17_regression §17.7 (Ridge 8-var)
-  - project_mra_rl_roadmap.md (Stage A-1 spec)
+  - project_mra_rl_roadmap.md (Stage A-3 spec)
   - project_vw_root_cause_analysis.md (vw defect)
 
 Usage:
@@ -48,26 +48,46 @@ TIER2 = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows",
          "hangingMan", "shootingStar", "eveningStar", "invertedHammer"}
 TIER3 = {"spinningTop", "doji", "fallingWedge"}
 
-# 12 feature names (6 original + 6 derived)
+# 18 feature names (6 original + 6 derived + 6 indicators from CSV)
 FEATURE_NAMES = [
     # Original 6
     "hw", "vw", "mw", "rw", "confidence_norm", "signal_dir",
     # Derived 6
     "market_type", "log_confidence", "pattern_tier",
     "hw_x_signal", "vw_x_signal", "conf_x_signal",
+    # Indicator 6 (from backtest_runner.js via CSV, MRA A-2)
+    "trendStrength", "volumeRatio", "atrNorm",
+    "rsi_14", "macd_hist", "bb_position",
 ]
+# Index boundary: features 0-11 are base, 12-17 are indicators
+N_BASE_FEATURES = 12
 
 
 # ──────────────────────────────────────────────
 # 1. Data Loading + Feature Engineering
 # ──────────────────────────────────────────────
 
+def _safe_float(row, key, default):
+    """Read CSV column as float with safe default for missing/empty values."""
+    v = row.get(key)
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return default
+
+
 def load_and_engineer(horizon):
-    """Load CSV, derive 6 new features, return X (n×12), y (n,), metadata."""
+    """Load CSV, derive 6 features + read 6 indicators, return X (n×18), y (n,), metadata."""
     col = f"ret_{horizon}"
     rows = []
+    indicator_present = False
     with open(CSV_PATH, encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        # Check if indicator columns exist in CSV header
+        if reader.fieldnames:
+            indicator_present = "trendStrength" in reader.fieldnames
         for row in reader:
             val = row.get(col)
             if not val or val == "":
@@ -101,6 +121,15 @@ def load_and_engineer(horizon):
             log_conf = math.log(max(conf, 1.0))
             conf_norm = conf / 100.0
 
+            # 6 indicator columns (from backtest_runner.js, MRA A-2)
+            # Defaults chosen as neutral midpoints for each indicator
+            trend_str = _safe_float(row, "trendStrength", 0.0)
+            vol_ratio = _safe_float(row, "volumeRatio", 1.0)
+            atr_norm = _safe_float(row, "atrNorm", 0.0)
+            rsi_14 = _safe_float(row, "rsi_14", 50.0)
+            macd_h = _safe_float(row, "macd_hist", 0.0)
+            bb_pos = _safe_float(row, "bb_position", 0.5)
+
             rows.append({
                 "hw": hw, "vw": vw, "mw": mw, "rw": rw,
                 "confidence_norm": conf_norm,
@@ -111,6 +140,12 @@ def load_and_engineer(horizon):
                 "hw_x_signal": hw * sig_dir,
                 "vw_x_signal": vw * sig_dir,
                 "conf_x_signal": conf_norm * sig_dir,
+                "trendStrength": trend_str,
+                "volumeRatio": vol_ratio,
+                "atrNorm": atr_norm,
+                "rsi_14": rsi_14,
+                "macd_hist": macd_h,
+                "bb_position": bb_pos,
                 "ret": ret,
                 "date": row.get("date", ""),
                 "code": row.get("code", ""),
@@ -131,7 +166,7 @@ def load_and_engineer(horizon):
         dates.append(r["date"])
         meta.append({"code": r["code"], "type": r["type"], "signal": r["signal"]})
 
-    return X, y, dates, meta
+    return X, y, dates, meta, indicator_present
 
 
 # ──────────────────────────────────────────────
@@ -579,12 +614,17 @@ def main():
         sys.exit(1)
 
     # ── Step 1: Load + Feature Engineering ──
-    print(f"[1/7] Loading CSV + engineering 12 features (horizon={horizon})...")
-    X, y, dates, meta = load_and_engineer(horizon)
+    print(f"[1/7] Loading CSV + engineering 18 features (horizon={horizon})...")
+    X, y, dates, meta, indicator_present = load_and_engineer(horizon)
     n, p = X.shape
     print(f"  -> {n:,} samples, {p} features")
+    if indicator_present:
+        print("  -> Indicator columns (trendStrength..bb_position) found in CSV")
+    else:
+        print("  -> WARNING: Indicator columns not in CSV (using defaults). "
+              "Re-run backtest_all.py for 28-col CSV.")
 
-    # ── Step 2: OLS Baseline (6-col vs 12-col) ──
+    # ── Step 2: OLS Baseline (6-col vs 12-col vs 18-col) ──
     print("[2/7] OLS Baseline...")
     # 6-col: hw, vw, mw, rw, confidence_norm, signal_dir (indices 0~5)
     X6 = X[:, :6]
@@ -592,21 +632,28 @@ def main():
     y_hat_6 = ols_predict(X6, ols6["beta"])
     ic6 = calc_prediction_ic(y_hat_6, y)
 
-    # 12-col: all features
-    ols12 = ols_fit(X, y)
-    y_hat_12 = ols_predict(X, ols12["beta"])
+    # 12-col: base features only (indices 0~11)
+    X12 = X[:, :N_BASE_FEATURES]
+    ols12 = ols_fit(X12, y)
+    y_hat_12 = ols_predict(X12, ols12["beta"])
     ic12 = calc_prediction_ic(y_hat_12, y)
+
+    # 18-col: all features including indicators
+    ols18 = ols_fit(X, y)
+    y_hat_18 = ols_predict(X, ols18["beta"])
+    ic18 = calc_prediction_ic(y_hat_18, y)
 
     print(f"  -> 6-col OLS: R²={ols6['r2']:.6f}, IC={ic6['ic'] if ic6 else 'N/A'}")
     print(f"  -> 12-col OLS: R²={ols12['r2']:.6f}, IC={ic12['ic'] if ic12 else 'N/A'}")
+    print(f"  -> 18-col OLS: R²={ols18['r2']:.6f}, IC={ic18['ic'] if ic18 else 'N/A'}")
 
     # Feature significance table
-    print("  -> 12-col OLS coefficients:")
+    print("  -> 18-col OLS coefficients:")
     print(f"     {'Feature':<20} {'beta':>10} {'t-stat':>10} {'p-value':>10} {'sig':>5}")
     names_with_intercept = ["intercept"] + FEATURE_NAMES
-    for j in range(len(ols12["beta"])):
-        sig = "***" if ols12["p_values"][j] < 0.001 else "**" if ols12["p_values"][j] < 0.01 else "*" if ols12["p_values"][j] < 0.05 else ""
-        print(f"     {names_with_intercept[j]:<20} {ols12['beta'][j]:>10.4f} {ols12['t_stats'][j]:>10.3f} {ols12['p_values'][j]:>10.4f} {sig:>5}")
+    for j in range(len(ols18["beta"])):
+        sig = "***" if ols18["p_values"][j] < 0.001 else "**" if ols18["p_values"][j] < 0.01 else "*" if ols18["p_values"][j] < 0.05 else ""
+        print(f"     {names_with_intercept[j]:<20} {ols18['beta'][j]:>10.4f} {ols18['t_stats'][j]:>10.3f} {ols18['p_values'][j]:>10.4f} {sig:>5}")
 
     # ── Step 3: Ridge CV ──
     print("[3/7] Ridge CV (5-fold)...")
@@ -651,13 +698,21 @@ def main():
     # ── Step 6: Walk-Forward IC ──
     wf_result = None
     wf_result_6col = None
+    wf_result_12col = None
     if not quick:
         print("[6/7] Walk-Forward rolling IC (60-day train, 20-day test)...")
         wf_result = walk_forward_ic(X, y, dates, train_days=60, test_days=20,
                                      method="ridge", lam=best_ridge_lam)
         if wf_result:
-            print(f"  -> 12-col Ridge WF: mean_IC={wf_result['mean_ic']}, "
+            print(f"  -> 18-col Ridge WF: mean_IC={wf_result['mean_ic']}, "
                   f"t={wf_result['t_stat']}, positive={wf_result['ic_positive_pct']}%")
+
+        # Compare with 12-col Ridge walk-forward
+        wf_result_12col = walk_forward_ic(X12, y, dates, train_days=60, test_days=20,
+                                           method="ridge", lam=best_ridge_lam)
+        if wf_result_12col:
+            print(f"  -> 12-col Ridge WF: mean_IC={wf_result_12col['mean_ic']}, "
+                  f"t={wf_result_12col['t_stat']}, positive={wf_result_12col['ic_positive_pct']}%")
 
         # Compare with 6-col OLS walk-forward
         wf_result_6col = walk_forward_ic(X6, y, dates, train_days=60, test_days=20,
@@ -678,11 +733,11 @@ def main():
     print(f"  -> Recommendation: {vw_test['recommendation']}")
 
     # ── Fama-MacBeth for best model ──
-    print("\n[Extra] Fama-MacBeth daily IC (12-col Ridge)...")
-    fm_12 = fama_macbeth_prediction_ic(y_hat_ridge, y, dates)
-    if fm_12:
-        print(f"  -> mean_IC={fm_12['mean_ic']}, t={fm_12['t_stat']}, "
-              f"positive={fm_12['ic_positive_pct']}%")
+    print("\n[Extra] Fama-MacBeth daily IC (18-col Ridge)...")
+    fm_18 = fama_macbeth_prediction_ic(y_hat_ridge, y, dates)
+    if fm_18:
+        print(f"  -> 18-col Ridge FM: mean_IC={fm_18['mean_ic']}, t={fm_18['t_stat']}, "
+              f"positive={fm_18['ic_positive_pct']}%")
 
     fm_6 = fama_macbeth_prediction_ic(y_hat_6, y, dates)
     if fm_6:
@@ -695,8 +750,9 @@ def main():
     models = [
         ("6-col OLS", ic6, fm_6),
         ("12-col OLS", ic12, None),
-        ("12-col Ridge", ic_ridge, fm_12),
-        ("12-col LASSO", ic_lasso, None),
+        ("18-col OLS", ic18, None),
+        ("18-col Ridge", ic_ridge, fm_18),
+        ("18-col LASSO", ic_lasso, None),
         ("BIC-selected OLS", ic_bic, None),
     ]
     print(f"  {'Model':<20} {'In-sample IC':>15} {'FM mean IC':>15} {'FM t-stat':>12}")
@@ -710,7 +766,10 @@ def main():
         print(f"\n  Walk-Forward IC:")
         print(f"  {'6-col OLS':<20} mean={wf_result_6col['mean_ic']:.6f}, "
               f"t={wf_result_6col['t_stat']:.2f}, positive={wf_result_6col['ic_positive_pct']}%")
-        print(f"  {'12-col Ridge':<20} mean={wf_result['mean_ic']:.6f}, "
+        if wf_result_12col:
+            print(f"  {'12-col Ridge':<20} mean={wf_result_12col['mean_ic']:.6f}, "
+                  f"t={wf_result_12col['t_stat']:.2f}, positive={wf_result_12col['ic_positive_pct']}%")
+        print(f"  {'18-col Ridge':<20} mean={wf_result['mean_ic']:.6f}, "
               f"t={wf_result['t_stat']:.2f}, positive={wf_result['ic_positive_pct']}%")
 
     elapsed = time.time() - t0
@@ -721,6 +780,7 @@ def main():
         "horizon": horizon,
         "n_samples": n,
         "n_features": p,
+        "indicator_columns_present": indicator_present,
         "feature_names": FEATURE_NAMES,
         "models": {
             "ols_6col": {
@@ -733,26 +793,31 @@ def main():
                 "r2": round(ols12["r2"], 6),
                 "adj_r2": round(ols12["adj_r2"], 6),
                 "in_sample_ic": ic12,
+            },
+            "ols_18col": {
+                "r2": round(ols18["r2"], 6),
+                "adj_r2": round(ols18["adj_r2"], 6),
+                "in_sample_ic": ic18,
                 "coefficients": {
                     names_with_intercept[j]: {
-                        "beta": round(float(ols12["beta"][j]), 6),
-                        "t_stat": round(float(ols12["t_stats"][j]), 4),
-                        "p_value": round(float(ols12["p_values"][j]), 6),
+                        "beta": round(float(ols18["beta"][j]), 6),
+                        "t_stat": round(float(ols18["t_stats"][j]), 4),
+                        "p_value": round(float(ols18["p_values"][j]), 6),
                     }
-                    for j in range(len(ols12["beta"]))
+                    for j in range(len(ols18["beta"]))
                 },
             },
-            "ridge_12col": {
+            "ridge_18col": {
                 "best_lambda": best_ridge_lam,
                 "in_sample_ic": ic_ridge,
-                "fama_macbeth": fm_12,
+                "fama_macbeth": fm_18,
                 "coefficients": {
                     names_with_intercept[j]: round(float(ridge_beta[j]), 6)
                     for j in range(len(ridge_beta))
                 },
                 "cv_results": {str(k): v for k, v in ridge_results.items()},
             },
-            "lasso_12col": {
+            "lasso_18col": {
                 "best_lambda": round(best_lasso_lam, 8),
                 "in_sample_ic": ic_lasso,
                 "n_selected": int(n_nonzero),
@@ -771,7 +836,8 @@ def main():
         },
         "walk_forward": {
             "ols_6col": _to_native(wf_result_6col) if wf_result_6col else None,
-            "ridge_12col": _to_native(wf_result) if wf_result else None,
+            "ridge_12col": _to_native(wf_result_12col) if wf_result_12col else None,
+            "ridge_18col": _to_native(wf_result) if wf_result else None,
         },
         "vw_sign_reversal": vw_test,
         "elapsed_seconds": round(elapsed, 1),
@@ -785,12 +851,13 @@ def main():
 
     # Save optimal coefficients for JS runtime
     coeff_path = BACKTEST_DIR / "mra_coefficients.json"
-    best_model = "ridge_12col"
+    best_model = "ridge_18col"
     coeff_output = {
         "model": best_model,
         "lambda": best_ridge_lam,
         "horizon": horizon,
         "n_samples": n,
+        "indicator_columns_present": indicator_present,
         "feature_names": ["intercept"] + FEATURE_NAMES,
         "coefficients": [round(float(ridge_beta[j]), 8) for j in range(len(ridge_beta))],
         "feature_engineering": {
@@ -801,6 +868,12 @@ def main():
             "hw_x_signal": "hw * signal_dir",
             "vw_x_signal": "vw * signal_dir",
             "conf_x_signal": "confidence_norm * signal_dir",
+            "trendStrength": "MA trend direction strength (from backtest_runner.js)",
+            "volumeRatio": "current_volume / MA20_volume (from backtest_runner.js)",
+            "atrNorm": "ATR(14) / close (normalized, from backtest_runner.js)",
+            "rsi_14": "RSI(14) raw value 0-100 (from backtest_runner.js)",
+            "macd_hist": "MACD histogram value (from backtest_runner.js)",
+            "bb_position": "(close - BB_lower) / (BB_upper - BB_lower) (from backtest_runner.js)",
         },
     }
     with open(coeff_path, "w", encoding="utf-8") as f:

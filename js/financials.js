@@ -17,6 +17,8 @@ var _finTrendMetric = 'revenue';
 var _macroData = null;
 // ── 시장 지수 종가 캐시 (CAPM beta용) ──
 var _marketIndexCloses = { kospi: null, kosdaq: null };
+// ── FF3 팩터 데이터 캐시 (Fama-French 1993) ──
+var _ff3FactorData = null;
 
 // ── 업종 비교용 최신 재무값 캐시 ──
 var _latestFinOpm = 0;
@@ -183,6 +185,102 @@ async function _loadMarketIndex(market) {
   return _marketIndexCloses[key] || null;
 }
 
+/**
+ * FF3 팩터 노출도 렌더링 (Fama-French 1993, core_data/23 §3.2)
+ * Stock returns regressed on SMB/HML/MKT_RF daily factors via OLS.
+ * Displays factor loadings with size/value style labels.
+ */
+async function _renderFF3Factors(stock) {
+  var elSmb = document.getElementById('fin-smb');
+  var elHml = document.getElementById('fin-hml');
+  if (!elSmb || !elHml) return;
+  if (!stock || !stock.market) {
+    elSmb.textContent = '\u2014'; elHml.textContent = '\u2014'; return;
+  }
+  // Load FF3 factor data (cached)
+  if (!_ff3FactorData) {
+    try {
+      var resp = await fetch('data/macro/ff3_factors.json', { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) _ff3FactorData = await resp.json();
+    } catch (e) { /* optional */ }
+  }
+  if (!_ff3FactorData || !_ff3FactorData.daily) {
+    elSmb.textContent = '\u2014'; elHml.textContent = '\u2014'; return;
+  }
+  // Load stock candles
+  var stockCandles = null;
+  try { stockCandles = await dataService.getCandles(stock, '1d'); } catch (e) { /* optional */ }
+  if (!stockCandles || stockCandles.length < 60) {
+    elSmb.textContent = '\u2014'; elHml.textContent = '\u2014'; return;
+  }
+  // Build date-indexed stock returns
+  var ff3 = _ff3FactorData.daily;
+  var dateSet = {};
+  for (var di = 0; di < ff3.dates.length; di++) dateSet[ff3.dates[di]] = di;
+  // Match stock returns to factor dates
+  var stockRet = [], smbArr = [], hmlArr = [], mktArr = [];
+  for (var si = 1; si < stockCandles.length; si++) {
+    var t = stockCandles[si].time;
+    var idx = dateSet[t];
+    if (idx === undefined) continue;
+    var prev = stockCandles[si - 1].close;
+    if (!prev || prev <= 0) continue;
+    var ri = (stockCandles[si].close - prev) / prev;
+    stockRet.push(ri);
+    smbArr.push(ff3.SMB[idx]);
+    hmlArr.push(ff3.HML[idx]);
+    mktArr.push(ff3.MKT_RF[idx]);
+  }
+  if (stockRet.length < 30) {
+    elSmb.textContent = '\u2014'; elHml.textContent = '\u2014'; return;
+  }
+  // OLS: stockRet = a + b1*MKT_RF + b2*SMB + b3*HML
+  // Simple multivariate via normal equations: X = [1, MKT_RF, SMB, HML]
+  var N = stockRet.length;
+  // Build XtX (4x4) and Xty (4x1)
+  var XtX = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+  var Xty = [0,0,0,0];
+  for (var i = 0; i < N; i++) {
+    var row = [1, mktArr[i], smbArr[i], hmlArr[i]];
+    var yi = stockRet[i];
+    for (var a = 0; a < 4; a++) {
+      Xty[a] += row[a] * yi;
+      for (var b = 0; b < 4; b++) XtX[a][b] += row[a] * row[b];
+    }
+  }
+  // Solve 4x4 via Gaussian elimination
+  var mat = [];
+  for (var a = 0; a < 4; a++) {
+    mat[a] = XtX[a].slice();
+    mat[a].push(Xty[a]);
+  }
+  for (var col = 0; col < 4; col++) {
+    var maxR = col;
+    for (var r = col + 1; r < 4; r++) if (Math.abs(mat[r][col]) > Math.abs(mat[maxR][col])) maxR = r;
+    var tmp = mat[col]; mat[col] = mat[maxR]; mat[maxR] = tmp;
+    if (Math.abs(mat[col][col]) < 1e-12) {
+      elSmb.textContent = '\u2014'; elHml.textContent = '\u2014'; return;
+    }
+    var pivot = mat[col][col];
+    for (var c = col; c < 5; c++) mat[col][c] /= pivot;
+    for (var r = 0; r < 4; r++) {
+      if (r === col) continue;
+      var f = mat[r][col];
+      for (var c = col; c < 5; c++) mat[r][c] -= f * mat[col][c];
+    }
+  }
+  // beta = [alpha, mkt_beta, smb_loading, hml_loading]
+  var smbLoad = mat[2][4];
+  var hmlLoad = mat[3][4];
+  // Display with style labels
+  var smbLabel = smbLoad > 0.3 ? '\uC18C\uD615\uC8FC' : smbLoad < -0.3 ? '\uB300\uD615\uC8FC' : '\uC911\uB9BD';
+  var hmlLabel = hmlLoad > 0.3 ? '\uAC00\uCE58\uC8FC' : hmlLoad < -0.3 ? '\uC131\uC7A5\uC8FC' : '\uC911\uB9BD';
+  elSmb.textContent = smbLoad.toFixed(2) + ' (' + smbLabel + ')';
+  elSmb.className = 'fin-grid-value' + (smbLoad >= 0 ? ' up' : ' dn');
+  elHml.textContent = hmlLoad.toFixed(2) + ' (' + hmlLabel + ')';
+  elHml.className = 'fin-grid-value' + (hmlLoad >= 0 ? ' up' : ' dn');
+}
+
 /** 경기순환 국면 배지 렌더링 — OECD CLI 4-phase (core_data/29 §1.2) */
 function _renderCyclePhase() {
   var phaseEl = document.getElementById('fin-cycle-phase');
@@ -264,7 +362,7 @@ function _clearAllFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-smb', 'fin-hml', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var i = 0; i < ids.length; i++) {
@@ -353,7 +451,7 @@ async function updateFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-smb', 'fin-hml', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var _i = 0; _i < _finIds.length; _i++) {
@@ -607,6 +705,8 @@ async function updateFinancials() {
 
   // ── CAPM Beta (core_data/25 §1.2) ──
   _renderCAPMBeta(currentStock);
+  // ── FF3 Factor Exposure (Fama-French 1993, core_data/23 §3.2) ──
+  _renderFF3Factors(currentStock);
 
   // ── 성장성: 3년 CAGR 계산 ──
   const annualData = await getFinancialData(currentStock.code, 'annual');

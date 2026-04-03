@@ -410,7 +410,7 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
     }
   }
   var T = sr.length;
-  if (T < 50) return null;
+  if (T < 60) return null;  // MIN_OBS=60 aligned with compute_capm_beta.py
 
   // OLS beta: Cov(ri, rm) / Var(rm)
   var sumRi = 0, sumRm = 0;
@@ -427,17 +427,21 @@ function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual) {
   var beta0 = cov / varM;
   var alpha = meanRi - beta0 * meanRm;
 
-  // Scholes-Williams 보정: lead/lag beta
+  // Scholes-Williams (1977) 보정: lead/lag beta
+  // Aligned with compute_capm_beta.py loop ranges
   var thinTrading = (zeroVolDays / T) > 0.10;
   var beta = beta0;
   if (thinTrading && T > 3) {
-    // β₋₁: ri vs rm(t-1)
     var covLag = 0, covLead = 0, autoM = 0;
-    for (var i = 1; i < T - 1; i++) {
-      var di = sr[i] - meanRi;
-      covLag += di * (mr[i - 1] - meanRm);
-      covLead += di * (mr[i + 1] - meanRm);
+    // β₋₁: Cov(ri_t, rm_{t-1}), t ∈ [1, T-1]
+    for (var i = 1; i < T; i++) {
+      covLag += (sr[i] - meanRi) * (mr[i - 1] - meanRm);
     }
+    // β₊₁: Cov(ri_t, rm_{t+1}), t ∈ [0, T-2]
+    for (var i = 0; i < T - 1; i++) {
+      covLead += (sr[i] - meanRi) * (mr[i + 1] - meanRm);
+    }
+    // ρ_m: autocorrelation of market returns
     for (var i = 1; i < T; i++) {
       autoM += (mr[i] - meanRm) * (mr[i - 1] - meanRm);
     }
