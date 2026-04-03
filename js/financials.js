@@ -15,10 +15,16 @@ var _finTrendMetric = 'revenue';
 
 // ── 매크로 데이터 캐시 (KTB10Y 등) ──
 var _macroData = null;
+// ── EVA 스코어 캐시 (compute_eva.py 출력) ──
+var _evaScores = null;
+// ── 채권 메트릭스 캐시 (compute_bond_metrics.py 출력) ──
+var _bondMetrics = null;
 // ── 시장 지수 종가 캐시 (CAPM beta용) ──
 var _marketIndexCloses = { kospi: null, kosdaq: null };
 // ── FF3 팩터 데이터 캐시 (Fama-French 1993) ──
 var _ff3FactorData = null;
+// ── CAPM Beta JSON 캐시 (compute_capm_beta.py 출력, DD 포함) ──
+var _capmBetaJson = null;
 
 // ── 업종 비교용 최신 재무값 캐시 ──
 var _latestFinOpm = 0;
@@ -169,6 +175,102 @@ async function _renderCAPMBeta(stock) {
   var label = b >= 1.5 ? '고위험' : b >= 1.0 ? '공격적' : b >= 0.7 ? '중립' : '방어적';
   el.textContent = b.toFixed(2) + ' (' + label + ')';
   el.className = 'fin-grid-value' + (b >= 1.0 ? ' up' : ' dn');
+}
+
+/** Merton Distance-to-Default 렌더링 (Merton 1974, Doc35 §6.1-6.5)
+ *  compute_capm_beta.py가 사전 계산한 DD를 capm_beta.json에서 읽어 표시.
+ *  DD>3: 안전(초록), 2-3: 주의(중립), <2: 경고(빨강) */
+async function _renderDD(stock) {
+  var el = document.getElementById('fin-dd');
+  if (!el) return;
+  if (!stock || !stock.code) { el.textContent = '\u2014'; el.className = 'fin-grid-value'; return; }
+
+  // capm_beta.json 캐시 로드 (한번만)
+  if (!_capmBetaJson) {
+    try {
+      var resp = await fetch('data/backtest/capm_beta.json', { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) _capmBetaJson = await resp.json();
+    } catch (e) { /* optional */ }
+  }
+  if (!_capmBetaJson || !_capmBetaJson.stocks) {
+    el.textContent = '\u2014'; el.className = 'fin-grid-value'; return;
+  }
+
+  var entry = _capmBetaJson.stocks[stock.code];
+  if (!entry || entry.distanceToDefault == null) {
+    el.textContent = '\u2014'; el.className = 'fin-grid-value'; return;
+  }
+
+  var dd = entry.distanceToDefault;
+  var grade = entry.ddGrade;
+  var label, cls;
+  if (grade === 'safe' || dd > 3) {
+    label = '\uC548\uC804';  // 안전
+    cls = 'fin-grid-value fin-good';
+  } else if (grade === 'caution' || dd >= 2) {
+    label = '\uC8FC\uC758';  // 주의
+    cls = 'fin-grid-value';
+  } else {
+    label = '\uACBD\uACE0';  // 경고
+    cls = 'fin-grid-value up';
+  }
+  el.textContent = label + ' (DD: ' + dd.toFixed(2) + ')';
+  el.className = cls;
+}
+
+/** Blume(1975) 보정 Beta + Jensen Alpha 유의성 렌더링 (Doc 25 §9.3-9.4)
+ *  compute_capm_beta.py가 사전 계산한 betaBlume/alphaTstat를 capm_beta.json에서 읽어 표시. */
+async function _renderBlumeBetaAlpha(stock) {
+  var elBlume = document.getElementById('fin-blume-beta');
+  var elAlpha = document.getElementById('fin-alpha-sig');
+  if (!elBlume && !elAlpha) return;
+  if (!stock || !stock.code) {
+    if (elBlume) { elBlume.textContent = '\u2014'; elBlume.className = 'fin-grid-value'; }
+    if (elAlpha) { elAlpha.textContent = '\u2014'; elAlpha.className = 'fin-grid-value'; }
+    return;
+  }
+
+  // capm_beta.json 캐시 로드 (한번만 — _renderDD와 공유)
+  if (!_capmBetaJson) {
+    try {
+      var resp = await fetch('data/backtest/capm_beta.json', { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) _capmBetaJson = await resp.json();
+    } catch (e) { /* optional */ }
+  }
+  if (!_capmBetaJson || !_capmBetaJson.stocks) {
+    if (elBlume) { elBlume.textContent = '\u2014'; elBlume.className = 'fin-grid-value'; }
+    if (elAlpha) { elAlpha.textContent = '\u2014'; elAlpha.className = 'fin-grid-value'; }
+    return;
+  }
+
+  var entry = _capmBetaJson.stocks[stock.code];
+  if (!entry) {
+    if (elBlume) { elBlume.textContent = '\u2014'; elBlume.className = 'fin-grid-value'; }
+    if (elAlpha) { elAlpha.textContent = '\u2014'; elAlpha.className = 'fin-grid-value'; }
+    return;
+  }
+
+  // Blume Beta (Doc 25 §9.3)
+  if (elBlume && entry.betaBlume != null) {
+    var bb = entry.betaBlume;
+    var label = bb >= 1.5 ? '\uACE0\uC704\uD5D8' : bb >= 1.0 ? '\uACF5\uACA9\uC801' : bb >= 0.7 ? '\uC911\uB9BD' : '\uBC29\uC5B4\uC801';
+    elBlume.textContent = bb.toFixed(2) + ' (' + label + ')';
+    elBlume.className = 'fin-grid-value' + (bb >= 1.0 ? ' up' : ' dn');
+  } else if (elBlume) {
+    elBlume.textContent = '\u2014'; elBlume.className = 'fin-grid-value';
+  }
+
+  // Alpha Significance (Doc 25 §9.4)
+  if (elAlpha && entry.alpha != null) {
+    var alpha = entry.alpha;
+    var tstat = entry.alphaTstat;
+    var sig = (tstat != null && Math.abs(tstat) > 2.0);
+    var alphaStr = (alpha >= 0 ? '+' : '') + (alpha * 100).toFixed(2) + '%';
+    elAlpha.textContent = alphaStr + (sig ? ' *\uC720\uC758' : ' \uBE44\uC720\uC758');
+    elAlpha.className = 'fin-grid-value' + (sig ? (alpha >= 0 ? ' fin-good' : ' up') : '');
+  } else if (elAlpha) {
+    elAlpha.textContent = '\u2014'; elAlpha.className = 'fin-grid-value';
+  }
 }
 
 /** 시장 지수 데이터 로드 (CAPM beta용, core_data/25 §1.2) */
@@ -352,6 +454,57 @@ function _renderYieldCurve() {
   }
 }
 
+/** EVA Spread 렌더링 (Stern Stewart 1991, Doc 14 §2.8) */
+async function _renderEVA(stock) {
+  var el = document.getElementById('fin-eva-spread');
+  if (!el) return;
+  if (!stock || !stock.code) { el.textContent = '\u2014'; return; }
+  // 캐시된 EVA 스코어 로드
+  if (!_evaScores) {
+    try {
+      var resp = await fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) _evaScores = await resp.json();
+    } catch (e) { /* EVA optional */ }
+  }
+  if (!_evaScores || !_evaScores.stocks) { el.textContent = '\u2014'; return; }
+  var data = _evaScores.stocks[stock.code];
+  if (!data || data.evaSpread == null) { el.textContent = '\u2014'; return; }
+  var spread = data.evaSpread;
+  var pct = (spread * 100).toFixed(1);
+  el.textContent = (spread >= 0 ? '+' : '') + pct + '%';
+  el.className = 'fin-grid-value' + (spread >= 0 ? ' up' : ' dn');
+}
+
+/** 채권 메트릭스 렌더링 (Duration/DV01, Doc 44) */
+async function _renderBondMetrics() {
+  var durEl = document.getElementById('fin-bond-duration');
+  var dv01El = document.getElementById('fin-bond-dv01');
+  if (!durEl) return;
+  // bond_metrics.json 로드 (캐시)
+  if (!_bondMetrics) {
+    try {
+      var resp = await fetch('data/macro/bond_metrics.json', { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) _bondMetrics = await resp.json();
+    } catch (e) { /* bond metrics optional */ }
+  }
+  if (!_bondMetrics || !_bondMetrics.benchmarks) {
+    durEl.textContent = '\u2014';
+    if (dv01El) dv01El.textContent = '';
+    return;
+  }
+  var ktb10 = _bondMetrics.benchmarks.ktb_10y;
+  if (!ktb10) {
+    durEl.textContent = '\u2014';
+    if (dv01El) dv01El.textContent = '';
+    return;
+  }
+  durEl.textContent = ktb10.modifiedDuration.toFixed(2) + '\uB144';  // 년
+  if (dv01El) {
+    dv01El.textContent = 'DV01 ' + ktb10.dv01.toFixed(4);
+    dv01El.className = 'fin-yield-regime normal';
+  }
+}
+
 /**
  * DART 데이터 없을 때 모든 재무 지표를 "—"로 초기화 + 캔버스 차트 클리어
  * seed 생성 가짜 데이터를 표시하지 않기 위한 헬퍼.
@@ -362,7 +515,7 @@ function _clearAllFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-smb', 'fin-hml', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-dd', 'fin-blume-beta', 'fin-alpha-sig', 'fin-smb', 'fin-hml', 'fin-eva-spread', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var i = 0; i < ids.length; i++) {
@@ -451,7 +604,7 @@ async function updateFinancials() {
     'fin-period', 'fin-revenue', 'fin-op', 'fin-ni',
     'fin-rev-yoy', 'fin-rev-qoq', 'fin-op-yoy', 'fin-op-qoq', 'fin-ni-yoy', 'fin-ni-qoq',
     'fin-opm', 'fin-roe', 'fin-eps', 'fin-bps',
-    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-smb', 'fin-hml', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
+    'fin-per', 'fin-pbr', 'fin-psr', 'fin-yield-gap', 'fin-beta', 'fin-dd', 'fin-blume-beta', 'fin-alpha-sig', 'fin-smb', 'fin-hml', 'fin-eva-spread', 'fin-roa', 'fin-debt-ratio', 'fin-npm',
     'fin-rev-cagr', 'fin-ni-cagr', 'fin-score', 'fin-grade'
   ];
   for (var _i = 0; _i < _finIds.length; _i++) {
@@ -705,6 +858,10 @@ async function updateFinancials() {
 
   // ── CAPM Beta (core_data/25 §1.2) ──
   _renderCAPMBeta(currentStock);
+  // ── Merton Distance-to-Default (Doc35 §6.1-6.5) ──
+  _renderDD(currentStock);
+  // ── Blume Beta + Alpha Significance (Doc 25 §9.3-9.4) ──
+  _renderBlumeBetaAlpha(currentStock);
   // ── FF3 Factor Exposure (Fama-French 1993, core_data/23 §3.2) ──
   _renderFF3Factors(currentStock);
 
@@ -724,6 +881,10 @@ async function updateFinancials() {
   _renderCyclePhase();
   // ── 수익률곡선 레짐 (Doc35 §3, NSS slope) ──
   _renderYieldCurve();
+  // ── EVA Spread (Doc 14 §2.8, Stern Stewart 1991) ──
+  _renderEVA(currentStock);
+  // ── 채권 듀레이션/DV01 (Doc 44) ──
+  _renderBondMetrics();
 
   // YoY/QoQ 변화율 계산
   _calcFinChanges(data);

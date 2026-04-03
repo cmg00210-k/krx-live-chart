@@ -51,6 +51,12 @@
 | 39 | [39_investor_flow_information.md](39_investor_flow_information.md) | 투자자 수급·정보 비대칭 | Grossman-Stiglitz 역설, Kyle 3유형, 외국인 흐름(Kang-Stulz), LSV 군집, 개미 역발상, 복합 수급 신호, 수급-가격 괴리 |
 | 40 | [40_short_selling_securities_lending.md](40_short_selling_securities_lending.md) | 공매도·대차거래 분석 | Miller 고평가, Diamond-Verrecchia, SIR/DTC, 숏스퀴즈 탐지(Lamont-Thaler), 대차수수료(D'Avolio), 비선형성, 제도적 이벤트 |
 | 41 | [41_bond_equity_relative_value.md](41_bond_equity_relative_value.md) | 채권-주식 상대가치·위험선호 전환 | Fed Model/ERP z-score, RORO 레짐(inflation beta), 듀레이션·볼록성, 크레딧 사이클 4국면(EBP), BOK 이벤트 스터디, 크로스에셋 복합 신호, CRAI |
+| 42 | [42_advanced_asset_pricing.md](42_advanced_asset_pricing.md) | 자산가격결정 심화 이론 | Sharpe 단일지수, Zero-Beta CAPM(Black 1972), ICAPM(Merton 1973), CCAPM(Breeden 1979), APT 정식 도출(Ross 1976), FF 5-Factor 심화, 모형 간 계보, SDF 통합 |
+| 43 | [43_corporate_finance_advanced.md](43_corporate_finance_advanced.md) | 기업재무론 심화 | Miller(1977) 개인세 모형, Jensen-Meckling 대리인비용 자본구조, Ross/Bhattacharya 시그널링, MM 배당무관련, 고급 자본예산(PI/MIRR/EAA/실물옵션), 배당정책 심화 |
+| 44 | [44_bond_pricing_duration.md](44_bond_pricing_duration.md) | 채권 가격결정·듀레이션 이론 | 쿠폰채 가격결정, YTM(Newton-Raphson), Macaulay/Modified Duration, DV01, 볼록성(Convexity), Key Rate Duration, 면역전략, 기간구조 이론, 유효듀레이션, KRX KTB 적용 |
+| 45 | [45_options_pricing_advanced.md](45_options_pricing_advanced.md) | 옵션 가격결정 심화 | CRR 이항트리, 미국형 옵션(조기행사), 풋-콜 패리티, 이색옵션(Barrier/Asian/Lookback/Digital/ELS), Heston 확률변동성, Dupire Local Vol, 실물옵션(McDonald-Siegel), KRX 적용 |
+| 46 | [46_options_strategies.md](46_options_strategies.md) | 옵션전략 종합 & 실전 | 바닐라 전략 페이오프(8종), Greeks 동역학(4×8 매트릭스), BEP/P/L 곡면, Gamma Scalping, 분산스왑, VKOSPI 전략선택, PCR/GEX 연동, Straddle Implied Move |
+| 47 | [47_credit_risk_models.md](47_credit_risk_models.md) | 신용위험 모형 체계 | Merton(1974) 구조적 모형, KMV 확장(EDF), Jarrow-Turnbull/Duffie-Singleton 축약형, 신용스프레드 분해, CDS-Bond Basis, Vasicek/Basel IRB/Gaussian Copula, KRX DD 적용 |
 
 ---
 
@@ -76,8 +82,9 @@
   └── 시계열 모형(AR, MA, ARIMA) → 변동성 모형(GARCH)
   └── 회귀분석 → 베이지안 추론 → 몬테카를로
 
-[Stage 3] 금융 이론 프레임워크                  → 05, 04, 25, 26 일부
-  └── EMH → 적응적 시장 가설 → MPT → CAPM → APT
+[Stage 3] 금융 이론 프레임워크                  → 05, 04, 25, 26 일부, 42
+  └── EMH → 적응적 시장 가설 → MPT → CAPM(CML/SML) → APT
+  └── 단일지수 모형 → Zero-Beta CAPM → ICAPM → CCAPM (42번)
   └── Black-Scholes → Greeks → 내재변동성(VKOSPI) → 행동금융학
 
 [Stage 4] 패턴 이론 (정성적)                    → 06, 04 일부
@@ -89,24 +96,28 @@
   └── 고급 캔들스틱/차트 패턴 → 하모닉 패턴 → 품질 점수
   └── 패턴 조합 확률(마르코프 체인, 정보 이론)
 
-[Stage 6] 위험 관리와 성과 측정                 → 14, 12, 25, 28 일부
+[Stage 6] 위험 관리와 성과 측정                 → 14, 12, 25, 28 일부, 43, 44, 47
   └── 에르고딕 경제학 → 켈리 기준 → VaR/CVaR → 스트레스 테스트
   └── 샤프/소르티노/칼마 비율 → 공분산·상관 → 성과 귀인
+  └── 기업재무론 심화(DDM/RIM/EVA, 자본구조, 시그널링) → 43번
+  └── 채권 가격결정(Duration, DV01, Convexity, 면역전략) → 44번
+  └── 신용위험 모형(Merton DD, KMV, 축약형, 포트폴리오) → 47번
 
 [Stage 7] ML 기반 패턴 인식 및 백테스팅         → 15 (개편본)
   └── CNN/LSTM/Attention 패턴 인식 → 전이학습 → SHAP 해석
   └── 워크포워드 검증 → 다중 가설 검정 → 부트스트랩
 
-[Stage 8] 고급 이론                             → 03, 13, 09, 12, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 38, 41
+[Stage 8] 고급 이론                             → 03, 13, 09, 12, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 38, 41, 45, 46, 47
   └── 경제물리학(멱법칙, 임계현상) → 정보기하학(KL 발산, 전이 엔트로피)
   └── 게임 이론(내쉬 균형) → 극단값 이론(GEV, GPD)
-  └── 파생상품(옵션/선물) → 교차시장 상관 → 거시경제·섹터 회전
+  └── 파생상품(옵션가격결정 45번, 옵션전략 46번, 선물헤지 27번 §9-13) → 교차시장 상관
   └── IV 곡면(SVI, 스큐, GEX 심화) → 옵션 흐름(UOA, 스마트 머니)
   └── 거시경제학(IS-LM, AD-AS, 테일러 준칙) → 미시경제학(탄력성, 시장구조, 한계분석)
   └── 탐색이론(Stigler, 주의 제한) → 대리인 비용(Jensen-Meckling, HHI)
   └── 채권시장 신호(NSS 수익률 곡선, 크레딧 스프레드, Merton DD)
   └── 채권-주식 상대가치(ERP, RORO 레짐, 크레딧 사이클, BOK 이벤트)
   └── ETF 생태계(레버리지 센티먼트, 자금흐름, 괴리율, 보유 비중 패턴 보정)
+  └── 신용위험 모형(Merton DD, KMV, Jarrow-Turnbull, 포트폴리오 신용) → 47번
 
 [Stage 9] 최적 제어와 RL 기초                   → 10, 11
   └── HJB 방정식 → 머튼 포트폴리오 → 최적 실행

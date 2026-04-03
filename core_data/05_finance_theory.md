@@ -125,6 +125,113 @@ EMH가 맞다면 기술적 분석으로 α를 얻을 수 없다.
   CAPM은 여전히 WACC 계산, 교육용, 개념적 프레임워크로 활용됨.
   그러나 단일 β에 기반한 투자 의사결정은 권장되지 않음.
 
+### 3.3 자본시장선 (Capital Market Line, CML)
+
+James Tobin (1958), *Liquidity Preference as Behavior Towards Risk*,
+Review of Economic Studies (1981 노벨 경제학상)
+
+```
+CML: E[Rₚ] = Rf + [(E[Rm] - Rf) / σm] · σₚ
+
+E[Rₚ]: 효율적 포트폴리오의 기대수익률
+Rf: 무위험이자율
+E[Rm]: 시장 포트폴리오의 기대수익률
+σm: 시장 포트폴리오의 표준편차
+σₚ: 포트폴리오의 표준편차
+
+기울기 = (E[Rm] - Rf) / σm = "시장의 위험 가격 (Market Price of Risk)"
+```
+
+기하학적 해석:
+```
+E[R]
+ ↑      CML (직선)
+ |     /
+ |    / ← 시장 포트폴리오 M (접선점)
+ |   / ↗ 효율적 프론티어 (곡선)
+ Rf /
+ |/
+ └─────────────→ σ
+
+CML = 무위험자산(Rf)에서 효율적 프론티어에 접하는 직선
+접선점 = 시장 포트폴리오 M (모든 위험자산의 시가총액 가중 포트폴리오)
+```
+
+핵심 성질:
+- CML 위의 점: 효율적 포트폴리오 (최적 위험-수익 교환)
+- CML 아래의 점: 비효율적 포트폴리오 (개선 가능)
+- CML은 **총 위험(σ)** 기준으로 효율적 포트폴리오만 평가
+- 개별 자산은 CML 위에 놓이지 않음 (비체계적 위험 포함)
+
+CML vs SML 구분:
+- CML: x축 = σ(총 위험), 효율적 포트폴리오에만 적용
+- SML: x축 = β(체계적 위험), 모든 자산에 적용 (아래 §3.4)
+
+### 3.4 증권시장선 (Security Market Line, SML)
+
+```
+SML: E[Rᵢ] = Rf + βᵢ · (E[Rm] - Rf)
+
+이것은 §3.1의 CAPM 공식과 동일하다.
+SML은 CAPM의 기하학적 표현이다.
+```
+
+기하학적 해석:
+```
+E[R]
+ ↑       SML (직선)
+ |      /
+ |     / ← 과소평가 (양의 α, SML 위)
+ |    /
+ |   / ← 시장 포트폴리오 M (β=1, E[Rm])
+ |  /
+ | / ← 과대평가 (음의 α, SML 아래)
+ Rf
+ └─────────────→ β
+
+SML 위의 자산: α > 0 → 과소평가 (매수 시그널)
+SML 아래의 자산: α < 0 → 과대평가 (매도 시그널)
+SML 위의 자산: 위험 대비 수익이 충분 → 포트폴리오 추가 후보
+```
+
+기술적 분석 연결:
+- SML 기반 α 계산은 종목의 "본질적 매력도"를 측정
+- 기술적 패턴 + 양의 α = 가장 강한 매수 시그널 (패턴+가치 합류)
+- 25_capm_delta_covariance.md §6 Jensen's Alpha의 이론적 근거
+
+### 3.5 분리 정리 (Separation Theorem)
+
+Tobin (1958), 2-Fund Separation Theorem
+
+```
+투자 결정의 2단계 분리:
+
+  1단계 (투자 결정): 최적 위험자산 포트폴리오 M 결정
+    → 모든 투자자에게 동일 (시장 포트폴리오)
+    → Markowitz 효율적 프론티어의 접선 포트폴리오
+
+  2단계 (금융 결정): Rf와 M 사이의 배분 비율 결정
+    → 투자자의 위험 선호에 따라 다름
+    → 위험 회피적: Rf에 가중 (대출)
+    → 위험 추구적: M에 가중, 또는 차입(레버리지)
+
+핵심 함의:
+  모든 투자자는 동일한 위험자산 포트폴리오를 보유해야 한다.
+  차이는 오직 위험자산 vs 무위험자산의 배분 비율에서만 발생한다.
+  → "One mutual fund theorem" (하나의 펀드만 필요)
+```
+
+실무적 한계:
+- 동질적 기대(homogeneous expectations) 가정 위배
+- 무위험 차입 불가능 (차입금리 > 대출금리)
+- 공매도 제약 → Zero-Beta CAPM (42_advanced_asset_pricing.md §3)
+- 정보 비대칭 → 투자자별 최적 포트폴리오 상이
+
+교차 참조:
+- CML/SML 심층 확장: 42_advanced_asset_pricing.md (시장모형, ICAPM, CCAPM)
+- Beta 추정 방법론: 25_capm_delta_covariance.md §1.2
+- WACC 적용: 14_finance_management.md §2.3
+
 ---
 
 ## 4. Fama-French 요인 모형
@@ -404,3 +511,53 @@ EWMA 변동성은 LinUCB dim 3으로 진입하여:
 
 이는 변동성 클러스터링(volatility clustering) 특성 — 큰 변동 후 큰 변동이 지속 —
 에 대한 적응적 대응이다.
+
+---
+
+## 9. 가격결정모형 → 상세문서 매핑 (Pricing Model Cross-Reference)
+
+CheeseStock 코퍼스(47개 문서)에서 주요 가격결정모형의 기본 위치, 심화 위치, 구현 스크립트를 정리한다.
+동일 모형이 여러 문서에 등장하나 **중복 기술을 피하고 참조(cross-reference)**로 연결하는 원칙을 따른다.
+
+| 모형 | 기본 위치 | 심화 위치 | 구현 |
+|------|----------|----------|------|
+| CAPM | Doc 05 §3 | Doc 42 §1-4 (단일지수→ICAPM→CCAPM) | `compute_capm_beta.py` |
+| Zero-Beta CAPM | — | Doc 42 §2 (Black 1972) | — |
+| ICAPM (Merton 1973) | — | Doc 42 §3 | — (상태변수 이론적 근거) |
+| CCAPM (Breeden 1979) | — | Doc 42 §4 | — |
+| APT (Ross 1976) | Doc 23 §1-3 | Doc 42 §5 (정식 도출) | `mra_apt_extended.py` |
+| FF 5-Factor | Doc 23 §3 | Doc 42 §6 | `ff3_factors.json` |
+| BSM 옵션가격 | Doc 05 §5, Doc 26 §1 | Doc 45 §5-7 (Heston/Dupire) | — |
+| CRR 이항트리 | — | Doc 45 §1-2 | `compute_options_analytics.py` |
+| 옵션전략 페이오프 | — | Doc 46 §1-3 | `compute_options_analytics.py` |
+| 변동성 매매 | Doc 34 §2 (VRP) | Doc 46 §4 (Gamma Scalping) | — |
+| Merton DD | Doc 35 §6 | Doc 47 §1-2 | `compute_capm_beta.py` (DD) |
+| KMV/EDF | — | Doc 47 §2 | `compute_capm_beta.py` (PD) |
+| 축약형 신용모형 | — | Doc 47 §3 (Jarrow-Turnbull/Duffie-Singleton) | — |
+| Duration/DV01 | — | Doc 44 §3-5 | `compute_bond_metrics.py` |
+| MM 자본구조 | Doc 14 §2 | Doc 43 §1-2 (Miller 1977, 대리인비용) | — |
+| DDM/RIM/EVA | Doc 14 §2.7-2.8 | Doc 43 §3-6 | `compute_eva.py` |
+| 선물 헤지 | Doc 27 §1-7 | Doc 27 §9-13 (최적헤지비율/동적헤지) | `compute_hedge_ratio.py` |
+| Beta 보정 | Doc 25 §2 (SW) | Doc 25 §9.1-9.3 (Dimson/Blume) | `compute_capm_beta.py` (betaBlume) |
+| IC 형식론 | — | Doc 25 §9.5 (Grinold 기본법칙) | `mra_apt_extended.py` |
+
+### 9.1 참조 원칙
+
+1. **기본 위치**에서 핵심 공식과 직관을 기술
+2. **심화 위치**에서 확장(일반화, 한계, 한국 시장 적용)을 기술하되, 기본 공식은 "Doc XX §Y 참조"로 대체
+3. **구현 스크립트**는 `scripts/` 디렉토리 내 Python 파일로, 순수 Python(scipy/numpy 금지) 제약
+4. **JS 연결**은 `financials.js` (표시), `appWorker.js` (신뢰도 조정), `backtester.js` (백테스트 컨텍스트)
+
+### 9.2 IC(Information Coefficient) 기여 추적
+
+| Phase | 핵심 기여 | 예상 IC 증분 |
+|-------|----------|-------------|
+| 1 | ICAPM 상태변수 이론적 근거 | +0.001~0.003 |
+| 2 | EVA z-score 팩터 | +0.005~0.015 |
+| 3 | Equity Duration, Rate Beta | +0.003~0.008 |
+| 4 | Implied Move 이론적 기반 | +0.005~0.010 |
+| 5 | Straddle Implied Move | +0.005~0.010 |
+| 6 | DD < 2.0 필터링/페널티 | +0.005~0.010 |
+| 7 | Blume β + IC 형식론 | +0.002~0.005 |
+| 8 | MCS v2 + Flow + HMM | +0.013~0.035 |
+| **합계** | | **+0.039~0.096** |

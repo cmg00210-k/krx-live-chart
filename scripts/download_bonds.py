@@ -347,6 +347,80 @@ def fit_nss(maturities: List[float], yields: List[float],
 #  크레딧 레짐 분류
 # ══════════════════════════════════════════════════════
 
+def _compute_bond_metrics(coupon_rate: float, ytm: float, maturity_years: int,
+                          face: float = 100) -> Dict[str, float]:
+    """
+    채권 지표 일괄 계산 (Duration, Convexity, DV01).
+
+    Par bond 가정 (coupon_rate = ytm), 반기 이표.
+
+    Parameters:
+        coupon_rate: 연간 쿠폰금리 (%, 예: 3.25)
+        ytm:         만기수익률 (%, 예: 3.25)
+        maturity_years: 잔존 만기 (년)
+        face:        액면가
+
+    Returns:
+        dict: {macaulay_duration, modified_duration, dv01, convexity}
+
+    Academic: Fabozzi (2007) ch.4, Macaulay (1938)
+    """
+    import math
+
+    n = int(maturity_years * 2)  # 반기 기간 수
+    c = (coupon_rate / 100) * face / 2  # 반기 쿠폰
+    y = (ytm / 100) / 2  # 반기 수익률
+
+    if n <= 0 or y <= 0:
+        return {
+            'macaulay_duration': 0.0,
+            'modified_duration': 0.0,
+            'dv01': 0.0,
+            'convexity': 0.0,
+        }
+
+    # 가격 계산
+    price = 0.0
+    for t in range(1, n + 1):
+        cf = c + (face if t == n else 0)
+        price += cf / (1 + y) ** t
+
+    if price <= 0:
+        return {
+            'macaulay_duration': 0.0,
+            'modified_duration': 0.0,
+            'dv01': 0.0,
+            'convexity': 0.0,
+        }
+
+    # Macaulay Duration (반기 단위 → 연 단위 /2)
+    weighted_sum = 0.0
+    for t in range(1, n + 1):
+        cf = c + (face if t == n else 0)
+        weighted_sum += t * cf / (1 + y) ** t
+    mac_dur = (weighted_sum / price) / 2.0
+
+    # Modified Duration
+    mod_dur = mac_dur / (1 + y)
+
+    # DV01 (per 100 face)
+    dv01 = price * mod_dur * 0.0001
+
+    # Convexity (반기 단위 → 연 단위 /4)
+    conv_sum = 0.0
+    for t in range(1, n + 1):
+        cf = c + (face if t == n else 0)
+        conv_sum += t * (t + 1) * cf / (1 + y) ** (t + 2)
+    convexity = (conv_sum / price) / 4.0
+
+    return {
+        'macaulay_duration': round(mac_dur, 4),
+        'modified_duration': round(mod_dur, 4),
+        'dv01': round(dv01, 4),
+        'convexity': round(convexity, 4),
+    }
+
+
 def classify_credit_regime(aa_spread: Optional[float]) -> str:
     """
     AA- 크레딧 스프레드 기반 시장 레짐 분류.
@@ -469,6 +543,28 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
         inv_label = " (역전!)" if curve_inverted else ""
         print(f"  수익률곡선 기울기 10Y-3Y: {slope_10y3y:+.2f}%p{inv_label}")
 
+    # ── Duration / Convexity / DV01 계산 ──
+    # Par bond 가정: coupon = ytm (Fabozzi 2007 ch.4)
+    metrics_duration = {}
+    metrics_convexity = {}
+    metrics_dv01 = {}
+    _metrics_tenors = {"ktb_3y": 3, "ktb_10y": 10, "ktb_30y": 30}
+
+    for mkey, mat in _metrics_tenors.items():
+        ytm_val = yields_data.get(mkey)
+        if ytm_val is not None:
+            m = _compute_bond_metrics(ytm_val, ytm_val, mat)
+            metrics_duration[mkey] = m['modified_duration']
+            metrics_convexity[mkey] = m['convexity']
+            metrics_dv01[mkey] = m['dv01']
+            if verbose:
+                print(f"  {mkey} metrics: D_mod={m['modified_duration']:.4f}, "
+                      f"Conv={m['convexity']:.4f}, DV01={m['dv01']:.4f}")
+        else:
+            metrics_duration[mkey] = None
+            metrics_convexity[mkey] = None
+            metrics_dv01[mkey] = None
+
     result = {
         "updated": datetime.now().strftime("%Y-%m-%d"),
         "yields": yields_data,
@@ -478,6 +574,11 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
         "slope_10y2y": slope_10y2y,
         "curve_inverted": curve_inverted,
         "credit_regime": credit_regime,
+        "metrics": {
+            "duration": metrics_duration,
+            "convexity": metrics_convexity,
+            "dv01": metrics_dv01,
+        },
     }
 
     return result
@@ -600,6 +701,11 @@ def create_template() -> Tuple[dict, dict]:
         "slope_10y2y": None,
         "curve_inverted": None,
         "credit_regime": "unknown",
+        "metrics": {
+            "duration": {"ktb_3y": None, "ktb_10y": None, "ktb_30y": None},
+            "convexity": {"ktb_3y": None, "ktb_10y": None, "ktb_30y": None},
+            "dv01": {"ktb_3y": None, "ktb_10y": None, "ktb_30y": None},
+        },
     }
 
     history = {

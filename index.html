@@ -539,12 +539,28 @@
             <span class="fin-grid-value" id="fin-beta">&mdash;</span>
           </div>
           <div class="fin-grid-item">
+            <span class="fin-grid-label">부도거리 <span class="fin-info" data-tooltip="Merton(1974) Distance-to-Default. DD>3: 안전, 2-3: 주의, <2: 경고. 높을수록 부도 위험 낮음. KMV Default Point = 유동부채+0.5×비유동부채.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-dd">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">보정 &beta; <span class="fin-info" data-tooltip="Blume(1975) 평균회귀 보정 Beta. β_adj = 0.67×β_hist + 0.33×1.0. KOSDAQ 소형주 beta 불안정성을 완화. Doc 25 §9.3.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-blume-beta">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">Alpha 유의성 <span class="fin-info" data-tooltip="Jensen(1968) Alpha 통계적 유의성. |t|>2.0이면 5% 수준 유의 (*표시). 양의 alpha=초과수익, 음의 alpha=시장 미달. Doc 25 §9.4.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-alpha-sig">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
             <span class="fin-grid-label">SMB <span class="fin-info" data-tooltip="Fama-French 소형주 프리미엄 팩터 노출도. 양수=소형주 특성, 음수=대형주 특성. OLS 회귀 계수.">&#9432;</span></span>
             <span class="fin-grid-value" id="fin-smb">&mdash;</span>
           </div>
           <div class="fin-grid-item">
             <span class="fin-grid-label">HML <span class="fin-info" data-tooltip="Fama-French 가치주 프리미엄 팩터 노출도. 양수=가치주 특성, 음수=성장주 특성. OLS 회귀 계수.">&#9432;</span></span>
             <span class="fin-grid-value" id="fin-hml">&mdash;</span>
+          </div>
+          <div class="fin-grid-item">
+            <span class="fin-grid-label">EVA Spread <span class="fin-info" data-tooltip="경제적 부가가치 스프레드 (ROIC - WACC). 양수면 가치 창출, 음수면 가치 파괴. Stern Stewart (1991), Doc 14 §2.8.">&#9432;</span></span>
+            <span class="fin-grid-value" id="fin-eva-spread">&mdash;</span>
           </div>
           <div class="fin-grid-item">
             <span class="fin-grid-label">ROA <span class="fin-info" data-tooltip="총자산이익률. 순이익을 총자산으로 나눈 비율. 자산 활용의 효율성을 나타냅니다.">&#9432;</span></span>
@@ -595,6 +611,12 @@
           <span class="fin-yield-label">수익률곡선</span>
           <span class="fin-yield-slope" id="fin-yield-slope">&mdash;</span>
           <span class="fin-yield-regime" id="fin-yield-regime"></span>
+        </div>
+        <!-- 채권 듀레이션/DV01 (Doc 44) -->
+        <div class="fin-yield-row" id="fin-bond-metrics-row">
+          <span class="fin-yield-label">KTB10Y D<sub>mod</sub></span>
+          <span class="fin-yield-slope" id="fin-bond-duration">&mdash;</span>
+          <span class="fin-yield-regime" id="fin-bond-dv01"></span>
         </div>
 
         <!-- 추이 차트 -->

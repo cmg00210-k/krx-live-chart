@@ -132,6 +132,7 @@ async function _continueInit() {
   // 매크로/채권 데이터 로드 (비차단 — 차트 오버레이 정보용)
   _loadMarketData();
   _loadDerivativesData();
+  _loadPhase8Data();  // [Phase 5+8] MCS v2 + 수급 신호 + 옵션 분석
 
   // 복원된 환경설정을 UI에 반영
   _applyPrefsToUI();

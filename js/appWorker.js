@@ -102,6 +102,8 @@ function _initAnalysisWorker() {
         // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
         _calcNaiveDD(candles.map(function(c) { return c.close; }));
         _applyMertonDDToPatterns(detectedPatterns);
+        // [Phase 5+8] MCS + HMM 레짐 + 수급 + 옵션 Implied Move + DD 통합 조정
+        _applyPhase8ConfidenceToPatterns(detectedPatterns);
         // [D-1] Survivorship bias: mild confidence discount for buy patterns
         _applySurvivorshipAdjustment(detectedPatterns);
         _applyMacroConditionsToSignals(detectedSignals);
@@ -311,6 +313,110 @@ async function _loadDerivativesData() {
     // Worker: 레짐 분류만 (signalEngine._classifyVolRegimeFromVKOSPI 등)
     _sendMarketContextToWorker();
   } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+}
+
+/**
+ * [Phase 5+8] 매크로 복합점수 + 투자자 수급 + 옵션 분석 데이터 비동기 로드
+ *
+ * 이론: Doc 25 §9.5 (IC 형식론), Doc 29 §5 (MCS), Doc 46 §5 (옵션 전략)
+ * 선택적 데이터: 로드 실패 시 무시 (기존 기능에 영향 없음)
+ */
+async function _loadPhase8Data() {
+  try {
+    var results = await Promise.allSettled([
+      fetch('data/macro/macro_composite.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/backtest/flow_signals.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/derivatives/options_analytics.json', { signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (results[0].status === 'fulfilled' && results[0].value.ok)
+      _macroComposite = await results[0].value.json();
+    if (results[1].status === 'fulfilled' && results[1].value.ok)
+      _flowSignals = await results[1].value.json();
+    if (results[2].status === 'fulfilled' && results[2].value.ok)
+      _optionsAnalytics = await results[2].value.json();
+    var loaded = [_macroComposite, _flowSignals, _optionsAnalytics].filter(Boolean).length;
+    if (loaded > 0) {
+      console.log('[KRX] Phase 8 데이터 로드 완료 (' + loaded + '/3)');
+    }
+  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+}
+
+/**
+ * [Phase 8] 패턴 신뢰도에 MCS + HMM 레짐 + 수급 방향 + 옵션 Implied Move 조정 적용
+ *
+ * 호출 시점: _applyMacroConfidenceToPatterns() 이후 (기존 매크로 조정 완료 후 추가 레이어)
+ * 중복 방지: patterns.js/signalEngine.js의 기존 HMM discount와 별개 — 여기서는 flow_signals.json 기반
+ *
+ * 조정 로직:
+ * - MCS > 70: 매수 패턴 +5%, MCS < 30: 매도 패턴 +5%
+ * - HMM regime: REGIME_CONFIDENCE_MULT 적용
+ * - 외국인 방향 일치: +3% 보너스
+ * - Implied Move > 3%: 이벤트 기간 패턴 신뢰도 ±5%
+ * - DD < 2: 매수 패턴 -10% 페널티
+ */
+function _applyPhase8ConfidenceToPatterns(patterns) {
+  if (!patterns || !patterns.length) return;
+
+  var code = currentStock ? currentStock.code : null;
+
+  // MCS 조정 (거시경제 복합점수)
+  if (_macroComposite && _macroComposite.mcsV2 != null) {
+    var mcs = _macroComposite.mcsV2;
+    for (var i = 0; i < patterns.length; i++) {
+      var p = patterns[i];
+      if (p.confidence == null) continue;
+      if (mcs >= MCS_THRESHOLDS.strong_bull && p.direction === 'buy') {
+        p.confidence *= 1.05;
+      } else if (mcs <= MCS_THRESHOLDS.strong_bear && p.direction === 'sell') {
+        p.confidence *= 1.05;
+      }
+    }
+  }
+
+  // HMM 레짐 + 수급 조정 (종목별)
+  if (code && _flowSignals && _flowSignals[code]) {
+    var flow = _flowSignals[code];
+    var regime = flow.hmmRegimeLabel || null;
+    var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
+
+    for (var j = 0; j < patterns.length; j++) {
+      var pt = patterns[j];
+      if (pt.confidence == null) continue;
+
+      // HMM 레짐 승수
+      var dir = pt.direction === 'buy' ? 'buy' : 'sell';
+      pt.confidence *= mult[dir];
+
+      // 외국인 방향 일치 보너스
+      if (flow.foreignMomentum === 'buy' && pt.direction === 'buy') {
+        pt.confidence *= 1.03;
+      } else if (flow.foreignMomentum === 'sell' && pt.direction === 'sell') {
+        pt.confidence *= 1.03;
+      }
+    }
+  }
+
+  // 옵션 Implied Move 조정 (이벤트 기간 감지)
+  if (_optionsAnalytics && _optionsAnalytics.straddleImpliedMove != null) {
+    var impliedMove = _optionsAnalytics.straddleImpliedMove;
+    if (impliedMove > 3.0) {
+      // 높은 Implied Move = 이벤트 기간: 방향성 패턴 신뢰도 조정
+      for (var k = 0; k < patterns.length; k++) {
+        if (patterns[k].confidence == null) continue;
+        patterns[k].confidence *= 0.95;  // 불확실성 증가 → 전반적 감산
+      }
+    }
+  }
+
+  // DD 페널티 (Phase 6 연결)
+  if (_currentDD != null && _currentDD < 2.0) {
+    for (var m = 0; m < patterns.length; m++) {
+      if (patterns[m].confidence == null) continue;
+      if (patterns[m].direction === 'buy') {
+        patterns[m].confidence *= 0.90;  // DD < 2 → 매수 패턴 -10%
+      }
+    }
+  }
 }
 
 /**
