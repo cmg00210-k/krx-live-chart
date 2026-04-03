@@ -113,6 +113,8 @@ class PatternBacktester {
     this._loadBehavioralData();
     this._loadCalibratedConstants();
     this._loadSurvivorshipCorrection();
+    this._loadCAPMBeta();
+    this._loadMarketIndex();
   }
 
   /** [D-1] Survivorship bias correction — Elton, Gruber & Blake (1996)
@@ -153,6 +155,50 @@ class PatternBacktester {
     // Global median (fallback)
     return corr.global ? corr.global.delta_wr_median : 0;
   }
+
+  /** [Phase 2-C] CAPM Beta data — Doc25 §1.2
+   *  Loads pre-computed per-stock beta from compute_capm_beta.py output.
+   *  Used by _calcJensensAlpha() in _computeStats(). */
+  _capmBeta = null;
+  _loadCAPMBeta() {
+    var that = this;
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var prefix = isWorker ? '../data/backtest/' : 'data/backtest/';
+    fetch(prefix + 'capm_beta.json')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; })
+      .then(function(data) {
+        if (data && data.stocks && typeof data.stocks === 'object') {
+          that._capmBeta = data;
+        }
+      });
+  }
+
+  /** [Phase 2-C] Market index daily closes — Jensen's Alpha market return
+   *  Stored as date-indexed map: { "YYYY-MM-DD": close } for O(1) lookup. */
+  _marketIndex = null;
+  _loadMarketIndex() {
+    var that = this;
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var prefix = isWorker ? '../data/market/' : 'data/market/';
+    fetch(prefix + 'kospi_daily.json')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; })
+      .then(function(data) {
+        if (Array.isArray(data) && data.length > 0) {
+          var indexed = {};
+          for (var i = 0; i < data.length; i++) {
+            if (data[i].time && data[i].close != null) {
+              indexed[data[i].time] = data[i].close;
+            }
+          }
+          that._marketIndex = indexed;
+        }
+      });
+  }
+
+  /** [Phase 2-C] Current stock code — set by backtestAll() for Jensen's Alpha lookup */
+  _currentStockCode = null;
 
   /** [Phase I-L2] Behavioral data JSONs — core_data 18-21 quantification outputs */
   _behavioralData = null;
@@ -446,8 +492,9 @@ class PatternBacktester {
    * @param {Array} candles — OHLCV 배열
    * @returns {{ [patternType]: backtestResult }}
    */
-  backtestAll(candles) {
+  backtestAll(candles, stockCode) {
     if (!candles || candles.length < 50) return {};
+    this._currentStockCode = stockCode || null;
 
     const results = {};
     for (const pType of Object.keys(this._META)) {
@@ -1677,6 +1724,41 @@ class PatternBacktester {
         predActualPairs: predActualPairs.length >= 10 ? predActualPairs : null, // [Phase 2/3] 산점도용 (predicted, actual) 쌍
       };
 
+      // ── [Phase 2-C] Jensen's Alpha — market-adjusted excess return (Doc25 §1.3) ──
+      // alpha = R_pattern - [Rf + beta * (R_market - Rf)]
+      if (this._capmBeta && this._marketIndex && this._currentStockCode) {
+        var _betaEntry = this._capmBeta.stocks && this._capmBeta.stocks[this._currentStockCode];
+        var _rfAnnual = (this._capmBeta.summary && this._capmBeta.summary.parameters)
+          ? this._capmBeta.summary.parameters.rf_annual_pct : 3.5;
+        if (_betaEntry && _betaEntry.beta != null) {
+          var _jas = [];
+          for (var _ji = 0; _ji < returns.length; _ji++) {
+            var _jocc = validOccs[_ji];
+            var _entryDate = (_jocc.idx + 1 < candles.length) ? candles[_jocc.idx + 1].time : null;
+            var _exitDate = (_jocc.idx + h < candles.length) ? candles[_jocc.idx + h].time : null;
+            if (!_entryDate || !_exitDate) continue;
+            var _mktEntry = this._marketIndex[_entryDate];
+            var _mktExit = this._marketIndex[_exitDate];
+            if (_mktEntry == null || _mktExit == null || _mktEntry === 0) continue;
+            var _mktRet = (_mktExit - _mktEntry) / _mktEntry * 100;
+            var _ja = this._calcJensensAlpha(returns[_ji], h, _betaEntry.beta, _rfAnnual, _mktRet);
+            if (_ja != null) _jas.push(_ja);
+          }
+          if (_jas.length > 0) {
+            var _jaSum = 0;
+            for (var _jk = 0; _jk < _jas.length; _jk++) _jaSum += _jas[_jk];
+            var _jaMean = _jaSum / _jas.length;
+            var _jaSorted = _jas.slice().sort(function(a, b) { return a - b; });
+            var _jaMedian = _jas.length % 2 === 0
+              ? (_jaSorted[_jas.length / 2 - 1] + _jaSorted[_jas.length / 2]) / 2
+              : _jaSorted[Math.floor(_jas.length / 2)];
+            stats.jensensAlpha = +_jaMean.toFixed(3);
+            stats.jensensAlphaMedian = +_jaMedian.toFixed(3);
+            stats.jensensAlphaN = _jas.length;
+          }
+        }
+      }
+
       // ── Phase A: 단순 OLS 진단 (return = alpha + beta * confidence) ──
       if (returns.length >= 20) {
         var sx = 0, sy = 0, sxy = 0, sx2 = 0;
@@ -1912,6 +1994,7 @@ class PatternBacktester {
       patternScore: 0, patternGrade: 'F',
       mzRegression: null, calibrationCoverage: null, predActualPairs: null,
       ic: null, icir: null, icIsOOS: false, icWindows: 0,
+      jensensAlpha: null, jensensAlphaMedian: null, jensensAlphaN: 0,
     };
   }
 

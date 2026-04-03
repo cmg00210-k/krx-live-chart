@@ -60,6 +60,15 @@ function createEngine() {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
       }
     }
+    // Market data files (data/market/)
+    const mktDir = path.join(DATA_DIR, 'market');
+    if (baseName && baseName.endsWith('.json')) {
+      const fpath2 = path.join(mktDir, baseName);
+      if (fs.existsSync(fpath2)) {
+        const data2 = JSON.parse(fs.readFileSync(fpath2, 'utf8'));
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(data2) });
+      }
+    }
     return Promise.resolve({ ok: false });
   };
 
@@ -90,6 +99,20 @@ this.PatternEngine = PatternEngine;
 `;
 
   vm.runInContext(combinedSource, sandbox, { filename: 'combined.js', timeout: 60000 });
+
+  // [Phase 2-C] Sync-inject CAPM + market data for Jensen's Alpha
+  // (Promise microtasks from constructor fetch() don't run in synchronous batch mode)
+  const capmPath = path.join(DATA_DIR, 'backtest', 'capm_beta.json');
+  if (fs.existsSync(capmPath)) {
+    sandbox.backtester._capmBeta = JSON.parse(fs.readFileSync(capmPath, 'utf8'));
+  }
+  const mktPath = path.join(DATA_DIR, 'market', 'kospi_daily.json');
+  if (fs.existsSync(mktPath)) {
+    const mktData = JSON.parse(fs.readFileSync(mktPath, 'utf8'));
+    const indexed = {};
+    for (const d of mktData) if (d.time && d.close != null) indexed[d.time] = d.close;
+    sandbox.backtester._marketIndex = indexed;
+  }
 
   return sandbox;
 }
@@ -152,7 +175,7 @@ function analyzeStock(sandbox, code, market, filePath) {
   sandbox.backtester.invalidateCache();
 
   const patterns = sandbox.patternEngine.analyze(candles);
-  const backtestResults = sandbox.backtester.backtestAll(candles);
+  const backtestResults = sandbox.backtester.backtestAll(candles, code);
 
   const patternSummary = patterns.map(p => ({
     type: p.type,

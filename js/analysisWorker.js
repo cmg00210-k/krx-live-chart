@@ -77,7 +77,7 @@ try {
     'indicators.js?v=25',
     'patterns.js?v=42',
     'signalEngine.js?v=34',
-    'backtester.js?v=36'
+    'backtester.js?v=37'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
