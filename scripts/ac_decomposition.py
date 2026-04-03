@@ -14,6 +14,8 @@ B) Newey-West HAC standard errors with bandwidth=5
 C) Block bootstrap (block_size=5) for IC standard errors
 """
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 import csv
 import math
 import os

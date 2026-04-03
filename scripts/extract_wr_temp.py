@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """5-year backtest WR extraction from occurrenceReturns (Phase 2-E)"""
 import json, sys
+sys.stdout.reconfigure(encoding='utf-8')
 from collections import defaultdict
 
 SIG = dict(hammer='buy',invertedHammer='buy',shootingStar='sell',hangingMan='sell',

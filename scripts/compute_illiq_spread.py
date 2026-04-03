@@ -12,6 +12,7 @@ Academic basis:
   Roll (1984) S = 2 * sqrt(max(0, -Cov(dP_t, dP_{t-1})))
 """
 import json, os, math, sys
+sys.stdout.reconfigure(encoding='utf-8')
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 OUT_PATH = os.path.join(DATA_DIR, 'backtest', 'illiq_spread.json')

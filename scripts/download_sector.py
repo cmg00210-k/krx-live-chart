@@ -8,6 +8,7 @@ FinanceDataReader + data/financials/*.json 활용
 import json
 import os
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
 from datetime import datetime
 
 

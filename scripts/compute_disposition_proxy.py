@@ -11,6 +11,7 @@ Academic basis:
   Kahneman & Tversky (1979): loss aversion lambda=2.25
 """
 import json, os, math, sys
+sys.stdout.reconfigure(encoding='utf-8')
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 OUT_PATH = os.path.join(DATA_DIR, 'backtest', 'disposition_proxy.json')

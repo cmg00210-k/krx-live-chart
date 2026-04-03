@@ -32,6 +32,7 @@ Exit codes: 0 = OK, 1 = error
 
 import os
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
 import shutil
 import argparse
 

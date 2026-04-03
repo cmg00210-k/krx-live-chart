@@ -12,6 +12,7 @@ Academic basis:
 Note: Pure numpy implementation (no hmmlearn dependency).
 """
 import json, os, math, sys
+sys.stdout.reconfigure(encoding='utf-8')
 from collections import defaultdict
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
