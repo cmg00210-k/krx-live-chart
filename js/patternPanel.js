@@ -1292,7 +1292,7 @@ function renderPatternCards(patterns) {
             </div>
             <div class="pp-stat-row">
               <span class="pp-stat-label">5일 승률</span>
-              <span class="pp-stat-value">${h5 && h5.n > 0 ? h5.winRate.toFixed(0) + '%' : '--'}</span>
+              <span class="pp-stat-value">${h5 && h5.n > 0 ? h5.winRate.toFixed(0) + '%' + (h5.survivorshipBias > 0 ? ' <span style="color:var(--neutral);font-size:10px">(adj ' + h5.correctedWR.toFixed(0) + '%)</span>' : '') : '--'}</span>
             </div>` +
             expRetHtml +
             rrHtml +

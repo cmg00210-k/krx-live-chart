@@ -102,6 +102,8 @@ function _initAnalysisWorker() {
         // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
         _calcNaiveDD(candles.map(function(c) { return c.close; }));
         _applyMertonDDToPatterns(detectedPatterns);
+        // [D-1] Survivorship bias: mild confidence discount for buy patterns
+        _applySurvivorshipAdjustment(detectedPatterns);
         _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
@@ -592,6 +594,35 @@ function _applyMertonDDToPatterns(patterns) {
       p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
     }
   }
+}
+
+/**
+ * [D-1] Survivorship bias confidence adjustment.
+ * Applies mild confidence discount to BUY patterns when correction data is loaded.
+ * Sell patterns are NOT adjusted (delisted stocks failing = bearish patterns were correct).
+ * Clamp: [0.92, 1.0] — consistent with D-2 RORO band [0.92, 1.08].
+ */
+function _applySurvivorshipAdjustment(patterns) {
+  if (typeof backtester === 'undefined' || !backtester._survivorshipCorr) return;
+  var corr = backtester._survivorshipCorr;
+  var globalDelta = corr.global ? corr.global.delta_wr_median : 0;
+
+  // Only apply if correction is meaningful (> 1pp)
+  if (globalDelta <= 1) return;
+
+  // adj = 1 - (delta / 200): half the WR delta as confidence multiplier
+  // 2.8pp delta → 0.986 multiplier, 5pp delta → 0.975 multiplier
+  var adj = Math.max(0.92, Math.min(1.0, 1 - (globalDelta / 200)));
+
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    // Buy patterns only — sell patterns benefit from delisted stock failures
+    if (p.signal === 'buy' && typeof p.confidence === 'number') {
+      p.confidence = +(p.confidence * adj).toFixed(1);
+    }
+  }
+
+  _survivorshipCorrectionLoaded = true;
 }
 
 /**
@@ -1267,6 +1298,8 @@ function _analyzeOnMainThread() {
   // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
   _calcNaiveDD(candles.map(function(c) { return c.close; }));
   _applyMertonDDToPatterns(detectedPatterns);
+  // [D-1] Survivorship bias: mild confidence discount for buy patterns
+  _applySurvivorshipAdjustment(detectedPatterns);
   _applyMacroConditionsToSignals(detectedSignals);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;

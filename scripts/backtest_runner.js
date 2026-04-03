@@ -36,9 +36,29 @@ function createEngine() {
   // Load rl_policy.json synchronously and return it via a fake fetch Promise
   const rlPolicyPath = path.join(DATA_DIR, 'backtest', 'rl_policy.json');
   const fakeFetch = function(url) {
-    if (url.includes('rl_policy') && fs.existsSync(rlPolicyPath)) {
-      const data = JSON.parse(fs.readFileSync(rlPolicyPath, 'utf8'));
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
+    // Resolve JSON data files for backtester lazy-loading
+    const resolvers = [
+      { match: 'rl_policy', file: 'rl_policy.json' },
+      { match: 'survivorship_correction', file: 'survivorship_correction.json' },
+    ];
+    for (const r of resolvers) {
+      if (url.includes(r.match)) {
+        const fpath = path.join(DATA_DIR, 'backtest', r.file);
+        if (fs.existsSync(fpath)) {
+          const data = JSON.parse(fs.readFileSync(fpath, 'utf8'));
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
+        }
+      }
+    }
+    // Behavioral data files (illiq_spread, hmm_regimes, etc.)
+    const btDir = path.join(DATA_DIR, 'backtest');
+    const baseName = url.split('/').pop();
+    if (baseName && baseName.endsWith('.json')) {
+      const fpath = path.join(btDir, baseName);
+      if (fs.existsSync(fpath)) {
+        const data = JSON.parse(fs.readFileSync(fpath, 'utf8'));
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
+      }
     }
     return Promise.resolve({ ok: false });
   };
@@ -75,8 +95,10 @@ this.PatternEngine = PatternEngine;
 }
 
 // ── Analyze one stock ────────────────────────────────
-function analyzeStock(sandbox, code, market) {
-  const candleFile = path.join(DATA_DIR, market.toLowerCase(), `${code}.json`);
+function analyzeStock(sandbox, code, market, filePath) {
+  const candleFile = filePath
+    ? path.join(DATA_DIR, filePath)
+    : path.join(DATA_DIR, market.toLowerCase(), `${code}.json`);
   if (!fs.existsSync(candleFile)) {
     return { code, market, error: 'file_not_found' };
   }
@@ -175,10 +197,12 @@ function analyzeStock(sandbox, code, market) {
 const args = process.argv.slice(2);
 
 if (args[0] === '--batch') {
-  // Batch mode: process all stocks from index.json
-  const indexPath = path.join(DATA_DIR, 'index.json');
+  // Batch mode: process all stocks from index.json (or delisted_index.json with --delisted)
+  const delistedMode = args.includes('--delisted');
+  const indexFile = delistedMode ? 'delisted_index.json' : 'index.json';
+  const indexPath = path.join(DATA_DIR, indexFile);
   if (!fs.existsSync(indexPath)) {
-    process.stderr.write('index.json not found\n');
+    process.stderr.write(indexFile + ' not found\n');
     process.exit(1);
   }
 
@@ -212,7 +236,9 @@ if (args[0] === '--batch') {
 
   for (const stock of targetStocks) {
     try {
-      const result = analyzeStock(sandbox, stock.code, stock.market);
+      // D-1: delisted mode uses stock.file path directly (e.g., "delisted/008110.json")
+      const filePath = delistedMode ? stock.file : null;
+      const result = analyzeStock(sandbox, stock.code, stock.market, filePath);
       process.stdout.write(JSON.stringify(result) + '\n');
       if (result.skipped) skipped++;
       if (result.error) errors++;

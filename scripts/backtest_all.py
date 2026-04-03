@@ -227,8 +227,8 @@ def run_node_incremental(changed_codes):
             INCREMENTAL_CODES_PATH.unlink()
 
 
-def run_node_batch():
-    """Node backtest_runner.js --batch 실행"""
+def run_node_batch(delisted=False):
+    """Node backtest_runner.js --batch 실행 (delisted=True: 상폐 종목 모드)"""
     runner = ROOT / "scripts" / "backtest_runner.js"
     if not runner.exists():
         print(f"[ERROR] {runner} not found")
@@ -236,16 +236,26 @@ def run_node_batch():
 
     BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("[1/4] Running Node backtest_runner.js --batch ...")
+    output_path = BACKTEST_DIR / ("delisted_raw_results.ndjson" if delisted else "raw_results.ndjson")
+    cmd = ["node", str(runner), "--batch"]
+    if delisted:
+        cmd.append("--delisted")
+
+    tag = " (delisted)" if delisted else ""
+    print(f"[1/4] Running Node backtest_runner.js --batch{tag} ...")
     start = time.time()
 
-    with open(RAW_NDJSON, "w", encoding="utf-8") as out_f, \
+    # Delisted stocks have ~4x more candles per stock (avg 980 vs 244)
+    # → longer per-stock processing time → higher timeout needed
+    batch_timeout = 1800 if delisted else 600
+
+    with open(output_path, "w", encoding="utf-8") as out_f, \
          open(BACKTEST_DIR / "batch_log.txt", "w", encoding="utf-8") as log_f:
         proc = subprocess.run(
-            ["node", str(runner), "--batch"],
+            cmd,
             stdout=out_f,
             stderr=log_f,
-            timeout=600,
+            timeout=batch_timeout,
         )
 
     elapsed = time.time() - start
@@ -253,7 +263,7 @@ def run_node_batch():
         print(f"[ERROR] Node process exited with code {proc.returncode}")
         sys.exit(1)
 
-    line_count = sum(1 for _ in open(RAW_NDJSON, encoding="utf-8"))
+    line_count = sum(1 for _ in open(output_path, encoding="utf-8"))
     print(f"  -> {line_count} stocks processed in {elapsed:.1f}s")
     return line_count
 
@@ -526,12 +536,76 @@ def generate_wc_return_pairs(results):
     return total
 
 
+def _run_delisted_pipeline():
+    """D-1 Survivorship Bias: 상폐 종목 전용 백테스트 파이프라인.
+
+    backtest_runner.js --batch --delisted 실행 후
+    delisted_pattern_performance.json 생성.
+    """
+    delisted_ndjson = BACKTEST_DIR / "delisted_raw_results.ndjson"
+
+    # Step 1: Run Node batch in delisted mode
+    run_node_batch(delisted=True)
+
+    # Step 2: Load results
+    print("[2/4] Loading delisted raw results...")
+    results = []
+    errors = 0
+    with open(delisted_ndjson, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                results.append(obj)
+            except json.JSONDecodeError:
+                errors += 1
+    print(f"  -> {len(results)} results loaded ({errors} parse errors)")
+
+    # Step 3: Aggregate pattern performance (same logic as listed stocks)
+    print("[3/4] Aggregating delisted pattern performance...")
+    pattern_perf = aggregate_pattern_performance(results)
+    perf_path = BACKTEST_DIR / "delisted_pattern_performance.json"
+    with open(perf_path, "w", encoding="utf-8") as f:
+        json.dump(pattern_perf, f, ensure_ascii=False, indent=2)
+    print(f"  -> delisted_pattern_performance.json ({len(pattern_perf)} pattern types)")
+
+    # Step 3b: Aggregate stats
+    agg_stats = aggregate_stats(results)
+    stats_path = BACKTEST_DIR / "delisted_aggregate_stats.json"
+    with open(stats_path, "w", encoding="utf-8") as f:
+        json.dump(agg_stats, f, ensure_ascii=False, indent=2)
+    print(f"  -> delisted_aggregate_stats.json ({agg_stats['analyzed']} analyzed)")
+
+    # Step 4: Summary
+    total = len(results)
+    skipped = sum(1 for r in results if r.get("skipped"))
+    errored = sum(1 for r in results if r.get("error"))
+    analyzed = total - skipped - errored
+    bt_count = sum(1 for r in results if r.get("backtest") and len(r["backtest"]) > 0)
+
+    print("[4/4] Delisted Backtest Summary:")
+    print(f"  Total stocks:     {total}")
+    print(f"  Analyzed:         {analyzed}")
+    print(f"  Skipped:          {skipped}")
+    print(f"  Errors:           {errored}")
+    print(f"  Backtest-ready:   {bt_count}")
+    print(f"  Pattern types:    {len(pattern_perf)}")
+
+
 def main():
     args = sys.argv[1:]
     skip_run = "--skip-run" in args
     incremental = "--incremental" in args
+    delisted_mode = "--delisted" in args
 
     BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ── D-1: Delisted mode — separate pipeline ──
+    if delisted_mode:
+        _run_delisted_pipeline()
+        return
 
     # Step 1: Run Node batch (or skip)
     if skip_run:

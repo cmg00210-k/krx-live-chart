@@ -112,6 +112,46 @@ class PatternBacktester {
     this._loadRLPolicy();
     this._loadBehavioralData();
     this._loadCalibratedConstants();
+    this._loadSurvivorshipCorrection();
+  }
+
+  /** [D-1] Survivorship bias correction — Elton, Gruber & Blake (1996)
+   *  Loads empirical delta_wr per pattern/horizon from survivorship_correction.json.
+   *  If missing, _getSurvivorshipCorrection() returns 0 (graceful fallback). */
+  _survivorshipCorr = null;
+  _loadSurvivorshipCorrection() {
+    var that = this;
+    var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
+    var prefix = isWorker ? '../data/backtest/' : 'data/backtest/';
+    fetch(prefix + 'survivorship_correction.json')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; })
+      .then(function(data) {
+        if (data && data.global && typeof data.global.delta_wr_median === 'number') {
+          that._survivorshipCorr = data;
+        }
+      });
+  }
+
+  /** [D-1] Get survivorship bias correction for a pattern/horizon.
+   *  Priority: per-pattern per-horizon > per-horizon > global median.
+   *  Returns 0 if correction data not loaded. */
+  _getSurvivorshipCorrection(patternType, h) {
+    var corr = this._survivorshipCorr;
+    if (!corr) return 0;
+    // Per-pattern per-horizon (most precise)
+    if (corr.per_pattern && corr.per_pattern[patternType]) {
+      var pp = corr.per_pattern[patternType];
+      if (pp[String(h)] && pp[String(h)].n_delisted >= 30) {
+        return pp[String(h)].delta;
+      }
+    }
+    // Per-horizon (medium precision)
+    if (corr.per_horizon && corr.per_horizon[String(h)] != null) {
+      return corr.per_horizon[String(h)];
+    }
+    // Global median (fallback)
+    return corr.global ? corr.global.delta_wr_median : 0;
   }
 
   /** [Phase I-L2] Behavioral data JSONs — core_data 18-21 quantification outputs */
@@ -1160,9 +1200,11 @@ class PatternBacktester {
    * @returns {Object} — { [horizon]: statsObj }
    */
   _computeStats(candles, occurrences, horizons, patternSignal, patternType) {
-    // KNOWN LIMITATION: Survivorship bias — universe excludes delisted stocks.
-    // WR positively biased ~2-5pp (Elton, Gruber & Blake, 1996, JF 51(4):1097-1108).
-    // Mitigation: wrAlpha uses null-WR recentering, but absolute WR still inflated.
+    // KNOWN LIMITATION (PARTIALLY ADDRESSED D-1):
+    // Survivorship bias — wrAlpha null-recentered (Sullivan et al. 1999).
+    // Absolute WR corrected via empirical delta from delisted universe
+    // (Elton, Gruber & Blake, 1996, JF 51(4):1097-1108).
+    // correctedWR = winRate - delta (from survivorship_correction.json).
     const result = {};
 
     for (const h of horizons) {
@@ -1306,6 +1348,11 @@ class PatternBacktester {
       var nullWR = this._computeNullWR(candles, h);
       var wrNull = patternSignal === 'sell' ? nullWR.sellNull : nullWR.buyNull;
       var wrAlpha = +(winRate - wrNull).toFixed(1);
+
+      // [D-1] Survivorship bias correction — correctedWR = winRate - delta
+      // wrAlpha is already relative (observed - null share same bias), so NOT corrected.
+      var sbCorr = this._getSurvivorshipCorrection(patternType, h);
+      var correctedWR = +(winRate - sbCorr).toFixed(1);
 
       // [Expert Consensus] Cohen's h — effect size independent of sample size
       // h = 2 * arcsin(sqrt(p_obs)) - 2 * arcsin(sqrt(p_null))
@@ -1594,6 +1641,8 @@ class PatternBacktester {
         winRateCI: winRateCI,
         wrNull: wrNull,
         wrAlpha: wrAlpha,
+        correctedWR: correctedWR,
+        survivorshipBias: sbCorr,
         informationRatio,
         regimeWR,
         maxLoss: +maxLoss.toFixed(2),
