@@ -2399,8 +2399,9 @@ class SignalEngine {
   // ══════════════════════════════════════════════════════
 
   /**
-   * 선물 베이시스 신호 (Doc36 §3, Bessembinder & Seguin 1993)
-   * contango(양) = 시장 낙관, backwardation(음) = 시장 비관
+   * 선물 베이시스 신호 (Doc27 §1.2 + §5.1, Bessembinder & Seguin 1993)
+   * basisPct 기반 정규화 — 지수 수준 무관한 cross-regime 비교 가능
+   * |basisPct| > 2.0% = extreme (strong), > 0.5% = normal (medium/weak)
    */
   _detectBasisSignal(candles) {
     var deriv = (typeof _derivativesData !== 'undefined') ? _derivativesData : null;
@@ -2408,18 +2409,33 @@ class SignalEngine {
     if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
     if (!deriv || deriv.basis == null) return [];
     var lastIdx = candles.length - 1;
+
+    // basisPct 우선 사용 (정규화됨), 없으면 절대값 fallback
+    var bPct = (deriv.basisPct != null) ? deriv.basisPct : null;
     var basis = deriv.basis;
 
-    if (basis > 0.5) {
-      return [{ type: 'basisContango', signal: 'buy', strength: 'weak',
-        confidence: 55, index: lastIdx, category: 'derivatives',
-        description: '선물 베이시스 양(+' + basis.toFixed(2) + '): 시장 낙관 (contango)' }];
-    } else if (basis < -0.5) {
-      return [{ type: 'basisBackwardation', signal: 'sell', strength: 'weak',
-        confidence: 55, index: lastIdx, category: 'derivatives',
-        description: '선물 베이시스 음(' + basis.toFixed(2) + '): 시장 비관 (backwardation)' }];
+    // Doc27 §5.1 정규화 임계값: ±0.5% normal, ±2.0% extreme (panic/excess)
+    var absB = bPct != null ? Math.abs(bPct) : Math.abs(basis);
+    var threshold = bPct != null ? 0.5 : 0.5;       // % or points
+    var extremeT = bPct != null ? 2.0 : 5.0;        // % or points
+    var isPositive = bPct != null ? (bPct > 0) : (basis > 0);
+    var displayVal = bPct != null ? bPct.toFixed(2) + '%' : basis.toFixed(2);
+
+    if (absB < threshold) return [];
+
+    var isExtreme = absB >= extremeT;
+    var strength = isExtreme ? 'strong' : (absB >= threshold * 2 ? 'medium' : 'weak');
+    var conf = isExtreme ? 72 : (strength === 'medium' ? 62 : 55);
+
+    if (isPositive) {
+      return [{ type: 'basisContango', signal: 'buy', strength: strength,
+        confidence: conf, index: lastIdx, category: 'derivatives',
+        description: '선물 베이시스 양(+' + displayVal + '): 시장 낙관 (contango)' }];
+    } else {
+      return [{ type: 'basisBackwardation', signal: 'sell', strength: strength,
+        confidence: conf, index: lastIdx, category: 'derivatives',
+        description: '선물 베이시스 음(' + displayVal + '): 시장 비관 (backwardation)' }];
     }
-    return [];
   }
 
   /**

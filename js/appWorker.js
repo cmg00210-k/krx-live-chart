@@ -20,7 +20,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=29');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=30');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -344,6 +344,7 @@ function _sendMarketContextToWorker() {
   if (Array.isArray(deriv) && deriv.length > 0) deriv = deriv[deriv.length - 1];
   var pcr = (deriv && deriv.pcr != null) ? deriv.pcr : null;
   var basis = (deriv && deriv.basis != null) ? deriv.basis : null;
+  var basisPct = (deriv && deriv.basisPct != null) ? deriv.basisPct : null;
 
   // etf_summary.json: leverageRatio
   var leverageRatio = null;
@@ -366,6 +367,7 @@ function _sendMarketContextToWorker() {
     vkospi: vkospi,
     pcr: pcr,
     basis: basis,
+    basisPct: basisPct,
     leverageRatio: leverageRatio,
     foreignAlignment: foreignAlignment,
   });
@@ -397,19 +399,39 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
   // 데이터 전무 시 no-op
   if (!deriv && !investor && !etf && !shorts) return;
 
+  // [Phase 4-B] USD/KRW 수출주 채널 — 루프 밖 1회 산출 (Doc28 §3, Baek & Kang 2018)
+  // β_FX +0.3~+0.5: KRW 약세 → 수출주 매출↑ → 매수 부스트, 역방향도 적용
+  var _fxExportDir = 0;  // 0=neutral, +1=KRW weak (exporter bullish), -1=KRW strong
+  if (_macroLatest && _macroLatest.usdkrw != null && currentStock) {
+    var _usdkrw = _macroLatest.usdkrw;
+    var _expSector = _getStovallSector(currentStock.industry || currentStock.sector || '');
+    var _EXPORT_SECTORS = { 'semiconductor': 1, 'tech': 1, 'cons_disc': 1, 'industrial': 1 };
+    if (_EXPORT_SECTORS[_expSector]) {
+      if (_usdkrw > 1400) _fxExportDir = 1;        // KRW 급약세: 수출주 수혜
+      else if (_usdkrw < 1300) _fxExportDir = -1;   // KRW 강세: 수출주 불리
+    }
+  }
+
   for (var pi = 0; pi < patterns.length; pi++) {
     var p = patterns[pi];
     var isBuy = (p.signal === 'buy');
     var adj = 1.0;
 
-    // ── 1. 선물 베이시스 (Doc36 §3, Bessembinder & Seguin 1993) ──
-    // 양의 베이시스(contango) = 낙관, 음의 베이시스(backwardation) = 비관
-    if (deriv && deriv.basis != null) {
-      var basis = deriv.basis;
-      if (basis > 0.5) {          // contango: 시장 낙관
-        adj *= isBuy ? 1.05 : 0.95;
-      } else if (basis < -0.5) {  // backwardation: 시장 비관
-        adj *= isBuy ? 0.95 : 1.05;
+    // ── 1. 선물 베이시스 (Doc27 §5.1 + §6.2, Bessembinder & Seguin 1993) ──
+    // basisPct 정규화 사용: ±0.5% normal (±5%), ±2.0% extreme (±8%)
+    if (deriv && (deriv.basisPct != null || deriv.basis != null)) {
+      var _bPct = deriv.basisPct;
+      var _bAbs = _bPct != null ? Math.abs(_bPct) : Math.abs(deriv.basis);
+      var _bThr = _bPct != null ? 0.5 : 0.5;
+      var _bExt = _bPct != null ? 2.0 : 5.0;
+      var _bPos = _bPct != null ? (_bPct > 0) : (deriv.basis > 0);
+      if (_bAbs >= _bThr) {
+        var _bMult = _bAbs >= _bExt ? 0.08 : 0.05;  // extreme ±8%, normal ±5%
+        if (_bPos) {              // contango: 시장 낙관
+          adj *= isBuy ? (1 + _bMult) : (1 - _bMult);
+        } else {                  // backwardation: 시장 비관
+          adj *= isBuy ? (1 - _bMult) : (1 + _bMult);
+        }
       }
     }
 
@@ -461,6 +483,13 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
     }
 
     // [C-6 FIX] ERP는 signalEngine._detectERPSignal()에서만 처리 — 이중 적용 방지
+
+    // ── 7. USD/KRW 수출주 채널 (Doc28 §3, β_FX ±5%) ──
+    if (_fxExportDir !== 0) {
+      adj *= (_fxExportDir === 1)
+        ? (isBuy ? 1.05 : 0.95)     // KRW 약세 → 수출주 매수 유리
+        : (isBuy ? 0.95 : 1.05);    // KRW 강세 → 수출주 매수 불리
+    }
 
     // clamp [0.70, 1.30]
     adj = Math.max(0.70, Math.min(1.30, adj));

@@ -76,7 +76,7 @@ try {
     'colors.js?v=13',
     'indicators.js?v=26',
     'patterns.js?v=42',
-    'signalEngine.js?v=36',
+    'signalEngine.js?v=37',
     'backtester.js?v=37'
   );
   _workerReady = true;
@@ -504,10 +504,11 @@ self.onmessage = function (e) {
       }
 
       // _derivativesData: signalEngine._detectBasisSignal(), _detectPCRSignal()
-      if (msg.pcr != null || msg.basis != null) {
+      if (msg.pcr != null || msg.basis != null || msg.basisPct != null) {
         _derivativesData = _derivativesData || {};
         if (msg.pcr != null) _derivativesData.pcr = msg.pcr;
         if (msg.basis != null) _derivativesData.basis = msg.basis;
+        if (msg.basisPct != null) _derivativesData.basisPct = msg.basisPct;
       }
 
       // _etfData: signalEngine._detectETFSentiment()
