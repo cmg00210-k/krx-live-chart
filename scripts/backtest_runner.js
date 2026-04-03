@@ -197,13 +197,14 @@ function analyzeStock(sandbox, code, market, filePath) {
   const HORIZONS = [1, 3, 5, 10, 20];
   const KRX_COST = 0.31;  // KRX round-trip: commission 0.03% + tax 0.18% + slippage 0.10% (flat, no horizon scaling)
 
-  // Pre-compute indicator arrays once per stock (MRA A-2: 6 indicator variables)
+  // Pre-compute indicator arrays once per stock (MRA A-2: 6 indicator variables + HAR-RV)
   const closes = candles.map(c => c.close);
   const _atr = sandbox.calcATR(candles, 14);
   const _vma = sandbox.calcMA(candles.map(c => c.volume || 0), 20);
   const _rsi = sandbox.calcRSI(closes, 14);
   const _macd = sandbox.calcMACD(closes);
   const _bb = sandbox.calcBB(closes, 20, 2);
+  const _harRV = sandbox.calcHAR_RV(candles);  // Corsi (2009), needs 83+ candles
 
   const occurrenceReturns = [];
   for (const p of patterns) {
@@ -269,6 +270,10 @@ function analyzeStock(sandbox, code, market, filePath) {
         }
       }
 
+      // harRV: HAR-RV annualized forecast at pattern bar (Corsi 2009, Doc34 §1-3)
+      const harRV = (_harRV && _harRV[idx] && _harRV[idx].harRV != null)
+        ? +_harRV[idx].harRV.toFixed(4) : '';
+
       occurrenceReturns.push({
         type: p.type,
         signal: p.signal,
@@ -292,6 +297,7 @@ function analyzeStock(sandbox, code, market, filePath) {
         rsi_14: rsi14,
         macd_hist: macdHist,
         bb_position: bbPos,
+        harRV: harRV,
         returns,
       });
     }

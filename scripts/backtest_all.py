@@ -503,6 +503,7 @@ def generate_wc_return_pairs(results):
         "pattern_tier", "hw_x_signal", "vw_x_signal",
         "trendStrength", "volumeRatio", "atrNorm",
         "rsi_14", "macd_hist", "bb_position",
+        "harRV",
         "ret_1", "ret_3", "ret_5", "ret_10", "ret_20",
     ]
 
@@ -542,6 +543,7 @@ def generate_wc_return_pairs(results):
                     "rsi_14": occ.get("rsi_14"),
                     "macd_hist": occ.get("macd_hist"),
                     "bb_position": occ.get("bb_position"),
+                    "harRV": occ.get("harRV"),
                     "ret_1": rets.get("1"),
                     "ret_3": rets.get("3"),
                     "ret_5": rets.get("5"),

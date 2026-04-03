@@ -107,11 +107,11 @@ FEATURE_NAMES_23COL = [
     "hw", "vw", "mw", "rw", "confidence_norm", "signal_dir",
     "market_type", "log_confidence", "pattern_tier",
     "hw_x_signal", "vw_x_signal", "conf_x_signal",
-    # 6 indicators
+    # 7 indicators (harRV added)
     "trendStrength", "volumeRatio", "atrNorm",
-    "rsi_14", "macd_hist", "bb_position",
-    # 5 APT (same as mra_combined: beta_60d, value_inv_pbr instead of stock_ret_5d, market_ret_5d)
-    "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
+    "rsi_14", "macd_hist", "bb_position", "harRV",
+    # 5 APT (vol_spread replaces momentum_60d)
+    "vol_spread", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
 ]
 
 
@@ -463,7 +463,9 @@ def load_and_engineer_23col(horizon):
     date_idx = mra.build_date_index(ohlcv)
     mkt_returns = mra.compute_market_returns(ohlcv, index_info, top_n=100)
 
-    apt_raw = mra.compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials)
+    vkospi_dict = mra.load_vkospi()
+    apt_raw = mra.compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials,
+                                      vkospi_dict=vkospi_dict)
     for j, fname in enumerate(mra.APT_FACTOR_NAMES):
         valid = np.sum(~np.isnan(apt_raw[:, j]))
         print(f"     {fname}: {valid:,}/{n:,} ({valid / n * 100:.1f}%)")
@@ -963,8 +965,9 @@ def main():
     n, p = X.shape
     # Update feature_names to match actual dimension
     if use_23col:
-        if p != 23:
-            print(f"  -> [WARN] Expected 23 features, got {p}. Falling back to 13-col.")
+        expected = len(FEATURE_NAMES_23COL)
+        if p != expected:
+            print(f"  -> [WARN] Expected {expected} features, got {p}. Falling back to 13-col.")
             feature_names = FEATURE_NAMES
     elif p == len(FEATURE_NAMES_CORE):
         feature_names = FEATURE_NAMES_CORE

@@ -333,7 +333,7 @@ function _sendMarketContextToWorker() {
   } else if (_macroLatest && _macroLatest.vkospi != null) {
     vkospi = _macroLatest.vkospi;
   } else if (_macroLatest && _macroLatest.vix != null) {
-    // VIX→VKOSPI proxy (same heuristic as signalEngine._classifyVolRegimeFromVKOSPI)
+    // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only (real VKOSPI in vkospi.json)
     var vix = _macroLatest.vix;
     var scale = vix < 20 ? 1.0 : vix < 30 ? 1.1 : 1.25;
     vkospi = vix * scale;
@@ -1007,7 +1007,7 @@ function _classifyRORORegime() {
   } else if (_macroLatest && _macroLatest.vkospi != null) {
     vkospi = _macroLatest.vkospi;
   } else if (_macroLatest && _macroLatest.vix != null) {
-    // VIX→VKOSPI proxy: VKOSPI ≈ VIX × 1.15 (historical avg)
+    // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only (real VKOSPI in vkospi.json)
     vkospi = _macroLatest.vix * 1.15;
   }
   if (vkospi != null) {

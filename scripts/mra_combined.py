@@ -70,18 +70,19 @@ FEATURE_NAMES_12 = [
     "hw_x_signal", "vw_x_signal", "conf_x_signal",
 ]
 
-# 6 technical indicator features (from CSV columns)
+# 7 technical indicator features (from CSV columns)
 INDICATOR_NAMES = [
     "trendStrength", "volumeRatio", "atrNorm",
     "rsi_14", "macd_hist", "bb_position",
+    "harRV",  # Corsi (2009) HAR-RV annualized forecast
 ]
 
-# 5 APT factors
+# 5 APT factors (vol_spread replaces momentum_60d which was insignificant p=0.923)
 APT_FACTOR_NAMES = [
-    "momentum_60d", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
+    "vol_spread", "beta_60d", "value_inv_pbr", "log_size", "liquidity_20d",
 ]
 
-# Full 23 features
+# Full feature set (12 base + 7 indicators + 5 APT = 24)
 FEATURE_NAMES_23 = FEATURE_NAMES_12 + INDICATOR_NAMES + APT_FACTOR_NAMES
 
 
@@ -142,6 +143,7 @@ def load_csv_with_indicators(horizon):
                 "rsi_14": _safe_float(row, "rsi_14", 50.0),
                 "macd_hist": _safe_float(row, "macd_hist", 0.0),
                 "bb_position": _safe_float(row, "bb_position", 0.5),
+                "harRV": _safe_float(row, "harRV", 0.0),
                 # metadata
                 "ret": ret, "date": row.get("date", ""), "code": row.get("code", ""),
                 "type": ptype, "signal": signal, "market": row.get("market", ""),
@@ -150,10 +152,10 @@ def load_csv_with_indicators(horizon):
 
 
 def rows_to_X18(rows):
-    """Convert rows -> X (n x 18), y (n,), dates, meta."""
+    """Convert rows -> X (n x 19), y (n,), dates, meta. (12 base + 7 indicators)"""
     n = len(rows)
     names = FEATURE_NAMES_12 + INDICATOR_NAMES
-    X = np.zeros((n, 18))
+    X = np.zeros((n, len(names)))
     y = np.zeros(n)
     dates = []
     meta = []
@@ -213,7 +215,8 @@ def load_ohlcv_all(index_info):
             candles = d.get("candles", [])
             if len(candles) < 10:
                 continue
-            series = [(c.get("time", ""), c.get("close", 0), c.get("volume", 0))
+            series = [(c.get("time", ""), c.get("close", 0), c.get("volume", 0),
+                       c.get("high", 0), c.get("low", 0))
                       for c in candles if c.get("time") and c.get("close", 0) > 0]
             if series:
                 ohlcv[code] = series
@@ -222,6 +225,44 @@ def load_ohlcv_all(index_info):
             pass
     print(f"  -> OHLCV loaded: {loaded} stocks")
     return ohlcv
+
+
+def load_vkospi():
+    """Load VKOSPI daily data -> {date_str: close_value}."""
+    vk_path = DATA_DIR / "vkospi.json"
+    if not vk_path.exists():
+        print("  -> WARNING: vkospi.json not found, vol_spread unavailable")
+        return {}
+    with open(vk_path, encoding="utf-8") as f:
+        data = json.load(f)
+    vk_dict = {r["time"]: r["close"] for r in data if r.get("time") and r.get("close")}
+    print(f"  -> VKOSPI loaded: {len(vk_dict)} daily records")
+    return vk_dict
+
+
+def calc_hv_parkinson(series, idx, period=20):
+    """Parkinson (1980) HV from high-low range. Returns annualized vol (decimal) or None.
+    series: list of (time, close, volume, high, low) tuples.
+    KRX limit-hit guard: skip days where (high-low)/low < 0.001."""
+    LN2 = math.log(2)
+    KRX_TRADING_DAYS = 250
+    start = max(0, idx - period + 1)
+    sum_log_sq = 0.0
+    valid = 0
+    for j in range(start, idx + 1):
+        hi, lo = series[j][3], series[j][4]
+        if hi <= 0 or lo <= 0 or hi < lo:
+            continue
+        # KRX limit-hit guard: if H==L (or near), skip
+        if lo > 0 and (hi - lo) / lo < 0.001:
+            continue
+        log_hl = math.log(hi / lo)
+        sum_log_sq += log_hl * log_hl
+        valid += 1
+    if valid < max(period // 2, 5):
+        return None
+    variance = sum_log_sq / (4 * valid * LN2)
+    return math.sqrt(variance) * math.sqrt(KRX_TRADING_DAYS)
 
 
 def build_date_index(ohlcv):
@@ -241,7 +282,8 @@ def compute_market_returns(ohlcv, index_info, top_n=100):
     all_dates = set()
     for code in top_codes:
         closes = {}
-        for dt, cl, _ in ohlcv[code]:
+        for s in ohlcv[code]:
+            dt, cl = s[0], s[1]
             closes[dt] = cl
             all_dates.add(dt)
         code_closes[code] = closes
@@ -265,11 +307,15 @@ def compute_market_returns(ohlcv, index_info, top_n=100):
     return mkt_returns
 
 
-def compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials):
-    """Compute 5 APT factors per sample. Returns (n, 5) with NaN for missing."""
+def compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials,
+                        vkospi_dict=None):
+    """Compute 5 APT factors per sample. Returns (n, 5) with NaN for missing.
+    Factor 0: vol_spread = (VKOSPI/100)^2 - HV_parkinson^2 (Ang et al. 2006)
+    Factor 1: beta_60d, Factor 2: value_inv_pbr, Factor 3: log_size, Factor 4: liquidity_20d"""
     n = len(rows)
     factors = np.full((n, 5), np.nan)
     hit = miss = 0
+    vk = vkospi_dict or {}
 
     for i, row in enumerate(rows):
         code, date = row["code"], row["date"]
@@ -284,11 +330,14 @@ def compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financia
             continue
         hit += 1
 
-        # Factor 0: momentum_60d
-        if idx >= 60:
-            cur, past = series[idx][1], series[idx - 60][1]
-            if past > 0:
-                factors[i, 0] = (cur / past - 1.0) * 100
+        # Factor 0: vol_spread = (VKOSPI/100)^2 - HV_parkinson(20d)^2
+        # Ang, Hodrick, Xing & Zhang (2006): aggregate vol exposure cross-section
+        vk_val = vk.get(date)
+        if vk_val is not None and idx >= 20:
+            hv = calc_hv_parkinson(series, idx, period=20)
+            if hv is not None:
+                iv_decimal = vk_val / 100.0
+                factors[i, 0] = iv_decimal * iv_decimal - hv * hv
 
         # Factor 1: beta_60d
         if idx >= 60:
@@ -755,32 +804,36 @@ def main():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest first.")
         sys.exit(1)
 
+    n_total = len(FEATURE_NAMES_23)
     print("=" * 70)
-    print("  MRA Stage B-1: 23-Column Combined Model")
-    print("  12 base + 6 indicators + 5 APT factors")
+    print(f"  MRA Stage B-1: {n_total}-Column Combined Model")
+    print(f"  {len(FEATURE_NAMES_12)} base + {len(INDICATOR_NAMES)} indicators + {len(APT_FACTOR_NAMES)} APT factors")
     print("=" * 70)
 
-    # ── Step 1: Load CSV with 18 features ──
-    print(f"\n[1/9] Loading CSV + 18 features (horizon={horizon})...")
+    # ── Step 1: Load CSV with base + indicator features ──
+    n_base = len(FEATURE_NAMES_12) + len(INDICATOR_NAMES)
+    print(f"\n[1/9] Loading CSV + {n_base} features (horizon={horizon})...")
     rows, indicator_present = load_csv_with_indicators(horizon)
     X18, y, dates, meta = rows_to_X18(rows)
     n = len(rows)
-    print(f"  -> {n:,} samples, 18 features")
+    print(f"  -> {n:,} samples, {n_base} features")
     if not indicator_present:
         print("  -> WARNING: Indicator columns missing (using defaults)")
 
     # ── Step 2: Load auxiliary data for APT factors ──
-    print("\n[2/9] Loading auxiliary data (index, financials, OHLCV)...")
+    print("\n[2/9] Loading auxiliary data (index, financials, OHLCV, VKOSPI)...")
     index_info = load_index()
     financials = load_financials()
     print(f"  -> Index: {len(index_info)}, Financials: {len(financials)}")
     ohlcv = load_ohlcv_all(index_info)
     date_idx = build_date_index(ohlcv)
+    vkospi_dict = load_vkospi()
 
     # ── Step 3: Compute APT factors ──
     print("\n[3/9] Computing cap-weighted market returns + 5 APT factors...")
     mkt_returns = compute_market_returns(ohlcv, index_info, top_n=100)
-    apt_raw = compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials)
+    apt_raw = compute_apt_factors(rows, ohlcv, date_idx, mkt_returns, index_info, financials,
+                                  vkospi_dict=vkospi_dict)
 
     apt_coverage = {}
     for j, fname in enumerate(APT_FACTOR_NAMES):
@@ -796,7 +849,7 @@ def main():
     X23 = np.column_stack([X18, apt_z])
     X12 = X18[:, :12]
     X6 = X18[:, :6]
-    print(f"  -> Combined: {X23.shape[0]:,} x {X23.shape[1]} (23 features)")
+    print(f"  -> Combined: {X23.shape[0]:,} x {X23.shape[1]} ({len(FEATURE_NAMES_23)} features)")
 
     # ── Step 5: VIF + Condition Number diagnostics ──
     print("\n[4/9] Collinearity diagnostics...")
@@ -893,8 +946,8 @@ def main():
     y_hat_lasso23 = ols_predict(X23, lasso_beta)
     ic_lasso23 = calc_ic(y_hat_lasso23, y)
     n_nonzero = int(np.sum(np.abs(lasso_beta[1:]) > 1e-8))
-    lasso_selected = [FEATURE_NAMES_23[j] for j in range(23) if abs(lasso_beta[j + 1]) > 1e-8]
-    print(f"  -> Best lambda={best_lasso_lam:.6f}, {n_nonzero}/23 features selected")
+    lasso_selected = [FEATURE_NAMES_23[j] for j in range(len(FEATURE_NAMES_23)) if abs(lasso_beta[j + 1]) > 1e-8]
+    print(f"  -> Best lambda={best_lasso_lam:.6f}, {n_nonzero}/{len(FEATURE_NAMES_23)} features selected")
     print(f"  -> Selected: {lasso_selected}")
 
     # BIC forward selection (23-col)

@@ -608,7 +608,7 @@ class SignalEngine {
       var _vkospiVal = null;
       if (_mctx && _mctx.vkospi != null) _vkospiVal = _mctx.vkospi;
       else if (_macro && _macro.vkospi != null) _vkospiVal = _macro.vkospi;
-      else if (_macro && _macro.vix != null) _vkospiVal = _macro.vix * 1.12;
+      else if (_macro && _macro.vix != null) _vkospiVal = _macro.vix * 1.12;  // [DEPRECATED FALLBACK]
       if (_vkospiVal != null && _vkospiVal > 0) {
         var _hv = calcHV(candles, 20);
         if (_hv != null && _hv > 0.01) {
@@ -1787,15 +1787,14 @@ class SignalEngine {
     // 2차: _marketContext (app.js 전역) — market_context.json에서 로드
     var mctx = (typeof _marketContext !== 'undefined') ? _marketContext : null;
 
-    // VKOSPI 우선 (KRX 자체 변동성지수) — 현재 미구현이므로 null일 수 있음
+    // VKOSPI 우선 (KRX 자체 변동성지수) — data/vkospi.json 547일 실데이터 (2024-01-02~)
     var vol = null;
     if (mctx && mctx.vkospi != null) {
       vol = mctx.vkospi;  // VKOSPI 직접 사용
     } else if (macro && macro.vkospi != null) {
-      vol = macro.vkospi;  // macro_latest.json VKOSPI
+      vol = macro.vkospi;  // data/vkospi.json → appWorker.js 로드
     } else if (macro && macro.vix != null) {
-      // [D-Heuristic] VIX→VKOSPI proxy: regime-dependent (pending actual VKOSPI data pipeline)
-      // Normal (VIX<20): x1.0, Elevated (20<=VIX<30): x1.1, Crisis (VIX>=30): x1.25
+      // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — only for offline mode without vkospi.json
       var vix = macro.vix;
       var vkospiScale = vix < 20 ? 1.0 : vix < 30 ? 1.1 : 1.25;
       vol = vix * vkospiScale;
@@ -1872,7 +1871,7 @@ class SignalEngine {
     } else if (macro.vkospi != null) {
       volForCrisis = macro.vkospi;
     } else if (macro.vix != null) {
-      volForCrisis = macro.vix * 1.12;  // [PROXY] VIX→VKOSPI approx, demote when full VKOSPI coverage
+      volForCrisis = macro.vix * 1.12;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
     }
     if (volForCrisis != null) {
       score += Math.min(1, Math.max(0, (volForCrisis - 15) / 25));
@@ -3070,7 +3069,7 @@ class SignalEngine {
       } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vkospi != null) {
         vkospi = _macroLatest.vkospi;
       } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vix != null) {
-        vkospi = _macroLatest.vix * 1.12;  // VIX→VKOSPI proxy (fallback)
+        vkospi = _macroLatest.vix * 1.12;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
       }
       var hv = calcHV(candles, 20);
       if (vkospi != null && hv != null) {
