@@ -76,7 +76,7 @@ try {
     'colors.js?v=13',
     'indicators.js?v=25',
     'patterns.js?v=42',
-    'signalEngine.js?v=34',
+    'signalEngine.js?v=35',
     'backtester.js?v=37'
   );
   _workerReady = true;

@@ -1830,13 +1830,23 @@ class SignalEngine {
   static _calcCrisisSeverity() {
     var macro = (typeof _macroLatest !== 'undefined') ? _macroLatest : null;
     if (!macro) return 0;
+    var mctx = (typeof _marketContext !== 'undefined') ? _marketContext : null;
 
     var score = 0;
     var components = 0;
 
-    // VIX 기여 (0~1): VIX < 15 → 0, VIX > 40 → 1
-    if (macro.vix != null) {
-      score += Math.min(1, Math.max(0, (macro.vix - 15) / 25));
+    // VKOSPI-first volatility contribution (0~1): vol < 15 → 0, vol > 40 → 1
+    // Fallback: mctx.vkospi → macro.vkospi → macro.vix × 1.12 [PROXY]
+    var volForCrisis = null;
+    if (mctx && mctx.vkospi != null) {
+      volForCrisis = mctx.vkospi;
+    } else if (macro.vkospi != null) {
+      volForCrisis = macro.vkospi;
+    } else if (macro.vix != null) {
+      volForCrisis = macro.vix * 1.12;  // [PROXY] VIX→VKOSPI approx, demote when full VKOSPI coverage
+    }
+    if (volForCrisis != null) {
+      score += Math.min(1, Math.max(0, (volForCrisis - 15) / 25));
       components++;
     }
 
