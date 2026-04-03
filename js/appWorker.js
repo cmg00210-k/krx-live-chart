@@ -360,7 +360,7 @@ function _sendMarketContextToWorker() {
   }
 
   // 데이터가 하나라도 있을 때만 전송
-  if (vkospi == null && pcr == null && basis == null && leverageRatio == null && foreignAlignment == null) return;
+  if (vkospi == null && pcr == null && basis == null && basisPct == null && leverageRatio == null && foreignAlignment == null) return;
 
   _analysisWorker.postMessage({
     type: 'marketContext',

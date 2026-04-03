@@ -248,8 +248,8 @@ def run_node_batch(delisted=False):
 
     # Delisted stocks have ~4x more candles per stock (avg 980 vs 244)
     # → longer per-stock processing time → higher timeout needed
-    # v56: 6 indicator columns add ~20% overhead → 1200s for 2651 stocks at ~2.5/s
-    batch_timeout = 1800 if delisted else 1200
+    # v56: 6 indicator columns + variable candle counts → 1800s safety margin
+    batch_timeout = 3600 if delisted else 1800
 
     with open(output_path, "w", encoding="utf-8") as out_f, \
          open(BACKTEST_DIR / "batch_log.txt", "w", encoding="utf-8") as log_f:
