@@ -22,11 +22,10 @@ Files INCLUDED despite extension rules:
   data/backtest/wr_5year.json     -- backtester.js fetches this at runtime
   data/backtest/rl_*.json         -- kept; small RL artefacts used by app
 
-Timeframe exclusion via --exclude-tf flag or STAGE_EXCLUDE_TF env var:
-  --exclude-tf 15m        exclude _15m.json files (~2,779 files saved)
-  --exclude-tf 30m        exclude _30m.json files (~2,779 files saved)
-  --exclude-tf 15m,30m    exclude both           (~5,558 files saved)
-  STAGE_EXCLUDE_TF=15m,30m python scripts/stage_deploy.py
+Default timeframe exclusions: _1m, _15m, _30m (client resamples from 5m).
+Additional exclusion via --exclude-tf flag or STAGE_EXCLUDE_TF env var:
+  --exclude-tf 1h         also exclude _1h.json files (~2,850 files saved)
+  STAGE_EXCLUDE_TF=1h python scripts/stage_deploy.py
 
 Exit codes: 0 = OK, 1 = error
 """
@@ -62,6 +61,8 @@ EXCLUDE_EXTENSIONS = {".py", ".bat", ".md", ".ndjson", ".csv"}
 # Additional timeframes can be added at runtime via --exclude-tf or STAGE_EXCLUDE_TF.
 _BASE_EXCLUDE_SUFFIX_PATTERNS = [
     "_1m.json",   # 1 min bars (2,400+ files) -- not needed for Cloudflare static deploy
+    "_15m.json",  # 15 min bars -- client resamples from 5m (3-bar merge)
+    "_30m.json",  # 30 min bars -- client resamples from 5m (6-bar merge)
 ]
 
 # Exact relative paths (from ROOT) that are always excluded regardless of ext.

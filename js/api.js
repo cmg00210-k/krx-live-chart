@@ -357,6 +357,14 @@ class KRXDataService {
           candles = this._resampleCandles(candles5m, 3);
         }
       }
+      if (candles.length === 0 && timeframe === '30m') {
+        // 30m 파일 없음 → 5m에서 클라이언트 리샘플링 (6봉 합산)
+        // KRX 390min/5min = 78봉/일, 78/6 = 13봉/일 = 정확히 30m
+        var candles5m30 = await this._fileGetIntradayCandles(stock, '5m');
+        if (candles5m30.length >= 6) {
+          candles = this._resampleCandles(candles5m30, 6);
+        }
+      }
       if (candles.length === 0) {
         // 분봉 파일 없음 → 일봉 캐시 재사용 (워터마크로 안내)
         var dailyKey = stock.code + '-1d';
