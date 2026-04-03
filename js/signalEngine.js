@@ -2985,10 +2985,13 @@ class SignalEngine {
     var vrp = null;
     if (typeof calcVRP === 'function' && typeof calcHV === 'function') {
       var vkospi = null;
-      if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vkospi != null) {
+      var _mctx = (typeof _marketContext !== 'undefined') ? _marketContext : null;
+      if (_mctx && _mctx.vkospi != null) {
+        vkospi = _mctx.vkospi;  // market_context.json real VKOSPI
+      } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vkospi != null) {
         vkospi = _macroLatest.vkospi;
       } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vix != null) {
-        vkospi = _macroLatest.vix * 1.12;  // VIX→VKOSPI proxy
+        vkospi = _macroLatest.vix * 1.12;  // VIX→VKOSPI proxy (fallback)
       }
       var hv = calcHV(candles, 20);
       if (vkospi != null && hv != null) {

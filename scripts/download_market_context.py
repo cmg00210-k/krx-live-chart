@@ -89,17 +89,32 @@ def fetch_ccsi(api_key: str) -> Optional[float]:
 # VKOSPI (KRX 변동성 지수)
 # ──────────────────────────────────────────────────────
 def fetch_vkospi() -> Optional[float]:
-    """KRX 데이터포탈 VKOSPI 최신값 — 공식 API 없으므로 FinanceDataReader 활용"""
+    """VKOSPI: data/vkospi.json(Open API) → FDR VIX fallback"""
+    # 1) data/vkospi.json (download_vkospi.py Open API output)
+    vkospi_path = Path(__file__).parent.parent / 'data' / 'vkospi.json'
+    try:
+        if vkospi_path.exists():
+            with open(vkospi_path, 'r', encoding='utf-8') as f:
+                records = json.load(f)
+            if isinstance(records, dict):
+                records = records.get('candles', records.get('data', []))
+            if records:
+                last = records[-1] if isinstance(records, list) else records
+                val = last.get('close') or last.get('Close')
+                if val is not None:
+                    return float(val)
+    except Exception:
+        pass
+    # 2) FDR VIX fallback (VKOSPI proxy)
     try:
         import FinanceDataReader as fdr
         today = datetime.date.today()
         start = (today - datetime.timedelta(days=10)).strftime('%Y-%m-%d')
-        df = fdr.DataReader('VIX', start)  # VIX fallback (VKOSPI 대리)
+        df = fdr.DataReader('VIX', start)
         if not df.empty:
             return float(df['Close'].iloc[-1])
     except Exception:
         pass
-    # FinanceDataReader 없거나 실패 시 None
     return None
 
 
