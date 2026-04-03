@@ -637,6 +637,79 @@ def compute_condition_number(X):
     return float(np.linalg.cond(XtX))
 
 
+def residual_diagnostics(y_actual, y_predicted, dates, lags=None):
+    """
+    Residual diagnostics for RL readiness assessment:
+    - Kurtosis, skewness (fat tail detection)
+    - Jarque-Bera test (H0: residuals are normal)
+    - Ljung-Box test (H0: no serial autocorrelation at specified lags)
+    - ARCH-LM proxy (squared residual autocorrelation)
+
+    Ljung-Box: Q = n(n+2) * sum_{k=1}^{h} r_k^2 / (n-k)
+    where r_k is sample autocorrelation at lag k.
+    """
+    if lags is None:
+        lags = [1, 5, 10, 20]
+    resid = y_actual - y_predicted
+    n = len(resid)
+
+    # Basic moments
+    mean_r = float(np.mean(resid))
+    std_r = float(np.std(resid, ddof=1))
+    skew = float(sp_stats.skew(resid))
+    kurt = float(sp_stats.kurtosis(resid, fisher=True))  # excess kurtosis
+
+    # Jarque-Bera: JB = (n/6)(S^2 + K^2/4)
+    jb_stat = (n / 6.0) * (skew ** 2 + kurt ** 2 / 4.0)
+    jb_pvalue = float(1.0 - sp_stats.chi2.cdf(jb_stat, 2))
+
+    # Ljung-Box autocorrelation test
+    # Sort residuals by date for temporal autocorrelation
+    date_order = np.argsort(dates) if isinstance(dates[0], str) else np.arange(n)
+    resid_sorted = resid[date_order]
+
+    # But residuals are cross-sectional (multiple stocks per date), so
+    # compute per-date average residual for temporal analysis
+    by_date = defaultdict(list)
+    for i in range(n):
+        by_date[dates[i]].append(resid[i])
+    sorted_dates = sorted(by_date.keys())
+    daily_mean_resid = np.array([np.mean(by_date[d]) for d in sorted_dates])
+    n_days = len(daily_mean_resid)
+
+    lb_results = {}
+    if n_days > max(lags) + 5:
+        r_mean = np.mean(daily_mean_resid)
+        denom = np.sum((daily_mean_resid - r_mean) ** 2)
+        if denom > 1e-12:
+            for h in lags:
+                acf_sum = 0.0
+                for k in range(1, h + 1):
+                    numer = np.sum((daily_mean_resid[k:] - r_mean) * (daily_mean_resid[:-k] - r_mean))
+                    r_k = numer / denom
+                    acf_sum += r_k ** 2 / (n_days - k)
+                q_stat = n_days * (n_days + 2) * acf_sum
+                p_val = float(1.0 - sp_stats.chi2.cdf(q_stat, h))
+                lb_results[h] = {"Q_stat": round(q_stat, 4), "p_value": round(p_val, 6)}
+
+    # Extreme residual clustering: |e| > 3*sigma
+    extreme_mask = np.abs(resid) > 3 * std_r
+    n_extreme = int(np.sum(extreme_mask))
+    extreme_pct = round(n_extreme / n * 100, 2)
+
+    return {
+        "n": n,
+        "mean": round(mean_r, 6),
+        "std": round(std_r, 4),
+        "skewness": round(skew, 4),
+        "excess_kurtosis": round(kurt, 2),
+        "jarque_bera": {"statistic": round(jb_stat, 2), "p_value": round(jb_pvalue, 6)},
+        "ljung_box": lb_results,
+        "extreme_residuals": {"n": n_extreme, "pct": extreme_pct, "threshold": "3*sigma"},
+        "n_daily_dates": n_days,
+    }
+
+
 # ================================================================
 #  6. JSON Serialization
 # ================================================================
@@ -857,6 +930,34 @@ def main():
         delta = ic_plus["ic"] - ic_18["ic"] if ic_plus and ic_18 else 0
         print(f"    +{fname:<18} IC={ic_plus['ic']:.6f} (delta={delta:+.6f})")
 
+    # ── Residual Diagnostics (Wave 5: Statistical Deepening) ──
+    print("\n[B-1+] Residual diagnostics (23-col Ridge)...")
+    resid_diag = residual_diagnostics(y, y_hat_ridge23, dates)
+    print(f"  -> Skewness: {resid_diag['skewness']:.4f}, Excess kurtosis: {resid_diag['excess_kurtosis']:.2f}")
+    print(f"  -> Jarque-Bera: stat={resid_diag['jarque_bera']['statistic']:.1f}, "
+          f"p={resid_diag['jarque_bera']['p_value']:.6f} "
+          f"({'REJECT H0: non-normal' if resid_diag['jarque_bera']['p_value'] < 0.05 else 'fail to reject'})")
+    if resid_diag["ljung_box"]:
+        print(f"  -> Ljung-Box (daily mean residual autocorrelation):")
+        for lag, lb in sorted(resid_diag["ljung_box"].items()):
+            sig = "***" if lb["p_value"] < 0.001 else "**" if lb["p_value"] < 0.01 else "*" if lb["p_value"] < 0.05 else ""
+            print(f"    lag={lag:>2}: Q={lb['Q_stat']:>8.2f}, p={lb['p_value']:.4f} {sig}")
+    print(f"  -> Extreme residuals (|e|>3sigma): {resid_diag['extreme_residuals']['n']} "
+          f"({resid_diag['extreme_residuals']['pct']}% of {resid_diag['n']:,})")
+
+    # RL readiness assessment
+    rl_ready_signals = []
+    if resid_diag["excess_kurtosis"] > 3:
+        rl_ready_signals.append("fat tails (kurtosis >> 3)")
+    if any(lb["p_value"] < 0.05 for lb in resid_diag["ljung_box"].values()):
+        rl_ready_signals.append("serial autocorrelation (Ljung-Box rejects)")
+    if resid_diag["extreme_residuals"]["pct"] > 1.0:
+        rl_ready_signals.append("extreme clustering (>1% beyond 3sigma)")
+    if rl_ready_signals:
+        print(f"  -> RL exploitable patterns: {', '.join(rl_ready_signals)}")
+    else:
+        print(f"  -> RL readiness: residuals appear well-behaved (limited RL opportunity)")
+
     # ── Stage B-2: Regime Interaction (HMM bull_prob) ──
     regime_wf = None
     regime_ic = None
@@ -1000,6 +1101,7 @@ def main():
             "in_sample_ic": _to_native(regime_ic) if regime_ic else None,
             "fama_macbeth": _to_native(regime_fm) if regime_fm else None,
         } if regime_features else None,
+        "residual_diagnostics": _to_native(resid_diag),
         "elapsed_seconds": round(elapsed, 1),
     }
 
