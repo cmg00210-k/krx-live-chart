@@ -43,7 +43,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 DERIV_DIR = os.path.join(DATA_DIR, "derivatives")
 
-# ── KRX Open API 클라이언트 (없으면 OTP 폴백) ──
+# ── KRX Open API 클라이언트 / 공통 상수 (없으면 OTP 폴백) ──
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
@@ -51,6 +51,12 @@ try:
     from krx_api import KRXClient
 except ImportError:
     KRXClient = None
+
+from api_constants import (
+    KRX_OTP_URL as _OTP_URL,
+    KRX_CSV_URL as _CSV_URL,
+    generate_business_days as _gen_biz_days,
+)
 
 # ── verbose 전역 (main에서 설정) ──
 _verbose = False
@@ -88,11 +94,8 @@ def _format_date(yyyymmdd: str) -> str:
 
 def _generate_business_days(start_dt, end_dt):
     """영업일(월~금) YYYYMMDD 생성기."""
-    current = start_dt
-    while current <= end_dt:
-        if current.weekday() < 5:
-            yield current.strftime("%Y%m%d")
-        current += timedelta(days=1)
+    for d in _gen_biz_days(start_dt, end_dt):
+        yield d.strftime("%Y%m%d")
 
 
 # ════════════════════════════════════════════════════════
@@ -317,8 +320,8 @@ def _fetch_futures_otp(start_dt, end_dt):
         _log("[파생] requests 미설치, OTP 폴백 불가")
         return []
 
-    OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-    CSV_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+    OTP_URL = _OTP_URL
+    CSV_URL = _CSV_URL
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Referer": "http://data.krx.co.kr",
@@ -341,10 +344,18 @@ def _fetch_futures_otp(start_dt, end_dt):
                 "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12501",
             }
             resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=15)
+            if resp.status_code != 200:
+                _vlog(f"  [선물 OTP] {date_str} HTTP {resp.status_code}")
+                current += timedelta(days=1)
+                continue
             otp = resp.text.strip()
             time.sleep(0.5)
 
             resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=30)
+            if resp2.status_code != 200:
+                _vlog(f"  [선물 CSV] {date_str} HTTP {resp2.status_code}")
+                current += timedelta(days=1)
+                continue
             raw = resp2.content
             for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
                 try:
@@ -393,8 +404,8 @@ def _fetch_options_otp(start_dt, end_dt):
     except ImportError:
         return []
 
-    OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-    CSV_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+    OTP_URL = _OTP_URL
+    CSV_URL = _CSV_URL
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Referer": "http://data.krx.co.kr",
@@ -417,10 +428,18 @@ def _fetch_options_otp(start_dt, end_dt):
                 "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12601",
             }
             resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=15)
+            if resp.status_code != 200:
+                _vlog(f"  [옵션 OTP] {date_str} HTTP {resp.status_code}")
+                current += timedelta(days=1)
+                continue
             otp = resp.text.strip()
             time.sleep(0.5)
 
             resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=60)
+            if resp2.status_code != 200:
+                _vlog(f"  [옵션 CSV] {date_str} HTTP {resp2.status_code}")
+                current += timedelta(days=1)
+                continue
             raw = resp2.content
             for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
                 try:

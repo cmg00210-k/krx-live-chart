@@ -76,6 +76,12 @@ BSI_RANGE = (50, 120)       # BSI 범위
 CSI_RANGE = (60, 130)       # 소비자심리 범위
 
 
+# ── MCS v2 가중치 합계 검증 ──
+_weight_sum = sum(MCS_WEIGHTS.values())
+if abs(_weight_sum - 1.0) > 0.001:
+    print(f'[WARN] MCS_WEIGHTS sum={_weight_sum:.4f}, expected 1.0 — results may be incorrect')
+
+
 def _load_json(path):
     """JSON 파일 로드, 실패 시 None."""
     try:
@@ -448,6 +454,20 @@ def main():
         print(f'  Phase: {cc_result["creditCyclePhase"]}')
         print(f'  AA- Spread: {cc_result["aaSpread"]}%p')
         print(f'  {cc_result["description"]}')
+
+    # ── 출력 검증 ──
+    if mcs_result:
+        mcs_val = mcs_result.get('mcsV2')
+        if mcs_val is not None and (mcs_val < 0 or mcs_val > 100):
+            print(f'  [WARN] MCS v2={mcs_val} 범위 이탈 [0, 100] — 정규화 오류 가능')
+        eff_w = mcs_result.get('effectiveWeight', 0)
+        if eff_w > 0 and abs(eff_w - 1.0) > 0.001 and mcs_result.get('availableIndicators') == len(MCS_WEIGHTS):
+            print(f'  [WARN] 전체 지표 가용인데 effectiveWeight={eff_w:.3f} != 1.0')
+
+    if taylor_result:
+        tg = taylor_result.get('taylorGap')
+        if tg is not None and abs(tg) > 5:
+            print(f'  [WARN] Taylor Gap={tg:+.4f} — 절대값 5%p 초과, 데이터 점검 필요')
 
     # ── 출력 구성 ──
     output = {

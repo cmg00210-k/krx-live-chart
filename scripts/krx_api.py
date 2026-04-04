@@ -44,9 +44,11 @@ except ImportError:
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import KRX_OPEN_API_BASE as API_BASE, RATE_LIMIT_SEC
+
 # ── KRX Open API 설정 ──
-API_BASE = "https://data-dbg.krx.co.kr/svc/apis"
-RATE_LIMIT_SEC = 0.5   # KRX 커뮤니티 권장 호출 간격
 DAILY_QUOTA = 10000     # KRX 공식 일일 한도
 QUOTA_WARN = 9000       # 경고 임계치
 

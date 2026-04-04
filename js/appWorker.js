@@ -244,11 +244,11 @@ async function _loadMarketData() {
       fetch('data/macro/kosis_latest.json', { signal: AbortSignal.timeout(5000) }),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
-      _macroLatest = await results[0].value.json();
+      try { _macroLatest = await results[0].value.json(); } catch(e) { console.warn('[KRX] macro JSON parse error:', e); }
     if (results[1].status === 'fulfilled' && results[1].value.ok)
-      _bondsLatest = await results[1].value.json();
+      try { _bondsLatest = await results[1].value.json(); } catch(e) { console.warn('[KRX] bonds JSON parse error:', e); }
     if (results[2].status === 'fulfilled' && results[2].value.ok)
-      _kosisLatest = await results[2].value.json();
+      try { _kosisLatest = await results[2].value.json(); } catch(e) { console.warn('[KRX] kosis JSON parse error:', e); }
     if (_macroLatest || _bondsLatest) {
       console.log('[KRX] 매크로/채권 데이터 로드 완료');
     }
@@ -260,7 +260,7 @@ async function _loadMarketData() {
     try {
       var vkResp = await fetch('data/vkospi.json', { signal: AbortSignal.timeout(5000) });
       if (vkResp.ok) {
-        var vkData = await vkResp.json();
+        var vkData; try { vkData = await vkResp.json(); } catch(e) { console.warn('[KRX] vkospi JSON parse error:', e); vkData = null; }
         if (Array.isArray(vkData) && vkData.length > 0) {
           var latestVK = vkData[vkData.length - 1];
           if (latestVK && latestVK.close != null) {
@@ -296,13 +296,13 @@ async function _loadDerivativesData() {
       fetch('data/derivatives/shortselling_summary.json', { signal: AbortSignal.timeout(5000) }),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
-      _derivativesData = await results[0].value.json();
+      try { _derivativesData = await results[0].value.json(); } catch(e) { console.warn('[KRX] derivatives JSON parse error:', e); }
     if (results[1].status === 'fulfilled' && results[1].value.ok)
-      _investorData = await results[1].value.json();
+      try { _investorData = await results[1].value.json(); } catch(e) { console.warn('[KRX] investor JSON parse error:', e); }
     if (results[2].status === 'fulfilled' && results[2].value.ok)
-      _etfData = await results[2].value.json();
+      try { _etfData = await results[2].value.json(); } catch(e) { console.warn('[KRX] etf JSON parse error:', e); }
     if (results[3].status === 'fulfilled' && results[3].value.ok)
-      _shortSellingData = await results[3].value.json();
+      try { _shortSellingData = await results[3].value.json(); } catch(e) { console.warn('[KRX] shortselling JSON parse error:', e); }
 
     // [H-13 FIX] source="sample" 데이터는 null 처리 — 가짜 데이터가 신뢰도 조정에 영향 방지
     if (_investorData && _investorData.source === 'sample') {
@@ -325,7 +325,7 @@ async function _loadDerivativesData() {
     try {
       var basisResp = await fetch('data/derivatives/basis_analysis.json', { signal: AbortSignal.timeout(5000) });
       if (basisResp.ok) {
-        var basisArr = await basisResp.json();
+        var basisArr; try { basisArr = await basisResp.json(); } catch(e) { console.warn('[KRX] basis JSON parse error:', e); basisArr = null; }
         if (Array.isArray(basisArr) && basisArr.length > 0) {
           var latestBasis = basisArr[basisArr.length - 1];
           // _derivativesData가 배열이면 최신 레코드에 병합, 아니면 객체에 직접 병합
@@ -366,11 +366,11 @@ async function _loadPhase8Data() {
       fetch('data/derivatives/options_analytics.json', { signal: AbortSignal.timeout(5000) }),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
-      _macroComposite = await results[0].value.json();
+      try { _macroComposite = await results[0].value.json(); } catch(e) { console.warn('[KRX] macro_composite JSON parse error:', e); }
     if (results[1].status === 'fulfilled' && results[1].value.ok)
-      _flowSignals = await results[1].value.json();
+      try { _flowSignals = await results[1].value.json(); } catch(e) { console.warn('[KRX] flow_signals JSON parse error:', e); }
     if (results[2].status === 'fulfilled' && results[2].value.ok)
-      _optionsAnalytics = await results[2].value.json();
+      try { _optionsAnalytics = await results[2].value.json(); } catch(e) { console.warn('[KRX] options_analytics JSON parse error:', e); }
     var loaded = [_macroComposite, _flowSignals, _optionsAnalytics].filter(Boolean).length;
     if (loaded > 0) {
       console.log('[KRX] Phase 8 데이터 로드 완료 (' + loaded + '/3)');

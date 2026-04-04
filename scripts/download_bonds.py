@@ -46,10 +46,13 @@ MACRO_DIR = os.path.join(DATA_DIR, "macro")
 LATEST_FILE = os.path.join(MACRO_DIR, "bonds_latest.json")
 HISTORY_FILE = os.path.join(MACRO_DIR, "bonds_history.json")
 
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import ECOS_BASE_URL, RATE_LIMIT_SEC
+from compute_bond_metrics import compute_bond_metrics as _compute_bond_metrics_canonical
+
 # ── ECOS API 설정 ──
-ECOS_BASE_URL = "https://ecos.bok.or.kr/api"
 ECOS_STAT_CODE = "817Y002"  # 시장금리(일별)
-RATE_LIMIT_SEC = 0.5
 
 # 국고채 수익률 항목코드
 # 출처: ECOS StatisticItemList 817Y002 (2026-04-04 검증 완료)
@@ -353,6 +356,7 @@ def _compute_bond_metrics(coupon_rate: float, ytm: float, maturity_years: int,
                           face: float = 100) -> Dict[str, float]:
     """
     채권 지표 일괄 계산 (Duration, Convexity, DV01).
+    canonical 구현은 compute_bond_metrics.py — 이 함수는 래퍼.
 
     Par bond 가정 (coupon_rate = ytm), 반기 이표.
 
@@ -367,60 +371,7 @@ def _compute_bond_metrics(coupon_rate: float, ytm: float, maturity_years: int,
 
     Academic: Fabozzi (2007) ch.4, Macaulay (1938)
     """
-    import math
-
-    n = int(maturity_years * 2)  # 반기 기간 수
-    c = (coupon_rate / 100) * face / 2  # 반기 쿠폰
-    y = (ytm / 100) / 2  # 반기 수익률
-
-    if n <= 0 or y <= 0:
-        return {
-            'macaulay_duration': 0.0,
-            'modified_duration': 0.0,
-            'dv01': 0.0,
-            'convexity': 0.0,
-        }
-
-    # 가격 계산
-    price = 0.0
-    for t in range(1, n + 1):
-        cf = c + (face if t == n else 0)
-        price += cf / (1 + y) ** t
-
-    if price <= 0:
-        return {
-            'macaulay_duration': 0.0,
-            'modified_duration': 0.0,
-            'dv01': 0.0,
-            'convexity': 0.0,
-        }
-
-    # Macaulay Duration (반기 단위 → 연 단위 /2)
-    weighted_sum = 0.0
-    for t in range(1, n + 1):
-        cf = c + (face if t == n else 0)
-        weighted_sum += t * cf / (1 + y) ** t
-    mac_dur = (weighted_sum / price) / 2.0
-
-    # Modified Duration
-    mod_dur = mac_dur / (1 + y)
-
-    # DV01 (per 100 face)
-    dv01 = price * mod_dur * 0.0001
-
-    # Convexity (반기 단위 → 연 단위 /4)
-    conv_sum = 0.0
-    for t in range(1, n + 1):
-        cf = c + (face if t == n else 0)
-        conv_sum += t * (t + 1) * cf / (1 + y) ** (t + 2)
-    convexity = (conv_sum / price) / 4.0
-
-    return {
-        'macaulay_duration': round(mac_dur, 4),
-        'modified_duration': round(mod_dur, 4),
-        'dv01': round(dv01, 4),
-        'convexity': round(convexity, 4),
-    }
+    return _compute_bond_metrics_canonical(coupon_rate, ytm, maturity_years, face)
 
 
 def classify_credit_regime(aa_spread: Optional[float]) -> str:
@@ -473,17 +424,19 @@ def _validate_bond_data(latest: dict, verbose: bool = False) -> dict:
 
     # ── Rule 1: 합리적 범위 (reasonable range filter) ──
     # 한국 시장금리: 역사적 최저 ~0.5%, 최고 ~20% (1998 IMF)
-    YIELD_MIN, YIELD_MAX = -1.0, 20.0
+    # [H-14 FIX] KTB와 크레딧 분리 — 크레딧은 위기 시 20% 초과 가능 (1998 BBB- ~25%)
+    KTB_MIN, KTB_MAX = -1.0, 20.0
+    CREDIT_MIN, CREDIT_MAX = -1.0, 25.0
 
     for key, val in list(yields.items()):
-        if val is not None and (val < YIELD_MIN or val > YIELD_MAX):
-            errors.append(f"Range: {key}={val:.3f}% outside [{YIELD_MIN}, {YIELD_MAX}]")
+        if val is not None and (val < KTB_MIN or val > KTB_MAX):
+            errors.append(f"Range: {key}={val:.3f}% outside [{KTB_MIN}, {KTB_MAX}]")
             yields[key] = None
 
     for key in ["aa_minus", "bbb_minus"]:
         val = credit.get(key)
-        if val is not None and (val < YIELD_MIN or val > YIELD_MAX):
-            errors.append(f"Range: {key}={val:.3f}% outside [{YIELD_MIN}, {YIELD_MAX}]")
+        if val is not None and (val < CREDIT_MIN or val > CREDIT_MAX):
+            errors.append(f"Range: {key}={val:.3f}% outside [{CREDIT_MIN}, {CREDIT_MAX}]")
             credit[key] = None
 
     # ── Rule 2: 크레딧 계층 구조 (credit hierarchy) ──
@@ -521,6 +474,24 @@ def _validate_bond_data(latest: dict, verbose: bool = False) -> dict:
             )
             credit["bbb_minus"] = None
             credit["bbb_spread"] = None
+
+    # ── Rule 2b: BBB 스프레드 양수 검증 ──
+    # credit_spreads에 저장된 스프레드 값도 직접 검증 (collect_latest에서 계산된 값)
+    bbb_spread_val = credit.get("bbb_spread")
+    if bbb_spread_val is not None and bbb_spread_val < 0:
+        errors.append(
+            f"BBB spread: {bbb_spread_val:.3f}%p < 0 "
+            f"— negative BBB- credit spread is economically impossible, nullifying"
+        )
+        credit["bbb_spread"] = None
+
+    aa_spread_val = credit.get("aa_spread")
+    if aa_spread_val is not None and aa_spread_val < 0:
+        errors.append(
+            f"AA spread: {aa_spread_val:.3f}%p < 0 "
+            f"— negative AA- credit spread is economically impossible, nullifying"
+        )
+        credit["aa_spread"] = None
 
     # ── Rule 3: 수익률곡선 단조성 (yield curve monotonicity) ──
     # 정상: short < long, 역전은 실제 경제 신호 → 경고만 (invalidate 안 함)

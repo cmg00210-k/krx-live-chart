@@ -62,12 +62,17 @@ try:
 except ImportError:
     HAS_FDR = False
 
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import (
+    ECOS_BASE_URL as ECOS_BASE,
+    FRED_BASE_URL as FRED_BASE,
+    RATE_LIMIT_SEC as RATE_LIMIT,
+    TIMEOUT_QUICK as TIMEOUT,
+)
+
 # ── API 설정 ──
-ECOS_BASE = "https://ecos.bok.or.kr/api"
-FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 OECD_BASE = "https://sdmx.oecd.org/public/rest/data"
-TIMEOUT = 15  # seconds
-RATE_LIMIT = 0.5  # seconds between API calls
 
 # ── ECOS 통계코드 ──
 ECOS_SERIES = {
@@ -197,6 +202,9 @@ UIP_W_DXY = 0.25
 # MCS_v2 = 0.225*PMI + 0.180*CSI + 0.225*export + 0.135*yield + 0.135*EPU_inv + 0.100*Taylor_gap
 # v1→v2: 기존 5개 비례 축소 + Taylor gap(#142 w6=0.10) 추가
 MCS_W = {"pmi": 0.225, "csi": 0.180, "export": 0.225, "yield_curve": 0.135, "epu_inv": 0.135, "taylor_gap": 0.100}
+_mcs_w_sum = sum(MCS_W.values())
+if abs(_mcs_w_sum - 1.0) > 0.001:
+    print(f'[MACRO][WARN] MCS_W sum={_mcs_w_sum:.4f}, expected 1.0')
 
 # [STAT-B] Inertial Taylor Rule — Woodford (2003), Clarida-Galí-Gertler (1999)
 # Central banks smooth rate changes: i_t = ρ*i_{t-1} + (1-ρ)*i_taylor
@@ -272,6 +280,9 @@ def fetch_ecos_series(api_key, stat_code, item_code, freq="M",
 
     try:
         r = requests.get(url, timeout=TIMEOUT)
+        if r.status_code != 200:
+            vlog(f"ECOS HTTP {r.status_code} for {stat_code}/{item_code}")
+            return None
         data = r.json()
 
         # ECOS 에러 처리
@@ -361,6 +372,9 @@ def fetch_fred_series(fred_key, series_id, limit=100):
 
     try:
         r = requests.get(FRED_BASE, params=params, timeout=TIMEOUT)
+        if r.status_code != 200:
+            vlog(f"FRED HTTP {r.status_code} for {series_id}")
+            return None
         data = r.json()
         obs = data.get("observations", [])
 
@@ -1131,6 +1145,22 @@ def build_latest(all_data):
     mcs_result = calc_mcs(all_data, latest)
     latest["mcs"] = mcs_result["mcs"] if mcs_result else None
     latest["mcs_components"] = mcs_result["components"] if mcs_result else None
+
+    # ── 데이터 품질 검증 (범위 이상 경고) ──
+    _RANGE_CHECKS = {
+        "cpi_yoy":           (-5, 30,    "CPI YoY (%) — 디플레/하이퍼인플레 범위 이탈"),
+        "korea_cli":         (80, 120,   "OECD CLI — 정상 범위 80~120 (trend=100)"),
+        "bok_rate":          (-1, 15,    "한은 기준금리 — 역사적 범위"),
+        "unemployment_rate": (0.5, 15,   "실업률 — 한국 역사적 범위"),
+        "vix":               (5, 90,     "VIX — 사상 최고 89.5 (2020.03)"),
+        "usdkrw":            (800, 2000, "USD/KRW — 역사적 범위"),
+        "bsi_mfg":           (20, 180,   "BSI 제조업 — 0~200 스케일"),
+    }
+    for key, (lo, hi, desc) in _RANGE_CHECKS.items():
+        val = latest.get(key)
+        if val is not None and (val < lo or val > hi):
+            log(f"[WARN] {key}={val} 범위 이탈 [{lo}, {hi}] — {desc}")
+            # 경고만, None 처리하지 않음 (극단적 시장 환경에서 정당한 값일 수 있음)
 
     return latest
 

@@ -32,12 +32,14 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, str(Path(__file__).parent))
+from api_constants import ECOS_BASE_URL as ECOS_BASE, TIMEOUT_QUICK as TIMEOUT
+
 # ──────────────────────────────────────────────────────
 # 설정
 # ──────────────────────────────────────────────────────
 OUTPUT_PATH = Path(__file__).parent.parent / 'data' / 'market_context.json'
-ECOS_BASE = 'https://ecos.bok.or.kr/api'
-TIMEOUT = 15  # 초
 
 # ──────────────────────────────────────────────────────
 # 유틸
@@ -79,11 +81,23 @@ def fetch_ccsi(api_key: str) -> Optional[float]:
     )
     try:
         r = requests.get(url, timeout=TIMEOUT)
+        if r.status_code != 200:
+            print(f'[CCSI] ECOS HTTP {r.status_code}', file=sys.stderr)
+            return None
         data = r.json()
         rows = data.get('StatisticSearch', {}).get('row', [])
         if rows:
             # 가장 최근 값 반환
-            return float(rows[-1].get('DATA_VALUE', 0))
+            # [M-5 FIX] 0 default 제거 — CCSI 정상 범위는 80~120, 0은 불가능한 값
+            raw = rows[-1].get('DATA_VALUE')
+            if raw is None or raw == '':
+                print('[CCSI] DATA_VALUE가 비어 있음 — None 반환', file=sys.stderr)
+                return None
+            val = float(raw)
+            if val < 50 or val > 150:
+                print(f'[CCSI] 범위 이상: {val} (정상: 80~120) — None 반환', file=sys.stderr)
+                return None
+            return val
     except Exception as e:
         print(f'[CCSI] ECOS 조회 실패: {e}', file=sys.stderr)
     return None
@@ -231,10 +245,15 @@ def main():
         # VKOSPI
         vkospi = fetch_vkospi()
         if vkospi is not None:
-            ctx['vkospi'] = round(vkospi, 2)
-            print(f'  VKOSPI: {vkospi:.2f}')
-        else:
-            print('  VKOSPI: 조회 실패 (FinanceDataReader 필요)')
+            # VKOSPI 정상 범위: 5~100 (사상 최고 ~89, 2020.03)
+            if vkospi < 5 or vkospi > 100:
+                print(f'  [WARN] VKOSPI={vkospi:.2f} 범위 이탈 [5, 100] — 데이터 무시')
+                vkospi = None
+            else:
+                ctx['vkospi'] = round(vkospi, 2)
+                print(f'  VKOSPI: {vkospi:.2f}')
+        if vkospi is None:
+            print('  VKOSPI: 조회 실패 또는 범위 이상')
 
         # 투자자 순매수
         flow = fetch_investor_flow()

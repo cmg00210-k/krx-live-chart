@@ -534,7 +534,8 @@ def download_stock_financials(api_key: str, stock_code: str,
         for rcode, rname in report_codes.items():
             items = fetch_financials(api_key, corp_code, year, rcode)
             if items is None:
-                continue  # 데이터 없음 — sleep 불필요 (API 미호출 또는 "013" 응답)
+                time.sleep(delay)  # API call was made (status "013" or error) — rate limit required
+                continue
 
             period_data = extract_period_data(items, year, rcode)
             if period_data is None:

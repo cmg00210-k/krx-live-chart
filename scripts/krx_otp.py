@@ -21,6 +21,7 @@ v1 (2026-04-02):
 """
 
 import os
+import sys
 import time
 
 try:
@@ -31,11 +32,9 @@ except ImportError:
 # ── 경로 설정 ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ── KRX OTP 엔드포인트 ──
-OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-CSV_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
-
-RATE_LIMIT_SEC = 0.5
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL, RATE_LIMIT_SEC
 
 HEADERS = {
     "User-Agent": (

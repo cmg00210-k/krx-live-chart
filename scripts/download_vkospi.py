@@ -40,17 +40,16 @@ except ImportError:
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
-# ── KRX 클라이언트 임포트 ──
+# ── KRX 클라이언트 / 공통 상수 임포트 ──
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
 try:
     from krx_api import KRXClient
 except ImportError:
     KRXClient = None
 
-# ── OTP 폴백용 상수 ──
-OTP_URL = "http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd"
-CSV_URL = "http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd"
+from api_constants import KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL, generate_business_days as _gen_biz_days
 
+# ── OTP 폴백용 상수 ──
 OTP_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -75,12 +74,8 @@ def _generate_business_days(start_dt, end_dt):
     Yields:
         str YYYYMMDD 형식 영업일
     """
-    current = start_dt
-    while current <= end_dt:
-        # 월(0)~금(4)만
-        if current.weekday() < 5:
-            yield current.strftime("%Y%m%d")
-        current += timedelta(days=1)
+    for d in _gen_biz_days(start_dt, end_dt):
+        yield d.strftime("%Y%m%d")
 
 
 def _parse_float_safe(val):

@@ -222,6 +222,22 @@ def build_latest(series):
         if isinstance(v, float):
             latest[k] = round(v, 2)
 
+    # ── 데이터 품질 검증 (범위 이상 경고) ──
+    # 2020=100 기준 지수 계열은 합리적 범위 내인지 확인
+    _KOSIS_RANGE_CHECKS = {
+        "cli_composite":    (50, 150,  "선행종합지수 (2020=100)"),
+        "cci_composite":    (50, 150,  "동행종합지수 (2020=100)"),
+        "lag_composite":    (50, 150,  "후행종합지수 (2020=100)"),
+        "esi":              (30, 150,  "경제심리지수 (100=중립)"),
+        "ipi_all":          (50, 200,  "전산업생산지수 (2020=100)"),
+        "retail_sales":     (50, 200,  "소매판매지수 (2020=100)"),
+        "rate_spread_5y":   (-5, 10,   "금리스프레드 5Y (%p)"),
+    }
+    for key, (lo, hi, desc) in _KOSIS_RANGE_CHECKS.items():
+        val = latest.get(key)
+        if val is not None and (val < lo or val > hi):
+            log(f"[WARN] {key}={val} 범위 이탈 [{lo}, {hi}] — {desc}")
+
     return latest
 
 
