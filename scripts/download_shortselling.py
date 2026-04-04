@@ -409,8 +409,16 @@ def compute_summary(
     sir_results.sort(key=lambda x: x["sir"], reverse=True)
     top_sir = sir_results[:50]
 
+    # Flat compat: latest market short ratio for JS [C-4 FIX]
+    latest_market_ratio = market_trend[-1]["shortRatio"] if market_trend else 0
+    latest_market_ratio_5d = market_trend[-1].get("shortRatioMA5", 0) if market_trend else 0
+    latest_market_ratio_20d = market_trend[-1].get("shortRatioMA20", 0) if market_trend else 0
+    latest_date = market_trend[-1]["date"] if market_trend else datetime.now().strftime("%Y-%m-%d")
+
     summary = {
         "updated": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        "date": latest_date,  # flat compat key for JS [C-4 FIX]
+        "source": "live",  # Pipeline CHECK 6 guard — must not be "sample"
         "totalStocks": len(sir_results),
         "squeeze_candidates": squeeze_candidates[:30],
         "topSIR": top_sir,
@@ -424,6 +432,12 @@ def compute_summary(
             ) if sir_results else 0,
             "squeezeCount": len(squeeze_candidates),
         },
+        # Flat compat keys for JS backward compatibility [C-4 FIX]
+        "market_short_ratio": latest_market_ratio,
+        "market_short_ratio_5d_ma": latest_market_ratio_5d,
+        "market_short_ratio_20d_ma": latest_market_ratio_20d,
+        "total_short_volume": sum(r["shortVolume"] for r in trade_records) if trade_records else 0,
+        "total_volume": sum(r["totalVolume"] for r in trade_records) if trade_records else 0,
     }
 
     if verbose:
@@ -448,6 +462,58 @@ def save_json(data, filepath: str, verbose: bool = False):
         print(f"  [저장] {filepath} ({size_kb:.1f}KB)")
 
     return size_kb
+
+
+# ─────────────────────────────────────────��───────
+# pykrx Fallback
+# ─────────────────────────────────────────────────
+
+def _pykrx_fallback_shortselling(start_str: str, end_str: str):
+    """
+    pykrx를 ���용한 공매도 거래현황 수집 (OTP 실패 시 fallback).
+    Returns: (trade_records, balance_records) tuple. 실패 시 ([], []).
+    """
+    try:
+        from pykrx import stock as pykrx_stock
+    except ImportError:
+        print("[공매도] pykrx 미설치 — pip install pykrx")
+        return [], []
+
+    import time as _time
+    print(f"[공매도] pykrx fallback: {start_str} ~ {end_str}")
+    start_fmt = start_str.replace("-", "")
+    end_fmt = end_str.replace("-", "")
+    trade_records = []
+    balance_records = []
+
+    for market_name in ["KOSPI", "KOSDAQ"]:
+        try:
+            df = pykrx_stock.get_shorting_volume_by_date(
+                start_fmt, end_fmt, market=market_name
+            )
+            if df is None or df.empty:
+                print(f"  [pykrx] {market_name}: 공매도 데이터 없음")
+                continue
+
+            # pykrx columns: 공매도거래량, 총거래량, 공매도비중, 직전40거래일평균공매도비중
+            for date_idx, row in df.iterrows():
+                date_str = date_idx.strftime("%Y-%m-%d")
+                trade_records.append({
+                    "date": date_str,
+                    "code": "MARKET",
+                    "name": market_name,
+                    "market": "STK" if market_name == "KOSPI" else "KSQ",
+                    "shortVolume": int(row.get("공매도거래량", 0)),
+                    "totalVolume": int(row.get("총거래량", 0)),
+                    "shortRatio": float(row.get("공매도비중", 0)),
+                })
+
+            print(f"  [pykrx] {market_name}: {len(df)}일 수집")
+            _time.sleep(1)
+        except Exception as e:
+            print(f"  [pykrx] {market_name} 공매도 실패: {e}")
+
+    return trade_records, balance_records
 
 
 def main():
@@ -518,6 +584,13 @@ def main():
         except ValueError as e:
             print(f"[공매도] 경고: {market} 거래현황 — {e}")
 
+    # OTP 실패 시 pykrx fallback (거래현황만 — 잔고는 pykrx 미지원)
+    if not all_trade_records:
+        print("\n[공매도] OTP 수집 실패 — pykrx fallback 시도...")
+        fallback_trades, fallback_balances = _pykrx_fallback_shortselling(args.start, args.end)
+        all_trade_records = fallback_trades
+        all_balance_records = fallback_balances
+
     # 거래현황 저장
     trade_output = os.path.join(DERIVATIVES_DIR, "shortselling_daily.json")
     if all_trade_records:
@@ -572,6 +645,40 @@ def main():
         )
         kb = save_json(summary, summary_output, args.verbose)
         print(f"[공매도] 요약 저장: {summary_output} ({kb:.1f}KB)")
+    elif all_trade_records and not all_balance_records:
+        # pykrx fallback: 거래현황만 있고 잔고 없음 → 간이 요약 생성
+        print("[공매도] 잔고 없음 — 거래현황 기반 간이 요약 생성")
+        daily_short = defaultdict(lambda: {"shortVol": 0, "totalVol": 0})
+        for rec in all_trade_records:
+            d = rec.get("date", "")
+            daily_short[d]["shortVol"] += rec["shortVolume"]
+            daily_short[d]["totalVol"] += rec["totalVolume"]
+        market_trend = []
+        for d in sorted(daily_short.keys()):
+            dd = daily_short[d]
+            ratio = round(dd["shortVol"] / dd["totalVol"] * 100, 2) if dd["totalVol"] > 0 else 0
+            market_trend.append({"date": d, "shortRatio": ratio})
+        latest_ratio = market_trend[-1]["shortRatio"] if market_trend else 0
+        latest_date = market_trend[-1]["date"] if market_trend else args.end
+        total_sv = sum(r["shortVolume"] for r in all_trade_records)
+        total_v = sum(r["totalVolume"] for r in all_trade_records)
+        summary = {
+            "updated": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+            "date": latest_date,
+            "source": "pykrx",
+            "totalStocks": 0,
+            "squeeze_candidates": [],
+            "topSIR": [],
+            "marketTrend": market_trend,
+            "stats": {"avgSIR": 0, "avgDTC": 0, "squeezeCount": 0},
+            "market_short_ratio": latest_ratio,
+            "market_short_ratio_5d_ma": 0,
+            "market_short_ratio_20d_ma": 0,
+            "total_short_volume": total_sv,
+            "total_volume": total_v,
+        }
+        kb = save_json(summary, summary_output, args.verbose)
+        print(f"[공매도] 간이 요약 저장: {summary_output} ({kb:.1f}KB)")
 
         # 최종 통계 출력
         stats = summary["stats"]

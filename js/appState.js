@@ -37,6 +37,11 @@ const _OSC_MAP = {
 // ── 시각화 레이어 토글 (4카테고리) ──
 var vizToggles = { candle: true, chart: true, signal: true, forecast: true };
 
+// ── VIX→VKOSPI 프록시 스케일 상수 ──
+// Doc26 §2.3 — VKOSPI ≈ VIX × 1.12 (KRX 시장, Whaley 2009)
+// DEPRECATED: vkospi.json 사용 권장, 오프라인 폴백 전용
+var VIX_VKOSPI_PROXY = 1.12;
+
 // ══════════════════════════════════════════════════════
 //  5-Tier Academic Verification System (2026-04-07)
 //  5-agent 교차검증 기반: technical-pattern-architect, cfa-financial-analyst,
@@ -262,6 +267,36 @@ var _lastVolRegime = 'neutral';  // [Phase0-#6] 최근 Worker 분석의 VolRegim
 var _currentRORORegime = 'neutral';  // [D-2] RORO 3-체제: 'risk-on' | 'risk-off' | 'neutral'
 var _roroScore = 0;                  // [D-2] RORO 복합 스코어 [-1.0, +1.0]
 var _currentDD = null;               // [D-4] Merton Naive DD (비금융주 한정, Bharath & Shumway 2008)
+
+// ── 파이프라인 상태 추적 (12개 데이터 소스 건강도) ──
+// appWorker.js 로더 함수에서 각 fetch 성공/실패 시 상태 갱신
+// 상태: 'ok' (정상 로드), 'stale' (오래된 데이터), 'missing' (미로드/실패), 'sample' (샘플 데이터)
+var _pipelineStatus = {
+  macro_latest: 'missing',
+  bonds_latest: 'missing',
+  kosis_latest: 'missing',
+  macro_composite: 'missing',
+  vkospi: 'missing',
+  derivatives: 'missing',
+  investor: 'missing',
+  etf: 'missing',
+  shortselling: 'missing',
+  basis: 'missing',
+  flow_signals: 'missing',
+  options_analytics: 'missing'
+};
+
+function _getPipelineHealth() {
+  var counts = { ok: 0, stale: 0, missing: 0, sample: 0 };
+  var keys = Object.keys(_pipelineStatus);
+  for (var i = 0; i < keys.length; i++) {
+    var v = _pipelineStatus[keys[i]];
+    counts[v] = (counts[v] || 0) + 1;
+  }
+  counts.total = keys.length;
+  return counts;
+}
+
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 let _lastActivePattern = null;     // [Fix-1] 전체 분석의 active 패턴 보존 (드래그 시 HUD 소실 방지)
 

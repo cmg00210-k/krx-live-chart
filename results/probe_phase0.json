@@ -1,0 +1,357 @@
+{
+  "run_at": "2026-04-02T13:07:29.236148",
+  "bas_dd": "20260401",
+  "api_base": "https://data-dbg.krx.co.kr/svc/apis",
+  "results": [
+    {
+      "id": 1,
+      "name_ko": "소액채권시장 일별매매정보",
+      "category": "채권",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 2,
+      "name_ko": "채권지수 시세정보",
+      "category": "채권",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 3,
+      "name_ko": "일반채권시장 일별매매정보",
+      "category": "채권",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 4,
+      "name_ko": "국채전문유통시장 일별매매정보",
+      "category": "채권",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 5,
+      "name_ko": "금시장 일별매매정보",
+      "category": "원자재",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 6,
+      "name_ko": "석유시장 일별매매정보",
+      "category": "원자재",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 7,
+      "name_ko": "배출권시장 일별매매정보",
+      "category": "배출권",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 8,
+      "name_ko": "파생상품지수 시세정보",
+      "category": "파생",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 9,
+      "name_ko": "선물 일별매매정보 (주식선물外)",
+      "category": "파생",
+      "status": "OK",
+      "record_count": 385,
+      "fields": [
+        "BAS_DD",
+        "PROD_NM",
+        "MKT_NM",
+        "ISU_CD",
+        "ISU_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "SPOT_PRC",
+        "SETL_PRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "ACC_OPNINT_QTY"
+      ],
+      "resolved_endpoint": "drv/fut_bydd_trd"
+    },
+    {
+      "id": 10,
+      "name_ko": "주식선물(유가) 일별매매정보",
+      "category": "파생",
+      "status": "OK",
+      "record_count": 385,
+      "fields": [
+        "BAS_DD",
+        "PROD_NM",
+        "MKT_NM",
+        "ISU_CD",
+        "ISU_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "SPOT_PRC",
+        "SETL_PRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "ACC_OPNINT_QTY"
+      ],
+      "resolved_endpoint": "drv/fut_bydd_trd"
+    },
+    {
+      "id": 11,
+      "name_ko": "주식선물(코스닥) 일별매매정보",
+      "category": "파생",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 12,
+      "name_ko": "주식옵션(유가) 일별매매정보",
+      "category": "파생",
+      "status": "OK",
+      "record_count": 12068,
+      "fields": [
+        "BAS_DD",
+        "PROD_NM",
+        "RGHT_TP_NM",
+        "ISU_CD",
+        "ISU_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "IMP_VOLT",
+        "NXTDD_BAS_PRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "ACC_OPNINT_QTY"
+      ],
+      "resolved_endpoint": "drv/opt_bydd_trd"
+    },
+    {
+      "id": 13,
+      "name_ko": "주식옵션(코스닥) 일별매매정보",
+      "category": "파생",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 14,
+      "name_ko": "옵션 일별매매정보 (주식옵션外)",
+      "category": "파생",
+      "status": "OK",
+      "record_count": 12068,
+      "fields": [
+        "BAS_DD",
+        "PROD_NM",
+        "RGHT_TP_NM",
+        "ISU_CD",
+        "ISU_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "IMP_VOLT",
+        "NXTDD_BAS_PRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "ACC_OPNINT_QTY"
+      ],
+      "resolved_endpoint": "drv/opt_bydd_trd"
+    },
+    {
+      "id": 15,
+      "name_ko": "ETF 일별매매정보",
+      "category": "ETF계열",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 16,
+      "name_ko": "ETN 일별매매정보",
+      "category": "ETF계열",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 17,
+      "name_ko": "ELW 일별매매정보",
+      "category": "ETF계열",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 18,
+      "name_ko": "유가증권 일별매매정보",
+      "category": "주식",
+      "status": "OK",
+      "record_count": 950,
+      "fields": [
+        "BAS_DD",
+        "ISU_CD",
+        "ISU_NM",
+        "MKT_NM",
+        "SECT_TP_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "FLUC_RT",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "MKTCAP",
+        "LIST_SHRS"
+      ],
+      "resolved_endpoint": "sto/stk_bydd_trd"
+    },
+    {
+      "id": 19,
+      "name_ko": "유가증권 종목기본정보",
+      "category": "주식",
+      "status": "OK",
+      "record_count": 950,
+      "fields": [
+        "ISU_CD",
+        "ISU_SRT_CD",
+        "ISU_NM",
+        "ISU_ABBRV",
+        "ISU_ENG_NM",
+        "LIST_DD",
+        "MKT_TP_NM",
+        "SECUGRP_NM",
+        "SECT_TP_NM",
+        "KIND_STKCERT_TP_NM",
+        "PARVAL",
+        "LIST_SHRS"
+      ],
+      "resolved_endpoint": "sto/stk_isu_base_info"
+    },
+    {
+      "id": 20,
+      "name_ko": "코스닥 일별매매정보",
+      "category": "주식",
+      "status": "OK",
+      "record_count": 1823,
+      "fields": [
+        "BAS_DD",
+        "ISU_CD",
+        "ISU_NM",
+        "MKT_NM",
+        "SECT_TP_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "FLUC_RT",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "MKTCAP",
+        "LIST_SHRS"
+      ],
+      "resolved_endpoint": "sto/ksq_bydd_trd"
+    },
+    {
+      "id": 21,
+      "name_ko": "코넥스 일별매매정보",
+      "category": "주식",
+      "status": "OK",
+      "record_count": 109,
+      "fields": [
+        "BAS_DD",
+        "ISU_CD",
+        "ISU_NM",
+        "MKT_NM",
+        "SECT_TP_NM",
+        "TDD_CLSPRC",
+        "CMPPREVDD_PRC",
+        "FLUC_RT",
+        "TDD_OPNPRC",
+        "TDD_HGPRC",
+        "TDD_LWPRC",
+        "ACC_TRDVOL",
+        "ACC_TRDVAL",
+        "MKTCAP",
+        "LIST_SHRS"
+      ],
+      "resolved_endpoint": "sto/knx_bydd_trd"
+    },
+    {
+      "id": 22,
+      "name_ko": "신주인수권증권 일별매매정보",
+      "category": "기타",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 23,
+      "name_ko": "KOSPI 시리즈 일별시세정보",
+      "category": "지수",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 24,
+      "name_ko": "KOSDAQ 시리즈 일별시세정보",
+      "category": "지수",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    },
+    {
+      "id": 25,
+      "name_ko": "KRX 시리즈 일별시세정보",
+      "category": "지수",
+      "status": "HTTP",
+      "record_count": 0,
+      "fields": [],
+      "resolved_endpoint": null
+    }
+  ]
+}

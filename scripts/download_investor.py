@@ -471,7 +471,9 @@ def compute_summary(investor_daily: list) -> dict:
     summary = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "latest_date": latest_date,
+        "date": latest_date,  # flat compat key for JS [C-2 FIX]
         "total_trading_days": total_days,
+        "source": "live",  # Pipeline CHECK 6 guard — must not be "sample"
         "foreign": {
             "net_1d_eok": _to_eok(foreign_1d),
             "net_5d_eok": _to_eok(foreign_5d),
@@ -502,9 +504,74 @@ def compute_summary(investor_daily: list) -> dict:
                 "neutral": "중립 (순매수/순매도 없음)",
             },
         },
+        # Flat compat keys for JS backward compatibility [C-2/C-3 FIX]
+        "foreign_net_1d": _to_eok(foreign_1d),
+        "foreign_net_5d": _to_eok(foreign_5d),
+        "foreign_net_20d": _to_eok(foreign_20d),
+        "institutional_net_1d": _to_eok(inst_1d),
+        "institutional_net_5d": _to_eok(inst_5d),
+        "institutional_net_20d": _to_eok(inst_20d),
+        "retail_net_1d": _to_eok(retail_1d),
+        "retail_net_5d": _to_eok(retail_5d),
+        "retail_net_20d": _to_eok(retail_20d),
     }
 
     return summary
+
+
+# ─────────────────────────────────────────────────
+# pykrx Fallback
+# ─────────────────────────────────────────────────
+
+def _pykrx_fallback_investor(start_str: str, end_str: str) -> list:
+    """
+    pykrx를 사용한 투자자별 매매동향 수집 (OTP 실패 시 fallback).
+    pykrx 미설치 또는 API 차단 시 빈 리스트 반환.
+    """
+    try:
+        from pykrx import stock as pykrx_stock
+    except ImportError:
+        print("[INVESTOR] pykrx 미설치 — pip install pykrx")
+        return []
+
+    print(f"[INVESTOR] pykrx fallback: {start_str} ~ {end_str}")
+    start_fmt = start_str.replace("-", "")
+    end_fmt = end_str.replace("-", "")
+    records = []
+
+    for market_name, market_code in [("KOSPI", "KOSPI"), ("KOSDAQ", "KOSDAQ")]:
+        try:
+            df = pykrx_stock.get_market_trading_value_by_date(
+                start_fmt, end_fmt, market=market_code
+            )
+            if df is None or df.empty:
+                print(f"  [pykrx] {market_name}: 데이터 없음")
+                continue
+
+            # pykrx columns: 기관합계, 기타법인, 개인, 외국인합계, 전체
+            inv_map = {
+                "기관합계": "institutional_total",
+                "개인": "retail",
+                "외국인합계": "foreign",
+            }
+            for date_idx, row in df.iterrows():
+                date_str = date_idx.strftime("%Y-%m-%d")
+                for ko_col, eng_key in inv_map.items():
+                    if ko_col in row.index:
+                        net_amount = int(row[ko_col])  # 원 단위
+                        records.append({
+                            "time": date_str,
+                            "market": market_code,
+                            "investor": eng_key,
+                            "net_amount": net_amount,
+                        })
+
+            print(f"  [pykrx] {market_name}: {len(df)}일 수집")
+            time.sleep(1)  # Rate limit
+        except Exception as e:
+            print(f"  [pykrx] {market_name} 실패: {e}")
+
+    return records
 
 
 # ─────────────────────────────────────────────────
@@ -589,7 +656,12 @@ def main():
                     f"(공휴일 또는 날짜 범위 확인)"
                 )
         except KRXOTPError as e:
-            print(f"[INVESTOR] {market_name}: {e}")
+            print(f"[INVESTOR] {market_name}: OTP 실패 — {e}")
+
+    # OTP 실패 시 pykrx fallback
+    if not all_investor_daily:
+        print("\n[INVESTOR] OTP 수집 실패 — pykrx fallback 시도...")
+        all_investor_daily = _pykrx_fallback_investor(args.start, args.end)
         except ValueError as e:
             print(f"[INVESTOR] {market_name}: {e}")
 
@@ -682,8 +754,12 @@ def main():
 
     # ── 3. 파생 요약 계산 ──
     if all_investor_daily:
+        # pykrx fallback 여부 판별
+        is_pykrx = any("market" in r and r["market"] in ("KOSPI", "KOSDAQ") for r in all_investor_daily)
         print("\n[INVESTOR] 파생 요약 계산 중...")
         summary = compute_summary(all_investor_daily)
+        if is_pykrx and not any("market" in r and r["market"] in ("STK", "KSQ") for r in all_investor_daily):
+            summary["source"] = "pykrx"  # Mark as pykrx fallback (not OTP)
 
         with open(OUTPUT_SUMMARY, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)

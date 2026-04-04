@@ -31,9 +31,12 @@ function calcEMA(data, n) {
   const k = 2 / (n + 1);
   const result = new Array(n - 1).fill(null);
 
-  // 첫 N개 데이터의 SMA를 EMA 초기값으로 사용
-  let sma = 0;
-  for (let i = 0; i < n; i++) sma += data[i];
+  // P0-3 fix: SMA init with null/NaN guard — skip invalid entries, fail gracefully
+  var sma = 0, validCount = 0;
+  for (var i = 0; i < n; i++) {
+    if (data[i] != null && !isNaN(data[i])) { sma += data[i]; validCount++; }
+  }
+  if (validCount < n) return data.map(function() { return null; });
   sma /= n;
   result.push(sma);
 
@@ -1002,7 +1005,7 @@ function calcMACD(closes, fast = 12, slow = 26, sig = 9) {
   let vi = 0;
 
   for (let i = 0; i < closes.length; i++) {
-    if (macdLine[i] !== null) {
+    if (macdLine[i] !== null && !isNaN(macdLine[i])) { // P0-4 fix: match validMacd filter (null AND NaN)
       if (vi >= sig - 1) {
         signalLine[i] = signalEma[vi];
         histogram[i] = macdLine[i] - signalLine[i];

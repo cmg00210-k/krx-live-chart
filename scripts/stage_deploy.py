@@ -302,6 +302,34 @@ def main():
     if errors:
         print("Errors       : {}".format(errors))
 
+    # Post-stage: verify critical files are present in deploy/
+    if not args.dry_run:
+        CRITICAL_FILES = [
+            "index.html", "sw.js", "_headers", "favicon.svg",
+            os.path.join("css", "style.css"),
+            os.path.join("js", "app.js"),
+            os.path.join("js", "colors.js"),
+            os.path.join("js", "chart.js"),
+            os.path.join("js", "appState.js"),
+            os.path.join("js", "appWorker.js"),
+            os.path.join("js", "appUI.js"),
+            os.path.join("js", "analysisWorker.js"),
+            os.path.join("lib", "lightweight-charts.standalone.production.js"),
+        ]
+        missing_critical = []
+        for f in CRITICAL_FILES:
+            if not os.path.exists(os.path.join(DEPLOY_DIR, f)):
+                missing_critical.append(f)
+        if missing_critical:
+            print()
+            print("CRITICAL: {} mission-critical file(s) missing from deploy/:".format(
+                len(missing_critical)))
+            for f in missing_critical:
+                print("  MISSING: {}".format(f))
+            errors += len(missing_critical)
+        else:
+            print("Critical files: all {} present in deploy/".format(len(CRITICAL_FILES)))
+
     # Always print breakdown in dry-run mode; optionally in live mode
     if args.dry_run or args.breakdown:
         print_breakdown(buckets, args.limit)

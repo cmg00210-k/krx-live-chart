@@ -40,9 +40,10 @@ var _etfData = null;
 var _shortSellingData = null;
 
 // ── [PERF] 분석 결과 캐시 — 동일 캔들 재분석 방지 ────
-// 캔들 길이 + 마지막 캔들의 time + open + close로 변경 감지
+// 캔들 길이 + 마지막 캔들의 time + open + close + realtimeMode로 변경 감지
 // drag 이벤트에서 동일 visible 구간 반복 요청 시 캐시 적중
 // NOTE: Worker msg에 stock code가 없으므로 open을 추가하여 충돌 확률 저감
+// NOTE: realtimeMode 포함 — WS 연결 전환 시 file 모드 stale 캐시 방지
 let _analyzeCache = { key: null, patterns: null, signals: null, stats: null };
 
 // ── 적응형 가중치 — 백테스트 WLS 계수에서 추출 ────
@@ -63,10 +64,11 @@ var _signalWinRateMap = {};
 // null이면 감쇠 미적용 (하위 호환 유지).
 let _backtestEpochMs = null;
 
-function _makeCacheKey(candles, timeframe) {
+function _makeCacheKey(candles, timeframe, realtimeMode) {
   if (!candles || !candles.length) return '';
   var last = candles[candles.length - 1];
-  return (timeframe || '') + '_' + candles.length + '_' + last.time + '_' + last.open + '_' + last.close;
+  // [P1-FIX] realtimeMode 포함 — WS 연결 시 file 모드 캐시 반환 방지
+  return (timeframe || '') + '_' + candles.length + '_' + last.time + '_' + last.open + '_' + last.close + '_' + (realtimeMode ? 'rt' : 'file');
 }
 
 // ── Worker 내부에 필요한 스크립트 로드 ───────────────
@@ -223,7 +225,7 @@ self.onmessage = function (e) {
 
       // [PERF] 캐시 키 비교 — 동일 캔들이면 재분석 건너뜀
       // drag 이벤트에서 동일 visible 구간 반복 요청 시 효과적
-      const cacheKey = _makeCacheKey(analyzeCandles, msg.timeframe);
+      const cacheKey = _makeCacheKey(analyzeCandles, msg.timeframe, realtimeMode);
       let patterns, signals, stats;
       var _cacheMiss = false;  // 캐시 미스 여부 — auto-backtest 트리거 판단용
 

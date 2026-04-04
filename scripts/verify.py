@@ -3,7 +3,7 @@
 """
 CheeseStock Pre-Deploy Verification
 =====================================
-Checks 5 categories without a build system, node_modules, or bundler.
+Checks 9 categories without a build system, node_modules, or bundler.
 
 Usage:
   python scripts/verify.py              # Full check, exit 0=pass / 1=fail
@@ -13,6 +13,7 @@ Usage:
   python scripts/verify.py --check dashes
   python scripts/verify.py --check globals
   python scripts/verify.py --check scripts
+  python scripts/verify.py --check pipeline
 
 Run from the project root (same dir as index.html).
 """
@@ -21,8 +22,10 @@ import re
 import sys
 import os
 import io
+import json
 import argparse
 from pathlib import Path
+from datetime import date, timedelta
 
 # Force UTF-8 output on Windows (avoids cp949 UnicodeEncodeError)
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -364,6 +367,40 @@ def check_colors(strict=False):
     if total_violations == 0:
         ok("All JS files use KRX_COLORS constants")
 
+    # 2b. rgba() audit — colors.js is the only approved source of rgba() values
+    colors_src = read(JS / "colors.js")
+    # Build whitelist from colors.js rgba values (normalize spaces)
+    rgba_whitelist = set()
+    for m in re.findall(r"rgba\(\s*([^)]+)\)", colors_src):
+        rgba_whitelist.add(re.sub(r"\s+", "", m))
+
+    rgba_violations = 0
+    for fname in COLOR_SCAN_FILES:
+        fpath = JS / fname
+        if not fpath.exists():
+            continue
+        src = read(fpath)
+        lines = src.splitlines()
+        file_rgba = []
+        for lineno, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+            code_part = line.split("//")[0]
+            for m in re.finditer(r"rgba\(\s*([^)]+)\)", code_part):
+                normalized = re.sub(r"\s+", "", m.group(1))
+                if normalized not in rgba_whitelist:
+                    file_rgba.append((lineno, f"rgba({normalized})", line.strip()))
+        if file_rgba:
+            warn(f"{fname} - {len(file_rgba)} rgba() value(s) not from colors.js:")
+            for lineno, color, snippet in file_rgba[:3]:
+                info(f"  line {lineno}: {color}")
+            rgba_violations += len(file_rgba)
+            warnings += 1
+
+    if rgba_violations == 0:
+        ok("All rgba() values traced to colors.js")
+
     return errors, warnings
 
 
@@ -692,6 +729,347 @@ def check_scripts(strict=False):
 
 
 # =============================================================================
+# CHECK 6 - JSON Pipeline Connectivity
+# =============================================================================
+
+# Canonical contract: appWorker.js fetch() targets → required keys → guards.
+# Each tuple: (file_path, required_keys, sample_guard_field, is_array)
+#   - required_keys: top-level keys (or dotted paths) that JS code accesses
+#   - sample_guard_field: if set, FAIL when data[field] == "sample" or "error"
+#   - is_array: if True, check keys against the last element of the array
+PIPELINE_CONTRACT = [
+    ("data/macro/macro_latest.json",                ["updated", "mcs", "vix", "bok_rate"],  None,      False),
+    ("data/macro/bonds_latest.json",                ["updated"],                             None,      False),
+    ("data/macro/kosis_latest.json",                ["updated", "source"],                   None,      False),
+    ("data/macro/macro_composite.json",             ["mcsV2"],                               None,      False),
+    ("data/vkospi.json",                            ["close", "time"],                       None,      True),
+    ("data/derivatives/derivatives_summary.json",   ["time"],                                None,      True),
+    ("data/derivatives/investor_summary.json",      ["date", "foreign_net_1d"],              "source",  False),
+    ("data/derivatives/etf_summary.json",           ["date"],                                None,      False),
+    ("data/derivatives/shortselling_summary.json",  ["date", "market_short_ratio"],          "source",  False),
+    ("data/derivatives/basis_analysis.json",        ["basis", "basisPct"],                   None,      True),
+    ("data/backtest/flow_signals.json",             ["stocks", "hmmRegimeLabel"],            "status",  False),
+    ("data/derivatives/options_analytics.json",     [],                                      "status",  False),
+]
+
+# Staleness threshold: WARN if data file not updated within this many days
+PIPELINE_STALENESS_DAYS = 14
+
+
+def _resolve_dotted_key(data, dotted_key):
+    """Walk a dotted key path like 'analytics.straddleImpliedMove'."""
+    parts = dotted_key.split(".")
+    cur = data
+    for part in parts:
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def _parse_date_field(data, field_candidates):
+    """Try to parse a date from common field names. Returns date or None."""
+    for field in field_candidates:
+        val = data.get(field) if isinstance(data, dict) else None
+        if not val or not isinstance(val, str):
+            continue
+        try:
+            return date.fromisoformat(val[:10])
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def check_pipeline(strict=False):
+    section("CHECK 6 - JSON Pipeline Connectivity (12 data sources)")
+    errors = 0
+    warnings = 0
+
+    for file_path, required_keys, guard_field, is_array in PIPELINE_CONTRACT:
+        fpath = ROOT / file_path
+        fname = file_path.split("/")[-1]
+
+        # 6a. File exists
+        if not fpath.exists():
+            fail(f"{file_path} — file not found")
+            errors += 1
+            continue
+
+        # 6b. Parse JSON
+        try:
+            raw = fpath.read_text(encoding="utf-8", errors="replace")
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            fail(f"{fname} — JSON parse error: {e}")
+            errors += 1
+            continue
+
+        # 6c. Array handling: check last element
+        check_target = data
+        if is_array:
+            if not isinstance(data, list) or len(data) == 0:
+                warn(f"{fname} — expected non-empty array, got {'empty array' if isinstance(data, list) else type(data).__name__}")
+                warnings += 1
+                continue
+            check_target = data[-1]
+
+        # 6d. Required keys present
+        missing_keys = []
+        for key in required_keys:
+            if "." in key:
+                if _resolve_dotted_key(check_target, key) is None:
+                    missing_keys.append(key)
+            elif not isinstance(check_target, dict) or key not in check_target:
+                missing_keys.append(key)
+
+        if missing_keys:
+            fail(f"{fname} — missing required keys: {missing_keys}")
+            errors += 1
+        else:
+            ok(f"{fname} — {len(required_keys)} required key(s) present")
+
+        # 6e. Sample/error data guard
+        if guard_field and isinstance(check_target, dict):
+            guard_val = check_target.get(guard_field, "")
+            if guard_val == "sample":
+                fail(f"{fname} — {guard_field}='sample' (daily update has not run real data)")
+                errors += 1
+            elif guard_val == "error":
+                fail(f"{fname} — {guard_field}='error' (upstream API failure)")
+                errors += 1
+
+        # 6f. Staleness check
+        if isinstance(check_target, dict):
+            parsed_date = _parse_date_field(check_target, ["updated", "date", "generated", "time"])
+            if parsed_date:
+                age_days = (date.today() - parsed_date).days
+                if age_days > PIPELINE_STALENESS_DAYS:
+                    warn(f"{fname} — data is {age_days} days old (threshold: {PIPELINE_STALENESS_DAYS}d)")
+                    warnings += 1
+
+    # 6g. options_analytics.json nested key check
+    opts_path = ROOT / "data/derivatives/options_analytics.json"
+    if opts_path.exists():
+        try:
+            opts_data = json.loads(opts_path.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(opts_data, dict):
+                implied_move = _resolve_dotted_key(opts_data, "analytics.straddleImpliedMove")
+                if implied_move is None:
+                    warn(f"options_analytics.json — analytics.straddleImpliedMove not found")
+                    warnings += 1
+                else:
+                    ok(f"options_analytics.json — nested analytics keys present")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass  # Already caught above
+
+    # 6h. screenerWorker.js importScripts version sync
+    screener_js = JS / "screenerWorker.js"
+    index_html = ROOT / "index.html"
+    if screener_js.exists() and index_html.exists():
+        html_src = read(index_html)
+        screener_src = read(screener_js)
+        html_vers = {m.group(1): int(m.group(2))
+                     for m in re.finditer(r'<script[^>]+src="js/([^"?]+\.js)\?v=(\d+)"', html_src)}
+        screener_vers = {m.group(1): int(m.group(2))
+                         for m in re.finditer(r"['\"]([^'\"?]+\.js)\?v=(\d+)['\"]", screener_src)}
+        mismatches = []
+        for fname_s, sv in screener_vers.items():
+            hv = html_vers.get(fname_s)
+            if hv is not None and hv != sv:
+                mismatches.append((fname_s, hv, sv))
+        if mismatches:
+            for fname_s, hv, sv in mismatches:
+                fail(f"Version mismatch: {fname_s} index.html ?v={hv} != screenerWorker.js ?v={sv}")
+                errors += 1
+        else:
+            ok(f"screenerWorker.js <-> index.html ?v=N versions in sync")
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 7 - Global Name Collisions
+# =============================================================================
+
+# Files that run in isolated Worker scope (not global namespace collision risk)
+WORKER_FILES = {"analysisWorker.js", "screenerWorker.js"}
+
+# Known intentional re-declarations (e.g., Worker-local copies)
+COLLISION_WHITELIST = {
+    "_VIX_PROXY",       # signalEngine.js Worker-safe copy of VIX_VKOSPI_PROXY
+}
+
+
+def _extract_top_level_decls(src):
+    """Extract all top-level var/let/const/function/class names from JS source."""
+    decls = set()
+    for m in re.finditer(
+        r"^(?:var|let|const|async\s+function|function|class)\s+(\w+)",
+        src, re.MULTILINE
+    ):
+        decls.add(m.group(1))
+    return decls
+
+
+def check_globals_collision(strict=False):
+    section("CHECK 7 - Global Name Collisions (19 files)")
+    errors = 0
+    warnings = 0
+
+    # Collect declarations per file (main-thread files only)
+    file_decls = {}
+    for fname in LOAD_ORDER:
+        if fname in WORKER_FILES:
+            continue
+        fpath = JS / fname
+        if not fpath.exists():
+            continue
+        src = read(fpath)
+        decls = _extract_top_level_decls(src)
+        file_decls[fname] = decls
+
+    # Find collisions: same name declared in 2+ files
+    name_to_files = {}
+    for fname, decls in file_decls.items():
+        for d in decls:
+            name_to_files.setdefault(d, []).append(fname)
+
+    # Known exports are intentionally in one file — filter those out
+    all_exports = set()
+    for exports in FILE_EXPORTS.values():
+        all_exports |= exports
+
+    collisions = []
+    for name, files in sorted(name_to_files.items()):
+        if len(files) > 1 and name not in COLLISION_WHITELIST:
+            collisions.append((name, files))
+
+    if collisions:
+        for name, files in collisions[:10]:
+            if name in all_exports:
+                warn(f"Global '{name}' declared in multiple files: {files} (exported — verify intentional)")
+                warnings += 1
+            else:
+                fail(f"Global '{name}' collision: declared in {files}")
+                errors += 1
+        if len(collisions) > 10:
+            info(f"... and {len(collisions) - 10} more collision(s)")
+    else:
+        ok(f"No global name collisions across {len(file_decls)} main-thread files")
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 8 - Dead Global Exports
+# =============================================================================
+
+def check_dead_exports(strict=False):
+    section("CHECK 8 - Dead Global Exports")
+    errors = 0
+    warnings = 0
+
+    # Read all main-thread file sources
+    all_sources = {}
+    for fname in LOAD_ORDER:
+        fpath = JS / fname
+        if fpath.exists():
+            all_sources[fname] = read(fpath)
+
+    # Also check index.html for references
+    index_src = ""
+    if (ROOT / "index.html").exists():
+        index_src = read(ROOT / "index.html")
+
+    dead_count = 0
+    for fname, exports in FILE_EXPORTS.items():
+        for export_name in sorted(exports):
+            # Check if any OTHER file references this export
+            referenced = False
+            for other_fname, other_src in all_sources.items():
+                if other_fname == fname:
+                    continue
+                # Simple word-boundary check
+                if re.search(r"\b" + re.escape(export_name) + r"\b", other_src):
+                    referenced = True
+                    break
+            # Also check index.html
+            if not referenced and re.search(r"\b" + re.escape(export_name) + r"\b", index_src):
+                referenced = True
+            # Also check Worker files (they importScripts some modules)
+            if not referenced:
+                for wf in WORKER_FILES:
+                    wpath = JS / wf
+                    if wpath.exists():
+                        wsrc = read(wpath)
+                        if re.search(r"\b" + re.escape(export_name) + r"\b", wsrc):
+                            referenced = True
+                            break
+            if not referenced:
+                warn(f"js/{fname}: '{export_name}' exported but never referenced by other files")
+                warnings += 1
+                dead_count += 1
+
+    if dead_count == 0:
+        total_exports = sum(len(v) for v in FILE_EXPORTS.values())
+        ok(f"All {total_exports} exported globals are referenced by at least one other file")
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 9 - Canvas Safety (save/restore balance + DPR setTransform)
+# =============================================================================
+
+CANVAS_FILES = [
+    "patternRenderer.js", "signalRenderer.js", "financials.js",
+    "drawingTools.js", "chart.js",
+]
+
+
+def check_canvas(strict=False):
+    section("CHECK 9 - Canvas Safety (save/restore + DPR)")
+    errors = 0
+    warnings = 0
+
+    for fname in CANVAS_FILES:
+        fpath = JS / fname
+        if not fpath.exists():
+            continue
+        src = read(fpath)
+        lines = src.splitlines()
+
+        # 9a. save/restore balance per file
+        saves = len(re.findall(r"\.save\(\)", src))
+        restores = len(re.findall(r"\.restore\(\)", src))
+        if saves != restores:
+            warn(f"{fname}: ctx.save()={saves} vs ctx.restore()={restores} (imbalanced by {abs(saves - restores)})")
+            warnings += 1
+        else:
+            ok(f"{fname}: save/restore balanced ({saves} pairs)")
+
+        # 9b. DPR safety: ctx.scale(dpr must be preceded by setTransform within 4 lines
+        #     Standard pattern: setTransform → clearRect → scale(dpr)
+        for lineno, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                continue
+            if re.search(r"\.scale\(\s*dpr", stripped):
+                # Look back up to 4 lines for setTransform
+                found_transform = False
+                for j in range(lineno - 2, max(0, lineno - 6), -1):
+                    if "setTransform" in lines[j]:
+                        found_transform = True
+                        break
+                if not found_transform:
+                    fail(f"{fname} line {lineno}: ctx.scale(dpr) without preceding setTransform (within 4 lines)")
+                    errors += 1
+
+    return errors, warnings
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -699,7 +1077,8 @@ def main():
     parser = argparse.ArgumentParser(description="CheeseStock pre-deploy verifier")
     parser.add_argument(
         "--check",
-        choices=["patterns", "colors", "dashes", "globals", "scripts", "all"],
+        choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
+                 "collision", "dead_exports", "canvas", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -716,11 +1095,15 @@ def main():
     total_warnings = 0
 
     checks = {
-        "patterns": check_patterns,
-        "colors":   check_colors,
-        "dashes":   check_dashes,
-        "globals":  check_globals,
-        "scripts":  check_scripts,
+        "patterns":      check_patterns,
+        "colors":        check_colors,
+        "dashes":        check_dashes,
+        "globals":       check_globals,
+        "scripts":       check_scripts,
+        "pipeline":      check_pipeline,
+        "collision":     check_globals_collision,
+        "dead_exports":  check_dead_exports,
+        "canvas":        check_canvas,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

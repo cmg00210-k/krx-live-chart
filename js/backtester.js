@@ -753,7 +753,7 @@ class PatternBacktester {
     const avgIS = sumIS / validFolds;
     const avgOOS = sumOOS / validFolds;
     // WFE: avoid division by zero, sign-aware (both negative = not robust)
-    var minISEdge = 0.005; // [D] Heuristic — 0.5% minimum IS edge: below KRX round-trip cost → noise
+    var minISEdge = 0.3; // P0-2 fix: 0.3pp minimum IS edge (~KRX round-trip cost 0.25%+0.015%); was 0.005 (60x too small, returns in pp)
     const wfe = Math.abs(avgIS) < minISEdge
       ? 0  // insufficient IS edge → WFE undefined
       : Math.round((avgOOS / avgIS) * 100);
@@ -1369,7 +1369,7 @@ class PatternBacktester {
 
       // [Expert Consensus] Sortino Ratio — Sortino & van der Meer (1991)
       // Penalizes only downside deviation, more appropriate for asymmetric returns
-      // Annualization: √(KRX_TRADING_DAYS/(h-1)) per Sortino & Price (1994); h-1 df correction, assumes IID downside deviations
+      // Annualization: √(KRX_TRADING_DAYS/h) per Sortino & van der Meer (1991)
       // [H-1 FIX] Denominator = sqrt(sum(min(r,0)^2) / N_total), NOT / N_negative.
       // Per Sortino & van der Meer (1991): downside deviation uses total sample count
       // to avoid overestimating risk when few negative returns exist.
@@ -1377,7 +1377,8 @@ class PatternBacktester {
         ? returns.reduce((a, r) => a + (r < 0 ? r * r : 0), 0) / n
         : 0;
       const downsideDev = Math.sqrt(downsideVariance);
-      const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(KRX_TRADING_DAYS / Math.max(1, h - 1))).toFixed(2) : null;
+      // P0-1 fix: Sortino denominator — h not h-1 (h-1 inflated ratio up to 41% at short horizons)
+      const sortinoRatio = downsideDev > 0 ? +(mean / downsideDev * Math.sqrt(KRX_TRADING_DAYS / Math.max(1, h))).toFixed(2) : null;
 
       // 승률 (방향에 따라 다름)
       let wins;

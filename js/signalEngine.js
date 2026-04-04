@@ -6,6 +6,11 @@
 //        patterns.js  (patternEngine — 캔들 패턴)
 // ══════════════════════════════════════════════════════
 
+// ── VIX→VKOSPI 프록시 스케일 (Worker 컨텍스트 호환) ──
+// 메인 스레드: appState.js의 VIX_VKOSPI_PROXY 참조
+// Worker 스레드: appState.js 미로드 → 로컬 폴백 1.12
+var _VIX_PROXY = (typeof VIX_VKOSPI_PROXY !== 'undefined') ? VIX_VKOSPI_PROXY : 1.12;
+
 // ── 복합 시그널 정의 ────────────────────────────────────
 const COMPOSITE_SIGNAL_DEFS = [
   // Tier 1: 강력 매수/매도 (3개 이상 조건 동시 충족)
@@ -608,7 +613,7 @@ class SignalEngine {
       var _vkospiVal = null;
       if (_mctx && _mctx.vkospi != null) _vkospiVal = _mctx.vkospi;
       else if (_macro && _macro.vkospi != null) _vkospiVal = _macro.vkospi;
-      else if (_macro && _macro.vix != null) _vkospiVal = _macro.vix * 1.12;  // [DEPRECATED FALLBACK]
+      else if (_macro && _macro.vix != null) _vkospiVal = _macro.vix * _VIX_PROXY;  // [DEPRECATED FALLBACK]
       if (_vkospiVal != null && _vkospiVal > 0) {
         var _hv = calcHV(candles, 20);
         if (_hv != null && _hv > 0.01) {
@@ -629,7 +634,7 @@ class SignalEngine {
 
     // [Phase TA-3 C-2] VKOSPI/VIX → HMM fallback chain (Doc26 §2)
     // Priority: 1) VKOSPI (KRX 자체 변동성지수, 미구현 시 null)
-    //           2) VIX × 1.1 proxy (VKOSPI ≈ VIX × 1.1 for KRX, Whaley 2009)
+    //           2) VIX × 1.12 proxy (VKOSPI ≈ VIX × 1.12 for KRX, Whaley 2009)
     //           3) HMM regime (기존 hmm_regimes.json 데이터)
     // 레짐별 신호 할인: crisis→0.65, high→0.80, normal→1.0, low→1.0
     var _vkospiRegime = SignalEngine._classifyVolRegimeFromVKOSPI();
@@ -1795,8 +1800,8 @@ class SignalEngine {
       vol = macro.vkospi;  // data/vkospi.json → appWorker.js 로드
     } else if (macro && macro.vix != null) {
       // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — only for offline mode without vkospi.json
-      // [P0-C8] 1.0/1.1/1.25 variable scale → 1.12 통일 (다른 fallback과 일관성)
-      vol = macro.vix * 1.12;
+      // [P0-C8] 1.0/1.1/1.25 variable scale → _VIX_PROXY 통일 (다른 fallback과 일관성)
+      vol = macro.vix * _VIX_PROXY;
     }
 
     if (vol == null) return null;
@@ -1863,14 +1868,14 @@ class SignalEngine {
     var components = 0;
 
     // VKOSPI-first volatility contribution (0~1): vol < 15 → 0, vol > 40 → 1
-    // Fallback: mctx.vkospi → macro.vkospi → macro.vix × 1.12 [PROXY]
+    // Fallback: mctx.vkospi → macro.vkospi → macro.vix × _VIX_PROXY [PROXY]
     var volForCrisis = null;
     if (mctx && mctx.vkospi != null) {
       volForCrisis = mctx.vkospi;
     } else if (macro.vkospi != null) {
       volForCrisis = macro.vkospi;
     } else if (macro.vix != null) {
-      volForCrisis = macro.vix * 1.12;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
+      volForCrisis = macro.vix * _VIX_PROXY;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
     }
     if (volForCrisis != null) {
       score += Math.min(1, Math.max(0, (volForCrisis - 15) / 25));
@@ -3070,7 +3075,7 @@ class SignalEngine {
       } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vkospi != null) {
         vkospi = _macroLatest.vkospi;
       } else if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.vix != null) {
-        vkospi = _macroLatest.vix * 1.12;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
+        vkospi = _macroLatest.vix * _VIX_PROXY;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
       }
       var hv = calcHV(candles, 20);
       if (vkospi != null && hv != null) {
