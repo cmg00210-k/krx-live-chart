@@ -4,7 +4,6 @@ Macro Composite Score v2 (MCS v2) -- Multi-Source Weighted Composite
 
 Reads:
   data/macro/kosis_latest.json    (CLI, ESI, IPI, retail, employment)
-  data/macro/ecos_latest.json     (ECOS indicators -- base rate, CPI)
   data/macro/macro_latest.json    (aggregated macro: KTB, BOK rate, CPI, exports, etc.)
   data/macro/bonds_latest.json    (yield curve, credit spreads)
 
@@ -391,17 +390,18 @@ def main():
     print(f'  Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}')
 
     # ── 데이터 로드 ──
+    # Note: ecos_latest.json does not exist; all ECOS-derived fields (BOK rate, CPI YoY)
+    # are already aggregated into macro_latest.json by compute_macro.py.
+    # The ecos parameter in helper functions is kept for API compatibility but receives None.
     kosis = _load_json(os.path.join(MACRO_DIR, 'kosis_latest.json'))
-    ecos = _load_json(os.path.join(MACRO_DIR, 'ecos_latest.json'))
     macro = _load_json(os.path.join(MACRO_DIR, 'macro_latest.json'))
     bonds = _load_json(os.path.join(MACRO_DIR, 'bonds_latest.json'))
+    ecos = None  # [C-3] was phantom ecos_latest.json — all ECOS fields live in macro_latest
 
-    sources_loaded = sum(1 for s in [kosis, ecos, macro, bonds] if s is not None)
-    print(f'  Data sources loaded: {sources_loaded}/4')
+    sources_loaded = sum(1 for s in [kosis, macro, bonds] if s is not None)
+    print(f'  Data sources loaded: {sources_loaded}/3')
     if kosis:
         print(f'    KOSIS: {kosis.get("updated", "?")}')
-    if ecos:
-        print(f'    ECOS: available')
     if macro:
         print(f'    Macro: {macro.get("updated", "?")}')
     if bonds:

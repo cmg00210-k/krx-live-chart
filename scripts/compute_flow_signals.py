@@ -384,17 +384,64 @@ def main():
             print(f'    {code}: foreign={foreign_mom}, retail={retail_sig}, '
                   f'inst={inst_align}, hmm={hmm}')
 
-    # ── 데이터 없는 종목도 HMM 라벨만 기록 ──
-    if hmm_label and not args.code:
+    # ── 시장 전체 investor_summary.json에서 global fallback 산출 ──
+    # per-stock data가 없을 때 시장 전체 수급 방향을 대리 변수로 사용
+    global_foreign = None
+    global_retail = None
+    global_inst_align = None
+    inv_sum_path = os.path.join(DATA_DIR, 'derivatives', 'investor_summary.json')
+    inv_sum = _load_json(inv_sum_path)
+    if inv_sum:
+        # [H-13 FIX] source="sample" → skip (가짜 데이터로 전체 종목에 신호 전파 방지)
+        if inv_sum.get('source') == 'sample':
+            print('  Global fallback: SKIPPED (investor_summary is SAMPLE data)')
+        else:
+            # [C-2 FIX] nested (foreign.net_1d_eok) 또는 flat (foreign_net_1d) 둘 다 지원
+            _foreign_obj = inv_sum.get('foreign')
+            fn = None
+            if isinstance(_foreign_obj, dict):
+                fn = _foreign_obj.get('net_1d_eok') or _foreign_obj.get('net_5d_eok')
+            if fn is None:
+                fn = inv_sum.get('foreign_net_1d') or inv_sum.get('foreign_net_5d')
+            if fn is not None:
+                global_foreign = 'buy' if fn > 0 else ('sell' if fn < 0 else 'neutral')
+            # [C-2 FIX] retail: nested 또는 flat
+            _retail_obj = inv_sum.get('retail')
+            rn = None
+            if isinstance(_retail_obj, dict):
+                rn = _retail_obj.get('net_1d_eok') or _retail_obj.get('net_5d_eok')
+            if rn is None:
+                rn = inv_sum.get('retail_net_1d') or inv_sum.get('retail_net_5d')
+            if rn is not None:
+                # 개인 역추세: 개인 매수 → contrarian_sell, 개인 매도 → contrarian_buy
+                global_retail = 'contrarian_sell' if rn > 0 else ('contrarian_buy' if rn < 0 else 'neutral')
+            al = inv_sum.get('alignment')
+            if isinstance(al, dict):
+                al = al.get('signal_1d')
+            if isinstance(al, str):
+                global_inst_align = al
+            print(f'  Global fallback: foreign={global_foreign}, retail={global_retail}, inst={global_inst_align}')
+
+    # ── 데이터 없는 종목: HMM 라벨만 기록 (수급 신호는 null) ──
+    # [C-5] per-stock investor data 없는 종목에 global_foreign/retail을 할당하면
+    # 2,600+ 종목이 동일한 방향(예: 'buy')을 받아 false confidence 조정이 발생한다.
+    # foreignMomentum/retailContrarian/institutionalAlignment 은 per-stock 데이터 있을 때만 유효.
+    # hmmRegimeLabel은 시장 전체 공통이므로 null이 아닌 값을 그대로 전달한다.
+    if not args.code:
+        null_flow_count = 0
         for s in stocks:
             code = s.get('code', '')
             if code not in results and code not in flow_cache:
                 results[code] = {
-                    'foreignMomentum': None,
-                    'retailContrarian': None,
-                    'institutionalAlignment': None,
-                    'hmmRegimeLabel': hmm_label,
+                    'foreignMomentum': None,       # no per-stock data — do not fabricate
+                    'retailContrarian': None,       # no per-stock data — do not fabricate
+                    'institutionalAlignment': None, # no per-stock data — do not fabricate
+                    'hmmRegimeLabel': hmm_label,   # market-wide regime is valid
                 }
+                null_flow_count += 1
+        if null_flow_count > 0:
+            print(f'  [WARN] {null_flow_count} stocks have no per-stock flow data — '
+                  f'foreignMomentum/retailContrarian/institutionalAlignment set to null')
 
     # ── 요약 통계 ──
     signal_counts = {

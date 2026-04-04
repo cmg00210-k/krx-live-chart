@@ -52,20 +52,22 @@ ECOS_STAT_CODE = "817Y002"  # 시장금리(일별)
 RATE_LIMIT_SEC = 0.5
 
 # 국고채 수익률 항목코드
+# 출처: ECOS StatisticItemList 817Y002 (2026-04-04 검증 완료)
 KTB_ITEMS = {
-    "ktb_1y":  "010200001",
-    "ktb_2y":  "010200002",
-    "ktb_3y":  "010200000",
-    "ktb_5y":  "010200003",
-    "ktb_10y": "010210000",
-    "ktb_20y": "010220000",
-    "ktb_30y": "010230000",
+    "ktb_1y":  "010190000",   # 국고채(1년)
+    "ktb_2y":  "010195000",   # 국고채(2년)
+    "ktb_3y":  "010200000",   # 국고채(3년)
+    "ktb_5y":  "010200001",   # 국고채(5년)
+    "ktb_10y": "010210000",   # 국고채(10년)
+    "ktb_20y": "010220000",   # 국고채(20년)
+    "ktb_30y": "010230000",   # 국고채(30년)
 }
 
 # 회사채 수익률 항목코드
+# 주의: 010400000 = 통안증권(91일) — BBB-와 혼동 금지
 CREDIT_ITEMS = {
-    "aa_minus": "010300000",   # 회사채 AA- 3년
-    "bbb_minus": "010400000",  # 회사채 BBB- 3년
+    "aa_minus":  "010300000",  # 회사채(3년, AA-)
+    "bbb_minus": "010320000",  # 회사채(3년, BBB-)
 }
 
 # 국고채 만기(년) — NSS 피팅용
@@ -443,6 +445,125 @@ def classify_credit_regime(aa_spread: Optional[float]) -> str:
 
 
 # ══════════════════════════════════════════════════════
+#  데이터 검증 (Financial Theory Constraints)
+# ══════════════════════════════════════════════════════
+
+def _validate_bond_data(latest: dict, verbose: bool = False) -> dict:
+    """
+    채권 데이터 금융이론 기반 검증.
+
+    Validation rules (CFA Level I Fixed Income):
+    1. Credit hierarchy: Risk-free (KTB) < AA- < BBB-
+       — 위험 프리미엄은 항상 양수. 위반 시 데이터 오류로 판정하고 무효화.
+    2. Yield curve monotonicity: normally short < long, but inversions
+       are real economic signals (recession indicator) — warn only, don't invalidate.
+    3. Reasonable range: 한국 시장금리 -1% ~ 20% (극단값 필터)
+
+    Parameters:
+        latest: collect_latest() 결과 dict
+        verbose: 상세 출력
+
+    Returns:
+        검증 후 수정된 dict (위반 값 → None)
+    """
+    yields = latest.get("yields", {})
+    credit = latest.get("credit_spreads", {})
+    warnings = []
+    errors = []
+
+    # ── Rule 1: 합리적 범위 (reasonable range filter) ──
+    # 한국 시장금리: 역사적 최저 ~0.5%, 최고 ~20% (1998 IMF)
+    YIELD_MIN, YIELD_MAX = -1.0, 20.0
+
+    for key, val in list(yields.items()):
+        if val is not None and (val < YIELD_MIN or val > YIELD_MAX):
+            errors.append(f"Range: {key}={val:.3f}% outside [{YIELD_MIN}, {YIELD_MAX}]")
+            yields[key] = None
+
+    for key in ["aa_minus", "bbb_minus"]:
+        val = credit.get(key)
+        if val is not None and (val < YIELD_MIN or val > YIELD_MAX):
+            errors.append(f"Range: {key}={val:.3f}% outside [{YIELD_MIN}, {YIELD_MAX}]")
+            credit[key] = None
+
+    # ── Rule 2: 크레딧 계층 구조 (credit hierarchy) ──
+    # KTB 3Y < AA- 3Y < BBB- 3Y (동일 만기 비교)
+    ktb_3y = yields.get("ktb_3y")
+    aa_yield = credit.get("aa_minus")
+    bbb_yield = credit.get("bbb_minus")
+
+    if ktb_3y is not None and aa_yield is not None:
+        if aa_yield <= ktb_3y:
+            errors.append(
+                f"Credit hierarchy: AA-({aa_yield:.3f}%) <= KTB3Y({ktb_3y:.3f}%) "
+                f"— impossible negative credit spread, nullifying AA-"
+            )
+            credit["aa_minus"] = None
+            credit["aa_spread"] = None
+            aa_yield = None
+
+    if ktb_3y is not None and bbb_yield is not None:
+        if bbb_yield <= ktb_3y:
+            errors.append(
+                f"Credit hierarchy: BBB-({bbb_yield:.3f}%) <= KTB3Y({ktb_3y:.3f}%) "
+                f"— impossible negative credit spread, nullifying BBB-"
+            )
+            credit["bbb_minus"] = None
+            credit["bbb_spread"] = None
+            bbb_yield = None
+
+    # AA- < BBB- (same maturity, BBB- is riskier)
+    if aa_yield is not None and bbb_yield is not None:
+        if bbb_yield <= aa_yield:
+            errors.append(
+                f"Credit hierarchy: BBB-({bbb_yield:.3f}%) <= AA-({aa_yield:.3f}%) "
+                f"— BBB- must yield more than AA-, nullifying BBB-"
+            )
+            credit["bbb_minus"] = None
+            credit["bbb_spread"] = None
+
+    # ── Rule 3: 수익률곡선 단조성 (yield curve monotonicity) ──
+    # 정상: short < long, 역전은 실제 경제 신호 → 경고만 (invalidate 안 함)
+    curve_keys = ["ktb_1y", "ktb_2y", "ktb_3y", "ktb_5y",
+                  "ktb_10y", "ktb_20y", "ktb_30y"]
+    prev_key, prev_val = None, None
+    for key in curve_keys:
+        val = yields.get(key)
+        if val is not None:
+            if prev_val is not None and val < prev_val:
+                warnings.append(
+                    f"Yield curve inversion: {key}({val:.3f}%) < "
+                    f"{prev_key}({prev_val:.3f}%) — real signal, not invalidated"
+                )
+            prev_key, prev_val = key, val
+
+    # ── 결과 출력 ──
+    if errors:
+        print(f"\n  [VALIDATE] {len(errors)} ERROR(s) — corrupted values nullified:")
+        for e in errors:
+            print(f"    ERROR: {e}")
+
+    if warnings:
+        print(f"\n  [VALIDATE] {len(warnings)} WARNING(s):")
+        for w in warnings:
+            print(f"    WARN: {w}")
+
+    if not errors and not warnings:
+        if verbose:
+            print("  [VALIDATE] All bond data passed validation")
+
+    latest["yields"] = yields
+    latest["credit_spreads"] = credit
+    latest["_validation"] = {
+        "errors": len(errors),
+        "warnings": len(warnings),
+        "details": errors + [f"WARN: {w}" for w in warnings] if (errors or warnings) else [],
+    }
+
+    return latest
+
+
+# ══════════════════════════════════════════════════════
 #  최신 스냅샷 수집
 # ══════════════════════════════════════════════════════
 
@@ -580,6 +701,9 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
             "dv01": metrics_dv01,
         },
     }
+
+    # ── 금융이론 기반 데이터 검증 ──
+    result = _validate_bond_data(result, verbose)
 
     return result
 

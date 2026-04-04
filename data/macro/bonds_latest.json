@@ -1,28 +1,55 @@
 {
-  "updated": "2026-04-01",
+  "updated": "2026-04-04",
   "yields": {
-    "ktb_1y": 3.567,
-    "ktb_3y": 3.37,
-    "ktb_10y": 3.689,
-    "ktb_20y": 3.68,
-    "ktb_30y": 3.609
+    "ktb_1y": 2.992,
+    "ktb_2y": 3.362,
+    "ktb_3y": 3.448,
+    "ktb_5y": 3.622,
+    "ktb_10y": 3.747,
+    "ktb_20y": 3.694,
+    "ktb_30y": 3.63
   },
   "credit_spreads": {
-    "aa_minus": 4.011,
-    "bbb_minus": 2.522,
-    "aa_spread": 0.64,
-    "bbb_spread": -0.85
+    "aa_minus": 4.093,
+    "bbb_minus": 9.897,
+    "aa_spread": 0.65,
+    "bbb_spread": 6.45
   },
   "nss_params": {
-    "beta1": 3.4015,
-    "beta2": 0.768,
-    "beta3": -2.3356,
-    "beta4": 1.692,
-    "lambda1": 1.3868,
-    "lambda2": 5.0564
+    "beta1": 3.3027,
+    "beta2": -217.0974,
+    "beta3": 214.8867,
+    "beta4": 1.583,
+    "lambda1": 0.134,
+    "lambda2": 6.5934
   },
-  "slope_10y3y": 0.32,
-  "slope_10y2y": null,
+  "slope_10y3y": 0.3,
+  "slope_10y2y": 0.38,
   "curve_inverted": false,
-  "credit_regime": "normal"
+  "credit_regime": "normal",
+  "metrics": {
+    "duration": {
+      "ktb_3y": 2.827,
+      "ktb_10y": 8.2764,
+      "ktb_30y": 18.1858
+    },
+    "convexity": {
+      "ktb_3y": 9.5883,
+      "ktb_10y": 80.3016,
+      "ktb_30y": 450.2423
+    },
+    "dv01": {
+      "ktb_3y": 0.0283,
+      "ktb_10y": 0.0828,
+      "ktb_30y": 0.1819
+    }
+  },
+  "_validation": {
+    "errors": 0,
+    "warnings": 2,
+    "details": [
+      "WARN: Yield curve inversion: ktb_20y(3.694%) < ktb_10y(3.747%) — real signal, not invalidated",
+      "WARN: Yield curve inversion: ktb_30y(3.630%) < ktb_20y(3.694%) — real signal, not invalidated"
+    ]
+  }
 }

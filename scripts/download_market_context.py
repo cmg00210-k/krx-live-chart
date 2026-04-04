@@ -4,7 +4,7 @@ download_market_context.py — 외부 API 시장 맥락 수집기
 Layer 2: getContextualConfidence()에서 사용되는 data/market_context.json 생성
 
 수집 항목:
-  1. ECOS API — 소비자심리지수(CCSI, 통계코드 721Y001)
+  1. ECOS API — 소비자심리지수(CCSI, 통계코드 511Y002/FME/99988)
   2. KRX 투자자 순매수 (외국인/기관) — 공시 데이터
   3. VKOSPI — 변동성 지수 (KRX API)
   4. 어닝시즌 플래그 — 1월/4월/7월/10월 실적 발표 기간
@@ -61,7 +61,11 @@ def _earning_season_flag():
 def fetch_ccsi(api_key: str) -> Optional[float]:
     """한국은행 ECOS API → 소비자심리지수(CCSI) 최신값 조회
     API 문서: https://ecos.bok.or.kr/api/#/DevGuide/userGuide
-    통계코드: 721Y001 / 항목: CCSI (종합)
+    통계코드: 511Y002 (소비자동향조사, 2-그룹 테이블)
+    Group1: FME (소비자심리지수)
+    Group2: 99988 (전체/전국)
+    주기: M (월별)
+    정상 범위: 80~120 (100 = 장기 평균)
     """
     if not HAS_REQUESTS or not api_key:
         return None
@@ -71,7 +75,7 @@ def fetch_ccsi(api_key: str) -> Optional[float]:
     end_ym = today.strftime('%Y%m')
     url = (
         f'{ECOS_BASE}/StatisticSearch/{api_key}/json/kr/1/10/'
-        f'721Y001/MM/{start_ym}/{end_ym}/CCSI'
+        f'511Y002/M/{start_ym}/{end_ym}/FME/99988'
     )
     try:
         r = requests.get(url, timeout=TIMEOUT)
@@ -122,30 +126,49 @@ def fetch_vkospi() -> Optional[float]:
 # 투자자 순매수 (KRX 공시)
 # ──────────────────────────────────────────────────────
 def fetch_investor_flow() -> Optional[dict]:
-    """외국인/기관 순매수 최신값 (억원 단위)
-    FinanceDataReader KRX 투자자 동향 조회
+    """외국인 순매수 최신값 (억원 단위)
+    우선순위: 1) data/derivatives/investor_summary.json (download_investor.py 생성)
+              2) pykrx 투자자별 거래실적
+              3) FinanceDataReader fallback
     """
+    # 1) investor_summary.json에서 읽기 (가장 확실)
+    inv_path = Path(__file__).parent.parent / 'data' / 'derivatives' / 'investor_summary.json'
     try:
-        import FinanceDataReader as fdr
-        today = datetime.date.today()
-        start = (today - datetime.timedelta(days=5)).strftime('%Y-%m-%d')
-        df = fdr.DataReader('KRX/PER', start)
-        if df is not None and not df.empty:
-            # PER 조회 성공 시 외국인/기관 데이터를 별도 조회
-            pass
+        if inv_path.exists():
+            with open(inv_path, 'r', encoding='utf-8') as f:
+                inv = json.load(f)
+            # [H-13 FIX] source="sample" 데이터는 무시 — 가짜 데이터가 live로 전파 방지
+            if inv.get('source') == 'sample':
+                print('[investor] investor_summary.json is SAMPLE — skipping')
+                return None
+            # [C-2 FIX] nested (foreign.net_1d_eok) 또는 flat (foreign_net_1d) 둘 다 지원
+            val = None
+            foreign = inv.get('foreign')
+            if isinstance(foreign, dict) and foreign.get('net_1d_eok') is not None:
+                val = foreign['net_1d_eok']
+            elif inv.get('foreign_net_1d') is not None:
+                val = inv['foreign_net_1d']
+            if val is not None:
+                return {'net_foreign_eok': round(float(val), 1)}
     except Exception:
         pass
-    # 투자자 데이터 직접 조회 (DataReader 지원 항목)
+
+    # 2) pykrx fallback
     try:
-        import FinanceDataReader as fdr
+        from pykrx import stock as pykrx_stock
         today = datetime.date.today()
-        start = (today - datetime.timedelta(days=10)).strftime('%Y-%m-%d')
-        df = fdr.DataReader('KOSPI/FOREIGN', start)
+        start = (today - datetime.timedelta(days=10)).strftime('%Y%m%d')
+        end = today.strftime('%Y%m%d')
+        df = pykrx_stock.get_market_trading_value_by_date(start, end, "KOSPI")
         if df is not None and not df.empty:
-            val = float(df.iloc[-1].get('Net', df.iloc[-1, 0]))
-            return {'net_foreign_eok': round(val / 1e8, 1)}
+            # 외국인 순매수 (억원)
+            foreign_col = [c for c in df.columns if '외국인' in c]
+            if foreign_col:
+                val = float(df[foreign_col[0]].iloc[-1])
+                return {'net_foreign_eok': round(val / 1e8, 1)}
     except Exception:
         pass
+
     return None
 
 

@@ -20,7 +20,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=30');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=61');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -303,10 +303,47 @@ async function _loadDerivativesData() {
       _etfData = await results[2].value.json();
     if (results[3].status === 'fulfilled' && results[3].value.ok)
       _shortSellingData = await results[3].value.json();
+
+    // [H-13 FIX] source="sample" 데이터는 null 처리 — 가짜 데이터가 신뢰도 조정에 영향 방지
+    if (_investorData && _investorData.source === 'sample') {
+      console.warn('[KRX] investor_summary is SAMPLE data — investor adjustments disabled');
+      _investorData = null;
+    }
+    // [H-14 FIX] shortselling source="sample" 동일 처리
+    if (_shortSellingData && _shortSellingData.source === 'sample') {
+      console.warn('[KRX] shortselling_summary is SAMPLE data — short interest adjustments disabled');
+      _shortSellingData = null;
+    }
+
     var loaded = [_derivativesData, _investorData, _etfData, _shortSellingData].filter(Boolean).length;
     if (loaded > 0) {
       console.log('[KRX] 파생상품/수급 데이터 로드 완료 (' + loaded + '/4)');
     }
+
+    // [H-6~7 FIX] basis_analysis.json에서 basis/basisPct를 _derivativesData에 병합
+    // derivatives_summary.json에는 basis 필드가 없고, basis_analysis.json에 별도 저장됨
+    try {
+      var basisResp = await fetch('data/derivatives/basis_analysis.json', { signal: AbortSignal.timeout(5000) });
+      if (basisResp.ok) {
+        var basisArr = await basisResp.json();
+        if (Array.isArray(basisArr) && basisArr.length > 0) {
+          var latestBasis = basisArr[basisArr.length - 1];
+          // _derivativesData가 배열이면 최신 레코드에 병합, 아니면 객체에 직접 병합
+          if (Array.isArray(_derivativesData) && _derivativesData.length > 0) {
+            var lastDeriv = _derivativesData[_derivativesData.length - 1];
+            if (lastDeriv.basis == null && latestBasis.basis != null) lastDeriv.basis = latestBasis.basis;
+            if (lastDeriv.basisPct == null && latestBasis.basisPct != null) lastDeriv.basisPct = latestBasis.basisPct;
+          } else if (_derivativesData && typeof _derivativesData === 'object') {
+            if (_derivativesData.basis == null && latestBasis.basis != null) _derivativesData.basis = latestBasis.basis;
+            if (_derivativesData.basisPct == null && latestBasis.basisPct != null) _derivativesData.basisPct = latestBasis.basisPct;
+          } else {
+            // _derivativesData가 없으면 basis만으로 생성
+            _derivativesData = [{ basis: latestBasis.basis, basisPct: latestBasis.basisPct }];
+          }
+          console.log('[KRX] 베이시스 데이터 병합: basis=' + latestBasis.basis + ', basisPct=' + latestBasis.basisPct);
+        }
+      }
+    } catch (e) { /* basis_analysis.json 로드 실패 — 기존 무시 */ }
 
     // [H-2] Worker에 시장 맥락 데이터 주입 — signalEngine 레짐 분류용
     // 메인 스레드: 멀티플라이어 적용 (_applyDerivativesConfidenceToPatterns)
@@ -365,40 +402,54 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
       if (p.confidence == null) continue;
-      if (mcs >= MCS_THRESHOLDS.strong_bull && p.direction === 'buy') {
+      if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') {
         p.confidence *= 1.05;
-      } else if (mcs <= MCS_THRESHOLDS.strong_bear && p.direction === 'sell') {
+      } else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') {
         p.confidence *= 1.05;
       }
     }
   }
 
   // HMM 레짐 + 수급 조정 (종목별)
-  if (code && _flowSignals && _flowSignals[code]) {
-    var flow = _flowSignals[code];
+  // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
+  if (code && _flowSignals && _flowSignals.stocks && _flowSignals.stocks[code]) {
+    var flow = _flowSignals.stocks[code];
     var regime = flow.hmmRegimeLabel || null;
     var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
+
+    // [C-5] Check whether per-stock flow signals are available.
+    // Stocks with no per-stock investor data have foreignMomentum/retailContrarian/
+    // institutionalAlignment set to null — HMM regime multiplier still applies
+    // (it is market-wide), but the per-stock bonus is skipped.
+    var hasFlowData = flow.foreignMomentum != null || flow.retailContrarian != null ||
+                      flow.institutionalAlignment != null;
+    if (!hasFlowData) {
+      console.warn('[Phase8] ' + code + ': no per-stock flow data — foreignMomentum bonus skipped');
+    }
 
     for (var j = 0; j < patterns.length; j++) {
       var pt = patterns[j];
       if (pt.confidence == null) continue;
 
-      // HMM 레짐 승수
-      var dir = pt.direction === 'buy' ? 'buy' : 'sell';
+      // HMM 레짐 승수 (시장 전체 적용 — per-stock data 유무 무관)
+      var dir = pt.signal === 'buy' ? 'buy' : 'sell';
       pt.confidence *= mult[dir];
 
-      // 외국인 방향 일치 보너스
-      if (flow.foreignMomentum === 'buy' && pt.direction === 'buy') {
-        pt.confidence *= 1.03;
-      } else if (flow.foreignMomentum === 'sell' && pt.direction === 'sell') {
-        pt.confidence *= 1.03;
+      // 외국인 방향 일치 보너스 — per-stock data 있을 때만 적용 (null 시 false confidence 방지)
+      if (hasFlowData) {
+        if (flow.foreignMomentum === 'buy' && pt.signal === 'buy') {
+          pt.confidence *= 1.03;
+        } else if (flow.foreignMomentum === 'sell' && pt.signal === 'sell') {
+          pt.confidence *= 1.03;
+        }
       }
     }
   }
 
   // 옵션 Implied Move 조정 (이벤트 기간 감지)
-  if (_optionsAnalytics && _optionsAnalytics.straddleImpliedMove != null) {
-    var impliedMove = _optionsAnalytics.straddleImpliedMove;
+  // JSON structure: { "analytics": { "straddleImpliedMove": ... } }
+  if (_optionsAnalytics && _optionsAnalytics.analytics && _optionsAnalytics.analytics.straddleImpliedMove != null) {
+    var impliedMove = _optionsAnalytics.analytics.straddleImpliedMove;
     if (impliedMove > 3.0) {
       // 높은 Implied Move = 이벤트 기간: 방향성 패턴 신뢰도 조정
       for (var k = 0; k < patterns.length; k++) {
@@ -408,13 +459,16 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
     }
   }
 
-  // DD 페널티 (Phase 6 연결)
-  if (_currentDD != null && _currentDD < 2.0) {
-    for (var m = 0; m < patterns.length; m++) {
-      if (patterns[m].confidence == null) continue;
-      if (patterns[m].direction === 'buy') {
-        patterns[m].confidence *= 0.90;  // DD < 2 → 매수 패턴 -10%
-      }
+  // DD 페널티는 _applyMertonDDToPatterns()에서 이미 적용됨 — 이중 적용 방지를 위해 여기서 제거
+  // (Phase8 DD: 0.90x + MertonDD: 0.82x = 0.738x 이중 감산 버그 수정)
+
+  // [P0-C7] confidence clamp [10, 100] — 다른 adjust 함수와 동일
+  for (var c = 0; c < patterns.length; c++) {
+    if (patterns[c].confidence != null) {
+      patterns[c].confidence = Math.max(10, Math.min(100, patterns[c].confidence));
+    }
+    if (patterns[c].confidencePred != null) {
+      patterns[c].confidencePred = Math.max(10, Math.min(95, patterns[c].confidencePred));
     }
   }
 }
@@ -600,7 +654,10 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
     // clamp [0.70, 1.30]
     adj = Math.max(0.70, Math.min(1.30, adj));
     if (adj !== 1.0) {
-      p.confidence = Math.max(10, Math.min(95, Math.round(p.confidence * adj)));
+      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      if (p.confidencePred != null) {
+        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      }
     }
   }
 }
@@ -722,8 +779,8 @@ function _applyMertonDDToPatterns(patterns) {
       adj = isBuy ? 0.75 : 1.15;
     }
 
-    // clamp [0.85, 1.15]
-    adj = Math.max(0.85, Math.min(1.15, adj));
+    // clamp [0.75, 1.15] — 하한 0.75: DD<1.0 tier (매우 위험) 구분 유효
+    adj = Math.max(0.75, Math.min(1.15, adj));
     p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
     if (p.confidencePred != null) {
       p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
@@ -757,7 +814,6 @@ function _applySurvivorshipAdjustment(patterns) {
     }
   }
 
-  _survivorshipCorrectionLoaded = true;
 }
 
 /**
@@ -995,8 +1051,9 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, 매도 패턴 감쇄
     // MCS < 0.4: 거시 약세 → 매도 패턴 부스트, 매수 패턴 감쇄
     // 0.4~0.6: 중립 → 조정 없음
+    // [FIX] _applyPhase8에서 mcsV2가 적용되면 여기서 스킵 (이중 적용 방지)
     var mcs = macro ? macro.mcs : null;
-    if (mcs != null) {
+    if (mcs != null && !(_macroComposite && _macroComposite.mcsV2 != null)) {
       if (mcs > 0.6) {
         var mcsAdj = 1.0 + (mcs - 0.6) * 0.25;  // 0.6→1.0, 1.0→1.10
         adj *= isBuy ? mcsAdj : (2.0 - mcsAdj);
@@ -1081,6 +1138,21 @@ function _applyMacroConfidenceToPatterns(patterns) {
       }
     }
 
+    // ── 11. KOSIS 경기종합지수 (CLI/CCI) 갭 ──
+    // CLI(선행) vs CCI(동행) 갭: 양수면 경기 회복 신호, 음수면 둔화 신호
+    // cli_cci_gap = CLI - CCI. 기준: 장기평균 ~0. |gap|>5 유의미.
+    // 소스: kosis_latest.json (download_kosis.py)
+    if (_kosisLatest) {
+      var cliCciGap = _kosisLatest.cli_cci_gap;
+      if (cliCciGap != null) {
+        if (cliCciGap > 5) {
+          adj *= isBuy ? 1.04 : 0.97;  // 선행>동행: 경기 회복 → 매수 +4%
+        } else if (cliCciGap < -5) {
+          adj *= isBuy ? 0.97 : 1.04;  // 선행<동행: 경기 둔화 → 매도 +4%
+        }
+      }
+    }
+
     // ── clamp [0.70, 1.25] ──
     adj = Math.max(0.70, Math.min(1.25, adj));
 
@@ -1114,7 +1186,8 @@ function _classifyRORORegime() {
     vkospi = _macroLatest.vkospi;
   } else if (_macroLatest && _macroLatest.vix != null) {
     // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only (real VKOSPI in vkospi.json)
-    vkospi = _macroLatest.vix * 1.15;
+    // [P0-C8] 1.15 → 1.12 통일 (signalEngine.js와 일관성)
+    vkospi = _macroLatest.vix * 1.12;
   }
   if (vkospi != null) {
     var volScore;
@@ -1174,8 +1247,10 @@ function _classifyRORORegime() {
   // ── Factor 5: 투자자 정렬 (weight 0.15) ──
   if (_investorData && _investorData.alignment != null) {
     var flowScore;
-    if (_investorData.alignment === 'aligned_buy') flowScore = 0.8;
-    else if (_investorData.alignment === 'aligned_sell') flowScore = -0.8;
+    var alignment = _investorData.alignment;
+    if (typeof alignment === 'object') alignment = alignment.signal_1d;
+    if (alignment === 'aligned_buy') flowScore = 0.8;
+    else if (alignment === 'aligned_sell') flowScore = -0.8;
     else flowScore = 0.0;
     score += flowScore * 0.15;
     count++;
@@ -1187,7 +1262,7 @@ function _classifyRORORegime() {
     _roroScore = 0;
     return;
   }
-  var normalizedScore = score / Math.min(count / 3, 1.0);
+  var normalizedScore = score * Math.min(count / 3, 1.0);
 
   // ── 히스테리시스 체제 전환 ──
   var ENTER_ON = 0.25, ENTER_OFF = -0.25;
@@ -1228,6 +1303,7 @@ function _applyRORORegimeToPatterns(patterns) {
 
   for (var i = 0; i < patterns.length; i++) {
     var p = patterns[i];
+    if (p.signal !== 'buy' && p.signal !== 'sell') continue;  // neutral → skip
     var adj = (p.signal === 'buy') ? buyAdj : sellAdj;
     // clamp [0.92, 1.08]
     adj = Math.max(0.92, Math.min(1.08, adj));
@@ -1433,6 +1509,8 @@ function _analyzeOnMainThread() {
   // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
   _calcNaiveDD(candles.map(function(c) { return c.close; }));
   _applyMertonDDToPatterns(detectedPatterns);
+  // [P0-C9] Phase 8 MCS + HMM 레짐 + 수급 + 옵션 + DD 통합 조정 (Worker 경로와 동일)
+  _applyPhase8ConfidenceToPatterns(detectedPatterns);
   // [D-1] Survivorship bias: mild confidence discount for buy patterns
   _applySurvivorshipAdjustment(detectedPatterns);
   _applyMacroConditionsToSignals(detectedSignals);
@@ -1475,6 +1553,17 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
 
   // 보존된 차트 패턴 구조선 병합 (드래그 시 소실 방지)
   detectedPatterns = _mergeChartPatternStructLines(visiblePatterns);
+
+  // 드래그 시 신뢰도 조정 — 캐시된 전역 컨텍스트 값 활용, 재계산 없음
+  _applyMarketContextToPatterns(detectedPatterns);
+  _applyRORORegimeToPatterns(detectedPatterns);
+  _applyMacroConfidenceToPatterns(detectedPatterns);
+  _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
+  _applyDerivativesConfidenceToPatterns(detectedPatterns);
+  _applyMertonDDToPatterns(detectedPatterns);
+  _applyPhase8ConfidenceToPatterns(detectedPatterns);
+  _applySurvivorshipAdjustment(detectedPatterns);
+
   chartManager._drawPatterns(candles, chartType, _filterPatternsForViz(detectedPatterns));
   _renderOverlays();
 

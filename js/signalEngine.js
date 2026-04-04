@@ -1795,9 +1795,8 @@ class SignalEngine {
       vol = macro.vkospi;  // data/vkospi.json → appWorker.js 로드
     } else if (macro && macro.vix != null) {
       // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — only for offline mode without vkospi.json
-      var vix = macro.vix;
-      var vkospiScale = vix < 20 ? 1.0 : vix < 30 ? 1.1 : 1.25;
-      vol = vix * vkospiScale;
+      // [P0-C8] 1.0/1.1/1.25 variable scale → 1.12 통일 (다른 fallback과 일관성)
+      vol = macro.vix * 1.12;
     }
 
     if (vol == null) return null;
@@ -2502,7 +2501,9 @@ class SignalEngine {
     // Foreign flow 1-day leadership signal (Kyle 1985, Choe/Kho/Stulz 2005)
     // Informed foreign traders lead KRX returns by 1-3 days (Doc39 §3.2)
     // Thresholds: ±2000억 medium (~1σ daily flow), ±5000억 strong (~2.5σ)
-    var fNet1d = investor.foreign_net_1d;
+    // [C-2 FIX] nested foreign.net_1d_eok 또는 flat foreign_net_1d
+    var fNet1d = (investor.foreign && investor.foreign.net_1d_eok != null)
+      ? investor.foreign.net_1d_eok : investor.foreign_net_1d;
     if (fNet1d != null) {
       if (fNet1d > 5000) {
         signals.push({ type: 'flowLeadershipBuy', signal: 'buy', strength: 'medium',

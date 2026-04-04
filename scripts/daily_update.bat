@@ -11,7 +11,7 @@
 
 chcp 65001 >nul
 echo [%date% %time%] ========================================
-echo [%date% %time%] KRX Daily Data Update - START (v52)
+echo [%date% %time%] KRX Daily Data Update - START (v52, 18 steps)
 echo [%date% %time%] ========================================
 
 :: Move to project root (one level up from bat location)
@@ -118,8 +118,77 @@ if errorlevel 1 (
     echo [%date% %time%] WARNING: Index update failed
 )
 
+:: =============================================
+:: Phase 2: Post-Processing Compute Pipeline
+:: (runs after all downloads complete)
+:: =============================================
+
+:: -- Step 11: Options latest snapshot (derivatives -> options_latest.json) --
+echo.
+echo [%date% %time%] [11/18] Options latest snapshot...
+"%PYTHON%" scripts/prepare_options_latest.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Options latest snapshot failed
+)
+
+:: -- Step 12: Options analytics (BSM IV + Greeks, needs Step 11) --
+echo.
+echo [%date% %time%] [12/18] Options analytics (BSM IV + Greeks)...
+"%PYTHON%" scripts/compute_options_analytics.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Options analytics failed
+)
+
+:: -- Step 13: Bond metrics (Duration / Convexity / DV01, needs Step 3) --
+echo.
+echo [%date% %time%] [13/18] Bond metrics (Duration/Convexity/DV01)...
+"%PYTHON%" scripts/compute_bond_metrics.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Bond metrics failed
+)
+
+:: -- Step 14: Futures basis analysis (needs Step 5 derivatives) --
+echo.
+echo [%date% %time%] [14/18] Futures basis analysis...
+"%PYTHON%" scripts/compute_basis.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Basis computation failed
+)
+
+:: -- Step 15: Macro composite score v2 (needs Steps 1-3 macro/KOSIS/bonds) --
+echo.
+echo [%date% %time%] [15/18] Macro composite score...
+"%PYTHON%" scripts/compute_macro_composite.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Macro composite failed
+)
+
+:: -- Step 16: Flow signals + HMM regime labels (needs Step 7 investor data) --
+echo.
+echo [%date% %time%] [16/18] Flow signals + HMM regimes...
+"%PYTHON%" scripts/compute_flow_signals.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: Flow signals failed
+)
+
+:: -- Step 17: CAPM beta (needs Step 8 OHLCV + Step 2 macro) --
+echo.
+echo [%date% %time%] [17/18] CAPM beta computation...
+"%PYTHON%" scripts/compute_capm_beta.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: CAPM beta failed
+)
+
+:: -- Step 18: EVA computation (needs Step 8 OHLCV + financials) --
+echo.
+echo [%date% %time%] [18/18] EVA computation...
+"%PYTHON%" scripts/compute_eva.py
+if errorlevel 1 (
+    echo [%date% %time%] WARNING: EVA computation failed
+)
+
 echo.
 echo [%date% %time%] ========================================
-echo [%date% %time%] KRX Daily Data Update - DONE (v52, 10 steps)
+echo [%date% %time%] KRX Daily Data Update - DONE (v52, 18 steps)
 echo [%date% %time%] ========================================
 exit /b 0
