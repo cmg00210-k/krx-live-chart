@@ -126,10 +126,6 @@ var _CONTEXT_ONLY_PATTERNS = new Set([
   'stickSandwich',         // n=420, WR 52% 50%포함
 ]);
 
-// ── D-1: Survivorship bias correction state ──
-// Set to true by appWorker.js when backtester confirms correction data loaded.
-var _survivorshipCorrectionLoaded = false;
-
 // ── 시그널 Tier 분류 ──
 var _TIER_S_SIGNALS = new Set([
   'goldenCross',          // weight=+3.0, Murphy(1999). 최고 가중치 추세 전환

@@ -25,8 +25,8 @@ try {
     'colors.js?v=13',
     'indicators.js?v=26',
     'patterns.js?v=42',
-    'signalEngine.js?v=39',
-    'backtester.js?v=37'
+    'signalEngine.js?v=40',
+    'backtester.js?v=38'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -76,7 +76,9 @@ self.onmessage = function (e) {
       }
 
       // 패턴 분석 (CPU 헤비 작업)
-      var patterns = patternEngine.analyze(candles);
+      var analyzeOpts = {};
+      if (msg.market) analyzeOpts.market = msg.market;
+      var patterns = patternEngine.analyze(candles, analyzeOpts);
 
       // 최근 5봉 이내 패턴만 필터링
       var candleLen = candles.length;

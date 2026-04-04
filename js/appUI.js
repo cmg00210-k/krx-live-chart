@@ -3069,11 +3069,13 @@ function _getPatternDirection(p) {
     'threeWhiteSoldiers','threeInsideUp','tweezerBottom','bullishMarubozu',
     'bullishBeltHold','bullishHaramiCross','stickSandwich',
     'abandonedBabyBullish','dragonflyDoji',
+    'risingThreeMethods','cupAndHandle',
     'doubleBottom','inverseHeadAndShoulders','ascendingTriangle','fallingWedge'];
   var bear = ['shootingStar','hangingMan','bearishEngulfing','bearishHarami','darkCloud','eveningStar',
     'threeBlackCrows','threeInsideDown','tweezerTop','bearishMarubozu',
     'bearishBeltHold','bearishHaramiCross',
     'abandonedBabyBearish','gravestoneDoji',
+    'fallingThreeMethods',
     'doubleTop','headAndShoulders','descendingTriangle','risingWedge'];
   if (bull.indexOf(p.type) !== -1) return 'bullish';
   if (bear.indexOf(p.type) !== -1) return 'bearish';
@@ -3239,6 +3241,7 @@ async function _startScreenerScan() {
               code: stock.code,
               name: stock.name,
               candles: candles,
+              market: stock.market,
             });
           });
           // 타임아웃 5초 — 단일 종목이 Worker를 차단하지 않도록
@@ -3255,7 +3258,7 @@ async function _startScreenerScan() {
           }
         } else {
           // ── 폴백: 메인 스레드 분석 (Worker 생성 실패 시) ──
-          var patterns = patternEngine.analyze(candles);
+          var patterns = patternEngine.analyze(candles, { market: stock.market });
           var recent = patterns.filter(function(p) {
             var idx = p.endIndex != null ? p.endIndex : p.startIndex;
             return idx != null && idx >= candles.length - 5;

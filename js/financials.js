@@ -320,6 +320,8 @@ async function _renderFF3Factors(stock) {
   var dateSet = {};
   for (var di = 0; di < ff3.dates.length; di++) dateSet[ff3.dates[di]] = di;
   // Match stock returns to factor dates
+  // [FIX] FF3 regression: dependent variable should be excess return (Ri - Rf)
+  var rfDaily = _ff3FactorData.rf_daily || 0;
   var stockRet = [], smbArr = [], hmlArr = [], mktArr = [];
   for (var si = 1; si < stockCandles.length; si++) {
     var t = stockCandles[si].time;
@@ -327,7 +329,7 @@ async function _renderFF3Factors(stock) {
     if (idx === undefined) continue;
     var prev = stockCandles[si - 1].close;
     if (!prev || prev <= 0) continue;
-    var ri = (stockCandles[si].close - prev) / prev;
+    var ri = (stockCandles[si].close - prev) / prev - rfDaily;
     stockRet.push(ri);
     smbArr.push(ff3.SMB[idx]);
     hmlArr.push(ff3.HML[idx]);

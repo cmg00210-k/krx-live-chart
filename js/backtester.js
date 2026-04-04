@@ -299,8 +299,10 @@ class PatternBacktester {
       .then(function(data) {
         if (!data) return;
         // D1: candle_target_atr → PatternEngine.CANDLE_TARGET_ATR
-        if (data.D1 && data.D1.candle_target_atr && typeof PatternEngine !== 'undefined') {
-          var d1 = data.D1.candle_target_atr;
+        // JSON structure: { "D1_candle_target_atr": { "calibrated": { "strong": 1.88, ... } } }
+        var d1Raw = data.D1_candle_target_atr;
+        if (d1Raw && d1Raw.calibrated && typeof PatternEngine !== 'undefined') {
+          var d1 = d1Raw.calibrated;
           if (d1.strong > 0 && d1.medium > 0 && d1.weak > 0) {
             PatternEngine.CANDLE_TARGET_ATR = {
               strong: +d1.strong.toFixed(2),
