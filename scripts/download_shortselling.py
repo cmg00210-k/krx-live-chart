@@ -486,32 +486,56 @@ def _pykrx_fallback_shortselling(start_str: str, end_str: str):
     trade_records = []
     balance_records = []
 
-    for market_name in ["KOSPI", "KOSDAQ"]:
-        try:
-            df = pykrx_stock.get_shorting_volume_by_date(
-                start_fmt, end_fmt, market=market_name
-            )
-            if df is None or df.empty:
-                print(f"  [pykrx] {market_name}: 공매도 데이터 없음")
-                continue
+    # pykrx 1.2.4: get_shorting_volume_by_ticker(date, market) returns all tickers for 1 day
+    # Iterate over business days, aggregate market totals per day
+    from datetime import datetime as _dt
+    start_d = _dt.strptime(start_fmt, "%Y%m%d")
+    end_d = _dt.strptime(end_fmt, "%Y%m%d")
+    current = start_d
+    day_count = 0
 
-            # pykrx columns: 공매도거래량, 총거래량, 공매도비중, 직전40거래일평균공매도비중
-            for date_idx, row in df.iterrows():
-                date_str = date_idx.strftime("%Y-%m-%d")
+    while current <= end_d:
+        if current.weekday() >= 5:  # skip weekends
+            current += timedelta(days=1)
+            continue
+
+        date_str_fmt = current.strftime("%Y%m%d")
+        date_str_iso = current.strftime("%Y-%m-%d")
+
+        for market_name in ["KOSPI", "KOSDAQ"]:
+            mkt_code = "STK" if market_name == "KOSPI" else "KSQ"
+            try:
+                df = pykrx_stock.get_shorting_volume_by_ticker(
+                    date_str_fmt, market=market_name
+                )
+                if df is None or df.empty:
+                    continue
+
+                # pykrx 1.2.4 columns: 공매도거래량, 총거래량, 공매도비중, ...
+                total_short = int(df["공매도거래량"].sum()) if "공매도거래량" in df.columns else 0
+                total_vol = int(df["총거래량"].sum()) if "총거래량" in df.columns else 0
+                ratio = total_short / total_vol * 100 if total_vol > 0 else 0
+
                 trade_records.append({
-                    "date": date_str,
+                    "date": date_str_iso,
                     "code": "MARKET",
                     "name": market_name,
-                    "market": "STK" if market_name == "KOSPI" else "KSQ",
-                    "shortVolume": int(row.get("공매도거래량", 0)),
-                    "totalVolume": int(row.get("총거래량", 0)),
-                    "shortRatio": float(row.get("공매도비중", 0)),
+                    "market": mkt_code,
+                    "shortVolume": total_short,
+                    "totalVolume": total_vol,
+                    "shortRatio": round(ratio, 4),
                 })
+                day_count += 1
+            except Exception as e:
+                print(f"  [pykrx] {market_name} {date_str_iso} 실패: {e}")
 
-            print(f"  [pykrx] {market_name}: {len(df)}일 수집")
-            _time.sleep(1)
-        except Exception as e:
-            print(f"  [pykrx] {market_name} 공매도 실패: {e}")
+        _time.sleep(1)
+        current += timedelta(days=1)
+
+    if day_count > 0:
+        print(f"  [pykrx] {day_count}건 수집 ({len(set(r['date'] for r in trade_records))}일)")
+    else:
+        print("  [pykrx] 공매도 데이터 없음 (KRX OTP 차단 시 정상)")
 
     return trade_records, balance_records
 
@@ -707,9 +731,63 @@ def main():
             if latest.get("shortRatioMA20") is not None:
                 print(f"  20일 MA: {latest['shortRatioMA20']}%")
     else:
-        print("[공매도] 경고: 거래/잔고 데이터 부족으로 요약 생성 불가")
+        # Cached fallback: 기존 summary가 real data이고 30일 이내면 유지
+        print("[공매도] 경고: 거래/잔고 데이터 부족으로 신규 요약 생성 불가")
+        _try_cached_fallback(summary_output)
 
     print(f"\n[공매도] 완료")
+
+
+def _try_cached_fallback(summary_path: str, grace_days: int = 30):
+    """
+    모든 수집이 실패한 경우, 기존 shortselling_summary.json이
+    sample이 아니고 grace_days 이내면 source='cached'로 유지.
+    """
+    if not os.path.exists(summary_path):
+        print("[공매도] 캐시 파일 없음 — sample 유지")
+        return
+
+    try:
+        with open(summary_path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[공매도] 캐시 파일 읽기 실패: {e}")
+        return
+
+    existing_source = existing.get("source", "sample")
+    if existing_source == "sample":
+        print("[공매도] 기존 파일도 sample — 캐시 불가")
+        return
+
+    # 날짜 확인
+    date_str = existing.get("date", existing.get("updated", ""))
+    if not date_str:
+        print("[공매도] 기존 파일에 날짜 없음 — 캐시 불가")
+        return
+
+    try:
+        from datetime import date as date_type
+        data_date = date_type.fromisoformat(date_str[:10])
+        age_days = (date_type.today() - data_date).days
+    except (ValueError, TypeError):
+        print(f"[공매도] 날짜 파싱 실패 ({date_str}) — 캐시 불가")
+        return
+
+    if age_days > grace_days:
+        print(f"[공매도] 기존 데이터 {age_days}일 경과 (한도 {grace_days}일) — 캐시 만료")
+        return
+
+    # Grace period 이내: source를 'cached'로 업데이트
+    existing["source"] = "cached"
+    existing["cached_from"] = existing_source
+    existing["cached_age_days"] = age_days
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
+
+    print(f"[공매도] 캐시 유지: 원본 source='{existing_source}', "
+          f"{age_days}일 경과 (한도 {grace_days}일)")
+    print(f"[공매도] source='cached'로 업데이트 — CHECK 6 PASS 가능")
 
 
 if __name__ == "__main__":

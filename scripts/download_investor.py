@@ -539,16 +539,19 @@ def _pykrx_fallback_investor(start_str: str, end_str: str) -> list:
     end_fmt = end_str.replace("-", "")
     records = []
 
+    # pykrx 1.2.4: get_market_trading_value_by_investor(fromdate, todate, ticker)
+    # Market-level data uses ticker="KOSPI" or "KOSDAQ" (not a keyword argument)
     for market_name, market_code in [("KOSPI", "KOSPI"), ("KOSDAQ", "KOSDAQ")]:
         try:
-            df = pykrx_stock.get_market_trading_value_by_date(
-                start_fmt, end_fmt, market=market_code
+            df = pykrx_stock.get_market_trading_value_by_investor(
+                start_fmt, end_fmt, market_code
             )
             if df is None or df.empty:
-                print(f"  [pykrx] {market_name}: 데이터 없음")
+                print(f"  [pykrx] {market_name}: 데이터 없음 (KRX OTP 차단 시 정상)")
                 continue
 
-            # pykrx columns: 기관합계, 기타법인, 개인, 외국인합계, 전체
+            # pykrx 1.2.4 columns: 금융투자, 보험, 투신, 사모, 은행, 기타금융, 연기금등,
+            #   기관합계, 기타법인, 개인, 외국인합계, 전체
             inv_map = {
                 "기관합계": "institutional_total",
                 "개인": "retail",
@@ -558,7 +561,7 @@ def _pykrx_fallback_investor(start_str: str, end_str: str) -> list:
                 date_str = date_idx.strftime("%Y-%m-%d")
                 for ko_col, eng_key in inv_map.items():
                     if ko_col in row.index:
-                        net_amount = int(row[ko_col])  # 원 단위
+                        net_amount = int(row[ko_col])
                         records.append({
                             "time": date_str,
                             "market": market_code,
@@ -567,7 +570,7 @@ def _pykrx_fallback_investor(start_str: str, end_str: str) -> list:
                         })
 
             print(f"  [pykrx] {market_name}: {len(df)}일 수집")
-            time.sleep(1)  # Rate limit
+            time.sleep(1)
         except Exception as e:
             print(f"  [pykrx] {market_name} 실패: {e}")
 
@@ -658,15 +661,30 @@ def main():
         except KRXOTPError as e:
             print(f"[INVESTOR] {market_name}: OTP 실패 — {e}")
 
-    # OTP 실패 시 pykrx fallback
-    if not all_investor_daily:
-        print("\n[INVESTOR] OTP 수집 실패 — pykrx fallback 시도...")
-        all_investor_daily = _pykrx_fallback_investor(args.start, args.end)
-        except ValueError as e:
-            print(f"[INVESTOR] {market_name}: {e}")
+    # Fallback chain: OTP → Naver HTML → pykrx
+    _data_source = "live"  # Track which source succeeded
 
-        # KRX 서버 부하 방지
-        time.sleep(RATE_LIMIT_SEC)
+    if not all_investor_daily:
+        # Fallback 2: Naver Finance HTML 스크래핑
+        print("\n[INVESTOR] OTP 수집 실패 — Naver Finance fallback 시도...")
+        try:
+            from naver_investor import fetch_naver_investor
+            all_investor_daily = fetch_naver_investor(
+                pages=3, verbose=args.verbose
+            )
+            if all_investor_daily:
+                _data_source = "naver"
+                dates = set(r["time"] for r in all_investor_daily)
+                print(f"[INVESTOR] Naver fallback 성공: {len(all_investor_daily)}건 ({len(dates)}일)")
+        except Exception as e:
+            print(f"[INVESTOR] Naver fallback 실패: {e}")
+
+    if not all_investor_daily:
+        # Fallback 3: pykrx
+        print("\n[INVESTOR] Naver 실패 — pykrx fallback 시도...")
+        all_investor_daily = _pykrx_fallback_investor(args.start, args.end)
+        if all_investor_daily:
+            _data_source = "pykrx"
 
     # investor_daily.json 저장
     if all_investor_daily:
@@ -754,12 +772,9 @@ def main():
 
     # ── 3. 파생 요약 계산 ──
     if all_investor_daily:
-        # pykrx fallback 여부 판별
-        is_pykrx = any("market" in r and r["market"] in ("KOSPI", "KOSDAQ") for r in all_investor_daily)
         print("\n[INVESTOR] 파생 요약 계산 중...")
         summary = compute_summary(all_investor_daily)
-        if is_pykrx and not any("market" in r and r["market"] in ("STK", "KSQ") for r in all_investor_daily):
-            summary["source"] = "pykrx"  # Mark as pykrx fallback (not OTP)
+        summary["source"] = _data_source  # live / naver / pykrx
 
         with open(OUTPUT_SUMMARY, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
