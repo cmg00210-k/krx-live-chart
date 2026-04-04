@@ -21,7 +21,7 @@ Layer 2: getContextualConfidence()에서 사용되는 data/market_context.json �
     data/market_context.json
 """
 
-import json, os, argparse, datetime, hashlib, math, sys
+import json, os, argparse, datetime, hashlib, sys
 sys.stdout.reconfigure(encoding='utf-8')
 from typing import Optional
 from pathlib import Path

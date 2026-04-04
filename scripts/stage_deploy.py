@@ -12,10 +12,13 @@ Why hard-links, not copies:
 
 Files EXCLUDED from deploy/:
   Dirs : scripts/ core_data/ pattern_impl/ docs/ server/ .claude/ .git/
-         data/backtest/results/
+         data/backtest/results/  data/delisted/ (308 files, Python-only)
   Files: *.py  *.bat  *.md  *.ndjson  *.csv  *.txt
          data/backtest/raw_results.ndjson  (819 MB -- over 25 MB limit)
          data/backtest/batch_log.txt
+         data/derivatives/{futures,options,etf}_daily.json  (Python compute-only)
+         data/derivatives/options_latest.json  (Python compute-only)
+         data/delisted_index.json  (backtest scripts only)
 
 Files INCLUDED despite extension rules:
   data/backtest/rl_policy.json    -- backtester.js fetches this at runtime
@@ -53,6 +56,7 @@ EXCLUDE_DIRS = {
     ".claude", ".git", "deploy", "logs",  # never recurse into deploy/ itself
     # czw/ removed — calibration data moved to data/backtest/
     os.path.join("data", "backtest", "results"),
+    os.path.join("data", "delisted"),  # 308 files, only used by Python backtest scripts
 }
 
 EXCLUDE_EXTENSIONS = {".py", ".bat", ".md", ".ndjson", ".csv"}
@@ -80,6 +84,21 @@ EXCLUDE_EXACT = {
     os.path.join("data", "backtest", "batch_log.txt"),
     os.path.join("data", "backtest", "wr_5year.txt"),
     os.path.join("data", "historical_mcap.json"),  # 13MB, unused by JS runtime
+    # History/timeseries files -- only consumed by Python compute scripts, not JS runtime
+    os.path.join("data", "macro", "bonds_history.json"),
+    os.path.join("data", "macro", "kosis_history.json"),
+    os.path.join("data", "macro", "macro_history.json"),
+    # Compute-only metadata -- Python scripts only, not fetched by JS
+    os.path.join("data", ".dart_corp_codes.json"),   # DART corp code cache (372KB)
+    os.path.join("data", "api_health.json"),          # krx_probe health check output
+    # Derivatives daily/raw files -- only consumed by Python compute scripts
+    # (JS fetches *_summary.json and options_analytics.json, not these)
+    os.path.join("data", "derivatives", "futures_daily.json"),
+    os.path.join("data", "derivatives", "options_daily.json"),
+    os.path.join("data", "derivatives", "options_latest.json"),
+    os.path.join("data", "derivatives", "etf_daily.json"),
+    # Delisted stock index -- only used by backtest_runner.js and Python scripts
+    os.path.join("data", "delisted_index.json"),
 }
 
 # ---------------------------------------------------------------------------

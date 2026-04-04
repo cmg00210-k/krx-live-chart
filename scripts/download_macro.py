@@ -71,9 +71,6 @@ from api_constants import (
     TIMEOUT_QUICK as TIMEOUT,
 )
 
-# ── API 설정 ──
-OECD_BASE = "https://sdmx.oecd.org/public/rest/data"
-
 # ── ECOS 통계코드 ──
 ECOS_SERIES = {
     "bok_rate": {
@@ -1294,6 +1291,15 @@ def save_json(data, path, label):
 #  Fama & French (1993), "Common risk factors in the
 #  returns of stocks and bonds", JFE 33(1), 3-56.
 #
+#  WHY THIS LIVES IN download_macro.py (not a separate compute_ script):
+#    1. FF3 uses Rf (CD 91-day rate) from macro_latest.json, which this
+#       script produces — running FF3 after ECOS fetch avoids stale Rf.
+#    2. main() orchestrates ECOS/FRED/OECD/Market then FF3 in one pass;
+#       extracting would require either re-reading macro_latest.json or
+#       a two-script pipeline with ordering dependency.
+#    3. FF3 output (ff3_factors.json) is consumed alongside macro_latest
+#       by the JS front-end, so co-locating keeps the pipeline atomic.
+#
 #  2×3 size/value sort:
 #    Size:  median market cap → Small (S) / Big (B)
 #    Value: Book-to-Market top 30% (H) / mid 40% (M) / bottom 30% (L)
@@ -2030,6 +2036,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# [STAT-A] FF3 design block → IMPLEMENTED above as build_ff3_factors()
-# Constants #168-#171 defined at module level. See Fama & French (1993).

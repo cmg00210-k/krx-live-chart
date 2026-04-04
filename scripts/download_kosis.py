@@ -74,35 +74,6 @@ SERIES_MAP = {
     "C0305": {"key": "cp_yield_kosis",  "name": "CP수익률 (ECOS 교차검증)"},
 }
 
-# ── MCS v2 확장 대상 (별도 테이블) ──
-# 실업률, 소비자심리지수(CSI)는 DT_1C8016에 포함되지 않음.
-# 별도 테이블에서 수집 필요 — 선택적 확장 (API 실패 시 건너뜀).
-#
-# Note: ESI (경제심리지수, A0102)가 CSI를 포함하는 통합지표이므로
-# CSI 단독 수집은 선택적. MCS v2에서는 ESI를 CSI proxy로 사용.
-OPTIONAL_SERIES = {
-    # 실업률: 통계청 경제활동인구조사 (orgId=101, tblId=DT_1DA7102S)
-    # 항목코드는 테이블 구조에 따라 다를 수 있으므로 placeholder로 기록.
-    # "unemployment": {
-    #     "orgId": "101",
-    #     "tblId": "DT_1DA7102S",  # 경제활동인구 월별 - 확인 필요
-    #     "key": "unemployment_rate_kosis",
-    #     "name": "실업률 (%) — MCS v2 unemployment_inv 입력",
-    #     "note": "macro_latest.json의 unemployment_rate와 교차검증 가능",
-    # },
-    #
-    # 소비자심리지수 (CSI): 한국은행 소비자동향조사
-    # ECOS에서 이미 수집 가능 (download_ecos.py 참조).
-    # KOSIS에서는 orgId=301 (한국은행) 테이블을 통해 접근 가능하나,
-    # ESI가 이미 CSI를 포함하므로 중복 수집 불필요.
-    # "csi": {
-    #     "orgId": "301",
-    #     "tblId": "TBD",  # 한국은행 소비자동향조사 테이블ID 확인 필요
-    #     "key": "csi_kosis",
-    #     "name": "소비자심리지수 (CSI) — ESI에 포함됨, 단독 수집 선택적",
-    # },
-}
-
 VERBOSE = False
 
 
