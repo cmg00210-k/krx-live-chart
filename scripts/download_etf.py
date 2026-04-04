@@ -37,9 +37,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 DERIV_DIR = os.path.join(DATA_DIR, "derivatives")
 
-# ── krx_api.py import ──
+# ── krx_api.py + 공통 유틸 import ──
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
 from krx_api import KRXClient
+from api_constants import parse_number as _parse_number_base
 
 # ── 레버리지/인버스 ETF 분류용 패턴 ──
 # 종목명에서 레버리지(2x) vs 인버스(-1x, -2x) 판별
@@ -64,16 +65,14 @@ def parse_number(val_str, as_int=False):
 
     Returns:
         파싱된 숫자 또는 None
+
+    Note: 코어 파싱은 api_constants.parse_number 위임.
+    as_int 플래그는 ETF-특화 기능으로 래퍼에서 처리.
     """
-    if val_str is None:
+    val = _parse_number_base(val_str)
+    if val is None:
         return None
-    s = str(val_str).strip().replace(",", "")
-    if not s or s == "-":
-        return None
-    try:
-        return int(s) if as_int else float(s)
-    except ValueError:
-        return None
+    return int(val) if as_int else float(val)
 
 
 def parse_etf_records(raw_records: list, verbose: bool = False) -> list:

@@ -46,7 +46,11 @@ ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 
 # ── 공통 상수/유틸 (api_constants.py) ──
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from api_constants import KRX_OPEN_API_BASE as API_BASE, RATE_LIMIT_SEC
+from api_constants import (
+    KRX_OPEN_API_BASE as API_BASE, RATE_LIMIT_SEC,
+    load_env_key as _load_env_key_base, DEFAULT_USER_AGENT,
+    TIMEOUT_QUICK, TIMEOUT_HEAVY, TIMEOUT_EXTREME,
+)
 
 # ── KRX Open API 설정 ──
 DAILY_QUOTA = 10000     # KRX 공식 일일 한도
@@ -94,12 +98,9 @@ ENDPOINTS = {
     "esg_index":        "esg/esg_index_info",
 }
 
+# M-17: User-Agent는 api_constants.DEFAULT_USER_AGENT 사용
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DEFAULT_USER_AGENT,
 }
 
 # 재시도 불가 에러 코드
@@ -110,18 +111,11 @@ def _load_env_key() -> str:
     """
     .env 파일에서 KRX_API_KEY 로드.
     환경 변수 우선, .env 파일 폴백.
+    키 없으면 ValueError (krx_probe_phase0.py 등 호출자가 이 예외를 기대함).
     """
-    key = os.environ.get("KRX_API_KEY")
+    key = _load_env_key_base("KRX_API_KEY", ENV_PATH)
     if key:
         return key
-
-    if os.path.isfile(ENV_PATH):
-        with open(ENV_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("KRX_API_KEY="):
-                    return line.split("=", 1)[1].strip()
-
     raise ValueError(
         "[KRX-API] API 키 없음. .env 파일에 KRX_API_KEY=... 추가 필요.\n"
         "  KRX Open API 가입: https://openapi.krx.co.kr/"
@@ -193,7 +187,7 @@ class KRXClient:
         return max(0, DAILY_QUOTA - self._daily_count)
 
     def get(self, endpoint: str, connect_timeout: int = 10,
-            read_timeout: int = 60, **params) -> List[Dict[str, Any]]:
+            read_timeout: int = TIMEOUT_HEAVY, **params) -> List[Dict[str, Any]]:
         """
         KRX Open API GET 요청.
 
@@ -269,7 +263,7 @@ class KRXClient:
 
     def get_options(self, date: str) -> List[Dict]:
         """옵션 일별 시세 조회. date: YYYYMMDD"""
-        return self.get("drv/opt_bydd_trd", read_timeout=120, basDd=date)
+        return self.get("drv/opt_bydd_trd", read_timeout=TIMEOUT_EXTREME, basDd=date)
 
     def get_stocks(self, date: str) -> List[Dict]:
         """유가증권 일별 시세 조회. date: YYYYMMDD"""
@@ -294,7 +288,7 @@ class KRXClient:
     def test_connection(self) -> bool:
         """API 연결 테스트. 성공 시 True."""
         try:
-            data = self.get("sto/stk_bydd_trd", read_timeout=15, basDd="20260401")
+            data = self.get("sto/stk_bydd_trd", read_timeout=TIMEOUT_QUICK, basDd="20260401")
             ok = len(data) > 0
             if self.verbose:
                 print(f"[KRX-API] 연결 테스트: {'성공' if ok else '실패'} ({len(data)} rows)")

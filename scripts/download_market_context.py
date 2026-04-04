@@ -106,8 +106,19 @@ def fetch_ccsi(api_key: str) -> Optional[float]:
 # ──────────────────────────────────────────────────────
 # VKOSPI (KRX 변동성 지수)
 # ──────────────────────────────────────────────────────
+def _load_json(path):
+    """Load JSON file, return parsed dict or None."""
+    try:
+        if Path(path).exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_vkospi() -> Optional[float]:
-    """VKOSPI: data/vkospi.json(Open API) → FDR VIX fallback"""
+    """VKOSPI: data/vkospi.json(Open API) → macro_latest.json VIX fallback"""
     # 1) data/vkospi.json (download_vkospi.py Open API output)
     vkospi_path = Path(__file__).parent.parent / 'data' / 'vkospi.json'
     try:
@@ -121,18 +132,17 @@ def fetch_vkospi() -> Optional[float]:
                 val = last.get('close') or last.get('Close')
                 if val is not None:
                     return float(val)
-    except Exception:
-        pass
-    # 2) FDR VIX fallback (VKOSPI proxy)
-    try:
-        import FinanceDataReader as fdr
-        today = datetime.date.today()
-        start = (today - datetime.timedelta(days=10)).strftime('%Y-%m-%d')
-        df = fdr.DataReader('VIX', start)
-        if not df.empty:
-            return float(df['Close'].iloc[-1])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[WARN] VKOSPI local load error: {e}', file=sys.stderr)
+    # 2) macro_latest.json VIX fallback (download_macro.py already fetches VIX from FRED/FDR)
+    # Avoids duplicate FDR network call — reuse existing pipeline output.
+    macro_path = Path(__file__).parent.parent / 'data' / 'macro' / 'macro_latest.json'
+    macro = _load_json(macro_path)
+    if macro:
+        vix = macro.get('vix')
+        if vix is not None:
+            print(f'  [VKOSPI] Using VIX={vix} from macro_latest.json as fallback')
+            return float(vix)
     return None
 
 
@@ -164,8 +174,8 @@ def fetch_investor_flow() -> Optional[dict]:
                 val = inv['foreign_net_1d']
             if val is not None:
                 return {'net_foreign_eok': round(float(val), 1)}
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[WARN] investor_summary load error: {e}', file=sys.stderr)
 
     # 2) pykrx fallback
     try:
@@ -180,8 +190,8 @@ def fetch_investor_flow() -> Optional[dict]:
             if foreign_col:
                 val = float(df[foreign_col[0]].iloc[-1])
                 return {'net_foreign_eok': round(val / 1e8, 1)}
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[WARN] investor pykrx fallback error: {e}', file=sys.stderr)
 
     return None
 

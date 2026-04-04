@@ -256,7 +256,9 @@ async function _loadMarketData() {
       console.log('[KRX] KOSIS 경제지표 로드 완료:', Object.keys(_kosisLatest).length, '개 필드');
     }
     // [B-4] VKOSPI 시계열 로드 → 최신 close를 _macroLatest.vkospi에 주입
-    // data/vkospi.json: [{time,open,high,low,close}, ...] (download_derivatives.py 생성)
+    // data/vkospi.json: [{time,open,high,low,close}, ...] (download_vkospi.py 생성)
+    // VKOSPI 레퍼런스 범위: <15 저변동, 15-22 정상, 22-30 경계, 30-50 위기, 50+ 극단
+    // (Doc26 §2.3; 역사적 최고 ~80 COVID 2020, ~80 tariff crisis 2026)
     try {
       var vkResp = await fetch('data/vkospi.json', { signal: AbortSignal.timeout(5000) });
       if (vkResp.ok) {
@@ -267,6 +269,14 @@ async function _loadMarketData() {
             if (!_macroLatest) _macroLatest = {};
             if (_macroLatest.vkospi == null) {
               _macroLatest.vkospi = latestVK.close;
+              // Staleness check: warn if latest VKOSPI data is >7 days old
+              if (latestVK.time) {
+                var vkDate = new Date(latestVK.time + 'T00:00:00+09:00');
+                var vkDaysOld = Math.floor((Date.now() - vkDate.getTime()) / 86400000);
+                if (vkDaysOld > 7) {
+                  console.warn('[KRX] VKOSPI 데이터 오래됨:', latestVK.time, '(' + vkDaysOld + '일 전) — 갱신 필요');
+                }
+              }
               console.log('[KRX] VKOSPI 로드:', latestVK.close, '(' + latestVK.time + ')');
             }
           }

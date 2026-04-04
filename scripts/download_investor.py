@@ -44,6 +44,7 @@ from datetime import datetime, timedelta
 # ── KRX OTP 공통 클라이언트 ──
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from krx_otp import KRXOTPClient, KRXOTPError, RATE_LIMIT_SEC
+from api_constants import clean_csv_fieldnames as clean_fieldnames
 
 # ── 경로 설정 ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,11 +90,6 @@ def log(msg: str):
 # ─────────────────────────────────────────────────
 # CSV 파싱 유틸
 # ─────────────────────────────────────────────────
-
-def clean_fieldnames(fieldnames: list) -> list:
-    """BOM 및 공백 제거"""
-    return [f.lstrip("\ufeff").strip() for f in (fieldnames or [])]
-
 
 def parse_int(val: str) -> int:
     """쉼표 포함 숫자 문자열 → int, 파싱 실패 시 0"""

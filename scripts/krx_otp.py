@@ -34,14 +34,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── 공통 상수/유틸 (api_constants.py) ──
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from api_constants import KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL, RATE_LIMIT_SEC
+from api_constants import (
+    KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL,
+    RATE_LIMIT_SEC, DEFAULT_USER_AGENT,
+    TIMEOUT_QUICK, TIMEOUT_NORMAL,
+)
 
+# M-17: User-Agent는 api_constants.DEFAULT_USER_AGENT 사용
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DEFAULT_USER_AGENT,
     "Referer": "http://data.krx.co.kr",
 }
 
@@ -76,7 +77,7 @@ class KRXOTPClient:
             time.sleep(RATE_LIMIT_SEC - elapsed)
         self._last_call = time.time()
 
-    def _generate_otp(self, stat_url: str, params: dict, timeout: int = 15) -> str:
+    def _generate_otp(self, stat_url: str, params: dict, timeout: int = TIMEOUT_QUICK) -> str:
         """
         OTP 토큰 생성.
 
@@ -112,7 +113,7 @@ class KRXOTPClient:
 
         return otp
 
-    def _download_csv(self, otp: str, timeout: int = 30) -> str:
+    def _download_csv(self, otp: str, timeout: int = TIMEOUT_NORMAL) -> str:
         """
         OTP 토큰으로 CSV 다운로드.
 
@@ -146,7 +147,7 @@ class KRXOTPClient:
         raise KRXOTPError("[KRX-OTP] CSV 인코딩 감지 실패")
 
     def fetch_csv(self, stat_url: str, params: dict,
-                  otp_timeout: int = 15, csv_timeout: int = 30) -> str:
+                  otp_timeout: int = TIMEOUT_QUICK, csv_timeout: int = TIMEOUT_NORMAL) -> str:
         """
         OTP 생성 → CSV 다운로드, 재시도 + 지수 백오프.
 

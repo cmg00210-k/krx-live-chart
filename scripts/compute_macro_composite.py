@@ -31,12 +31,15 @@ Usage:
   python scripts/compute_macro_composite.py --verbose
 """
 import json
-import math
 import os
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 import argparse
 from datetime import datetime
+
+# ── 공통 유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import normal_cdf as _normal_cdf
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -100,22 +103,6 @@ def _normalize_range(value, low, high):
         return 0.5
     normed = (value - low) / (high - low)
     return max(0.0, min(1.0, normed))
-
-
-def _normal_cdf(x):
-    """표준정규 CDF (Abramowitz & Stegun)."""
-    if x > 6:
-        return 1.0
-    if x < -6:
-        return 0.0
-    neg = x < 0
-    if neg:
-        x = -x
-    t = 1.0 / (1.0 + 0.2316419 * x)
-    d = 0.3989422804014327 * math.exp(-0.5 * x * x)
-    p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937
-        + t * (-1.821255978 + t * 1.330274429))))
-    return p if neg else 1.0 - p
 
 
 def compute_mcs_v2(kosis, ecos, macro, bonds, verbose=False):

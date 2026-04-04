@@ -43,8 +43,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 FINANCIALS_DIR = os.path.join(DATA_DIR, "financials")
 
-# ── DART API 설정 ──
-DART_BASE_URL = "https://opendart.fss.or.kr/api"
+# ── 공통 상수/유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
+from api_constants import DART_BASE_URL, TIMEOUT_QUICK, TIMEOUT_NORMAL
 
 # fnlttSinglAcnt 엔드포인트에서 조회할 주요 계정과목
 # account_nm 기준 매칭 (DART 공시 기준 한글명)
@@ -100,7 +101,7 @@ def fetch_shares_outstanding(api_key: str, corp_code: str,
     }
 
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=TIMEOUT_QUICK)
         resp.raise_for_status()
         data = resp.json()
 
@@ -150,7 +151,7 @@ def fetch_company_info(api_key: str, corp_code: str) -> Optional[dict]:
     }
 
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=TIMEOUT_QUICK)
         resp.raise_for_status()
         data = resp.json()
 
@@ -270,7 +271,7 @@ def download_corp_codes(api_key: str) -> dict:
     params = {"crtfc_key": api_key}
 
     try:
-        resp = requests.get(url, params=params, timeout=30)
+        resp = requests.get(url, params=params, timeout=TIMEOUT_NORMAL)
         resp.raise_for_status()
     except Exception as e:
         print(f"  CORPCODE 다운로드 실패: {e}")
@@ -279,7 +280,11 @@ def download_corp_codes(api_key: str) -> dict:
     # ZIP 안에 CORPCODE.xml이 들어있음
     try:
         zf = zipfile.ZipFile(io.BytesIO(resp.content))
-        xml_name = zf.namelist()[0]  # 보통 'CORPCODE.xml'
+        names = zf.namelist()
+        if not names:
+            print("  CORPCODE ZIP이 비어있음")
+            return {}
+        xml_name = names[0]  # 보통 'CORPCODE.xml'
         xml_data = zf.read(xml_name)
     except Exception as e:
         print(f"  CORPCODE ZIP 해제 실패: {e}")
@@ -350,7 +355,7 @@ def fetch_financials(api_key: str, corp_code: str, year: int,
     }
 
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=TIMEOUT_QUICK)
         resp.raise_for_status()
         data = resp.json()
 

@@ -45,7 +45,7 @@ def load_kospi_returns():
             with open(fpath, 'r', encoding='utf-8') as f:
                 d = json.load(f)
             candles = d.get('candles', [])
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             continue
 
         for i in range(1, len(candles)):

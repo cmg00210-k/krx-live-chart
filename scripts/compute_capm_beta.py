@@ -31,6 +31,10 @@ import sys
 sys.stdout.reconfigure(encoding='utf-8')
 import argparse
 
+# ── 공통 유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from api_constants import normal_cdf as _normal_cdf
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
@@ -50,24 +54,6 @@ DD_DEBT_VOL = 0.05         # 부채 변동성 근사 (Bharath & Shumway 2008)
 # 금융업종 제외 키워드 (부채=영업자산이므로 DD 해석 무의미)
 FINANCIAL_SECTORS = {'금융', '은행', '보험', '증권', '캐피탈', '저축은행', '카드',
                      'financial', 'banking', 'insurance', 'securities'}
-
-
-def _normal_cdf(x):
-    """표준정규 CDF 근사 (Abramowitz & Stegun 1964, |ε| < 7.5e-8).
-    scipy 미사용 — pure Python.
-    """
-    if x > 6:
-        return 1.0
-    if x < -6:
-        return 0.0
-    neg = x < 0
-    if neg:
-        x = -x
-    t = 1.0 / (1.0 + 0.2316419 * x)
-    d = 0.3989422804014327 * math.exp(-0.5 * x * x)  # φ(x)
-    p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937
-        + t * (-1.821255978 + t * 1.330274429))))
-    return p if neg else 1.0 - p
 
 
 def _is_financial_sector(stock_info):

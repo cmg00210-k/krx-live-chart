@@ -84,7 +84,7 @@ def main():
             with open(fpath, 'r', encoding='utf-8') as f:
                 d = json.load(f)
             candles = d.get('candles', [])
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             continue
 
         disp = compute_disposition(candles, 20)

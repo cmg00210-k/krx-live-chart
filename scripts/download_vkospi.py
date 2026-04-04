@@ -30,6 +30,17 @@ sys.stdout.reconfigure(encoding='utf-8')
 import time
 from datetime import datetime, timedelta
 
+# ── VKOSPI 레퍼런스 범위 (학술 근거: core_data/26_options_volatility_signals.md §2) ──
+# VKOSPI (KOSPI 200 Volatility Index) 역사적 범위:
+#   - 저변동: 10-15 (안정기, 예: 2017-2019 평시)
+#   - 정상:   15-22 (Doc26 §2.3 정상 구간)
+#   - 경계:   22-30 (방향성 불확실, 확대 구간)
+#   - 위기:   30-50 (2020 COVID 초기, 2024 Aug carry-trade unwind)
+#   - 극단:   50-80+ (2020 COVID 정점 ~80, 2026 tariff/geopolitical crisis ~80)
+# 참고: VIX(S&P 500)와 다른 시장을 추적하므로 독립적 발산 가능.
+#   VKOSPI는 VIX 대비 평시 0.9-1.1배, 위기 시 1.0-1.5배 수준.
+VKOSPI_STALENESS_DAYS = 7  # 7일 이상 미갱신 시 경고
+
 try:
     import requests
 except ImportError:
@@ -47,15 +58,16 @@ try:
 except ImportError:
     KRXClient = None
 
-from api_constants import KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL, generate_business_days as _gen_biz_days
+from api_constants import (
+    KRX_OTP_URL as OTP_URL, KRX_CSV_URL as CSV_URL,
+    generate_business_days as _gen_biz_days, clean_csv_fieldnames as _clean_fieldnames,
+    DEFAULT_USER_AGENT, TIMEOUT_QUICK, TIMEOUT_NORMAL,
+)
 
 # ── OTP 폴백용 상수 ──
+# M-17: User-Agent는 api_constants.DEFAULT_USER_AGENT 사용
 OTP_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": DEFAULT_USER_AGENT,
     "Referer": "http://data.krx.co.kr",
 }
 
@@ -238,7 +250,7 @@ def _generate_otp(start_yyyymmdd, end_yyyymmdd):
         "endDd": end_yyyymmdd,
     }
 
-    resp = requests.post(OTP_URL, data=params, headers=OTP_HEADERS, timeout=15)
+    resp = requests.post(OTP_URL, data=params, headers=OTP_HEADERS, timeout=TIMEOUT_QUICK)
     resp.raise_for_status()
 
     otp = resp.text.strip()
@@ -262,7 +274,7 @@ def _download_csv(otp):
         CSV_URL,
         data={"code": otp},
         headers=OTP_HEADERS,
-        timeout=30,
+        timeout=TIMEOUT_NORMAL,
     )
     resp.raise_for_status()
 
@@ -292,9 +304,7 @@ def _parse_csv(csv_text):
     records = []
     reader = csv.DictReader(io.StringIO(csv_text))
 
-    fieldnames = reader.fieldnames or []
-    cleaned = [f.lstrip("\ufeff").strip() for f in fieldnames]
-    reader.fieldnames = cleaned
+    reader.fieldnames = _clean_fieldnames(reader.fieldnames)
 
     for row in reader:
         try:
@@ -448,6 +458,40 @@ def main():
         raise SystemExit(1)
 
     print(f"[VKOSPI] {len(records)}일 데이터 수집 ({records[0]['time']} ~ {records[-1]['time']})")
+
+    # ── 데이터 품질 검증 ──
+    latest = records[-1]
+    latest_close = latest["close"]
+    latest_date_str = latest["time"]
+
+    # Staleness check: 최신 데이터가 7일 이상 오래된 경우 경고
+    try:
+        latest_date = datetime.strptime(latest_date_str, "%Y-%m-%d")
+        days_old = (datetime.now() - latest_date).days
+        if days_old > VKOSPI_STALENESS_DAYS:
+            print(
+                f"[VKOSPI] WARNING: 최신 데이터 {latest_date_str}은 {days_old}일 전 — "
+                f"staleness threshold {VKOSPI_STALENESS_DAYS}일 초과. "
+                f"KRX 공휴일 또는 다운로드 오류 확인 필요."
+            )
+        elif days_old > 3:
+            print(f"[VKOSPI] 참고: 최신 데이터 {latest_date_str} ({days_old}일 전)")
+    except ValueError:
+        pass
+
+    # Range sanity check (경고만, 무효화 안 함 — VKOSPI 50+ 실제 발생)
+    if latest_close > 50:
+        print(
+            f"[VKOSPI] 참고: VKOSPI {latest_close:.2f} — 극단적 고변동 구간 (>50). "
+            f"역사적으로 COVID(2020), tariff crisis(2026) 등에서 관측."
+        )
+    elif latest_close > 30:
+        print(f"[VKOSPI] 참고: VKOSPI {latest_close:.2f} — 위기 구간 (>30).")
+    elif latest_close < 10:
+        print(
+            f"[VKOSPI] WARNING: VKOSPI {latest_close:.2f} — 비정상적으로 낮음 (<10). "
+            f"데이터 파싱 오류 가능성 확인 필요."
+        )
 
     # 출력 디렉터리 확인 및 JSON 저장
     out_dir = os.path.dirname(os.path.abspath(args.output))

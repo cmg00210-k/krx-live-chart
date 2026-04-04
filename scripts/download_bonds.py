@@ -48,7 +48,7 @@ HISTORY_FILE = os.path.join(MACRO_DIR, "bonds_history.json")
 
 # ── 공통 상수/유틸 (api_constants.py) ──
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from api_constants import ECOS_BASE_URL, RATE_LIMIT_SEC
+from api_constants import ECOS_BASE_URL, RATE_LIMIT_SEC, TIMEOUT_QUICK
 from compute_bond_metrics import compute_bond_metrics as _compute_bond_metrics_canonical
 
 # ── ECOS API 설정 ──
@@ -109,6 +109,13 @@ def ecos_fetch(api_key: str, stat_code: str, item_code: str,
     """
     ECOS StatisticSearch API 호출.
 
+    M-15 NOTE: download_macro.py::fetch_ecos_series 와 유사하나 의도적으로 분리 유지.
+    차이: (1) 이 함수는 원시 TIME/DATA_VALUE dict 반환, macro 함수는 {date, value} 변환.
+          (2) 이 함수는 start_date/end_date를 YYYYMMDD로 받음, macro는 YYYYMM.
+          (3) 이 함수는 일별(D) 채권 데이터 전용, macro는 월별(M) 전용.
+          (4) macro 함수는 item_code URL-encoding 처리 추가 (슬래시 포함 코드 대응).
+    통합 시 두 함수의 모든 호출자를 동시에 수정해야 하므로 분리 유지.
+
     Parameters:
         api_key:    ECOS 인증키
         stat_code:  통계표코드 (예: 817Y002)
@@ -134,7 +141,7 @@ def ecos_fetch(api_key: str, stat_code: str, item_code: str,
         print(f"  [ECOS] GET {stat_code}/{item_code} ({start_date}~{end_date}, {frequency})")
 
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, timeout=TIMEOUT_QUICK)
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.Timeout:
@@ -372,6 +379,63 @@ def _compute_bond_metrics(coupon_rate: float, ytm: float, maturity_years: int,
     Academic: Fabozzi (2007) ch.4, Macaulay (1938)
     """
     return _compute_bond_metrics_canonical(coupon_rate, ytm, maturity_years, face)
+
+
+def _detect_yield_curve_status(latest: dict) -> dict:
+    """
+    수익률곡선 역전 패턴 다각도 탐지.
+
+    단일 10Y-3Y 스프레드만 보는 기존 curve_inverted 플래그의 한계를 보완.
+    장단기 역전(10Y-3Y, 10Y-2Y)과 장기 구간 역전(30Y-10Y)을 분리 탐지하여
+    부분 역전(partial)과 전면 역전(deep) 상태를 구분한다.
+
+    Academic: Estrella & Hardouvelis (1991), recession predictor.
+      - 10Y-2Y: 미국 연준 선호 경기침체 선행지표.
+      - 10Y-3Y: 한국 시장에서 더 보편적 참조 스프레드.
+      - 30Y-10Y: ultra-long 구간 역전은 장기 성장 기대 하락 신호.
+
+    Parameters:
+        latest: collect_latest() 도중 생성되는 yields dict
+
+    Returns:
+        dict: {
+            status: 'normal' | 'partially_inverted' | 'deeply_inverted',
+            inversions: [...inverted pair names...],
+            spreads: {slope_10y3y: float, slope_10y2y: float, slope_30y10y: float},
+        }
+    """
+    yields = latest.get("yields", {})
+    spreads = {}
+    inversions = []
+
+    pairs = [
+        ('slope_10y3y', 'ktb_10y', 'ktb_3y'),
+        ('slope_10y2y', 'ktb_10y', 'ktb_2y'),
+        ('slope_30y10y', 'ktb_30y', 'ktb_10y'),
+    ]
+
+    for name, long_key, short_key in pairs:
+        long_val = yields.get(long_key)
+        short_val = yields.get(short_key)
+        if long_val is not None and short_val is not None:
+            spread = long_val - short_val
+            spreads[name] = round(spread, 3)
+            if spread < 0:
+                inversions.append(name)
+
+    # Determine overall status
+    if len(inversions) >= 2:
+        status = 'deeply_inverted'
+    elif len(inversions) == 1:
+        status = 'partially_inverted'
+    else:
+        status = 'normal'
+
+    return {
+        'status': status,
+        'inversions': inversions,
+        'spreads': spreads,
+    }
 
 
 def classify_credit_regime(aa_spread: Optional[float]) -> str:
@@ -629,11 +693,23 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
     # 레짐 분류
     credit_regime = classify_credit_regime(aa_spread)
 
+    # ── 수익률곡선 역전 다각도 탐지 (M-21 enhancement) ──
+    # 기존 curve_inverted (bool)은 backward-compat 유지,
+    # 새 yield_curve dict가 세분화된 상태(normal/partial/deep)와 개별 스프레드 제공
+    yield_curve_status = _detect_yield_curve_status({"yields": yields_data})
+
     if aa_spread is not None:
         print(f"\n  크레딧 스프레드 AA-: {aa_spread:.2f}%p → 레짐: {credit_regime}")
     if slope_10y3y is not None:
         inv_label = " (역전!)" if curve_inverted else ""
         print(f"  수익률곡선 기울기 10Y-3Y: {slope_10y3y:+.2f}%p{inv_label}")
+    # 다각도 역전 상태 출력
+    yc_status = yield_curve_status['status']
+    if yc_status != 'normal':
+        inv_names = ', '.join(yield_curve_status['inversions'])
+        print(f"  수익률곡선 상태: {yc_status} (역전 구간: {inv_names})")
+    elif verbose:
+        print(f"  수익률곡선 상태: normal")
 
     # ── Duration / Convexity / DV01 계산 ──
     # Par bond 가정: coupon = ytm (Fabozzi 2007 ch.4)
@@ -664,7 +740,8 @@ def collect_latest(api_key: str, verbose: bool = False) -> dict:
         "nss_params": nss_params,
         "slope_10y3y": slope_10y3y,
         "slope_10y2y": slope_10y2y,
-        "curve_inverted": curve_inverted,
+        "curve_inverted": curve_inverted,  # backward-compat: simple bool
+        "yield_curve": yield_curve_status,  # M-21: multi-pair inversion detection
         "credit_regime": credit_regime,
         "metrics": {
             "duration": metrics_duration,
@@ -795,6 +872,11 @@ def create_template() -> Tuple[dict, dict]:
         "slope_10y3y": None,
         "slope_10y2y": None,
         "curve_inverted": None,
+        "yield_curve": {
+            "status": "unknown",
+            "inversions": [],
+            "spreads": {},
+        },
         "credit_regime": "unknown",
         "metrics": {
             "duration": {"ktb_3y": None, "ktb_10y": None, "ktb_30y": None},
@@ -936,7 +1018,22 @@ def main():
     print(f"  크레딧 레짐: {regime} ({regime_labels.get(regime, regime)})")
 
     inv = latest.get("curve_inverted")
-    if inv is not None:
+    yc = latest.get("yield_curve", {})
+    yc_st = yc.get("status", "unknown")
+    if yc_st != "unknown":
+        yc_labels = {
+            "normal": "정상",
+            "partially_inverted": "부분 역전",
+            "deeply_inverted": "전면 역전",
+        }
+        yc_inv = yc.get("inversions", [])
+        spreads_str = ", ".join(
+            f"{k}={v:+.3f}" for k, v in yc.get("spreads", {}).items()
+        )
+        print(f"  수익률곡선: {yc_labels.get(yc_st, yc_st)}" +
+              (f" (역전: {', '.join(yc_inv)})" if yc_inv else "") +
+              (f" [{spreads_str}]" if spreads_str else ""))
+    elif inv is not None:
         print(f"  수익률곡선: {'역전 (inverted)' if inv else '정상 (normal)'}")
 
     n_hist = len(history.get("dates", []))

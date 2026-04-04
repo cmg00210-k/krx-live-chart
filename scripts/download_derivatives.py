@@ -52,10 +52,23 @@ try:
 except ImportError:
     KRXClient = None
 
+try:
+    from krx_otp import KRXOTPClient, KRXOTPError
+    _HAS_KRX_OTP = True
+except ImportError:
+    _HAS_KRX_OTP = False
+
 from api_constants import (
     KRX_OTP_URL as _OTP_URL,
     KRX_CSV_URL as _CSV_URL,
     generate_business_days as _gen_biz_days,
+    parse_number as _parse_number_base,
+    clean_csv_fieldnames as _clean_fieldnames,
+    DEFAULT_USER_AGENT,
+    TIMEOUT_QUICK,
+    TIMEOUT_NORMAL,
+    TIMEOUT_HEAVY,
+    TIMEOUT_EXTREME,
 )
 
 # ── verbose 전역 (main에서 설정) ──
@@ -72,16 +85,12 @@ def _vlog(msg: str):
 
 
 def _parse_number(val):
-    """KRX API 문자열 → 숫자. 쉼표 제거, 빈문자열/'-' → None."""
-    if val is None:
+    """KRX API 문자열 → 숫자. 쉼표 제거, 빈문자열/'-'/'–' → None.
+    api_constants.parse_number 위임 + KRX 특수 em-dash('–') 사전 처리.
+    """
+    if isinstance(val, str) and val.strip() == "–":
         return None
-    s = str(val).strip().replace(",", "")
-    if not s or s in ("-", "–", ""):
-        return None
-    try:
-        return float(s) if "." in s else int(s)
-    except ValueError:
-        return None
+    return _parse_number_base(val)
 
 
 def _format_date(yyyymmdd: str) -> str:
@@ -195,7 +204,7 @@ def fetch_options_openapi(client, start_dt, end_dt):
         date_str = _format_date(dd)
         _vlog(f"  [옵션] {date_str} ({i+1}/{len(days)})")
 
-        raw = client.get("drv/opt_bydd_trd", read_timeout=120, basDd=dd)
+        raw = client.get("drv/opt_bydd_trd", read_timeout=TIMEOUT_EXTREME, basDd=dd)
         if not raw:
             consecutive_empty += 1
             _vlog(f"    → 데이터 없음")
@@ -309,7 +318,13 @@ def _extract_strike_price_from_name(contract_name: str):
 # ════════════════════════════════════════════════════════
 
 def _fetch_futures_otp(start_dt, end_dt):
-    """OTP 방식 선물 수집 (레거시 폴백)."""
+    """OTP 방식 선물 수집 (레거시 폴백).
+
+    M-18: KRXOTPClient (krx_otp.py) 우선 사용.
+    M-16: requests는 모듈 상단에서 import (함수 내 import 제거).
+    M-17: User-Agent는 DEFAULT_USER_AGENT 사용.
+    M-9:  BOM 정리는 _clean_fieldnames() 사용.
+    """
     import csv
     import io
     import time
@@ -320,10 +335,15 @@ def _fetch_futures_otp(start_dt, end_dt):
         _log("[파생] requests 미설치, OTP 폴백 불가")
         return []
 
+    # M-18: KRXOTPClient 사용 가능하면 위임
+    if _HAS_KRX_OTP:
+        otp_client = KRXOTPClient(verbose=_verbose)
+
     OTP_URL = _OTP_URL
     CSV_URL = _CSV_URL
+    # M-17: api_constants.DEFAULT_USER_AGENT 사용
     HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": DEFAULT_USER_AGENT,
         "Referer": "http://data.krx.co.kr",
     }
 
@@ -338,39 +358,47 @@ def _fetch_futures_otp(start_dt, end_dt):
         date_str = current.strftime("%Y-%m-%d")
 
         try:
-            params = {
-                "locale": "ko_KR", "prodId": "KRDRVFUK2I",
-                "trdDd": trd_dd, "share": "2", "csvxls_isNo": "false",
-                "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12501",
-            }
-            resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=15)
-            if resp.status_code != 200:
-                _vlog(f"  [선물 OTP] {date_str} HTTP {resp.status_code}")
-                current += timedelta(days=1)
-                continue
-            otp = resp.text.strip()
-            time.sleep(0.5)
-
-            resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=30)
-            if resp2.status_code != 200:
-                _vlog(f"  [선물 CSV] {date_str} HTTP {resp2.status_code}")
-                current += timedelta(days=1)
-                continue
-            raw = resp2.content
-            for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
-                try:
-                    csv_text = raw.decode(enc)
-                    break
-                except (UnicodeDecodeError, LookupError):
-                    continue
+            # M-18: KRXOTPClient 경유 (재시도·LOGOUT 감지 포함)
+            if _HAS_KRX_OTP:
+                csv_text = otp_client.fetch_csv(
+                    "dbms/MDC/STAT/standard/MDCSTAT12501",
+                    {"prodId": "KRDRVFUK2I", "trdDd": trd_dd},
+                    csv_timeout=TIMEOUT_NORMAL,
+                )
             else:
-                current += timedelta(days=1)
-                continue
-            time.sleep(0.5)
+                # 원본 수동 OTP 경로 (krx_otp 미설치 환경 폴백)
+                params = {
+                    "locale": "ko_KR", "prodId": "KRDRVFUK2I",
+                    "trdDd": trd_dd, "share": "2", "csvxls_isNo": "false",
+                    "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12501",
+                }
+                resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=TIMEOUT_QUICK)
+                if resp.status_code != 200:
+                    _vlog(f"  [선물 OTP] {date_str} HTTP {resp.status_code}")
+                    current += timedelta(days=1)
+                    continue
+                otp = resp.text.strip()
+                time.sleep(0.5)
+                resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=TIMEOUT_NORMAL)
+                if resp2.status_code != 200:
+                    _vlog(f"  [선물 CSV] {date_str} HTTP {resp2.status_code}")
+                    current += timedelta(days=1)
+                    continue
+                raw = resp2.content
+                for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
+                    try:
+                        csv_text = raw.decode(enc)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                else:
+                    current += timedelta(days=1)
+                    continue
+                time.sleep(0.5)
 
             reader = csv.DictReader(io.StringIO(csv_text))
-            if reader.fieldnames:
-                reader.fieldnames = [f.lstrip("\ufeff").strip() for f in reader.fieldnames]
+            # M-9: BOM 정리는 _clean_fieldnames() 위임
+            reader.fieldnames = _clean_fieldnames(reader.fieldnames)
             for row in reader:
                 contract = (row.get("종목명", "") or row.get("종목코드", "")).strip()
                 close_v = _parse_number(row.get("종가")) or _parse_number(row.get("정산가"))
@@ -394,7 +422,13 @@ def _fetch_futures_otp(start_dt, end_dt):
 
 
 def _fetch_options_otp(start_dt, end_dt):
-    """OTP 방식 옵션 수집 (레거시 폴백)."""
+    """OTP 방식 옵션 수집 (레거시 폴백).
+
+    M-18: KRXOTPClient (krx_otp.py) 우선 사용.
+    M-16: requests는 모듈 상단에서 import (함수 내 import 제거).
+    M-17: User-Agent는 DEFAULT_USER_AGENT 사용.
+    M-9:  BOM 정리는 _clean_fieldnames() 사용.
+    """
     import csv
     import io
     import time
@@ -404,10 +438,15 @@ def _fetch_options_otp(start_dt, end_dt):
     except ImportError:
         return []
 
+    # M-18: KRXOTPClient 사용 가능하면 위임
+    if _HAS_KRX_OTP:
+        otp_client = KRXOTPClient(verbose=_verbose)
+
     OTP_URL = _OTP_URL
     CSV_URL = _CSV_URL
+    # M-17: api_constants.DEFAULT_USER_AGENT 사용
     HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": DEFAULT_USER_AGENT,
         "Referer": "http://data.krx.co.kr",
     }
 
@@ -422,39 +461,47 @@ def _fetch_options_otp(start_dt, end_dt):
         date_str = current.strftime("%Y-%m-%d")
 
         try:
-            params = {
-                "locale": "ko_KR", "prodId": "KRDRVOPK2I",
-                "trdDd": trd_dd, "share": "2", "csvxls_isNo": "false",
-                "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12601",
-            }
-            resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=15)
-            if resp.status_code != 200:
-                _vlog(f"  [옵션 OTP] {date_str} HTTP {resp.status_code}")
-                current += timedelta(days=1)
-                continue
-            otp = resp.text.strip()
-            time.sleep(0.5)
-
-            resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=60)
-            if resp2.status_code != 200:
-                _vlog(f"  [옵션 CSV] {date_str} HTTP {resp2.status_code}")
-                current += timedelta(days=1)
-                continue
-            raw = resp2.content
-            for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
-                try:
-                    csv_text = raw.decode(enc)
-                    break
-                except (UnicodeDecodeError, LookupError):
-                    continue
+            # M-18: KRXOTPClient 경유 (재시도·LOGOUT 감지 포함)
+            if _HAS_KRX_OTP:
+                csv_text = otp_client.fetch_csv(
+                    "dbms/MDC/STAT/standard/MDCSTAT12601",
+                    {"prodId": "KRDRVOPK2I", "trdDd": trd_dd},
+                    csv_timeout=TIMEOUT_HEAVY,
+                )
             else:
-                current += timedelta(days=1)
-                continue
-            time.sleep(0.5)
+                # 원본 수동 OTP 경로 (krx_otp 미설치 환경 폴백)
+                params = {
+                    "locale": "ko_KR", "prodId": "KRDRVOPK2I",
+                    "trdDd": trd_dd, "share": "2", "csvxls_isNo": "false",
+                    "name": "fileDown", "url": "dbms/MDC/STAT/standard/MDCSTAT12601",
+                }
+                resp = requests.post(OTP_URL, data=params, headers=HEADERS, timeout=TIMEOUT_QUICK)
+                if resp.status_code != 200:
+                    _vlog(f"  [옵션 OTP] {date_str} HTTP {resp.status_code}")
+                    current += timedelta(days=1)
+                    continue
+                otp = resp.text.strip()
+                time.sleep(0.5)
+                resp2 = requests.post(CSV_URL, data={"code": otp}, headers=HEADERS, timeout=TIMEOUT_HEAVY)
+                if resp2.status_code != 200:
+                    _vlog(f"  [옵션 CSV] {date_str} HTTP {resp2.status_code}")
+                    current += timedelta(days=1)
+                    continue
+                raw = resp2.content
+                for enc in ("euc-kr", "cp949", "utf-8-sig", "utf-8"):
+                    try:
+                        csv_text = raw.decode(enc)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                else:
+                    current += timedelta(days=1)
+                    continue
+                time.sleep(0.5)
 
             reader = csv.DictReader(io.StringIO(csv_text))
-            if reader.fieldnames:
-                reader.fieldnames = [f.lstrip("\ufeff").strip() for f in reader.fieldnames]
+            # M-9: BOM 정리는 _clean_fieldnames() 위임
+            reader.fieldnames = _clean_fieldnames(reader.fieldnames)
             for row in reader:
                 contract = (row.get("종목명", "") or row.get("종목코드", "")).strip()
                 close_v = _parse_number(row.get("종가")) or _parse_number(row.get("정산가"))

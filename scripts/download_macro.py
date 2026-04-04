@@ -102,6 +102,8 @@ ECOS_SERIES = {
         "name": "M2 광의통화 (평잔, 원계열, 신지표)",
         "freq": "M",
     },
+    # NOTE: ECOS cli (순환변동치) differs from download_kosis.py cli_composite (2020=100 level).
+    # Intentional cross-validation: ECOS=cyclical component, KOSIS=absolute level index.
     "cli": {
         "stat_code": "901Y067",
         "item_code": "I16A",
@@ -127,6 +129,8 @@ ECOS_SERIES = {
         "name": "통관기준 수출액 (천불, Doc29 §2.5)",
         "freq": "M",
     },
+    # NOTE: Intentional cross-validation with download_kosis.py ipi_all (DT_1C8016/B0201).
+    # Same underlying series, different API pipelines — discrepancy = data quality alert.
     "ipi": {
         "stat_code": "901Y033",
         "item_code": "A00/2",
@@ -146,6 +150,8 @@ ECOS_SERIES = {
         "name": "CD금리 91일 (월별금리)",
         "freq": "M",
     },
+    # NOTE: Intentional cross-validation with download_kosis.py cp_yield_kosis (DT_1C8016/C0305).
+    # ECOS = 721Y001 시장금리 테이블, KOSIS = DT_1C8016 후행지표 — same rate, different pipeline.
     "cp_rate_91d": {
         "stat_code": "721Y001",
         "item_code": "4020000",
@@ -464,16 +470,20 @@ def fetch_oecd_cli(country_code):
         header = [h.strip().strip('"').strip('\r') for h in lines[0].split(",")]
         col_map = {name: i for i, name in enumerate(header)}
 
+        # 필수 컬럼 검증 — OECD API 헤더 변경 감지
+        expected_headers = {'TIME_PERIOD', 'OBS_VALUE'}
+        actual_headers = set(col_map.keys())
+        if not expected_headers.issubset(actual_headers):
+            missing = expected_headers - actual_headers
+            vlog(f"OECD CSV header change detected: missing {missing}, got {sorted(actual_headers)}")
+            return None
+
         ref_area_idx = col_map.get("REF_AREA")
         measure_idx = col_map.get("MEASURE")
         adjustment_idx = col_map.get("ADJUSTMENT")
         transform_idx = col_map.get("TRANSFORMATION")
-        time_idx = col_map.get("TIME_PERIOD")
-        val_idx = col_map.get("OBS_VALUE")
-
-        if time_idx is None or val_idx is None:
-            vlog(f"OECD CSV header parse failed: {header}")
-            return None
+        time_idx = col_map["TIME_PERIOD"]
+        val_idx = col_map["OBS_VALUE"]
 
         # 국가 + MEASURE=LI + TRANSFORMATION=IX 필터링
         # LI = Leading Indicator (amplitude-adjusted CLI)

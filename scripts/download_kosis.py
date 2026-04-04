@@ -30,6 +30,9 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 # ── 경로 설정 ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ── 공통 유틸 (api_constants.py) ──
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
+from api_constants import DEFAULT_USER_AGENT, TIMEOUT_NORMAL, KOSIS_BASE_URL
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 MACRO_DIR = os.path.join(DATA_DIR, "macro")
 LATEST_PATH = os.path.join(MACRO_DIR, "kosis_latest.json")
@@ -42,13 +45,15 @@ except ImportError:
     HAS_REQUESTS = False
 
 # ── KOSIS API 설정 ──
-KOSIS_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
-TIMEOUT = 30
+KOSIS_URL = KOSIS_BASE_URL
+TIMEOUT = TIMEOUT_NORMAL  # 30s — api_constants.py 표준
 
 # ── 수집 대상 항목코드 → 키명 매핑 (DT_1C8016) ──
 # C1 code → internal key name
 SERIES_MAP = {
     # 선행지표 (Leading)
+    # NOTE: cli_composite (2020=100 level) differs from download_macro.py's ECOS cli (901Y067 순환변동치).
+    # Intentional cross-validation: KOSIS=absolute level, ECOS=cyclical component.
     "A01":   {"key": "cli_composite",   "name": "선행종합지수 (2020=100)"},
     "A0102": {"key": "esi",             "name": "경제심리지수 (Doc29 §2.2 CSI proxy)"},
     "A0104": {"key": "construction_orders", "name": "건설수주(실질)"},
@@ -56,12 +61,16 @@ SERIES_MAP = {
     "A0107": {"key": "rate_spread_5y",  "name": "금리스프레드 5년국채-콜금리"},
     # 동행지표 (Coincident)
     "B02":   {"key": "cci_composite",   "name": "동행종합지수 (2020=100)"},
+    # NOTE: Intentional cross-validation with download_macro.py ECOS ipi (901Y033).
+    # KOSIS source = DT_1C8016, ECOS source = 901Y033 (same underlying but different pipelines).
     "B0201": {"key": "ipi_all",         "name": "전산업생산지수 (ECOS 교차검증)"},
     "B0204": {"key": "retail_sales",    "name": "소매판매지수"},
     "B0207": {"key": "employed_nonfarm","name": "비농림어업 취업자수 (천명)"},
     # 후행지표 (Lagging)
     "C03":   {"key": "lag_composite",   "name": "후행종합지수 (2020=100)"},
     "C0301": {"key": "inventory_index", "name": "생산자제품재고지수"},
+    # NOTE: Intentional cross-validation with download_macro.py ECOS cp_rate_91d (721Y001/4020000).
+    # KOSIS source = DT_1C8016 후행지표, ECOS source = 721Y001 시장금리 테이블.
     "C0305": {"key": "cp_yield_kosis",  "name": "CP수익률 (ECOS 교차검증)"},
 }
 
@@ -139,8 +148,8 @@ def fetch_kosis_table(api_key, tbl_id="DT_1C8016", org_id="101",
 
     try:
         session = requests.Session()
-        session.headers.update({"User-Agent": "Mozilla/5.0"})
-        r = session.get(KOSIS_URL, params=params, timeout=TIMEOUT, verify=False)
+        session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        r = session.get(KOSIS_URL, params=params, timeout=TIMEOUT)
 
         if r.status_code != 200:
             log(f"  HTTP {r.status_code}")

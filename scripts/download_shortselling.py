@@ -35,6 +35,10 @@ from collections import defaultdict
 # krx_otp.py와 같은 디렉터리에 있으므로 import path 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from krx_otp import KRXOTPClient, KRXOTPError
+from api_constants import (
+    clean_csv_fieldnames as _clean_fieldnames, parse_number as _parse_number_base,
+    TIMEOUT_HEAVY,
+)
 
 # ── 경로 설정 ──
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,11 +71,12 @@ BALANCE_COLUMN_MAP = {
 
 
 def parse_number(val: str) -> float:
-    """쉼표/공백 제거 후 숫자 파싱. 빈 값이면 0."""
-    cleaned = val.strip().replace(",", "").replace(" ", "")
-    if not cleaned or cleaned == "-":
-        return 0.0
-    return float(cleaned)
+    """쉼표/공백 제거 후 숫자 파싱. 빈 값이면 0.
+    코어 파싱은 api_constants.parse_number 위임.
+    공매도 데이터는 None 대신 0.0 반환 (집계 로직 보호).
+    """
+    result = _parse_number_base(val)
+    return float(result) if result is not None else 0.0
 
 
 def parse_trade_csv(csv_text: str, date_str: str, market: str) -> list:
@@ -91,9 +96,7 @@ def parse_trade_csv(csv_text: str, date_str: str, market: str) -> list:
     reader = csv.DictReader(io.StringIO(csv_text))
 
     # BOM 및 공백 제거
-    fieldnames = reader.fieldnames or []
-    cleaned = [f.lstrip("\ufeff").strip() for f in fieldnames]
-    reader.fieldnames = cleaned
+    reader.fieldnames = _clean_fieldnames(reader.fieldnames)
 
     for row in reader:
         try:
@@ -150,9 +153,7 @@ def parse_balance_csv(csv_text: str, date_str: str, market: str) -> list:
     reader = csv.DictReader(io.StringIO(csv_text))
 
     # BOM 및 공백 제거
-    fieldnames = reader.fieldnames or []
-    cleaned = [f.lstrip("\ufeff").strip() for f in fieldnames]
-    reader.fieldnames = cleaned
+    reader.fieldnames = _clean_fieldnames(reader.fieldnames)
 
     for row in reader:
         try:
@@ -222,7 +223,7 @@ def download_trade_data(
             "strtDd": start_yyyymmdd,
             "endDd": end_yyyymmdd,
         },
-        csv_timeout=60,  # 전종목 CSV는 크므로 타임아웃 여유
+        csv_timeout=TIMEOUT_HEAVY,  # 전종목 CSV는 크므로 타임아웃 여유
     )
 
     if verbose:
@@ -263,7 +264,7 @@ def download_balance_data(
             "strtDd": date_yyyymmdd,
             "endDd": date_yyyymmdd,
         },
-        csv_timeout=60,  # 전종목 CSV는 크므로 타임아웃 여유
+        csv_timeout=TIMEOUT_HEAVY,  # 전종목 CSV는 크므로 타임아웃 여유
     )
 
     if verbose:

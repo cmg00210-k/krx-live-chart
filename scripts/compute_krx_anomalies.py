@@ -41,7 +41,7 @@ def load_all_daily_returns():
             with open(fpath, 'r', encoding='utf-8') as f:
                 d = json.load(f)
             candles = d.get('candles', [])
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             continue
 
         rets = []
@@ -97,7 +97,7 @@ def compute_tom_effect(all_rets):
         for date_str, r, vol, mkt in rets:
             try:
                 dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
-            except:
+            except (ValueError, TypeError):
                 continue
             day = dt.day
             # Last 3 days: day >= 27 (approximate)
