@@ -1,7 +1,39 @@
 {
   "horizon": 5,
-  "total_records": 76443,
-  "valid_ret5_records": 74057,
+  "total_records": 253829,
+  "valid_ret5_records": 249962,
+  "calibration_metadata": {
+    "initial_values": "academic_defaults",
+    "academic_defaults": {
+      "candle_target_atr": {
+        "strong": 2.0,
+        "medium": 2.0,
+        "weak": 2.0
+      },
+      "rr_thresholds": [
+        1.0,
+        2.0
+      ],
+      "note": "Flat ATR 2.0 academic baseline; use --reset-initial to document"
+    },
+    "dataset_period": "2021-03-30 ~ 2026-04-02",
+    "train_records": 10448,
+    "test_records": 243381,
+    "train_period": "2021-03-30 ~ 2024-09-09",
+    "test_period": "2024-09-10 ~ 2026-04-02",
+    "oos_split": 0.3,
+    "cutoff_date": "2024-09-10",
+    "circular_check": true
+  },
+  "oos_validation": {
+    "status": "rejected",
+    "n": 239514,
+    "n_directed": 83793,
+    "oos_ic": 0.042939,
+    "oos_ic_pvalue": 0.0,
+    "oos_wr": 50.37,
+    "rejection_criteria": "OOS IC < 0.02 OR OOS WR < 52%"
+  },
   "C1_rr_thresholds": {
     "current": [
       1.0,
@@ -12,38 +44,38 @@
       1.5
     ],
     "changed": false,
-    "p_value_overall": 0.777639,
-    "p_value_low": 0.611905,
-    "p_value_high": 0.655897,
-    "score": 0.1062,
+    "p_value_overall": 0.75963,
+    "p_value_low": 0.75963,
+    "p_value_high": 1.0,
+    "score": -0.4088,
     "zone_counts": {
-      "below": 16401,
-      "mid": 53611,
-      "above": 4045
+      "below": 4848,
+      "mid": 0,
+      "above": 48
     },
     "zone_means": {
-      "below": -0.0561,
-      "mid": -0.0199,
-      "above": 0.05
+      "below": -0.5277,
+      "mid": null,
+      "above": -0.9364
     },
-    "evidence": "best_pair=[1.0, 2.75], score=0.1062%, F/t=0.25, p=7.7764e-01, p_low=6.1190e-01, p_high=6.5590e-01, n_below=16401, n_mid=53611, n_above=4045"
+    "evidence": "best_pair=[2.25, 2.5], score=-0.4088%, F/t=-0.31, p=7.5963e-01, p_low=7.5963e-01, p_high=1.0000e+00, n_below=4848, n_mid=0, n_above=48"
   },
   "C2_conf_L": {
     "current_formula": "R_sq * min(n/100, 1)",
-    "calibrated_formula": "R_sq * min(n/300, 1)",
-    "calibrated_n_scale": 300,
-    "changed": true,
+    "calibrated_formula": "R_sq * min(n/100, 1)",
+    "calibrated_n_scale": 50,
+    "changed": false,
     "logistic_coeffs": {
-      "intercept": 0.1045,
-      "b_confidence": 0.1999,
-      "b_wc": -0.0862
+      "intercept": 0.3862,
+      "b_confidence": -0.2778,
+      "b_wc": -0.2547
     },
     "b_conf_CI_95": [
-      0.0919,
-      0.2915
+      -0.6757,
+      0.1168
     ],
-    "overall_direction_accuracy": 0.5215,
-    "evidence": "Logistic: a=0.104, b_conf=0.200, b_wc=-0.086; b_conf CI=[0.092, 0.292]; N_scale=300; overall_accuracy=0.521"
+    "overall_direction_accuracy": 0.5083,
+    "evidence": "Logistic: a=0.386, b_conf=-0.278, b_wc=-0.255; b_conf CI=[-0.676, 0.117]; N_scale=50; overall_accuracy=0.508"
   },
   "D1_candle_target_atr": {
     "current": {
@@ -52,50 +84,50 @@
       "weak": 0.5
     },
     "calibrated": {
-      "strong": 1.88,
-      "medium": 2.31,
-      "weak": 2.18
+      "strong": 2.85,
+      "medium": 3.11,
+      "weak": 2.88
     },
     "changed": true,
     "atr_norm_used": 0.025,
     "tier_details": {
       "strong": {
-        "n": 55469,
-        "mean_abs_ret5": 4.7044,
-        "std_abs_ret5": 7.3644,
-        "atr_multiplier": 1.88,
+        "n": 1326,
+        "mean_abs_ret5": 7.1241,
+        "std_abs_ret5": 8.5619,
+        "atr_multiplier": 2.85,
         "CI_95": [
-          1.857,
-          1.906
+          2.665,
+          3.034
         ],
         "fallback": false
       },
       "medium": {
-        "n": 5403,
-        "mean_abs_ret5": 5.7822,
-        "std_abs_ret5": 7.3703,
-        "atr_multiplier": 2.31,
+        "n": 1235,
+        "mean_abs_ret5": 7.7749,
+        "std_abs_ret5": 18.8888,
+        "atr_multiplier": 3.11,
         "CI_95": [
-          2.234,
-          2.392
+          2.689,
+          3.531
         ],
         "fallback": false
       },
       "weak": {
-        "n": 1392,
-        "mean_abs_ret5": 5.4488,
-        "std_abs_ret5": 6.7635,
-        "atr_multiplier": 2.18,
+        "n": 7079,
+        "mean_abs_ret5": 7.1992,
+        "std_abs_ret5": 19.9132,
+        "atr_multiplier": 2.88,
         "CI_95": [
-          2.037,
-          2.322
+          2.694,
+          3.065
         ],
         "fallback": false
       }
     },
-    "kruskal_wallis_H": 279.3231,
-    "kruskal_wallis_p": 0.0,
-    "evidence": "ATR_NORM=0.025, strong=1.88x, medium=2.31x, weak=2.18x, KW p=2.2170e-61"
+    "kruskal_wallis_H": 2.9441,
+    "kruskal_wallis_p": 0.229454,
+    "evidence": "ATR_NORM=0.025, strong=2.85x, medium=3.11x, weak=2.88x, KW p=2.2945e-01"
   },
   "D2_sell_hw_inversion": {
     "current": {
@@ -103,23 +135,23 @@
       "b": -1
     },
     "calibrated": {
-      "a": 2,
-      "b": -1
+      "a": 3.063,
+      "b": -2.0
     },
-    "changed": false,
+    "changed": true,
     "ols": {
-      "intercept": -10.3635,
-      "slope": 8.2326,
-      "r_squared": 0.000578,
-      "p_value": 2e-06,
-      "std_err": 1.7161,
-      "t_stat": 4.7973
+      "intercept": -42.6462,
+      "slope": 40.7292,
+      "r_squared": 0.006037,
+      "p_value": 0.002004,
+      "std_err": 13.1607,
+      "t_stat": 3.0948
     },
-    "n_sell": 39774,
-    "mean_hw_sell": 1.2199,
-    "corr_current": 0.024,
-    "corr_new": 0.024,
-    "evidence": "OLS: ret5 = -10.3635 + 8.2326*hw, R^2=0.000578, p=1.6140e-06, corr_current=0.0240, corr_new=0.0240"
+    "n_sell": 1579,
+    "mean_hw_sell": 1.0313,
+    "corr_current": 0.0777,
+    "corr_new": 0.0777,
+    "evidence": "OLS: ret5 = -42.6462 + 40.7292*hw, R^2=0.006037, p=2.0044e-03, corr_current=0.0777, corr_new=0.0777"
   },
   "D3_rr_penalty": {
     "current": {
@@ -127,29 +159,29 @@
       "high": 5
     },
     "calibrated": {
-      "low": 3.1,
-      "high": 4.1
+      "low": 15,
+      "high": 5
     },
-    "changed": true,
+    "changed": false,
     "rr_thresholds_used": [
       1.0,
       1.5
     ],
     "zone_counts": {
-      "below": 16401,
-      "mid": 49207,
-      "above": 8449
+      "below": 4708,
+      "mid": 114,
+      "above": 74
     },
     "zone_means": {
-      "below": -0.0561,
-      "mid": 0.1597,
-      "above": -1.0321
+      "below": -0.5224,
+      "mid": -0.2089,
+      "above": -1.6171
     },
-    "cohens_d_low": -0.1048,
-    "p_value_low": 0.0,
-    "cohens_d_high": -0.1353,
-    "p_value_high": 0.0,
+    "cohens_d_low": -0.0785,
+    "p_value_low": 0.247391,
+    "cohens_d_high": -0.1115,
+    "p_value_high": 0.400292,
     "penalty_scale": 30,
-    "evidence": "thresholds=[1.0,1.5], d_low=-0.105(p=7.2391e-15), d_high=-0.135(p=2.1005e-27), scale=30"
+    "evidence": "thresholds=[1.0,1.5], d_low=-0.079(p=2.4739e-01), d_high=-0.112(p=4.0029e-01), scale=30"
   }
 }

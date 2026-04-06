@@ -100,6 +100,8 @@ EXCLUDE_EXACT = {
     os.path.join("data", "derivatives", "etf_daily.json"),
     # Delisted stock index -- only used by backtest_runner.js and Python scripts
     os.path.join("data", "delisted_index.json"),
+    # Dead output -- compute_krx_anomalies.py writes it but no JS consumer fetches it
+    os.path.join("data", "backtest", "krx_anomalies.json"),
 }
 
 # ---------------------------------------------------------------------------
