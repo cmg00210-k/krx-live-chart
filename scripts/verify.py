@@ -669,6 +669,55 @@ def check_scripts(strict=False):
         warn("5f skipped: index.html or js/analysisWorker.js not found")
         warnings += 1
 
+    # [V6-FIX] P0-3: Worker constructor URL ?v=N validation
+    # new Worker('js/analysisWorker.js?v=N') and new Worker('js/screenerWorker.js?v=N')
+    # must reference valid Worker files, and the constructor ?v=N should match the
+    # importScripts versions inside the Worker file (internal consistency).
+    if index_html.exists():
+        if 'html_src' not in dir() or html_src is None:
+            html_src = read(index_html)
+        if 'html_vers' not in dir():
+            html_vers = {m.group(1): int(m.group(2))
+                         for m in re.finditer(r'<script[^>]+src="js/([^"?]+\.js)\?v=(\d+)"', html_src)}
+        # Scan all main-thread JS files for new Worker(...) constructor calls
+        worker_constructor_re = re.compile(
+            r"""new\s+Worker\(\s*['"]js/([^'"?]+\.js)\?v=(\d+)['"]\s*\)"""
+        )
+        worker_constructors = []  # (host_file, worker_file, version)
+        for js_fname in LOAD_ORDER:
+            js_fpath = JS / js_fname
+            if not js_fpath.exists():
+                continue
+            js_src = read(js_fpath)
+            for m in worker_constructor_re.finditer(js_src):
+                worker_constructors.append((js_fname, m.group(1), int(m.group(2))))
+
+        if worker_constructors:
+            for host_file, wk_file, ctor_ver in worker_constructors:
+                wk_path = JS / wk_file
+                if not wk_path.exists():
+                    fail(f"Worker constructor in {host_file}: js/{wk_file} does not exist")
+                    errors += 1
+                    continue
+                # Read Worker file and extract its importScripts ?v=N versions
+                wk_src = read(wk_path)
+                wk_import_vers = {m2.group(1): int(m2.group(2))
+                                  for m2 in re.finditer(r"['\"]([^'\"?]+\.js)\?v=(\d+)['\"]", wk_src)}
+                # Check: each importScripts version should match index.html
+                wk_mismatches = []
+                for imp_file, imp_ver in wk_import_vers.items():
+                    hv = html_vers.get(imp_file)
+                    if hv is not None and hv != imp_ver:
+                        wk_mismatches.append((imp_file, hv, imp_ver))
+                if wk_mismatches:
+                    for imp_file, hv, iv in wk_mismatches:
+                        fail(f"Worker desync: {wk_file} importScripts {imp_file} ?v={iv} != index.html ?v={hv}")
+                        errors += 1
+                else:
+                    ok(f"Worker constructor {host_file} -> {wk_file}?v={ctor_ver}: importScripts versions in sync")
+        else:
+            ok("No Worker constructor calls found (skipping Worker URL validation)")
+
     # 5g. SW STATIC_ASSETS ↔ index.html local script sync
     sw_path2 = ROOT / "sw.js"
     if sw_path2.exists() and index_html.exists():
@@ -837,6 +886,34 @@ def check_pipeline(strict=False):
             errors += 1
         else:
             ok(f"{fname} — {len(required_keys)} required key(s) present")
+
+        # [V6-FIX] P2-1: Validate required key values are not null/empty
+        # Keys that exist but hold None, "", or [] indicate upstream data failures.
+        # Numeric 0 is allowed for "bok_rate" (zero interest rate is valid) but not for
+        # keys like "mcs", "vix" where 0 is economically implausible.
+        _ALLOW_ZERO_KEYS = {"bok_rate", "rf_daily"}  # rates can legitimately be 0
+        if isinstance(check_target, dict) and not missing_keys:
+            null_keys = []
+            for key in required_keys:
+                if "." in key:
+                    val = _resolve_dotted_key(check_target, key)
+                else:
+                    val = check_target.get(key)
+                if val is None:
+                    null_keys.append((key, "null"))
+                elif val == "":
+                    null_keys.append((key, "empty string"))
+                elif isinstance(val, list) and len(val) == 0:
+                    null_keys.append((key, "empty array"))
+                elif isinstance(val, dict) and len(val) == 0:
+                    null_keys.append((key, "empty object"))
+                elif val == 0 and key not in _ALLOW_ZERO_KEYS:
+                    # Numeric 0 for metrics like mcs/vix is suspect
+                    null_keys.append((key, "zero (suspect)"))
+            if null_keys:
+                for key, reason in null_keys:
+                    warn(f"{fname} — key '{key}' is {reason} (possible upstream failure)")
+                warnings += len(null_keys)
 
         # 6e. Sample/error data guard
         if guard_field and isinstance(check_target, dict):

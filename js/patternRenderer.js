@@ -764,8 +764,8 @@ const patternRenderer = (() => {
                 ctx.moveTo(barX, fz.yEntry);
                 ctx.lineTo(barX, fz.yStop);
                 ctx.stroke();
-                // 진입점 마커
-                ctx.fillStyle = '#fff';
+                // 진입점 마커 [V6-FIX F2: #fff → KRX_COLORS.CHART_TEXT]
+                ctx.fillStyle = KRX_COLORS.CHART_TEXT;
                 ctx.beginPath();
                 ctx.arc(barX, fz.yEntry, 2.5, 0, Math.PI * 2);
                 ctx.fill();
@@ -1280,12 +1280,16 @@ const patternRenderer = (() => {
           const tl = toXY(candles[handleStart].time, handleHigh);
           const br = toXY(candles[handleEnd].time, handleLow);
           if (tl.x != null && tl.y != null && br.x != null && br.y != null) {
+            // [V6-FIX F6]: Use {x1,y1,x2,y2,fill,border} — matches bracket layer
+            // consumer at draw() layer 2 (lines 219-241). Old {x,y,w,h,color}
+            // caused undefined coordinate checks and invisible handle bracket.
             data.brackets.push({
-              x: Math.min(tl.x, br.x) - 2,
-              y: Math.min(tl.y, br.y) - 2,
-              w: Math.abs(br.x - tl.x) + 4,
-              h: Math.abs(br.y - tl.y) + 4,
-              color: BUY_COLOR,
+              x1: Math.min(tl.x, br.x) - 2,
+              y1: Math.min(tl.y, br.y) - 2,
+              x2: Math.max(tl.x, br.x) + 2,
+              y2: Math.max(tl.y, br.y) + 2,
+              fill: KRX_COLORS.PTN_BUY_FILL,
+              border: BUY_COLOR,
             });
           }
         }

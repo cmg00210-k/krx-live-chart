@@ -1,0 +1,60 @@
+{
+  "generated": "2026-04-06T21:34:44",
+  "lastUpdated": "2026-04-06",
+  "status": "ok",
+  "mcsV2": 65.7,
+  "mcsScale": "0-100",
+  "mcsComponents": {
+    "cli": 0.904,
+    "esi": 0.59,
+    "ipi": 0.7467,
+    "consumer_confidence": 0.5057,
+    "pmi": 0.3,
+    "exports": 0.8387,
+    "unemployment_inv": 0.775,
+    "yield_spread": 0.3375
+  },
+  "mcsAvailable": 8,
+  "taylorGap": -0.6525,
+  "taylorDetail": {
+    "taylorGap": -0.6525,
+    "taylorRate": 3.1525,
+    "actualRate": 2.5,
+    "cpiYoY": 2.16,
+    "rStar": 0.5,
+    "piStar": 2.0,
+    "outputGap": 0.825,
+    "outputGapSource": "cli_proxy",
+    "cliValue": 101.65,
+    "existingGap": -0.2305
+  },
+  "yieldCurvePhase": "flattening",
+  "yieldCurveDetail": {
+    "yieldCurvePhase": "flattening",
+    "spread_10y3y": 0.3,
+    "isInverted": false,
+    "description": "수익률곡선 평탄화 — 경기 둔화 가능"
+  },
+  "creditCyclePhase": "peak",
+  "creditCycleDetail": {
+    "creditCyclePhase": "peak",
+    "aaSpread": 0.65,
+    "creditRegime": "normal",
+    "description": "신용 정점 — 스프레드 안정, 경계 필요"
+  },
+  "parameters": {
+    "weights": {
+      "cli": 0.2,
+      "esi": 0.15,
+      "ipi": 0.15,
+      "consumer_confidence": 0.1,
+      "pmi": 0.1,
+      "exports": 0.1,
+      "unemployment_inv": 0.1,
+      "yield_spread": 0.1
+    },
+    "taylor_r_star": 0.5,
+    "taylor_pi_star": 2.0,
+    "cli_to_gap_scale": 0.5
+  }
+}

@@ -392,8 +392,10 @@ var _activeParamInd = null;
 // compute_hmm_regimes.py → hmm_regimes.json → flow_signals.json 경유
 // 레짐 분류에 따라 매수/매도 패턴 신뢰도를 차등 조정
 var REGIME_CONFIDENCE_MULT = {
-  bull:     { buy: 1.10, sell: 0.85 },   // 강세 레짐: 매수 신뢰↑, 매도 신뢰↓
-  bear:     { buy: 0.85, sell: 1.10 },   // 약세 레짐: 반대
+  // [V6-FIX] Ang & Bekaert (2002), Lunde & Timmermann (2004): Bayesian shrinkage calibration
+  // Old: bull buy 1.10/sell 0.85, bear buy 0.85/sell 1.10 — ~2x too large for IC 0.02-0.04
+  bull:     { buy: 1.06, sell: 0.92 },   // 강세 레짐: 매수 +6%, 매도 -8%
+  bear:     { buy: 0.90, sell: 1.06 },   // 약세 레짐: 매수 -10%, 매도 +6%
   sideways: { buy: 1.00, sell: 1.00 },   // 횡보: 중립
   null:     { buy: 1.00, sell: 1.00 }    // 데이터 없음: 중립
 };

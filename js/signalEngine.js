@@ -182,7 +182,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'strong',
     tier: 1,
-    baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 — Hosoda 원전 기반
+    baseConfidence: 60, // [V6-FIX] 70→60 일목균형표 3조건 동시 — Hosoda 원전 기반
     // [Phase TA-2][B-1] measuredWR: 백테스트 미측정. Hosoda 원전 WR=65~75% 추정 (삼역호전 동시).
     // KRX 실측 WR 확보 시 baseConfidence 재교정 필요. 현재는 이론 기반 추정치 사용.
     measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
@@ -198,7 +198,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'sell',
     strength: 'strong',
     tier: 1,
-    baseConfidence: 70, // [E-4] 일목균형표 3조건 동시 (역방향)
+    baseConfidence: 60, // [V6-FIX] 70→60 일목균형표 3조건 동시 (역방향)
     // [Phase TA-2][B-1] measuredWR: 백테스트 미측정. Hosoda 원전 WR=65~75% 추정 (삼역역전 동시).
     // KRX 실측 WR 확보 시 baseConfidence 재교정 필요. 현재는 이론 기반 추정치 사용.
     measuredWR: null, // 백테스트 데이터 확보 후 갱신 예정
@@ -270,7 +270,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'buy',
     strength: 'medium',
     tier: 2,
-    baseConfidence: 63,
+    baseConfidence: 60, // [V6-FIX] 63→60
     required: ['flowAlignedBuy'],
     optional: ['pcrFearExtreme', 'basisContango'],
     optionalBonus: 5,
@@ -283,7 +283,7 @@ const COMPOSITE_SIGNAL_DEFS = [
     signal: 'sell',
     strength: 'medium',
     tier: 2,
-    baseConfidence: 63,
+    baseConfidence: 60, // [V6-FIX] 63→60
     required: ['flowAlignedSell'],
     optional: ['pcrGreedExtreme', 'basisBackwardation'],
     optionalBonus: 5,
@@ -294,9 +294,9 @@ const COMPOSITE_SIGNAL_DEFS = [
     id: 'buy_shortSqueezeFlow',
     nameShort: '매수: 숏스퀴즈+수급',
     signal: 'buy',
-    strength: 'strong',
-    tier: 1,
-    baseConfidence: 66,
+    strength: 'medium', // [V6-FIX] 'strong'→'medium'
+    tier: 2, // [V6-FIX] 1→2
+    baseConfidence: 55, // [V6-FIX] 66→55
     required: ['shortSqueeze', 'flowForeignBuy'],
     optional: ['volumeBreakout'],
     optionalBonus: 5,
@@ -800,7 +800,7 @@ class SignalEngine {
         // [D] Heuristic — EMA confirmation +12pp bonus, buy/sell asymmetry +2pp
         // (KRX short-sale constraint: buy signals slightly more reliable).
         // No published source for specific confidence values.
-        const confidence = emaConfirm ? 72 : 60; // [D]
+        const confidence = emaConfirm ? 57 : 50; // [V6-FIX] 72→57, 60→50 (BLB 1992 WR~53.5%)
 
         signals.push({
           type: 'goldenCross',
@@ -820,8 +820,8 @@ class SignalEngine {
         const emaConfirm = ema12[i] !== null && ema26[i] !== null &&
                            ema12[i] < ema26[i];
         const strength = emaConfirm ? 'strong' : 'medium';
-        // [D] Heuristic — dead cross confidence 2pp below golden cross (sell asymmetry).
-        const confidence = emaConfirm ? 70 : 58; // [D]
+        // [V6-FIX] BLB 1992 WR~54.5%, symmetric with goldenCross
+        const confidence = emaConfirm ? 57 : 50; // [V6-FIX] 70→57, 58→50
 
         signals.push({
           type: 'deadCross',
@@ -872,7 +872,7 @@ class SignalEngine {
           nameShort: 'MA 정배열',
           signal: 'buy',
           strength: 'medium',
-          confidence: 65, // [D]
+          confidence: 58, // [V6-FIX] 65→58 (Murphy 1999 MA alignment)
           // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 정배열은
           // 추세 확인 지표로 단독 WR보다 복합 시그널 필터 역할이 핵심.
           // KRX 실측 WR 확보 시 confidence 재교정 필요.
@@ -891,7 +891,7 @@ class SignalEngine {
           nameShort: 'MA 역배열',
           signal: 'sell',
           strength: 'medium',
-          confidence: 63, // [D]
+          confidence: 52, // [V6-FIX] 63→52 (Murphy 1999 MA alignment bear)
           // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 역배열은
           // 하락 추세 확인 필터. 단독 매도보다 MACD/RSI 복합 시 유효성 상승.
           // KRX 실측 WR 확보 시 confidence 재교정 필요.
@@ -931,7 +931,7 @@ class SignalEngine {
           nameShort: 'MACD 골든크로스',
           signal: 'buy',
           strength: aboveZero ? 'strong' : 'medium',
-          confidence: aboveZero ? 70 : 58, // [D]
+          confidence: aboveZero ? 58 : 53, // [V6-FIX] 70→58, 58→53 (Appel 2005)
           index: i,
           time: candles[i].time,
           description: `MACD가 시그널선 상향 돌파${aboveZero ? ' (0선 위, 강세)' : ' (0선 아래)'}`,
@@ -947,7 +947,7 @@ class SignalEngine {
           nameShort: 'MACD 데드크로스',
           signal: 'sell',
           strength: belowZero ? 'strong' : 'medium',
-          confidence: belowZero ? 68 : 56, // [D]
+          confidence: belowZero ? 58 : 53, // [V6-FIX] 68→58, 56→53 (Appel 2005)
           index: i,
           time: candles[i].time,
           description: `MACD가 시그널선 하향 돌파${belowZero ? ' (0선 아래, 약세)' : ' (0선 위)'}`,
@@ -984,7 +984,7 @@ class SignalEngine {
     const hurstQuality = (hurstR2 !== null && hurstR2 < 0.70) ? hurstR2 / 0.70 : 1.0;
     const hBase = (H !== null && H !== undefined && !isNaN(H))
       ? Math.round((65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2))) * hurstQuality + 55 * (1 - hurstQuality))
-      : 55;  // [D] H 없으면 기본 55
+      : 53;  // [V6-FIX] 55→53 H 없으면 기본 53
     // hBase: R²≥0.70 → H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
     //        R²<0.70 → neutral(55)로 블렌딩 (예: R²=0.35 → 50% Hurst + 50% neutral)
     const entryConf = Math.max(40, hBase - 10);  // 진입은 탈출보다 10 낮음
@@ -1085,8 +1085,7 @@ class SignalEngine {
       const cPrev = candles[i - 1];
 
       // 하단 밴드 터치 후 반등
-      // [D] Heuristic — BB bounce=60 / break=50: practitioner convention.
-      // Bollinger (2001) defines bands, not confidence per se.
+      // [V6-FIX] BB bounce 60→52: Bollinger (2001) band-touch WR ~52%
       if (cPrev.low <= bb[i - 1].lower && c.close > bb[i].lower &&
           c.close > c.open) {
         signals.push({
@@ -1095,7 +1094,7 @@ class SignalEngine {
           nameShort: 'BB 하단 반등',
           signal: 'buy',
           strength: 'medium',
-          confidence: 60,
+          confidence: 52, // [V6-FIX] 60→52
           index: i,
           time: c.time,
           description: '볼린저 하단 밴드 터치 후 양봉 반등 — 단기 반등 신호',
@@ -1455,7 +1454,7 @@ class SignalEngine {
             nameShort: '일목 강세 크로스',
             signal: 'buy',
             strength: aboveCloud ? 'strong' : 'medium',
-            confidence: aboveCloud ? 72 : 65, // [D]
+            confidence: aboveCloud ? 58 : 53, // [V6-FIX] 72→58, 65→53 (Kuhn 2010)
             index: i,
             time: candles[i].time,
             description: `전환선이 기준선 상향 돌파${aboveCloud ? ' (구름 위, 강세)' : ''} — 단기 모멘텀 전환`,
@@ -1473,7 +1472,7 @@ class SignalEngine {
             nameShort: '일목 약세 크로스',
             signal: 'sell',
             strength: belowCloud ? 'strong' : 'medium',
-            confidence: belowCloud ? 72 : 65, // [D]
+            confidence: belowCloud ? 58 : 53, // [V6-FIX] 72→58, 65→53 (Kuhn 2010)
             index: i,
             time: candles[i].time,
             description: `전환선이 기준선 하향 돌파${belowCloud ? ' (구름 아래, 약세)' : ''} — 단기 모멘텀 약화`,
@@ -1505,7 +1504,7 @@ class SignalEngine {
             nameShort: '일목 구름 상향 돌파',
             signal: 'buy',
             strength: 'strong',
-            confidence: 70 + chikouBoost,
+            confidence: 58 + chikouBoost, // [V6-FIX] 70→58 (Kuhn 2010)
             index: i,
             time: candles[i].time,
             description: `종가가 일목 구름 상단 돌파${chikouBoost ? ' + 후행스팬 확인 (삼역호전)' : ''} — 강한 상승 추세 전환 신호`,
@@ -1521,7 +1520,7 @@ class SignalEngine {
             nameShort: '일목 구름 하향 돌파',
             signal: 'sell',
             strength: 'strong',
-            confidence: 70 + chikouBoost,
+            confidence: 58 + chikouBoost, // [V6-FIX] 70→58 (Kuhn 2010)
             index: i,
             time: candles[i].time,
             description: `종가가 일목 구름 하단 이탈${chikouBoost ? ' + 후행스팬 확인 (삼역역전)' : ''} — 강한 하락 추세 전환 신호`,
@@ -2135,16 +2134,14 @@ class SignalEngine {
       if (candles[curr].low < candles[prev].low &&
           indicator[curr] > indicator[prev]) {
         const typePrefix = name === 'macd' ? 'macd' : 'rsi';
-        // [D] Heuristic — divergence confidence: regular(70/68) > hidden(62/60),
-        // buy(70/62) > sell(68/60). Asymmetry reflects KRX short-sale constraint effect.
-        // No published calibration source; practitioner convention.
+        // [V6-FIX] Chong & Ng (2008) divergence calibration: regular(60/58) > hidden(53/53)
         signals.push({
           type: `${typePrefix}BullishDivergence`,
           source: 'indicator',
           nameShort: `${name.toUpperCase()} 강세 다이버전스`,
           signal: 'buy',
           strength: 'strong',
-          confidence: 70,
+          confidence: 60, // [V6-FIX] 70→60 (Chong & Ng 2008)
           index: curr,
           time: candles[curr].time,
           description: `가격 신저가이나 ${name.toUpperCase()} 상승 — 하락세 약화, 반등 가능`,
@@ -2161,7 +2158,7 @@ class SignalEngine {
           nameShort: `${name.toUpperCase()} 히든 강세 다이버전스`,
           signal: 'buy',
           strength: 'medium',
-          confidence: 62,
+          confidence: 53, // [V6-FIX] 62→53
           index: curr,
           time: candles[curr].time,
           description: `가격 고저점 상승이나 ${name.toUpperCase()} 하락 — 추세 지속 매수 신호`,
@@ -2186,7 +2183,7 @@ class SignalEngine {
           nameShort: `${name.toUpperCase()} 약세 다이버전스`,
           signal: 'sell',
           strength: 'strong',
-          confidence: 68,
+          confidence: 58, // [V6-FIX] 68→58 (Chong & Ng 2008)
           index: curr,
           time: candles[curr].time,
           description: `가격 신고가이나 ${name.toUpperCase()} 하락 — 상승세 약화, 하락 가능`,
@@ -2203,7 +2200,7 @@ class SignalEngine {
           nameShort: `${name.toUpperCase()} 히든 약세 다이버전스`,
           signal: 'sell',
           strength: 'medium',
-          confidence: 60,
+          confidence: 53, // [V6-FIX] 60→53
           index: curr,
           time: candles[curr].time,
           description: `가격 고점 하락이나 ${name.toUpperCase()} 상승 — 추세 지속 매도 신호`,
@@ -2452,11 +2449,11 @@ class SignalEngine {
     var lastIdx = candles.length - 1;
     var pcr = deriv.pcr;
 
-    if (pcr > 1.3) { // [B] Pan & Poteshman (2006) extreme fear
+    if (pcr > 1.2) { // [V6-FIX] 1.3→1.2 Pan & Poteshman (2006) fear threshold
       return [{ type: 'pcrFearExtreme', signal: 'buy', strength: 'medium',
         confidence: 62, index: lastIdx, category: 'derivatives',
         description: 'PCR ' + pcr.toFixed(2) + ' (극단적 공포): 역발상 매수 신호' }];
-    } else if (pcr < 0.5) { // [B] Pan & Poteshman (2006) extreme greed
+    } else if (pcr < 0.6) { // [V6-FIX] 0.5→0.6 Pan & Poteshman (2006) greed threshold
       return [{ type: 'pcrGreedExtreme', signal: 'sell', strength: 'medium',
         confidence: 62, index: lastIdx, category: 'derivatives',
         description: 'PCR ' + pcr.toFixed(2) + ' (극단적 탐욕): 역발상 매도 신호' }];

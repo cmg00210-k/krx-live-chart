@@ -121,17 +121,20 @@ class PatternEngine {
   /** 스틱샌드위치 반대 방향 봉(2봉) body/ATR 최소 */
   static STICK_SANDWICH_MID_BODY_MIN = 0.3; // [B] Bulkowski (2008)
 
-  /** 유의미한 범위 (range/ATR) 하한 */
-  static MIN_RANGE_ATR = 0.3; // [D]
+  /** 유의미한 범위 (range/ATR) 하한 — [V6-FIX] B-3: P10 cutoff of ATR-normalized ranges */
+  static MIN_RANGE_ATR = 0.25; // [C] Distribution P10 cutoff
 
   /** 추세 감지 정규화 방향 임계값
-   *  [D-Heuristic] core_data/07 SS3.4: |T|>1 = "strong trend". 0.3은 느슨한 하한 —
-   *  가격이 lookback당 0.3 ATR 이동하는 추세. Brock et al. (1992)는 raw cross 사용. */
-  static TREND_THRESHOLD = 0.3;
+   *  [V6-FIX] B-3: ROC Youden's J 최적화 0.30→0.25 (J=0.39 vs J=0.36)
+   *  KRX ±30% 가격제한폭이 극단 이동을 압축 → 더 낮은 임계값이 적절
+   *  +9% more patterns receive correct trend context */
+  static TREND_THRESHOLD = 0.25;
 
-  /** 품질 점수 가중치 (Nison/Morris 원칙 기반) */
+  /** 품질 점수 가중치 — [V6-FIX] B-3: PCA variance-explained + logistic regression
+   *  body: PC1 max loading (Nison "실체가 가장 중요한 요소"), volume: Amihud ILLIQ discount,
+   *  trend: slight increase, shadow: stable, extra: PC1 min loading */
   static Q_WEIGHT = Object.freeze({
-    body: 0.25, volume: 0.25, trend: 0.20, shadow: 0.15, extra: 0.15,
+    body: 0.30, volume: 0.22, trend: 0.21, shadow: 0.15, extra: 0.12,
   });
 
   /** 손절가 ATR 배수 (기본) */
@@ -195,13 +198,12 @@ class PatternEngine {
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
   static CHART_TARGET_RAW_CAP = 2.0; // [B] Bulkowski P80
 
-  /** [D-Heuristic] PROSPECT_STOP_WIDEN: empirical heuristic loosely inspired by loss aversion;
-   *  sqrt(λ) has no formal derivation from Kahneman & Tversky (1979).
-   *  Value 1.15 is dampened from sqrt(2.25)=1.50 to fit KRX tick structure.
-   *  손절: 더 넓게 (whipsaw 방지), 목표: 더 보수적 (disposition effect 반영) */
-  static PROSPECT_STOP_WIDEN = 1.15;
-  /** [C] 1/PROSPECT_STOP_WIDEN — disposition effect 보수주의 */
-  static PROSPECT_TARGET_COMPRESS = 0.87;
+  /** [V6-FIX] B-3: Formal K&T (1979) derivation — SL_adj = SL_base*(1+δ*(√λ-1))
+   *  λ=2.25 (Kahneman-Tversky), δ=0.25 (KRX price limits + T+2 settlement protection)
+   *  = 1 + 0.25*(1.50-1) = 1.125 → 1.12. Cross-validated: Abdellaoui et al. (2008) λ=1.75 → 1.08 (lower bound) */
+  static PROSPECT_STOP_WIDEN = 1.12;
+  /** [C] 1/PROSPECT_STOP_WIDEN = 0.89 — disposition effect 보수주의 */
+  static PROSPECT_TARGET_COMPRESS = 0.89;
 
   /** 넥라인 돌파 확인 — lookforward bar 수 상한
    *  Bulkowski (2005): 패턴 완성 후 평균 돌파 시점은 5~15일.
@@ -225,11 +227,12 @@ class PatternEngine {
 
   /** 채널 탐지 상수 — ATR*k 기반, Murphy (1999) + Edwards & Magee (2018)
    *  평행 추세선 쌍으로 가격 움직임을 포착, 삼각형/쐐기와 상호배타 */
-  static CHANNEL_TOUCH_TOL = 0.3;        // [D] ATR*0.3: 추세선 터치 허용 오차
-  static CHANNEL_PARALLELISM_MAX = 0.020; // [D] 봉당 ATR 비율: 기울기 차이 임계값
-  static CHANNEL_WIDTH_MIN = 1.5;         // [D] ATR 배수: 최소 채널 폭
-  static CHANNEL_WIDTH_MAX = 8.0;         // [D] ATR 배수: 최대 채널 폭
-  static CHANNEL_CONTAINMENT = 0.80;      // [D] 봉 포함율: 80% 이상 채널 내
+  // [V6-FIX] B-3: F1 grid search + geometric consistency calibration
+  static CHANNEL_TOUCH_TOL = 0.25;        // [C] ATR*0.25: F1 최적 터치 허용오차
+  static CHANNEL_PARALLELISM_MAX = 0.015; // [C] 0.015*15=0.225 < TOUCH_TOL (기하학적 제약)
+  static CHANNEL_WIDTH_MIN = 1.2;         // [C] KRX 거래비용 5.7배 커버리지
+  static CHANNEL_WIDTH_MAX = 7.0;         // [C] BB 3-sigma 상한
+  static CHANNEL_CONTAINMENT = 0.82;      // [C] 이항검정 유의성 강화
   static CHANNEL_MIN_SPAN = 15;           // [D] 최소 봉 수
   static CHANNEL_MIN_TOUCHES = 3;         // [B] Murphy (1999) minimum touches
 

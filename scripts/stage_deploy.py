@@ -307,16 +307,34 @@ def main():
 
     # Post-stage: verify critical files are present in deploy/
     if not args.dry_run:
+        # [V6-FIX] P2-3: Complete list of all 19 load-order JS files + 2 Workers + assets
         CRITICAL_FILES = [
             "index.html", "sw.js", "_headers", "favicon.svg",
             os.path.join("css", "style.css"),
-            os.path.join("js", "app.js"),
+            # All 19 JS files in load order (must match index.html <script> tags)
             os.path.join("js", "colors.js"),
+            os.path.join("js", "data.js"),
+            os.path.join("js", "api.js"),
+            os.path.join("js", "realtimeProvider.js"),
+            os.path.join("js", "indicators.js"),
+            os.path.join("js", "patterns.js"),
+            os.path.join("js", "signalEngine.js"),
             os.path.join("js", "chart.js"),
+            os.path.join("js", "patternRenderer.js"),
+            os.path.join("js", "signalRenderer.js"),
+            os.path.join("js", "backtester.js"),
+            os.path.join("js", "sidebar.js"),
+            os.path.join("js", "patternPanel.js"),
+            os.path.join("js", "financials.js"),
+            os.path.join("js", "drawingTools.js"),
             os.path.join("js", "appState.js"),
             os.path.join("js", "appWorker.js"),
             os.path.join("js", "appUI.js"),
+            os.path.join("js", "app.js"),
+            # Web Workers (not in load order but fetched at runtime)
             os.path.join("js", "analysisWorker.js"),
+            os.path.join("js", "screenerWorker.js"),
+            # CDN fallback library
             os.path.join("lib", "lightweight-charts.standalone.production.js"),
         ]
         missing_critical = []

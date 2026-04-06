@@ -61,10 +61,26 @@ MCS_WEIGHTS = {
 }
 
 # ── Taylor Rule 파라미터 (Taylor 1993) ──
-# r = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
-TAYLOR_R_STAR = 0.5        # 균형실질이자율 (한국, 최근 추정)
-TAYLOR_PI_STAR = 2.0       # 한은 물가안정목표 (2%)
-TAYLOR_OUTPUT_GAP = 0.0    # 산출갭 추정 (실시간 불가, 0 가정)
+# i* = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)/y*
+#
+# Laubach & Williams (2003): "Measuring the Natural Rate of Interest"
+#   r* estimated via Kalman filter on IS curve.
+#   US r* ≈ 1.0% (2003), trended down to ~0.5% (2020s).
+#   Korean r* structurally lower than US due to:
+#     1. High household debt (~105% GDP, BOK 2024) compresses neutral rate
+#     2. Aging demographics (fertility 0.72, 2024) reduce potential growth
+#     3. Export-dependent economy → external shocks dominate domestic equilibrium
+#   BOK own estimate (Monetary Policy Report 2023): r* ≈ 0.25-0.75%
+#   We use midpoint 0.5% — consistent with download_macro.py (#135)
+TAYLOR_R_STAR = 0.5        # 균형실질이자율 (한국) — Laubach-Williams (2003) adapted; #135
+TAYLOR_PI_STAR = 2.0       # 한은 물가안정목표 (2%) — BOK official target; #136
+
+# ── CLI → Output Gap Proxy (OECD methodology) ──
+# OECD CLI is amplitude-adjusted, centered on 100 (= trend growth).
+# output_gap ≈ (CLI - 100) * CLI_TO_GAP_SCALE
+# Scale factor 0.5: CLI point ≈ 0.5%p output gap (conservative).
+# Source: download_macro.py line 972 uses identical formula; #139
+CLI_TO_GAP_SCALE = 0.5     # CLI-to-output-gap scaling factor; #139
 
 # ── 정규화를 위한 역사적 참조값 ──
 # 2020=100 기준 지수의 합리적 범위
@@ -222,8 +238,17 @@ def compute_mcs_v2(kosis, ecos, macro, bonds, verbose=False):
     # 0-100 스케일 변환
     mcs_score = round(weighted_sum * 100, 1)
 
+    # ── [FND-MAC-6] Scale normalization safeguard ──
+    # MCS v2 is always on 0-100 scale. This clamp prevents rounding/accumulation errors
+    # from producing values outside the valid range, which could cause misinterpretation
+    # in JS consumers (appWorker.js _applyPhase8ConfidenceToPatterns uses thresholds 30/45/55/70).
+    # Note: macro_latest.json contains a DIFFERENT MCS (0-1 scale, computed by download_macro.py).
+    # The two must never be confused. The 'scale' field in output makes the convention explicit.
+    mcs_score = max(0.0, min(100.0, mcs_score))
+
     return {
         'mcsV2': mcs_score,
+        'scale': '0-100',  # [FND-MAC-6] explicit scale annotation for JS consumers
         'components': {k: round(v, 4) for k, v in indicators.items()},
         'availableIndicators': len(indicators),
         'totalIndicators': len(MCS_WEIGHTS),
@@ -231,15 +256,21 @@ def compute_mcs_v2(kosis, ecos, macro, bonds, verbose=False):
     }
 
 
-def compute_taylor_gap(macro, ecos):
+def compute_taylor_gap(macro, ecos, kosis=None):
     """
     Taylor Gap = 실제 기준금리 - Taylor 규칙 추정치.
 
-    Taylor (1993):
-      r_taylor = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
+    Taylor (1993): "Discretion versus policy rules in practice"
+      i* = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
 
-    음수 → 완화적 (실제 금리가 Taylor보다 낮음)
-    양수 → 긴축적 (실제 금리가 Taylor보다 높음)
+    Output gap proxy: (CLI - 100) * CLI_TO_GAP_SCALE
+      OECD CLI centered on 100 (= trend). Deviation ≈ output gap.
+      Falls back to 0.0 if CLI data unavailable.
+      Source: download_macro.py uses identical formula (#139).
+
+    Sign convention:
+      음수 → 완화적 (실제 금리가 Taylor보다 낮음)
+      양수 → 긴축적 (실제 금리가 Taylor보다 높음)
     """
     # 기준금리
     bok_rate = None
@@ -260,9 +291,36 @@ def compute_taylor_gap(macro, ecos):
     if macro:
         existing_gap = macro.get('taylor_gap')
 
+    # ── Output gap: CLI-based proxy (FND-MAC-3 fix) ──
+    # [FND-MAC-3] Previously hardcoded to 0.0, making output gap term irrelevant.
+    # Now uses OECD CLI when available, consistent with download_macro.py.
+    #
+    # CRITICAL: Two different CLI sources exist with different semantics:
+    #   1. macro_latest.json korea_cli (OECD 901Y067): amplitude-adjusted CYCLICAL
+    #      component, centered on 100. Deviation from 100 = output gap proxy.
+    #      Value ~101.65 → output gap ≈ +0.83%p (slight expansion).
+    #   2. kosis_latest.json cli_composite (KOSIS DT_1C8016 A01): absolute LEVEL
+    #      index, base 2020=100. Value ~125.2 reflects cumulative growth, NOT
+    #      cyclical position. Using this for output gap gives absurd values.
+    #
+    # Priority: OECD cyclical CLI (korea_cli) > fallback 0.0
+    # DO NOT use kosis cli_composite for Taylor rule -- it is the wrong series.
+    cli = None
+    if macro:
+        cli = macro.get('korea_cli')  # OECD cyclical CLI (centered on 100)
+
+    output_gap = 0.0  # fallback
+    output_gap_source = 'fallback_zero'
+    if cli is not None:
+        output_gap = (cli - 100) * CLI_TO_GAP_SCALE
+        output_gap_source = 'cli_proxy'
+    else:
+        print('  [WARN] CLI data unavailable for output gap — falling back to 0.0')
+
     # Taylor rule 계산
+    # i* = r* + pi + 0.5*(pi - pi*) + 0.5*output_gap
     pi = cpi_yoy
-    r_taylor = TAYLOR_R_STAR + pi + 0.5 * (pi - TAYLOR_PI_STAR) + 0.5 * TAYLOR_OUTPUT_GAP
+    r_taylor = TAYLOR_R_STAR + pi + 0.5 * (pi - TAYLOR_PI_STAR) + 0.5 * output_gap
 
     gap = bok_rate - r_taylor
 
@@ -273,7 +331,9 @@ def compute_taylor_gap(macro, ecos):
         'cpiYoY': cpi_yoy,
         'rStar': TAYLOR_R_STAR,
         'piStar': TAYLOR_PI_STAR,
-        'outputGap': TAYLOR_OUTPUT_GAP,
+        'outputGap': round(output_gap, 4),
+        'outputGapSource': output_gap_source,
+        'cliValue': cli,
         'existingGap': existing_gap,
     }
 
@@ -431,12 +491,15 @@ def main():
 
     # ── Taylor Gap ──
     print('\n--- Taylor Gap ---')
-    taylor_result = compute_taylor_gap(macro, ecos)
+    taylor_result = compute_taylor_gap(macro, ecos, kosis=kosis)
     if taylor_result:
         gap = taylor_result['taylorGap']
         stance = '완화적' if gap < 0 else '긴축적' if gap > 0 else '중립'
         print(f'  Taylor Gap: {gap:+.4f} ({stance})')
         print(f'  Actual: {taylor_result["actualRate"]}%, Taylor: {taylor_result["taylorRate"]:.2f}%')
+        print(f'  Output Gap: {taylor_result["outputGap"]:+.4f} (source: {taylor_result["outputGapSource"]})')
+        if taylor_result.get('cliValue') is not None:
+            print(f'  CLI: {taylor_result["cliValue"]} → gap = ({taylor_result["cliValue"]} - 100) * {CLI_TO_GAP_SCALE}')
 
     # ── Yield Curve Phase ──
     print('\n--- Yield Curve Phase ---')
@@ -474,6 +537,7 @@ def main():
         'lastUpdated': datetime.now().strftime('%Y-%m-%d'),
         'status': 'ok',
         'mcsV2': mcs_result.get('mcsV2') if mcs_result else None,
+        'mcsScale': mcs_result.get('scale', '0-100') if mcs_result else '0-100',  # [FND-MAC-6]
         'mcsComponents': mcs_result.get('components') if mcs_result else None,
         'mcsAvailable': mcs_result.get('availableIndicators') if mcs_result else 0,
         'taylorGap': taylor_result.get('taylorGap') if taylor_result else None,
@@ -486,6 +550,7 @@ def main():
             'weights': MCS_WEIGHTS,
             'taylor_r_star': TAYLOR_R_STAR,
             'taylor_pi_star': TAYLOR_PI_STAR,
+            'cli_to_gap_scale': CLI_TO_GAP_SCALE,
         },
     }
 

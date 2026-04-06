@@ -234,10 +234,17 @@ def vlog(msg):
         print(f"[MACRO][v] {msg}")
 
 
-def calc_taylor_implied_rate(pi, y_gap, r_star=1.0, pi_star=2.0, a_pi=0.50, a_y=0.50, a_e=0.1, delta_e=0.0):
+def calc_taylor_implied_rate(pi, y_gap, r_star=0.5, pi_star=2.0, a_pi=0.50, a_y=0.50, a_e=0.1, delta_e=0.0):
     """Taylor Rule implied rate (Taylor 1993, Ball 1999 open-economy extension).
 
     i* = r* + pi + a_pi*(pi - pi*) + a_y*y_gap + a_e*delta_e
+
+    [FND-MAC-1] r* standardized to 0.5% (was 1.0%).
+    Laubach & Williams (2003): r* estimated via Kalman filter on IS curve.
+    Korean r* ≈ 0.5% — structurally lower than US due to high household debt
+    (~105% GDP), aging demographics (TFR 0.72), export dependency.
+    BOK Monetary Policy Report (2023): r* ≈ 0.25-0.75%, midpoint = 0.5%.
+    Now consistent with compute_macro_composite.py TAYLOR_R_STAR.
 
     [1-E#4] Ball (1999): a_e * delta_e adds exchange rate pass-through.
     a_e ≈ 0.1 (conservative for KRW — lower than commodity currencies).

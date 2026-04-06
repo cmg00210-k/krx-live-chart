@@ -13,8 +13,17 @@ REM ASCII-only commit message (Korean breaks Cloudflare API).
 
 cd /d "%~dp0\.."
 
+:: Dual-Python: use 64-bit for pipeline scripts
+if defined KRX_PYTHON (
+    set PYTHON=%KRX_PYTHON%
+) else if exist "%USERPROFILE%\miniconda3\envs\krx64\python.exe" (
+    set PYTHON=%USERPROFILE%\miniconda3\envs\krx64\python.exe
+) else (
+    set PYTHON=python
+)
+
 echo [1/3] Pre-deploy verification...
-python scripts/verify.py
+"%PYTHON%" scripts/verify.py
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Verification failed -- fix errors before deploying
     pause
@@ -23,7 +32,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo [2/3] Staging deploy directory...
-python scripts/stage_deploy.py
+"%PYTHON%" scripts/stage_deploy.py
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Staging failed -- file count over limit or script error
     pause

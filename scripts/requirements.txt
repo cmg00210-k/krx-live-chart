@@ -1,11 +1,20 @@
 # KRX Live Chart (CheeseStock) Python Dependencies
 # Install: pip install -r scripts/requirements.txt
 #
-# Pinned 2026-03-28 based on verified working environment
+# Updated 2026-04-04 — Python 3.9.13 (32-bit) verified
+# NOTE: Python 3.9-32bit limits: scipy<=1.9.1, numpy<1.25 (no newer wheels)
 
-numpy>=1.23,<2.0           # 1.23.5 tested; <2.0 avoids breaking API changes
-pandas>=1.5,<3.0           # 1.5.3 tested; used by calibrate_constants.py
-scipy>=1.9,<2.0            # 1.9.1 tested; stats, optimize for calibration/RL
-pykrx>=1.0.51,<2.0         # 1.0.51 tested; KRX OHLCV download (adjusted=True)
+# Core scientific
+numpy>=1.23,<1.25          # 1.24.4 tested; <1.25 for scipy 1.9.x compat
+pandas>=1.5,<3.0           # 2.0.3 tested; DataFrame operations
+scipy>=1.9,<2.0            # 1.9.1 tested; stats, optimize (max for Py3.9-32bit)
+setuptools>=58,<81         # 80.10.2 tested; <81 keeps pkg_resources (pykrx needs it)
+
+# Data sources
+pykrx>=1.0.51,<2.0         # 1.0.51 tested; KRX OHLCV (Python 3.10 needed for 1.2.4+)
 finance-datareader>=0.9.66,<1.0 # 0.9.110 tested; FDR index price updates
-requests>=2.28             # 2.32.5 tested; DART API calls
+requests>=2.28             # 2.32.5 tested; DART/ECOS/FRED API calls
+
+# HTML scraping (Naver Finance fallback)
+beautifulsoup4>=4.12       # 4.14.3 tested; Naver investor HTML parsing
+lxml>=4.9                  # 6.0.2 tested; fast HTML/XML parser for bs4

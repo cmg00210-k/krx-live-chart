@@ -35,7 +35,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=61');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=62');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -121,6 +121,15 @@ function _initAnalysisWorker() {
         _applyPhase8ConfidenceToPatterns(detectedPatterns);
         // [D-1] Survivorship bias: mild confidence discount for buy patterns
         _applySurvivorshipAdjustment(detectedPatterns);
+        // [V6-FIX] C-1: Compound floor — prevent 8-phase multiplicative cascade from
+        // crushing confidence below 25. Without this, worst-case 7+ sequential discounts
+        // can reduce 70 → 10 (floor). Minimum meaningful confidence = 25.
+        // Academic: Winsorized product (Tukey 1977) — robust statistics bounding.
+        for (var cf = 0; cf < detectedPatterns.length; cf++) {
+          if (detectedPatterns[cf].confidence != null && detectedPatterns[cf].confidence < 25) {
+            detectedPatterns[cf].confidence = 25;
+          }
+        }
         _applyMacroConditionsToSignals(detectedSignals);
         _injectWcToSignals(detectedSignals, detectedPatterns);
         signalStats = msg.stats;
@@ -559,6 +568,12 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // MCS 조정 (거시경제 복합점수)
   if (_macroComposite && _macroComposite.mcsV2 != null) {
     var mcs = _macroComposite.mcsV2;
+    // [V6-FIX] B-4 FND-MAC-6: Scale guard — mcsV2 is 0-100 (macro_composite.json).
+    // If accidentally 0-1 (from macro_latest.json mcs), normalize.
+    if (mcs > 0 && mcs <= 1.0) {
+      console.warn('[Phase8] MCS appears to be 0-1 scale, normalizing to 0-100');
+      mcs = mcs * 100;
+    }
     for (var i = 0; i < patterns.length; i++) {
       var p = patterns[i];
       if (p.confidence == null) continue;
@@ -613,11 +628,12 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // JSON structure: { "analytics": { "straddleImpliedMove": ... } }
   if (_optionsAnalytics && _optionsAnalytics.analytics && _optionsAnalytics.analytics.straddleImpliedMove != null) {
     var impliedMove = _optionsAnalytics.analytics.straddleImpliedMove;
-    if (impliedMove > 3.0) {
-      // 높은 Implied Move = 이벤트 기간: 방향성 패턴 신뢰도 조정
+    // [V6-FIX] B-6: threshold 3.0→3.5 (old fired in normal markets for near-expiry options),
+    // discount 0.95→0.93 (Simon & Wiggins 2001: accuracy drops ~15-20% when IV/HV > 2.0)
+    if (impliedMove > 3.5) {
       for (var k = 0; k < patterns.length; k++) {
         if (patterns[k].confidence == null) continue;
-        patterns[k].confidence *= 0.95;  // 불확실성 증가 → 전반적 감산
+        patterns[k].confidence *= 0.93;  // 불확실성 증가 → 전반적 감산
       }
     }
   }
@@ -748,7 +764,8 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
       var _bExt = _bPct != null ? 2.0 : 5.0;
       var _bPos = _bPct != null ? (_bPct > 0) : (deriv.basis > 0);
       if (_bAbs >= _bThr) {
-        var _bMult = _bAbs >= _bExt ? 0.08 : 0.05;  // extreme ±8%, normal ±5%
+        // [V6-FIX] B-6: noise-adjusted (σ_basis=2.36%), Bessembinder & Seguin IC 0.02-0.05
+        var _bMult = _bAbs >= _bExt ? 0.07 : 0.04;  // extreme ±7%, normal ±4%
         if (_bPos) {              // contango: 시장 낙관
           adj *= isBuy ? (1 + _bMult) : (1 - _bMult);
         } else {                  // backwardation: 시장 비관
@@ -758,13 +775,14 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
     }
 
     // ── 2. PCR 역발상 (Doc37 §6, Pan & Poteshman 2006) ──
-    // PCR > 1.3 = 극도의 공포 → 역발상 매수, PCR < 0.5 = 극도의 탐욕 → 역발상 매도
+    // [V6-FIX] B-6: thresholds 1.3/0.5→1.2/0.6 (P90=1.149; 0.5 was dead code: 0 observations)
+    // mult 0.08→0.06 (IC 0.03-0.05, wider activation zone → smaller per-hit adjustment)
     if (deriv && deriv.pcr != null) {
       var pcr = deriv.pcr;
-      if (pcr > 1.3) {
-        adj *= isBuy ? 1.08 : 0.92;   // 극단적 공포 → 매수 유리
-      } else if (pcr < 0.5) {
-        adj *= isBuy ? 0.92 : 1.08;   // 극단적 탐욕 → 매도 유리
+      if (pcr > 1.2) {
+        adj *= isBuy ? 1.06 : 0.94;   // 극단적 공포 → 매수 유리
+      } else if (pcr < 0.6) {
+        adj *= isBuy ? 0.94 : 1.06;   // 극단적 탐욕 → 매도 유리
       }
     }
 
@@ -784,10 +802,11 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
     // ── 4. ETF 레버리지 센티먼트 (Doc38 §3, Cheng & Madhavan 2009) ──
     if (etf && etf.leverageSentiment) {
       var sentiment = etf.leverageSentiment.sentiment;
+      // [V6-FIX] B-6: 5%→4% (unvalidated for KRX; 80%+ retail ETF market adds noise)
       if (sentiment === 'strong_bullish') {
-        adj *= isBuy ? 0.95 : 1.05;   // 극단적 낙관 → 역발상 (과열 경고)
+        adj *= isBuy ? 0.96 : 1.04;   // 극단적 낙관 → 역발상 (과열 경고)
       } else if (sentiment === 'strong_bearish') {
-        adj *= isBuy ? 1.05 : 0.95;   // 극단적 비관 → 역발상 (바닥 근접)
+        adj *= isBuy ? 1.04 : 0.96;   // 극단적 비관 → 역발상 (바닥 근접)
       }
     }
 
@@ -799,8 +818,11 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
         msr = shorts.marketTrend[shorts.marketTrend.length - 1].shortRatio;
       if (msr != null && msr > 10) {    // 시장 공매도 비율 > 10%
         adj *= isBuy ? 1.06 : 0.94;   // 높은 공매도 → 숏커버 rally 가능 (매수 유리)
-      } else if (msr != null && msr < 2) {
-        adj *= isBuy ? 0.97 : 1.03;   // 낮은 공매도 → 하방 보험 부족
+      // [V6-FIX] B-6: Low-SIR branch neutralized — data "unavailable" since Dec 2025,
+      // short-selling partially banned 2023.11-2025.03. Low SIR = regulatory constraint,
+      // not sentiment (Miller 1977). Re-enable when per-stock short data active.
+      // } else if (msr != null && msr < 2) {
+      //   adj *= isBuy ? 0.97 : 1.03;
       }
     }
 
@@ -964,9 +986,10 @@ function _applySurvivorshipAdjustment(patterns) {
   // Only apply if correction is meaningful (> 1pp)
   if (globalDelta <= 1) return;
 
-  // adj = 1 - (delta / 200): half the WR delta as confidence multiplier
-  // 2.8pp delta → 0.986 multiplier, 5pp delta → 0.975 multiplier
-  var adj = Math.max(0.92, Math.min(1.0, 1 - (globalDelta / 200)));
+  // [V6-FIX] B-1: /200→/100 (Elton-Gruber-Blake 1996); still near-zero with global delta ~0.1pp
+  // adj = 1 - (delta / 100): WR delta as confidence multiplier
+  // 2.8pp delta → 0.972 multiplier, 5pp delta → 0.950 multiplier
+  var adj = Math.max(0.92, Math.min(1.0, 1 - (globalDelta / 100)));
 
   for (var i = 0; i < patterns.length; i++) {
     var p = patterns[i];
@@ -1028,8 +1051,9 @@ function _applyMarketContextToPatterns(patterns) {
 
     // CCSI 조정 (매수 패턴만)
     if (p.signal === 'buy' && ccsi != null) {
-      if (ccsi < 85) adj *= 0.88;
-      else if (ccsi > 108) adj *= 1.06;  // [학술 수정] 105→108 (Lemmon&Portniaguina 2006)
+      // [V6-FIX] Baker-Wurgler (2006) + Lemmon-Portniaguina (2006): 0.88→0.90 (IC 0.02-0.04 range)
+      if (ccsi < 85) adj *= 0.90;
+      else if (ccsi > 108) adj *= 1.06;
     }
 
     // 외국인 유의미한 순매수 확인 (매수 패턴만) — [학술 수정] 500→1000억 (Richards 2005: ~$75M 이상)
@@ -1100,7 +1124,11 @@ function _applyMacroConfidenceToPatterns(patterns) {
       if (_sectorCycle && _sectorCycle[phase] != null) {
         // Stovall 차등: 섹터별 buy_mult, sell_mult = 2.0 - buy_mult
         var buyMult = _sectorCycle[phase];
-        adj *= isBuy ? buyMult : (2.0 - buyMult);
+        // [V6-FIX] B-4 FND-MAC-5: KRX_UNVALIDATED dampening 0.5x
+        // Stovall (1996) designed for US S&P; Korean sector dynamics unvalidated.
+        // Halve deviation from 1.0 until KRX backtesting confirms mapping.
+        var dampened = 1.0 + (buyMult - 1.0) * 0.5;
+        adj *= isBuy ? dampened : (2.0 - dampened);
       } else {
         // 매핑 실패 시 기존 균일 조정 유지
         if (phase === 'expansion') {
@@ -1153,7 +1181,8 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // 스트레스: 신용위험 확대 → 모든 패턴 신뢰도 감소
     if (aaSpread != null) {
       if (aaSpread > 1.5 || creditRegime === 'stress') {
-        adj *= 0.85;                  // 스트레스: -15% (전체)
+        // [V6-FIX] B-1: 0.85→0.88 (symmetric application; sell should ideally be boosted)
+        adj *= 0.88;                  // 스트레스: -12% (전체)
       } else if (aaSpread > 1.0 || creditRegime === 'elevated') {
         adj *= isBuy ? 0.93 : 1.04;  // 주의: 매수 -7%, 매도 +4%
       }
@@ -1503,8 +1532,27 @@ function _updateMicroContext(candleData) {
           hhi += sh * sh;
         }
         // HHI_MEAN_REV_COEFF = 0.10 (#119, Doc33 §6.2)
-        // TODO: eps_stability factor from Doc33 §5.2 — requires quarterly EPS variance data
-        hhiBoost = 0.10 * hhi;
+        // [V6-FIX] B-5 M-1: eps_stability mediator — Jensen-Meckling (1976)
+        // eps_stability = 1/(1 + sigma_NI_growth/100), dampens HHI boost for volatile earnings
+        var epsStab = 1.0;  // fallback: neutral
+        if (typeof _financialCache !== 'undefined' && _financialCache && currentStock) {
+          var fData = _financialCache[currentStock.code];
+          if (fData && fData.ni_history && fData.ni_history.length >= 3) {
+            var niArr = fData.ni_history;
+            var growths = [];
+            for (var g = 1; g < niArr.length; g++) {
+              if (niArr[g-1] !== 0) growths.push((niArr[g] - niArr[g-1]) / Math.abs(niArr[g-1]) * 100);
+            }
+            if (growths.length >= 2) {
+              var gMean = 0; for (var gm = 0; gm < growths.length; gm++) gMean += growths[gm];
+              gMean /= growths.length;
+              var gVar = 0; for (var gv = 0; gv < growths.length; gv++) gVar += (growths[gv] - gMean) * (growths[gv] - gMean);
+              var sigmaNI = Math.sqrt(gVar / growths.length);
+              epsStab = 1 / (1 + sigmaNI / 100);
+            }
+          }
+        }
+        hhiBoost = 0.10 * hhi * epsStab;
       }
     }
   }
@@ -1520,6 +1568,20 @@ function _updateMicroContext(candleData) {
 // _applyMacroConfidenceToPatterns() 직후 호출
 // clamp: [0.80, 1.15] (미시 보정은 매크로보다 좁은 범위)
 // ══════════════════════════════════════════════════════════════
+// [V6-FIX] B-5 M-5: Short-selling ban periods — Miller (1977), Diamond-Verrecchia (1987)
+// During bans: bearish patterns less reliable (can't short), bullish slightly less (no price discovery)
+var _SHORT_BAN_PERIODS = [
+  { start: '2020-03-16', end: '2021-05-02' },   // COVID-19 emergency
+  { start: '2023-11-06', end: '2025-03-30' }     // Latest ban (KOSPI200/KOSDAQ150 partial lift)
+];
+function _isInShortBan(dateStr) {
+  if (!dateStr) return false;
+  for (var b = 0; b < _SHORT_BAN_PERIODS.length; b++) {
+    if (dateStr >= _SHORT_BAN_PERIODS[b].start && (!_SHORT_BAN_PERIODS[b].end || dateStr <= _SHORT_BAN_PERIODS[b].end)) return true;
+  }
+  return false;
+}
+
 function _applyMicroConfidenceToPatterns(patterns, microCtx) {
   if (!patterns || patterns.length === 0 || !microCtx) return;
 
@@ -1527,6 +1589,13 @@ function _applyMicroConfidenceToPatterns(patterns, microCtx) {
     doubleBottom: true, doubleTop: true,
     headAndShoulders: true, inverseHeadAndShoulders: true
   };
+
+  // Determine short-ban status from latest candle date
+  var shortBanActive = false;
+  if (typeof candles !== 'undefined' && candles && candles.length > 0) {
+    var lastDate = candles[candles.length - 1].time;
+    if (typeof lastDate === 'string') shortBanActive = _isInShortBan(lastDate);
+  }
 
   for (var pi = 0; pi < patterns.length; pi++) {
     var p = patterns[pi];
@@ -1543,8 +1612,14 @@ function _applyMicroConfidenceToPatterns(patterns, microCtx) {
       adj *= (1 + microCtx.hhiBoost);
     }
 
-    // clamp [0.80, 1.15]
-    adj = Math.max(0.80, Math.min(1.15, adj));
+    // 3. Short-selling ban adjustment (Miller 1977: constraints → overpricing)
+    if (shortBanActive) {
+      if (p.signal === 'sell') adj *= 0.70;   // bearish patterns unreliable during ban
+      else if (p.signal === 'buy') adj *= 0.90; // bullish slightly dampened (no price discovery)
+    }
+
+    // clamp [0.55, 1.15] — widened from 0.80 to accommodate short-ban 0.70 effect
+    adj = Math.max(0.55, Math.min(1.15, adj));
 
     if (adj !== 1.0) {
       p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
@@ -1675,6 +1750,12 @@ function _analyzeOnMainThread() {
   _applyPhase8ConfidenceToPatterns(detectedPatterns);
   // [D-1] Survivorship bias: mild confidence discount for buy patterns
   _applySurvivorshipAdjustment(detectedPatterns);
+  // [V6-FIX] C-1: Compound floor (drag/resize path — same as Worker path)
+  for (var cf = 0; cf < detectedPatterns.length; cf++) {
+    if (detectedPatterns[cf].confidence != null && detectedPatterns[cf].confidence < 25) {
+      detectedPatterns[cf].confidence = 25;
+    }
+  }
   _applyMacroConditionsToSignals(detectedSignals);
   _injectWcToSignals(detectedSignals, detectedPatterns);
   signalStats = result.stats;

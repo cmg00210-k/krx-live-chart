@@ -852,6 +852,26 @@ class PatternBacktester {
     for (var k = 0; k < m; k++) {
       tests[k].stats.adjustedSignificant = (k <= maxK);
     }
+
+    // [V6-FIX] C-2: Cross-stock significance estimate — Harvey-Liu-Zhu (2016)
+    // Per-stock BH-FDR corrects for ~225 tests (45 patterns × 5 horizons).
+    // But scanning 2700 stocks implicitly runs 607,500 tests.
+    // Add crossStockSignificant: uses sqrt(N_stocks) correction factor
+    // (geometric mean between no correction and full Bonferroni).
+    // This is a practical heuristic, not exact — exact requires cross-stock p-value pooling.
+    var N_STOCKS = (typeof ALL_STOCKS !== 'undefined' && ALL_STOCKS.length > 0) ? ALL_STOCKS.length : 2700;
+    var sqrtN = Math.sqrt(N_STOCKS);
+    var crossQ = ALPHA / sqrtN;  // e.g., 0.05 / 52 ≈ 0.00096
+    var crossMaxK = -1;
+    for (var ck = m - 1; ck >= 0; ck--) {
+      if (tests[ck].pValue <= (ck + 1) * crossQ / m) {
+        crossMaxK = ck;
+        break;
+      }
+    }
+    for (var ck = 0; ck < m; ck++) {
+      tests[ck].stats.crossStockSignificant = (ck <= crossMaxK);
+    }
   }
 
   /** [C-6] Hansen (2005) SPA Test — "A Test for Superior Predictive Ability"
