@@ -426,10 +426,10 @@ async function _loadDerivativesData() {
       _pipelineStatus.investor = 'sample';
       _investorData = null;
     }
-    // [H-14 FIX] shortselling source="sample" 동일 처리
-    if (_shortSellingData && _shortSellingData.source === 'sample') {
-      console.warn('[KRX] shortselling_summary is SAMPLE data — short interest adjustments disabled');
-      _pipelineStatus.shortselling = 'sample';
+    // [H-14 FIX] shortselling source="sample" or "unavailable" → disable
+    if (_shortSellingData && (_shortSellingData.source === 'sample' || _shortSellingData.source === 'unavailable')) {
+      console.warn('[KRX] shortselling_summary is ' + _shortSellingData.source + ' data — short interest adjustments disabled');
+      _pipelineStatus.shortselling = _shortSellingData.source;
       _shortSellingData = null;
     }
     // [P1-fix] Source guards for 3 remaining derivative data paths
@@ -887,7 +887,7 @@ function _calcNaiveDD(candleCloses) {
     if (ewmaVol[i] != null) { sigmaE = ewmaVol[i]; break; }
   }
   if (!sigmaE || sigmaE <= 0) return;
-  sigmaE *= Math.sqrt(252);  // 연율화
+  sigmaE *= Math.sqrt(250);  // 연율화 (KRX_TRADING_DAYS=250)
 
   // r: 무위험이자율 (KTB 3Y)
   var r = 0.035;  // fallback (#130 YIELD_GAP_FALLBACK_KTB, Doc35 §10.1)

@@ -1024,12 +1024,3 @@ function isRealData() {
   return KRX_API_CONFIG.mode === 'ws' || KRX_API_CONFIG.mode === 'file';
 }
 
-/**
- * 캔들 배열의 데이터 출처 확인
- * @param {Array} candleArray - 캔들 배열
- * @returns {string} 'ws' | 'file' | 'demo' | 'unknown'
- */
-function getCandleSource(candleArray) {
-  if (!candleArray) return 'unknown';
-  return candleArray._dataSource || KRX_API_CONFIG.mode || 'unknown';
-}

@@ -32,6 +32,7 @@ Usage:
 """
 
 import csv
+import datetime
 import json
 import math
 import sys
@@ -572,6 +573,8 @@ def main():
         "mean_ic_original": summary["mean_ic_original"],
         "t_stat_delta": summary["t_stat_delta"],
     }
+    policy["trained_date"] = datetime.date.today().isoformat()
+    policy["feature_dim"] = final_bandit.d_internal - 1
     # Load and embed context normalization stats for JS runtime parity
     ctx_stats_path = BACKTEST_DIR / "rl_context_stats.json"
     if ctx_stats_path.exists():

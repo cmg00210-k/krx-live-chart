@@ -164,7 +164,7 @@ def compute_dd(code, market, candles, stock_info, rf_annual):
     mean_lr = sum(log_returns) / len(log_returns)
     var_lr = sum((r - mean_lr) ** 2 for r in log_returns) / (len(log_returns) - 1)
     sigma_daily = math.sqrt(var_lr) if var_lr > 0 else 0
-    sigma_E = sigma_daily * math.sqrt(252)  # 연율화
+    sigma_E = sigma_daily * math.sqrt(250)  # 연율화 (KRX_TRADING_DAYS=250)
     if sigma_E <= 0:
         return None
 
