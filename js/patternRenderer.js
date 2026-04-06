@@ -926,6 +926,8 @@ const patternRenderer = (() => {
           this._buildWedge(candles, p, toXY, data);
         } else if (p.type === 'channel') {
           this._buildChannel(candles, p, toXY, data);
+        } else if (p.type === 'cupAndHandle') {
+          this._buildCupAndHandle(candles, p, toXY, data);
         }
 
         // ── 패턴 라벨 생성 (모든 패턴 공통) ──
@@ -1216,6 +1218,138 @@ const patternRenderer = (() => {
           });
         }
       });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  컵앤핸들: U-shape polyline + handle box + neckline
+    //  O'Neil (1988): 7-65주 U자형 컵 + 1-4주 핸들 → 돌파
+    // ══════════════════════════════════════════════════
+    _buildCupAndHandle(candles, p, toXY, data) {
+      const si = p.startIndex, ei = p.endIndex;
+      if (si == null || ei == null || si >= candles.length || ei >= candles.length) return;
+
+      const neckline = p.neckline;
+      if (neckline == null || !isFinite(neckline)) return;
+
+      const bottomIdx = p.bottomIndex;
+      if (bottomIdx == null || bottomIdx >= candles.length) return;
+      const bottomPrice = candles[bottomIdx].low;
+
+      // Cup U-shape polyline: sample points along the cup (left rim → bottom → right rim)
+      // Right rim index: if handle exists, it's before the handle
+      const rightRimIdx = p.handleFound ? ei - Math.max(1, Math.floor((ei - si) * 0.15)) : ei;
+      const cupEnd = Math.min(rightRimIdx, ei, candles.length - 1);
+      const cupStart = si;
+
+      // Sample ~15 points along the cup for a smooth U-shape curve
+      const nSamples = Math.min(15, cupEnd - cupStart + 1);
+      const step = Math.max(1, Math.floor((cupEnd - cupStart) / (nSamples - 1)));
+      const cupPoints = [];
+      for (let j = cupStart; j <= cupEnd; j += step) {
+        const pt = toXY(candles[j].time, candles[j].low);
+        if (pt.x != null && pt.y != null) cupPoints.push(pt);
+      }
+      // Ensure last point is included
+      const lastPt = toXY(candles[cupEnd].time, candles[cupEnd].low);
+      if (lastPt.x != null && lastPt.y != null) {
+        if (!cupPoints.length || cupPoints[cupPoints.length - 1].x !== lastPt.x) {
+          cupPoints.push(lastPt);
+        }
+      }
+
+      if (cupPoints.length >= 3) {
+        data.polylines.push({
+          points: cupPoints,
+          color: BUY_COLOR,
+          width: 2,
+          dash: [],
+          smooth: true,
+        });
+      }
+
+      // Handle area: small rectangle showing the pullback zone
+      if (p.handleFound && cupEnd < ei) {
+        const handleStart = cupEnd;
+        const handleEnd = ei;
+        let handleHigh = -Infinity, handleLow = Infinity;
+        for (let j = handleStart; j <= handleEnd && j < candles.length; j++) {
+          if (candles[j].high > handleHigh) handleHigh = candles[j].high;
+          if (candles[j].low < handleLow) handleLow = candles[j].low;
+        }
+        if (isFinite(handleHigh) && isFinite(handleLow)) {
+          const tl = toXY(candles[handleStart].time, handleHigh);
+          const br = toXY(candles[handleEnd].time, handleLow);
+          if (tl.x != null && tl.y != null && br.x != null && br.y != null) {
+            data.brackets.push({
+              x: Math.min(tl.x, br.x) - 2,
+              y: Math.min(tl.y, br.y) - 2,
+              w: Math.abs(br.x - tl.x) + 4,
+              h: Math.abs(br.y - tl.y) + 4,
+              color: BUY_COLOR,
+            });
+          }
+        }
+      }
+
+      // Rim markers: hollow circles at left rim peak and right rim peak
+      const leftRimPt = toXY(candles[si].time, candles[si].high);
+      const rightRimPt = toXY(candles[cupEnd].time, candles[cupEnd].high);
+      [leftRimPt, rightRimPt].forEach(pt => {
+        if (pt.x != null && pt.y != null) {
+          data.connectors.push({
+            points: [pt, { x: pt.x, y: pt.y + 0.1 }],
+            color: BUY_COLOR, width: 0, dash: [], alpha: 0, showDots: false,
+            hollowCircle: true, circleX: pt.x, circleY: pt.y - 6, circleR: 4, circleWidth: 1.5,
+          });
+        }
+      });
+
+      // Bottom marker: upward triangle at cup bottom
+      const bottomPt = toXY(candles[bottomIdx].time, bottomPrice);
+      if (bottomPt.x != null && bottomPt.y != null) {
+        const ty = bottomPt.y + 8;
+        data.trendAreas.push({
+          points: [
+            { x: bottomPt.x, y: ty - 5 },
+            { x: bottomPt.x + 5, y: ty + 4 },
+            { x: bottomPt.x - 5, y: ty + 4 },
+          ],
+          fill: BUY_COLOR,
+        });
+      }
+
+      // Neckline (rim level) — same pattern as doubleBottom
+      const breakConfirmed = !!p.necklineBreakConfirmed;
+      const neckColor = breakConfirmed ? BUY_COLOR : GOLD_COLOR;
+      const neckDash = breakConfirmed ? [] : [5, 3];
+      const neckWidth = breakConfirmed ? 2 : 1.5;
+      const extIdx = Math.min(ei + 3, candles.length - 1);
+      const nStart = toXY(candles[Math.max(si - 1, 0)].time, neckline);
+      const nEnd = toXY(candles[extIdx].time, neckline);
+      data.hlines.push({
+        y: nStart.y,
+        x1: nStart.x, x2: nEnd.x,
+        color: neckColor,
+        width: neckWidth,
+        dash: neckDash,
+        priceLabel: neckline.toLocaleString('ko-KR'),
+      });
+
+      // Break point marker
+      if (breakConfirmed && p.breakIndex != null && p.breakIndex < candles.length) {
+        const brkPt = toXY(candles[p.breakIndex].time, neckline);
+        if (brkPt.x != null && brkPt.y != null) {
+          data.trendAreas.push({
+            points: [
+              { x: brkPt.x, y: brkPt.y - 4 },
+              { x: brkPt.x + 4, y: brkPt.y },
+              { x: brkPt.x, y: brkPt.y + 4 },
+              { x: brkPt.x - 4, y: brkPt.y },
+            ],
+            fill: BUY_COLOR,
+          });
+        }
+      }
     }
 
     // ══════════════════════════════════════════════════
