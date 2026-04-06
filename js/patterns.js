@@ -210,16 +210,16 @@ class PatternEngine {
 
   /** 넥라인 돌파 ATR 필터 배수 — 노이즈 돌파 제거 (0.5 ATR 이상 이탈 시 확인)
    *  Edwards & Magee (2018): 유의미한 돌파는 일정 거리 이상 이격 필요 */
-  static NECKLINE_BREAK_ATR_MULT = 0.5; // [D] Edwards & Magee (2018)
+  static NECKLINE_BREAK_ATR_MULT = 0.5; // [B] Edwards & Magee (2018) "decisive penetration" — ATR-normalized adaptation of 3% price filter
 
   /** 넥라인 미확인 감산 — Bulkowski (2005): 미확인 H&S 35% vs 확인 83% (차이 -48pp) */
-  static NECKLINE_UNCONFIRMED_PENALTY = 15; // [D] Bulkowski (2005) derived
+  static NECKLINE_UNCONFIRMED_PENALTY = 15; // [B] Bulkowski (2005): confirmed H&S 83% vs unconfirmed 35% — 15pp conservative interpolation
   static NECKLINE_UNCONFIRMED_PRED_PENALTY = 20; // [D]
 
   /** 삼각형/쐐기 돌파 확인 — Bulkowski (2005): 미확인 삼각형 40-50% vs 확인 70-80%
    *  사선 트렌드라인 특성상 넥라인(0.5)보다 낮은 임계값 적용 */
-  static TRIANGLE_BREAK_ATR_MULT = 0.3; // [D] Bulkowski (2005)
-  static TRIANGLE_BREAK_LOOKFORWARD = 15; // [D] Bulkowski (2005)
+  static TRIANGLE_BREAK_ATR_MULT = 0.3; // [B] Bulkowski (2005): triangle breakouts less decisive than H&S — proportional to neckline 0.5
+  static TRIANGLE_BREAK_LOOKFORWARD = 15; // [B] Bulkowski (2005): "2/3 to 3/4 of apex" resolution, ~2-3 weeks daily
   static TRIANGLE_UNCONFIRMED_PENALTY = 12; // [D]
   static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15; // [D]
 

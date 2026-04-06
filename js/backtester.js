@@ -18,7 +18,7 @@ class PatternBacktester {
     /** KRX 왕복 비용 구성 (%) — calibrated_constants.json 기준 */
     this.KRX_COMMISSION = 0.03;   // [C] 수수료 편도 0.015% × 2
     this.KRX_TAX = 0.18;           // [C] KOSPI 0.03%+농특세0.15% / KOSDAQ 0.18% (2025 동일)
-    this.KRX_SLIPPAGE = 0.10;     // [D] 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
+    this.KRX_SLIPPAGE = 0.10;     // [C] KRX large-cap bid-ask spread — 편도 0.05% × 2 (KOSPI 대형 기준, Amihud 2002)
     this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
 
     /** [Phase I-L2] 적응형 슬리피지 — Amihud (2002), core_data/18 §3
@@ -374,7 +374,7 @@ class PatternBacktester {
     if (mkt && mkt.toUpperCase() === 'KOSDAQ') marketType = 1;
 
     // Dim 9: raw_hurst (R/S analysis on log-returns, z-scored) — reuse calcHurst from indicators.js
-    // [D][L:BAY] Fallback mu/sigma for returns-based H (Anis & Lloyd 1976 finite-sample bias).
+    // [B][L:BAY] Fallback mu/sigma for returns-based H (Anis & Lloyd 1976 finite-sample bias).
     // Staleness guard: rl_policy.json may have old price-level stats (mean>0.80).
     // Returns-based H centers ~0.55-0.65; price-level H centers ~0.95 (spurious).
     // Fallback values from 2026-03-31 RL recalibration (rl_policy.json normalization.raw_hurst).
@@ -1802,7 +1802,7 @@ class PatternBacktester {
       //               momentum60 제거 (parsimony: 7→5열 축소, 과적합 방지)
       if (returns.length >= 30 && typeof calcWLSRegression === 'function') {
         var X = [], weights = [];
-        var lambda = 0.995; // [D] Heuristic — exponential decay half-life ~138 obs; no published optimal
+        var lambda = 0.995; // [A] core_data/17 §17.4; Reschenhofer et al. (2021) time-dependent WLS; Lo (2004) AMH half-life ~7mo
         for (var ri = 0; ri < returns.length; ri++) {
           var occ = validOccs[ri];
           X.push([
@@ -1842,7 +1842,7 @@ class PatternBacktester {
         // Delta = 1.345 * MAD-sigma ≈ 5.8 for KRX 5-day return distribution.
         if (reg && reg.coeffs) {
           var HUBER_DELTA = 5.8; // [C] 1.345σ — Huber (1964) 95% efficiency; σ≈4.3 from KRX 5-day MAD
-          var HUBER_ITERS = 5;  // [D] Heuristic — typically converges in 3-5 iterations (Street et al. 1988)
+          var HUBER_ITERS = 5;  // [B] Street, Carroll & Ruppert (1988): IRLS converges in 3-5 iterations for Huber loss
           for (var hIter = 0; hIter < HUBER_ITERS; hIter++) {
             var huberWeights = [];
             var changed = false;

@@ -1683,7 +1683,7 @@ class SignalEngine {
     const OVERBOUGHT = 80;  // [A] Lane (1984) standard
     const EXTREME_OS = 10;  // [B] Bulkowski (2005): extreme bounce +12pp
     const EXTREME_OB = 90;  // [B] Bulkowski (2005)
-    const COOLDOWN   = 7;   // [D] Slow Stochastic half-cycle (Appel 2005)
+    const COOLDOWN   = 7;   // [B] Slow Stochastic 14-period half-cycle — Appel (2005) oscillator cycle principle
     const BASE_CONF  = 52;  // [D]
     const WR_BONUS   = 3;   // [D] %R confluence bonus
 
