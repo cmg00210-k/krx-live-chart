@@ -1,0 +1,21 @@
+{
+  "updated": "2026-04-06T13:20",
+  "date": "2026-04-06",
+  "source": "unavailable",
+  "reason": "KRX OTP login required since Dec 2025; pykrx fallback blocked",
+  "market_short_ratio": 0,
+  "market_short_ratio_5d_ma": 0,
+  "market_short_ratio_20d_ma": 0,
+  "total_short_volume": 0,
+  "total_volume": 0,
+  "top_sir_stocks": [],
+  "squeeze_candidates": [],
+  "totalStocks": 0,
+  "topSIR": [],
+  "marketTrend": [],
+  "stats": {
+    "avgSIR": 0,
+    "avgDTC": 0,
+    "squeezeCount": 0
+  }
+}

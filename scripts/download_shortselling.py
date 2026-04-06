@@ -493,6 +493,7 @@ def _pykrx_fallback_shortselling(start_str: str, end_str: str):
     end_d = _dt.strptime(end_fmt, "%Y%m%d")
     current = start_d
     day_count = 0
+    consecutive_failures = 0
 
     while current <= end_d:
         if current.weekday() >= 5:  # skip weekends
@@ -526,8 +527,22 @@ def _pykrx_fallback_shortselling(start_str: str, end_str: str):
                     "shortRatio": round(ratio, 4),
                 })
                 day_count += 1
+                consecutive_failures = 0  # 성공 시 리셋
+            except (IndexError, KeyError, TypeError, ValueError, AttributeError) as e:
+                consecutive_failures += 1
+                if consecutive_failures <= 3:
+                    print(f"  [pykrx] {market_name} {date_str_iso}: {type(e).__name__}")
+                continue
             except Exception as e:
-                print(f"  [pykrx] {market_name} {date_str_iso} 실패: {e}")
+                consecutive_failures += 1
+                if consecutive_failures <= 3:
+                    print(f"  [pykrx] {market_name} {date_str_iso}: {type(e).__name__}: {e}")
+                continue
+
+        # 연속 실패 5회 이상이면 KRX OTP 차단으로 판단, 조기 종료
+        if consecutive_failures >= 5:
+            print("  [pykrx] 연속 5회 실패 — KRX OTP 차단 판단, 조기 종료")
+            break
 
         _time.sleep(1)
         current += timedelta(days=1)
@@ -731,39 +746,64 @@ def main():
             if latest.get("shortRatioMA20") is not None:
                 print(f"  20일 MA: {latest['shortRatioMA20']}%")
     else:
-        # Cached fallback: 기존 summary가 real data이고 30일 이내면 유지
+        # Cached fallback: 기존 summary가 real data이고 90일 이내면 유지
         print("[공매도] 경고: 거래/잔고 데이터 부족으로 신규 요약 생성 불가")
-        _try_cached_fallback(summary_output)
+        cache_applied = _try_cached_fallback(summary_output)
+        if not cache_applied:
+            # 캐시도 만료/없음 — source:"unavailable"로 최소한의 요약 생성
+            print("[공매도] 캐시 만료 — source='unavailable' 최소 요약 생성")
+            minimal = {
+                "updated": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+                "date": args.end,
+                "source": "unavailable",
+                "reason": "KRX OTP login required since Dec 2025; pykrx fallback blocked",
+                "market_short_ratio": 0,
+                "market_short_ratio_5d_ma": 0,
+                "market_short_ratio_20d_ma": 0,
+                "total_short_volume": 0,
+                "total_volume": 0,
+                "top_sir_stocks": [],
+                "squeeze_candidates": [],
+                "totalStocks": 0,
+                "topSIR": [],
+                "marketTrend": [],
+                "stats": {"avgSIR": 0, "avgDTC": 0, "squeezeCount": 0},
+            }
+            kb = save_json(minimal, summary_output, args.verbose)
+            print(f"[공매도] unavailable 요약 저장: {summary_output} ({kb:.1f}KB)")
 
     print(f"\n[공매도] 완료")
 
 
-def _try_cached_fallback(summary_path: str, grace_days: int = 30):
+def _try_cached_fallback(summary_path: str, grace_days: int = 90) -> bool:
     """
     모든 수집이 실패한 경우, 기존 shortselling_summary.json이
-    sample이 아니고 grace_days 이내면 source='cached'로 유지.
+    sample/unavailable이 아니고 grace_days 이내면 source='cached'로 유지.
+
+    Returns:
+        True if cache was applied, False if not (caller should write unavailable fallback)
     """
     if not os.path.exists(summary_path):
-        print("[공매도] 캐시 파일 없음 — sample 유지")
-        return
+        print("[공매도] 캐시 파일 없음")
+        return False
 
     try:
         with open(summary_path, "r", encoding="utf-8") as f:
             existing = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         print(f"[공매도] 캐시 파일 읽기 실패: {e}")
-        return
+        return False
 
     existing_source = existing.get("source", "sample")
-    if existing_source == "sample":
-        print("[공매도] 기존 파일도 sample — 캐시 불가")
-        return
+    if existing_source in ("sample", "unavailable"):
+        print(f"[공매도] 기존 파일 source='{existing_source}' — 캐시 불가")
+        return False
 
     # 날짜 확인
     date_str = existing.get("date", existing.get("updated", ""))
     if not date_str:
         print("[공매도] 기존 파일에 날짜 없음 — 캐시 불가")
-        return
+        return False
 
     try:
         from datetime import date as date_type
@@ -771,11 +811,11 @@ def _try_cached_fallback(summary_path: str, grace_days: int = 30):
         age_days = (date_type.today() - data_date).days
     except (ValueError, TypeError):
         print(f"[공매도] 날짜 파싱 실패 ({date_str}) — 캐시 불가")
-        return
+        return False
 
     if age_days > grace_days:
         print(f"[공매도] 기존 데이터 {age_days}일 경과 (한도 {grace_days}일) — 캐시 만료")
-        return
+        return False
 
     # Grace period 이내: source를 'cached'로 업데이트
     existing["source"] = "cached"
@@ -788,6 +828,7 @@ def _try_cached_fallback(summary_path: str, grace_days: int = 30):
     print(f"[공매도] 캐시 유지: 원본 source='{existing_source}', "
           f"{age_days}일 경과 (한도 {grace_days}일)")
     print(f"[공매도] source='cached'로 업데이트 — CHECK 6 PASS 가능")
+    return True
 
 
 if __name__ == "__main__":

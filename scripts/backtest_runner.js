@@ -210,7 +210,10 @@ function analyzeStock(sandbox, code, market, filePath) {
   for (const p of patterns) {
     const idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;
     if (idx === undefined) continue;
-    const entryIdx = idx + 1;
+    // [Fix-13] Chart patterns use swing points needing lookback future bars.
+    // Offset entry to avoid look-ahead bias in backtest returns.
+    const swingOffset = p._swingLookback || 0;
+    const entryIdx = idx + swingOffset + 1;
     if (entryIdx >= candles.length) continue;
     const entryPrice = candles[entryIdx].open || candles[idx].close;
     if (!entryPrice || entryPrice === 0) continue;

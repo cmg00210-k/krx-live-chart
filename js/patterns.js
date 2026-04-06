@@ -2791,6 +2791,7 @@ class PatternEngine {
 
       results.push({
         type: 'ascendingTriangle', name: '상승 삼각형 (Ascending Triangle)', nameShort: '상승삼각',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `수평 저항 + 상승 지지 — 상방 돌파 가능. 형태 점수 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
@@ -2859,6 +2860,7 @@ class PatternEngine {
 
       results.push({
         type: 'descendingTriangle', name: '하락 삼각형 (Descending Triangle)', nameShort: '하락삼각',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         description: `수평 지지 + 하락 저항 — 하방 돌파 가능. 형태 점수 ${confidence}%`,
         startIndex: startIdx, endIndex: endIdx,
@@ -2932,6 +2934,7 @@ class PatternEngine {
 
         results.push({
           type: 'risingWedge', name: '상승 쐐기 (Rising Wedge)', nameShort: '상승쐐기',
+          _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
           signal: 'sell', strength: 'medium', confidence, stopLoss, priceTarget,
           description: `상향 수렴 — 상승 피로, 하락 반전 가능. 형태 점수 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
@@ -3007,6 +3010,7 @@ class PatternEngine {
 
         results.push({
           type: 'fallingWedge', name: '하락 쐐기 (Falling Wedge)', nameShort: '하락쐐기',
+          _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
           signal: 'buy', strength: 'medium', confidence, stopLoss, priceTarget,
           description: `하향 수렴 — 하락 피로, 상승 반전 가능. 형태 점수 ${confidence}%`,
           startIndex: Math.min(h1.index, l1.index), endIndex: endIdx,
@@ -3094,6 +3098,7 @@ class PatternEngine {
 
         results.push({
           type: 'symmetricTriangle', name: '대칭 삼각형 (Symmetric Triangle)', nameShort: '대칭삼각',
+          _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
           signal: 'neutral', strength: 'medium', confidence,
           stopLoss: null, priceTarget: null,
           description: `대칭 수렴 — 매수·매도 균형, 방향 돌파 대기. 형태 점수 ${confidence}%`,
@@ -3155,6 +3160,7 @@ class PatternEngine {
 
       results.push({
         type: 'doubleBottom', name: '이중 바닥 (Double Bottom)', nameShort: '이중바닥',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
         neckline: neckline,
         description: `W형 바닥 — 강한 지지 확인. 형태 점수 ${confidence}%`,
@@ -3204,6 +3210,7 @@ class PatternEngine {
 
       results.push({
         type: 'doubleTop', name: '이중 천장 (Double Top)', nameShort: '이중천장',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'sell', strength: 'strong', confidence, stopLoss, priceTarget,
         neckline: neckline,
         description: `M형 천장 — 강한 저항 확인. 형태 점수 ${confidence}%`,
@@ -3278,6 +3285,7 @@ class PatternEngine {
 
       results.push({
         type: 'headAndShoulders', name: '머리어깨형 (Head & Shoulders)', nameShort: 'H&S',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'sell', strength: 'strong', confidence,
         stopLoss: Math.round(rs.price + a * 1.5), priceTarget,  // 우측 어깨 + 1.5 ATR (head 대비 합리적 손절)
         description: `머리어깨 — 강한 하락 반전. 형태 점수 ${confidence}%`,
@@ -3364,6 +3372,7 @@ class PatternEngine {
 
       results.push({
         type: 'inverseHeadAndShoulders', name: '역머리어깨형 (Inverse H&S)', nameShort: '역H&S',
+        _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
         signal: 'buy', strength: 'strong', confidence,
         stopLoss: Math.round(rs.price - a * 1.5), priceTarget,  // 우측 어깨 - 1.5 ATR (head 대비 합리적 손절)
         description: `역머리어깨 — 강한 상승 반전. 형태 점수 ${confidence}%`,
@@ -3734,6 +3743,7 @@ class PatternEngine {
     const dirLabel = direction === 'ascending' ? '상승' : direction === 'descending' ? '하락' : '횡보';
     results.push({
       type: 'channel',
+      _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
       name: dirLabel + ' 채널 (' + (direction === 'ascending' ? 'Rising' : direction === 'descending' ? 'Falling' : 'Horizontal') + ' Channel)',
       nameShort: dirLabel + '채널',
       description: '평행 추세선 ' + dirLabel + ' 채널. 형태 점수 ' + confidence + '%',
@@ -3905,6 +3915,7 @@ class PatternEngine {
 
         results.push({
           type: 'cupAndHandle', name: '컵앤핸들 (Cup & Handle)', nameShort: '컵앤핸들',
+          _swingLookback: 3,  // [Fix-13] look-ahead bias offset for backtester entry
           signal: 'buy', strength: 'strong', confidence, stopLoss, priceTarget,
           neckline: Math.max(leftRimPrice, rightRimPrice),
           description: `U형 컵 (R²=${rSquared.toFixed(2)}, 깊이 ${(depth * 100).toFixed(1)}%) + ${handleFound ? '핸들 확인' : '핸들 미확인'}. 형태 점수 ${confidence}%`,

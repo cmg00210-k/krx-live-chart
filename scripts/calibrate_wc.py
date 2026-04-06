@@ -26,6 +26,7 @@ References:
   - project_wc_formula_chain.md (Wc 수식 체인)
 """
 
+import argparse
 import csv
 import json
 import sys
@@ -320,45 +321,131 @@ def calibration_analysis(records):
     }
 
 
+def time_split_records(records, oos_ratio=0.3, cutoff_date=None):
+    """Time-based train/test split for OOS validation (Fix-12)."""
+    sorted_records = sorted(records, key=lambda r: r['date'])
+    dates = sorted(set(r['date'] for r in sorted_records))
+
+    if cutoff_date:
+        cutoff = cutoff_date
+    else:
+        cutoff_idx = int(len(dates) * (1 - oos_ratio))
+        cutoff = dates[cutoff_idx]
+
+    train = [r for r in sorted_records if r['date'] < cutoff]
+    test = [r for r in sorted_records if r['date'] >= cutoff]
+
+    print(f"  [OOS] Train: {len(train):,} records")
+    print(f"  [OOS] Test:  {len(test):,} records")
+    print(f"  [OOS] Cutoff: {cutoff}")
+
+    return train, test, str(cutoff)
+
+
+def validate_oos_wc(test_records):
+    """Validate Wc on OOS data (Fix-12).
+
+    Returns dict with OOS IC, WR, A/B test, and acceptance status.
+    Rejection criteria: OOS IC < 0.02 OR OOS WR < 52%.
+    """
+    if len(test_records) < 50:
+        return {"status": "insufficient_data", "n": len(test_records)}
+
+    wcs = np.array([r["wc"] for r in test_records])
+    rets = np.array([r["ret"] for r in test_records])
+
+    # OOS IC: Spearman correlation
+    ic_result = calc_ic(wcs, rets)
+    oos_ic = ic_result["ic"] if ic_result else 0.0
+    oos_ic_p = ic_result["p_value"] if ic_result else 1.0
+
+    # OOS WR: directional accuracy
+    directed = [r for r in test_records if r["signal"] in ("buy", "sell")]
+    if len(directed) > 0:
+        correct = sum(
+            1 for r in directed
+            if (r["signal"] == "buy" and r["ret"] > 0) or
+               (r["signal"] == "sell" and r["ret"] < 0)
+        )
+        oos_wr = round(correct / len(directed) * 100, 2)
+    else:
+        oos_wr = 50.0
+
+    # OOS A/B test
+    oos_ab = ab_test(test_records)
+
+    rejected = (oos_ic < 0.02) or (oos_wr < 52.0)
+
+    return {
+        "status": "rejected" if rejected else "accepted",
+        "n": len(test_records),
+        "n_directed": len(directed),
+        "oos_ic": round(float(oos_ic), 6),
+        "oos_ic_pvalue": round(float(oos_ic_p), 6),
+        "oos_wr": oos_wr,
+        "oos_ab_test": oos_ab,
+        "rejection_criteria": "OOS IC < 0.02 OR OOS WR < 52%",
+    }
+
+
 def main():
-    args = sys.argv[1:]
-    horizon = 5
-    for i, a in enumerate(args):
-        if a == "--horizon" and i + 1 < len(args):
-            horizon = int(args[i + 1])
+    parser = argparse.ArgumentParser(
+        description="KRX LIVE — Stage 5 Phase C: Wc Calibration with OOS validation")
+    parser.add_argument("--horizon", type=int, default=5,
+                        help="Return horizon in days (default: 5)")
+    parser.add_argument("--oos-split", type=float, default=0.3,
+                        help="OOS validation split ratio (default: 0.3)")
+    parser.add_argument("--oos-cutoff", type=str, default=None,
+                        help="OOS cutoff date YYYY-MM-DD (overrides --oos-split)")
+    parser.add_argument("--no-oos", action="store_true",
+                        help="Disable OOS split (legacy mode, full dataset)")
+    args = parser.parse_args()
+
+    horizon = args.horizon
 
     if not CSV_PATH.exists():
         print(f"[ERROR] {CSV_PATH} not found. Run backtest_all.py first.")
         sys.exit(1)
 
-    print(f"[1/6] Loading data (horizon={horizon})...")
+    print(f"[1/7] Loading data (horizon={horizon})...")
     records = load_data(horizon)
     print(f"  -> {len(records)} records")
 
-    print("[2/6] Overall IC + A/B test...")
-    wcs = np.array([r["wc"] for r in records])
-    rets = np.array([r["ret"] for r in records])
+    # Fix-12: Time-based OOS split
+    if args.no_oos:
+        print("[INFO] --no-oos: Using full dataset (legacy mode, no OOS)")
+        train_records = records
+        test_records = []
+        cutoff_date = None
+    else:
+        print(f"\n[OOS] Time-based train/test split (ratio={args.oos_split})...")
+        train_records, test_records, cutoff_date = time_split_records(
+            records, args.oos_split, args.oos_cutoff)
+
+    print("[2/7] Overall IC + A/B test...")
+    wcs = np.array([r["wc"] for r in train_records])
+    rets = np.array([r["ret"] for r in train_records])
     overall_ic = calc_ic(wcs, rets)
-    overall_ab = ab_test(records)
+    overall_ab = ab_test(train_records)
     print(f"  -> IC={overall_ic['ic']}, p={overall_ic['p_value']}")
     if overall_ab:
         print(f"  -> A/B diff={overall_ab['difference']}%, t={overall_ab['t_stat']}, p={overall_ab['p_value']}")
 
-    print("[3/6] Component attribution (hw/vw/mw/rw)...")
-    components = component_attribution(records)
+    print("[3/7] Component attribution (hw/vw/mw/rw)...")
+    components = component_attribution(train_records)
     for comp, data in components.items():
         ic_val = data.get("ic", 0)
         note = data.get("note", "")
         print(f"  -> {comp}: IC={ic_val}" + (f" ({note})" if note else ""))
 
-    print("[4/6] Fama-MacBeth daily IC stability...")
-    fm = fama_macbeth_ic(records)
+    print("[4/7] Fama-MacBeth daily IC stability...")
+    fm = fama_macbeth_ic(train_records)
     if fm:
         print(f"  -> mean_IC={fm['mean_ic']}, t={fm['t_stat']}, p={fm['p_value']}, "
               f"positive_days={fm['ic_positive_pct']}%")
 
-    print("[5/6] Pattern tier analysis + BH FDR...")
-    tiers = pattern_tier_analysis(records)
+    print("[5/7] Pattern tier analysis + BH FDR...")
+    tiers = pattern_tier_analysis(train_records)
 
     # BH FDR on pattern-level ICs
     pattern_ics = tiers.get("by_pattern", {})
@@ -371,21 +458,36 @@ def main():
         n_sig = sum(rejected)
         print(f"  -> {n_sig}/{len(names)} patterns significant after BH FDR correction")
 
-    print("[6/6] Calibration analysis...")
-    calibration = calibration_analysis(records)
+    print("[6/7] Calibration analysis...")
+    calibration = calibration_analysis(train_records)
     for sig, check in calibration["direction_consistency"].items():
         tag = "OK" if check["consistent"] else "MISMATCH"
         print(f"  -> {sig}: IC={check['ic']}, expected={check['expected_direction']}, "
               f"actual={check['actual_direction']} [{tag}]")
 
+    # Fix-12: OOS validation
+    if len(test_records) > 0:
+        print("\n[7/7] OOS validation on test set...")
+        oos_results = validate_oos_wc(test_records)
+        print(f"  [OOS] IC={oos_results.get('oos_ic', 'N/A')}, WR={oos_results.get('oos_wr', 'N/A')}%, "
+              f"Status={oos_results['status']}")
+    else:
+        print("[7/7] OOS validation skipped.")
+        oos_results = {"status": "skipped", "reason": "--no-oos flag used"}
+
     # Build output
     output = {
         "horizon": horizon,
         "total_records": len(records),
+        "train_records": len(train_records),
+        "test_records": len(test_records),
+        "oos_split": args.oos_split if not args.no_oos else None,
+        "cutoff_date": cutoff_date,
         "overall": {
             "ic": overall_ic,
             "ab_test": overall_ab,
         },
+        "oos_validation": oos_results,
         "component_attribution": components,
         "fama_macbeth": fm,
         "pattern_tiers": tiers,
@@ -397,6 +499,14 @@ def main():
         json.dump(output, f, ensure_ascii=False, indent=2)
 
     print(f"\n  Output: {out_path}")
+
+    # OOS summary
+    if oos_results.get('status') not in ('skipped', 'insufficient_data'):
+        print(f"\n[OOS] Validation: {oos_results['status'].upper()}")
+        print(f"  IC={oos_results['oos_ic']}, WR={oos_results['oos_wr']}%")
+        if oos_results['status'] == 'rejected':
+            print("  WARNING: OOS validation rejected — Wc weights may not generalize")
+
     print("  Done.")
 
 

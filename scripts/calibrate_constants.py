@@ -26,6 +26,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy import stats
+import argparse
 
 # Force UTF-8 on Windows (Korean print output)
 if hasattr(sys.stdout, 'reconfigure'):
@@ -124,6 +125,67 @@ def load_data():
     print(f"  -> pattern_performance: {len(pattern_perf)} pattern types")
 
     return df, theory_vs_actual, pattern_perf
+
+
+def time_split(df, oos_ratio=0.3, cutoff_date=None):
+    """Time-based train/test split for OOS validation (Fix-12).
+
+    Returns (df_train, df_test, cutoff_date_str).
+    """
+    df_sorted = df.sort_values('date')
+    dates = sorted(df_sorted['date'].unique())
+
+    if cutoff_date:
+        cutoff = cutoff_date
+    else:
+        cutoff_idx = int(len(dates) * (1 - oos_ratio))
+        cutoff = dates[cutoff_idx]
+
+    df_train = df_sorted[df_sorted['date'] < cutoff].copy()
+    df_test = df_sorted[df_sorted['date'] >= cutoff].copy()
+
+    print(f"  [OOS] Train: {len(df_train):,} records ({df_train['date'].min()} ~ {df_train['date'].max()})")
+    print(f"  [OOS] Test:  {len(df_test):,} records ({df_test['date'].min()} ~ {df_test['date'].max()})")
+    print(f"  [OOS] Cutoff: {cutoff}")
+
+    return df_train, df_test, str(cutoff)
+
+
+def validate_oos(df_test):
+    """Validate calibrated constants on OOS data (Fix-12).
+
+    Returns dict with OOS IC, WR, and acceptance status.
+    Rejection criteria: OOS IC < 0.02 OR OOS WR < 52%.
+    """
+    df_valid = df_test.dropna(subset=['ret_5'])
+    if len(df_valid) < 50:
+        return {"status": "insufficient_data", "n": int(len(df_valid))}
+
+    # OOS IC: Spearman correlation of wc vs ret_5
+    wc = df_valid['wc'].values
+    ret5 = df_valid['ret_5'].values
+    ic, ic_p = stats.spearmanr(wc, ret5)
+
+    # OOS WR: directional accuracy
+    df_dir = df_valid[df_valid['signal_direction'].isin([1, -1])]
+    if len(df_dir) > 0:
+        correct = ((df_dir['signal_direction'] == 1) & (df_dir['ret_5'] > 0)) | \
+                  ((df_dir['signal_direction'] == -1) & (df_dir['ret_5'] < 0))
+        oos_wr = float(correct.mean() * 100)
+    else:
+        oos_wr = 50.0
+
+    rejected = (ic < 0.02) or (oos_wr < 52.0)
+
+    return {
+        "status": "rejected" if rejected else "accepted",
+        "n": int(len(df_valid)),
+        "n_directed": int(len(df_dir)),
+        "oos_ic": round(float(ic), 6),
+        "oos_ic_pvalue": round(float(ic_p), 6),
+        "oos_wr": round(float(oos_wr), 2),
+        "rejection_criteria": "OOS IC < 0.02 OR OOS WR < 52%",
+    }
 
 
 # ──────────────────────────────────────────────
@@ -810,30 +872,85 @@ def calibrate_rr_penalty(df, theory_vs_actual, c1_result):
 # Main
 # ──────────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser(
+        description="Calibrate Wc system 5 constants with OOS validation")
+    parser.add_argument("--reset-initial", action="store_true",
+                        help="Document academic flat defaults (Fix-14: circular calibration)")
+    parser.add_argument("--oos-split", type=float, default=0.3,
+                        help="OOS validation split ratio (default: 0.3)")
+    parser.add_argument("--oos-cutoff", type=str, default=None,
+                        help="OOS cutoff date YYYY-MM-DD (overrides --oos-split)")
+    parser.add_argument("--no-oos", action="store_true",
+                        help="Disable OOS split (legacy mode, calibrate on full dataset)")
+    args = parser.parse_args()
+
     df, theory_vs_actual, pattern_perf = load_data()
 
-    # C-1: rr_thresholds (low < high 보장)
-    c1 = calibrate_rr_thresholds(df, theory_vs_actual)
+    # Fix-12: Time-based OOS split
+    if args.no_oos:
+        print("[INFO] --no-oos: Using full dataset (legacy mode, no OOS)")
+        df_train = df
+        df_test = pd.DataFrame()
+        cutoff_date = None
+    else:
+        print(f"\n[OOS] Time-based train/test split (ratio={args.oos_split})...")
+        df_train, df_test, cutoff_date = time_split(df, args.oos_split, args.oos_cutoff)
+
+    # Fix-14: Document initial values
+    initial_mode = "academic_defaults" if args.reset_initial else "current_calibrated"
+    if args.reset_initial:
+        print("[INFO] --reset-initial: Documenting academic flat defaults")
+
+    # C-1: rr_thresholds
+    c1 = calibrate_rr_thresholds(df_train, theory_vs_actual)
 
     # C-2: conf_L
-    c2 = calibrate_conf_L(df, pattern_perf)
+    c2 = calibrate_conf_L(df_train, pattern_perf)
 
     # D-1: candle_target_atr
-    d1 = calibrate_candle_atr(df)
+    d1 = calibrate_candle_atr(df_train)
 
     # D-2: sell_hw_inversion
-    d2 = calibrate_sell_hw(df)
+    d2 = calibrate_sell_hw(df_train)
 
-    # D-3: rr_penalty (C-1 의존)
-    d3 = calibrate_rr_penalty(df, theory_vs_actual, c1)
+    # D-3: rr_penalty (C-1 dependent)
+    d3 = calibrate_rr_penalty(df_train, theory_vs_actual, c1)
 
-    # 최종 출력
+    # Fix-12: OOS validation
+    if len(df_test) > 0:
+        print("\n[OOS] Validating on test set...")
+        oos_results = validate_oos(df_test)
+        print(f"  [OOS] IC={oos_results.get('oos_ic', 'N/A')}, WR={oos_results.get('oos_wr', 'N/A')}%, "
+              f"Status={oos_results['status']}")
+    else:
+        oos_results = {"status": "skipped", "reason": "--no-oos flag used"}
+
+    # Output
     print("\n[7/7] Writing calibrated_constants.json...")
 
     output = {
         "horizon": 5,
         "total_records": int(len(df)),
         "valid_ret5_records": int(df['ret_5'].notna().sum()),
+        # Fix-14: Calibration metadata
+        "calibration_metadata": {
+            "initial_values": initial_mode,
+            "academic_defaults": {
+                "candle_target_atr": {"strong": 2.0, "medium": 2.0, "weak": 2.0},
+                "rr_thresholds": [1.0, 2.0],
+                "note": "Flat ATR 2.0 academic baseline; use --reset-initial to document"
+            },
+            "dataset_period": f"{df['date'].min()} ~ {df['date'].max()}",
+            "train_records": int(len(df_train)),
+            "test_records": int(len(df_test)) if len(df_test) > 0 else 0,
+            "train_period": f"{df_train['date'].min()} ~ {df_train['date'].max()}" if len(df_train) > 0 else None,
+            "test_period": f"{df_test['date'].min()} ~ {df_test['date'].max()}" if len(df_test) > 0 else None,
+            "oos_split": args.oos_split if not args.no_oos else None,
+            "cutoff_date": cutoff_date,
+            "circular_check": args.reset_initial,
+        },
+        # Fix-12: OOS validation results
+        "oos_validation": oos_results,
         "C1_rr_thresholds": c1,
         "C2_conf_L": c2,
         "D1_candle_target_atr": d1,
@@ -848,7 +965,7 @@ def main():
 
     print(f"  -> {out_path}")
 
-    # 요약
+    # Summary
     print("\n" + "=" * 60)
     print("교정 결과 요약")
     print("=" * 60)
@@ -875,6 +992,13 @@ def main():
     unchanged = 5 - len(changes)
     if unchanged > 0:
         print(f"유지된 상수: {unchanged}개 (유의하지 않거나 데이터 부족)")
+
+    # OOS summary
+    if oos_results.get('status') not in ('skipped', 'insufficient_data'):
+        print(f"\n[OOS] Validation: {oos_results['status'].upper()}")
+        print(f"  IC={oos_results['oos_ic']}, WR={oos_results['oos_wr']}%")
+        if oos_results['status'] == 'rejected':
+            print("  WARNING: OOS validation rejected — constants may not generalize")
 
     print("\n완료.")
 

@@ -847,6 +847,11 @@ def check_pipeline(strict=False):
             elif guard_val == "error":
                 fail(f"{fname} — {guard_field}='error' (upstream API failure)")
                 errors += 1
+            elif guard_val == "unavailable":
+                warn(f"{fname} — {guard_field}='unavailable' (data source blocked, no alternative)")
+                warnings += 1
+            elif guard_val == "cached":
+                pass  # cached real data is acceptable
 
         # 6f. Staleness check
         if isinstance(check_target, dict):
