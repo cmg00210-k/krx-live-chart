@@ -9,7 +9,7 @@ wc_return_pairs.csv에서 Wc 가중치 시스템의 효과를 검증하고
   1. IC (Information Coefficient) — corr(Wc, future_return)
   2. A/B 검정 — Wc > median vs <= median (Welch t-test)
   3. 성분 귀속 — hw/vw/mw/rw 개별 기여도
-  4. 패턴별 층화 IC — Tier 1/2/3 패턴 분류 기반
+  4. 패턴별 층화 IC — 5-Tier (S/A/B/C/D) 패턴 분류 기반 (appState.js 동기화)
   5. Fama-MacBeth 스타일 날짜별 IC 안정성
   6. Benjamini-Hochberg FDR 보정
   7. 교정 계수 최적화 — clamp 범위 조정
@@ -41,10 +41,43 @@ ROOT = Path(__file__).resolve().parent.parent
 BACKTEST_DIR = ROOT / "data" / "backtest"
 CSV_PATH = BACKTEST_DIR / "wc_return_pairs.csv"
 
-# Phase A에서 확인된 Tier 분류
-TIER1_PATTERNS = {"doubleBottom", "doubleTop", "risingWedge", "threeWhiteSoldiers", "invertedHammer"}
-TIER2_PATTERNS = {"bullishEngulfing", "hammer", "morningStar", "threeBlackCrows", "hangingMan", "shootingStar", "eveningStar"}
-TIER3_PATTERNS = {"spinningTop", "doji", "fallingWedge"}
+# 5-Tier Academic Verification System — synced with appState.js (2026-04-07)
+# S-Tier: WR≥57% or ≤43%, n>1000, multi-agent consensus
+S_TIER_PATTERNS = {
+    # Candle (S)
+    "gravestoneDoji", "shootingStar", "hangingMan", "bearishHarami",
+    "darkCloud", "threeBlackCrows", "bearishEngulfing", "eveningStar",
+    # Chart (S)
+    "doubleTop", "doubleBottom",
+}
+# A-Tier: WR 55-57% or required for composite signals
+A_TIER_PATTERNS = {
+    # Candle (A)
+    "tweezerTop", "threeInsideDown",
+    # Chart (A)
+    "risingWedge", "headAndShoulders",
+}
+# B-Tier: Detected but not rendered standalone; composite input or pending promotion
+B_TIER_PATTERNS = {
+    # Candle (B)
+    "hammer", "tweezerBottom", "piercingLine", "dragonflyDoji",
+    "threeWhiteSoldiers", "bullishEngulfing", "morningStar",
+    "invertedHammer", "bullishMarubozu", "bearishMarubozu",
+    "threeInsideUp", "bearishBeltHold", "bearishHaramiCross",
+    "risingThreeMethods", "fallingThreeMethods",
+    # Chart (B)
+    "channel", "descendingTriangle", "inverseHeadAndShoulders",
+    "cupAndHandle", "fallingWedge", "ascendingTriangle", "symmetricTriangle",
+}
+# C-Tier (CONTEXT_ONLY): Displayed with warning badge, very small n
+C_TIER_PATTERNS = {
+    "abandonedBabyBullish", "abandonedBabyBearish", "stickSandwich",
+}
+# D-Tier (SUPPRESS): WR≈50% or noise, no rendering
+D_TIER_PATTERNS = {
+    "longLeggedDoji", "bullishHaramiCross", "bullishBeltHold",
+    "spinningTop", "doji",
+}
 
 
 def load_data(horizon):
@@ -197,19 +230,23 @@ def fama_macbeth_ic(records):
 
 
 def pattern_tier_analysis(records):
-    """Tier 1/2/3 + 패턴별 IC"""
-    tiers = {"tier1": [], "tier2": [], "tier3": [], "other": []}
+    """5-Tier (S/A/B/C/D) + 패턴별 IC — synced with appState.js 5-Tier system"""
+    tiers = {"S": [], "A": [], "B": [], "C": [], "D": [], "other": []}
     by_pattern = defaultdict(list)
 
     for r in records:
         pt = r["type"]
         by_pattern[pt].append(r)
-        if pt in TIER1_PATTERNS:
-            tiers["tier1"].append(r)
-        elif pt in TIER2_PATTERNS:
-            tiers["tier2"].append(r)
-        elif pt in TIER3_PATTERNS:
-            tiers["tier3"].append(r)
+        if pt in S_TIER_PATTERNS:
+            tiers["S"].append(r)
+        elif pt in A_TIER_PATTERNS:
+            tiers["A"].append(r)
+        elif pt in B_TIER_PATTERNS:
+            tiers["B"].append(r)
+        elif pt in C_TIER_PATTERNS:
+            tiers["C"].append(r)
+        elif pt in D_TIER_PATTERNS:
+            tiers["D"].append(r)
         else:
             tiers["other"].append(r)
 

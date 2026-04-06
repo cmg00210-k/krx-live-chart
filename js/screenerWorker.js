@@ -24,9 +24,9 @@ try {
   importScripts(
     'colors.js?v=13',
     'indicators.js?v=26',
-    'patterns.js?v=43',
-    'signalEngine.js?v=40',
-    'backtester.js?v=38'
+    'patterns.js?v=44',
+    'signalEngine.js?v=41',
+    'backtester.js?v=39'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });

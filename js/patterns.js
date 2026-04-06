@@ -20,109 +20,109 @@ class PatternEngine {
   // ══════════════════════════════════════════════════
 
   /** 도지 body/range 비율 상한 — Nison 표준 */
-  static DOJI_BODY_RATIO = 0.05;
+  static DOJI_BODY_RATIO = 0.05; // [A] Nison (1991)
 
   /** 꼬리/body 최소 비율 — 해머/유성형 하한 (Morris: 2x body) */
-  static SHADOW_BODY_MIN = 2.0;
+  static SHADOW_BODY_MIN = 2.0; // [A] Morris (2006)
 
   /** 반대쪽 꼬리/body 상한 — 해머/유성형 (Morris: <=0.15) */
-  static COUNTER_SHADOW_MAX_STRICT = 0.15;  // 해머용
-  static COUNTER_SHADOW_MAX_LOOSE = 0.3;    // 역해머/교수형/유성형용
+  static COUNTER_SHADOW_MAX_STRICT = 0.15;  // [A] Morris (2006) 해머용
+  static COUNTER_SHADOW_MAX_LOOSE = 0.3;    // [B] 역해머/교수형/유성형용
 
   /** body/range 최소 비율 — 유의미한 body 존재 확인 */
-  static MIN_BODY_RANGE = 0.1;
+  static MIN_BODY_RANGE = 0.1; // [B] Nison (1991)
 
   /** body/range 최대 비율 — 해머 계열 상한 (Nison: body는 range의 상/하 1/3 이내, ~33%)
    *  [T-8] 0.45→0.40: 0.45는 과관대, Nison 원전(0.33) + KRX tick-size 여유 = 0.40 */
-  static MAX_BODY_RANGE_HAMMER = 0.40;
+  static MAX_BODY_RANGE_HAMMER = 0.40; // [C] Nison 0.33 + KRX tick-size margin
 
   /** ATR 대비 최소 body 크기 — 적삼병/흑삼병 개별 봉
    *  [T-5] 0.3→0.5: Nison (1991) "long real body" 기준. 0.3은 과감지 유발 (n=103K) */
-  static THREE_SOLDIER_BODY_MIN = 0.5;
+  static THREE_SOLDIER_BODY_MIN = 0.5; // [B] Nison (1991) "long real body"
 
   /** ATR 대비 최소 body — 장악형 이전 봉 / 현재 봉
    *  [Audit] 0.1→0.2: Nison "visible real body" 기준. 0.1은 도지급 봉 포함으로
    *  장악 심리(공포→탐욕 전환) 미성립. HARAMI_PREV_BODY_MIN(0.3)보다 느슨 유지 */
-  static ENGULF_PREV_BODY_MIN = 0.2;
-  static ENGULF_CURR_BODY_MIN = 0.25;
+  static ENGULF_PREV_BODY_MIN = 0.2; // [B] Nison "visible real body"
+  static ENGULF_CURR_BODY_MIN = 0.25; // [B]
 
   /** 장악 봉의 body 배율 — KRX 가격제한폭(30%) 고려
    *  [T-4] 1.2→1.5: 1.2x는 과감지 (n=103K). Nison "clearly engulfs" → 1.5x가 KRX 적정 */
-  static ENGULF_BODY_MULT = 1.5;
+  static ENGULF_BODY_MULT = 1.5; // [C] Nison "clearly engulfs" + KRX limit
 
   /** 잉태형 이전 봉 최소 / 현재 봉 body 비율 상한 */
-  static HARAMI_PREV_BODY_MIN = 0.3;
-  static HARAMI_CURR_BODY_MAX = 0.5;
-  static HARAMI_CURR_BODY_MIN = 0.05;
+  static HARAMI_PREV_BODY_MIN = 0.3; // [B] Nison (1991)
+  static HARAMI_CURR_BODY_MAX = 0.5; // [B] Nison (1991)
+  static HARAMI_CURR_BODY_MIN = 0.05; // [B]
 
   /** 샛별/석별형 별(2봉) body 상한, 양끝 봉 body 하한
    *  [T-6] STAR_END_BODY_MIN 0.3→0.5: 양끝 봉은 "long body" 필수 (Nison 1991) */
-  static STAR_BODY_MAX = 0.2;
-  static STAR_END_BODY_MIN = 0.5;
+  static STAR_BODY_MAX = 0.2; // [A] Nison (1991) star body ratio
+  static STAR_END_BODY_MIN = 0.5; // [B] Nison (1991) "long body"
 
   /** 관통형/먹구름형 봉 body 하한 */
-  static PIERCING_BODY_MIN = 0.3;
+  static PIERCING_BODY_MIN = 0.3; // [B] Nison (1991)
 
   /** 잠자리/비석 도지 그림자 비율 */
-  static SPECIAL_DOJI_SHADOW_MIN = 0.70;
+  static SPECIAL_DOJI_SHADOW_MIN = 0.70; // [B] Nison (1991)
   /** [Phase1-D] 0.10→0.15: dragonfly/gravestone 반대꼬리 허용 확대 (n=20-22→35-45 목표)
    *  Nison 원칙 "거의 없는 반대꼬리" 유지하면서, 5%→15% 범위의 미세 꼬리 허용 */
-  static SPECIAL_DOJI_COUNTER_MAX = 0.15;
+  static SPECIAL_DOJI_COUNTER_MAX = 0.15; // [C] Nison + KRX tick tolerance
 
   /** 족집게 봉 body 하한 / 가격 일치 허용오차 (ATR 배수)
    *  [T-7] 0.15→0.25: 0.15는 도지급 봉까지 포함하여 과감지. Nison: "visible real body" */
-  static TWEEZER_BODY_MIN = 0.25;
-  static TWEEZER_TOLERANCE = 0.1;
+  static TWEEZER_BODY_MIN = 0.25; // [C] Nison + KRX tick
+  static TWEEZER_TOLERANCE = 0.1; // [C] ATR*0.1 tolerance
 
   /** 마루보주 body/range 하한 — Nison: 실체가 range의 85% 이상 */
-  static MARUBOZU_BODY_RATIO = 0.85;
+  static MARUBOZU_BODY_RATIO = 0.85; // [A] Nison (1991)
   /** 마루보주 꼬리/body 상한 — Morris: 양끝 꼬리 거의 없음 (2% 이하) */
-  static MARUBOZU_SHADOW_MAX = 0.02;
+  static MARUBOZU_SHADOW_MAX = 0.02; // [A] Morris (2006)
 
   /** 팽이형 body/range 범위 — 도지(5%)와 보통 봉(30%) 사이 */
-  static SPINNING_BODY_MIN = 0.05;
-  static SPINNING_BODY_MAX = 0.30;
+  static SPINNING_BODY_MIN = 0.05; // [A] Nison (1991)
+  static SPINNING_BODY_MAX = 0.30; // [A] Nison (1991)
   /** 팽이형 꼬리/body 하한 — 양쪽 꼬리가 body의 75% 이상
    *  [E-2] 0.50→0.75: Morris(2006) "shadow > body" 기준에 근접, n=137k/303k 과감지 억제 */
-  static SPINNING_SHADOW_RATIO = 0.75;
+  static SPINNING_SHADOW_RATIO = 0.75; // [B] Morris (2006) "shadow > body"
 
   /** 삼내형(Three Inside) 3봉 확인 body/ATR 최소 — Nison (1991) 확인 봉 유의미 크기 */
-  static THREE_INSIDE_CONFIRM_MIN = 0.2;
+  static THREE_INSIDE_CONFIRM_MIN = 0.2; // [B] Nison (1991)
 
   /** 버림받은아기 도지 body/range 상한 — 표준 도지(0.05)보다 관대 (Bulkowski 2008)
    *  [Phase1-B] 0.10→0.15: 준도지(near-doji) 포함, 캔들 body 임계(0.30) 대비 충분히 엄격 */
-  static ABANDONED_BABY_DOJI_MAX = 0.15;
+  static ABANDONED_BABY_DOJI_MAX = 0.15; // [C] Bulkowski (2008) near-doji
   /** 버림받은아기 갭 최소 ATR 비율 — KRX 갭 빈도 낮아 관대 설정
    *  [Phase1-B] 0.05→0.03: KRX 연속매매 구조에서 near-gap 포착 (n=10-12→18-30 목표) */
-  static ABANDONED_BABY_GAP_MIN = 0.03;
+  static ABANDONED_BABY_GAP_MIN = 0.03; // [C] KRX near-gap adapted
 
   /** 긴다리도지 양쪽 꼬리/range 최소 — Nison: 양쪽 30% 이상 */
-  static LONG_DOJI_SHADOW_MIN = 0.30;
+  static LONG_DOJI_SHADOW_MIN = 0.30; // [A] Nison (1991)
   /** 긴다리도지 range/ATR 최소 — 유의미한 크기 (일반 도지 0.3보다 엄격) */
-  static LONG_DOJI_RANGE_MIN = 0.80;
+  static LONG_DOJI_RANGE_MIN = 0.80; // [B]
 
   /** 띠두름(Belt Hold) body/range 하한 — Morris (2006): 강한 몸통 60%+ */
-  static BELT_BODY_RATIO_MIN = 0.60;
+  static BELT_BODY_RATIO_MIN = 0.60; // [B] Morris (2006)
   /** 띠두름 시가측 꼬리/body 상한 — 시가에서 갭 반전이므로 거의 없어야 함 */
-  static BELT_OPEN_SHADOW_MAX = 0.05;
+  static BELT_OPEN_SHADOW_MAX = 0.05; // [B] Morris (2006)
   /** 띠두름 종가측 꼬리/body 상한 — 마루보주(0.02)와 구분 */
-  static BELT_CLOSE_SHADOW_MAX = 0.30;
+  static BELT_CLOSE_SHADOW_MAX = 0.30; // [D]
   /** 띠두름 body/ATR 최소 — 유의미한 크기 */
-  static BELT_BODY_ATR_MIN = 0.40;
+  static BELT_BODY_ATR_MIN = 0.40; // [D]
 
   /** 잉태십자(Harami Cross) 2봉째 도지 body/range 상한 — Nison (1991): "harami cross = harami with doji"
    *  표준 도지(0.05)보다 관대: 준도지(near-doji)도 십자형 인정 */
-  static HARAMI_CROSS_DOJI_MAX = 0.08;
+  static HARAMI_CROSS_DOJI_MAX = 0.08; // [B] Nison (1991) near-doji
 
   /** 스틱샌드위치(Stick Sandwich) 종가 일치 허용오차 — ATR 배수
    *  Bulkowski (2008): 1봉과 3봉의 종가가 "거의 동일"해야 함
    *  KRX 호가 단위(tick) 고려: ATR*0.05 = ~50원(ATR 1000원 기준) */
-  static STICK_SANDWICH_CLOSE_TOL = 0.05;
+  static STICK_SANDWICH_CLOSE_TOL = 0.05; // [C] KRX tick-size adapted
   /** 스틱샌드위치 반대 방향 봉(2봉) body/ATR 최소 */
-  static STICK_SANDWICH_MID_BODY_MIN = 0.3;
+  static STICK_SANDWICH_MID_BODY_MIN = 0.3; // [B] Bulkowski (2008)
 
   /** 유의미한 범위 (range/ATR) 하한 */
-  static MIN_RANGE_ATR = 0.3;
+  static MIN_RANGE_ATR = 0.3; // [D]
 
   /** 추세 감지 정규화 방향 임계값
    *  [D-Heuristic] core_data/07 SS3.4: |T|>1 = "strong trend". 0.3은 느슨한 하한 —
@@ -135,7 +135,7 @@ class PatternEngine {
   });
 
   /** 손절가 ATR 배수 (기본) */
-  static STOP_LOSS_ATR_MULT = 2;
+  static STOP_LOSS_ATR_MULT = 2; // [B] Wilder (1978)
 
   /** ATR fallback: 가격의 2% (일봉 기준)
    *  [D-Heuristic] ATR(14) 불가 시 근사값. KRX 대형주 일봉 median ATR/close ≈ 2.1%.
@@ -190,10 +190,10 @@ class PatternEngine {
   static CANDLE_TARGET_ATR = { strong: 1.88, medium: 2.31, weak: 2.18 };
 
   /** 차트 패턴 목표가 ATR 상한 — EVT 99.5% VaR 경계 (core_data/12_extreme_value_theory.md §4.3) */
-  static CHART_TARGET_ATR_CAP = 6;
+  static CHART_TARGET_ATR_CAP = 6; // [B] EVT 99.5% VaR bound
 
   /** 차트 패턴 목표가 raw 배율 상한 — Bulkowski P80 (패턴 높이의 2배 초과 = 상위 20%) */
-  static CHART_TARGET_RAW_CAP = 2.0;
+  static CHART_TARGET_RAW_CAP = 2.0; // [B] Bulkowski P80
 
   /** [D-Heuristic] PROSPECT_STOP_WIDEN: empirical heuristic loosely inspired by loss aversion;
    *  sqrt(λ) has no formal derivation from Kahneman & Tversky (1979).
@@ -206,40 +206,40 @@ class PatternEngine {
   /** 넥라인 돌파 확인 — lookforward bar 수 상한
    *  Bulkowski (2005): 패턴 완성 후 평균 돌파 시점은 5~15일.
    *  20 bar 이후 돌파는 패턴 효력 소멸로 판단 (time decay). */
-  static NECKLINE_BREAK_LOOKFORWARD = 20;
+  static NECKLINE_BREAK_LOOKFORWARD = 20; // [B] Bulkowski (2005)
 
   /** 넥라인 돌파 ATR 필터 배수 — 노이즈 돌파 제거 (0.5 ATR 이상 이탈 시 확인)
    *  Edwards & Magee (2018): 유의미한 돌파는 일정 거리 이상 이격 필요 */
-  static NECKLINE_BREAK_ATR_MULT = 0.5;
+  static NECKLINE_BREAK_ATR_MULT = 0.5; // [D] Edwards & Magee (2018)
 
   /** 넥라인 미확인 감산 — Bulkowski (2005): 미확인 H&S 35% vs 확인 83% (차이 -48pp) */
-  static NECKLINE_UNCONFIRMED_PENALTY = 15;
-  static NECKLINE_UNCONFIRMED_PRED_PENALTY = 20;
+  static NECKLINE_UNCONFIRMED_PENALTY = 15; // [D] Bulkowski (2005) derived
+  static NECKLINE_UNCONFIRMED_PRED_PENALTY = 20; // [D]
 
   /** 삼각형/쐐기 돌파 확인 — Bulkowski (2005): 미확인 삼각형 40-50% vs 확인 70-80%
    *  사선 트렌드라인 특성상 넥라인(0.5)보다 낮은 임계값 적용 */
-  static TRIANGLE_BREAK_ATR_MULT = 0.3;
-  static TRIANGLE_BREAK_LOOKFORWARD = 15;
-  static TRIANGLE_UNCONFIRMED_PENALTY = 12;
-  static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15;
+  static TRIANGLE_BREAK_ATR_MULT = 0.3; // [D] Bulkowski (2005)
+  static TRIANGLE_BREAK_LOOKFORWARD = 15; // [D] Bulkowski (2005)
+  static TRIANGLE_UNCONFIRMED_PENALTY = 12; // [D]
+  static TRIANGLE_UNCONFIRMED_PRED_PENALTY = 15; // [D]
 
   /** 채널 탐지 상수 — ATR*k 기반, Murphy (1999) + Edwards & Magee (2018)
    *  평행 추세선 쌍으로 가격 움직임을 포착, 삼각형/쐐기와 상호배타 */
-  static CHANNEL_TOUCH_TOL = 0.3;        // ATR*0.3: 추세선 터치 허용 오차
-  static CHANNEL_PARALLELISM_MAX = 0.020; // 봉당 ATR 비율: 기울기 차이 임계값
-  static CHANNEL_WIDTH_MIN = 1.5;         // ATR 배수: 최소 채널 폭
-  static CHANNEL_WIDTH_MAX = 8.0;         // ATR 배수: 최대 채널 폭
-  static CHANNEL_CONTAINMENT = 0.80;      // 봉 포함율: 80% 이상 채널 내
-  static CHANNEL_MIN_SPAN = 15;           // 최소 봉 수
-  static CHANNEL_MIN_TOUCHES = 3;         // 상하선 합계 최소 터치 수
+  static CHANNEL_TOUCH_TOL = 0.3;        // [D] ATR*0.3: 추세선 터치 허용 오차
+  static CHANNEL_PARALLELISM_MAX = 0.020; // [D] 봉당 ATR 비율: 기울기 차이 임계값
+  static CHANNEL_WIDTH_MIN = 1.5;         // [D] ATR 배수: 최소 채널 폭
+  static CHANNEL_WIDTH_MAX = 8.0;         // [D] ATR 배수: 최대 채널 폭
+  static CHANNEL_CONTAINMENT = 0.80;      // [D] 봉 포함율: 80% 이상 채널 내
+  static CHANNEL_MIN_SPAN = 15;           // [D] 최소 봉 수
+  static CHANNEL_MIN_TOUCHES = 3;         // [B] Murphy (1999) minimum touches
 
   /** H&S 스윙 포인트 검색 윈도우 — Bulkowski (2005): 평균 65일, P75=85일
    *  [Phase1-A] 80→120: P75(85일) + 여유. KRX 낮은 변동성 레짐에서 장기 형성 포착 (n=4→15-25 목표) */
-  static HS_WINDOW = 120;
+  static HS_WINDOW = 120; // [C] Bulkowski P75=85 + KRX margin
 
   /** H&S 어깨 대칭 허용 — Bulkowski: 유효 H&S 중 40%가 >5% 비대칭. Murphy: 완벽 대칭은 이론적 이상
    *  [Phase1-A] 0.10→0.15: Bulkowski 40% 비대칭 포착, 실전 유효 H&S 커버리지 확대 */
-  static HS_SHOULDER_TOLERANCE = 0.15;
+  static HS_SHOULDER_TOLERANCE = 0.15; // [B] Bulkowski (2005)
 
   /** [Phase2-E] 패턴별 실측 5일 승률 — 5년 데이터 2,768종목 545,307건 (2021-03~2026-03)
    *  confidence(형태점수, UI용)와 confidencePred(예측승률, 모델용) 분리
@@ -349,14 +349,14 @@ class PatternEngine {
    *  Rothschild & Stiglitz (1976) 정보 비대칭 하 스크리닝 이론:
    *  펀더멘털 밸류에이션 임계점은 시장 참여자의 매수/매도 의사결정 앵커로 작용.
    *  ±30% = KRX 일일 가격제한폭(±30%)과 일치, 합리적 밸류에이션 판단 범위. */
-  static VALUATION_SR_RANGE = 0.30;
+  static VALUATION_SR_RANGE = 0.30; // [C] KRX daily limit ±30%
 
   /** 밸류에이션 S/R 최대 수준 수 — 과밀 방지 (기술적 S/R 최대 10개 대비 보수적) */
-  static VALUATION_SR_MAX_LEVELS = 5;
+  static VALUATION_SR_MAX_LEVELS = 5; // [D]
 
   /** 밸류에이션 S/R 기본 강도 — 기술적 S/R(최대 1.0) 대비 보수적
    *  단일 접촉(touches=1)이므로 기술적 S/R의 다중 접촉 강도를 초과할 수 없음 */
-  static VALUATION_SR_STRENGTH = 0.6;
+  static VALUATION_SR_STRENGTH = 0.6; // [D]
 
   /** [C] AMH lambda 시장별 상수 — core_data/20 §10 KRX 패턴 반감기 실증 */
   static AMH_LAMBDA = Object.freeze({

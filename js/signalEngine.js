@@ -9,7 +9,7 @@
 // ── VIX→VKOSPI 프록시 스케일 (Worker 컨텍스트 호환) ──
 // 메인 스레드: appState.js의 VIX_VKOSPI_PROXY 참조
 // Worker 스레드: appState.js 미로드 → 로컬 폴백 1.12
-var _VIX_PROXY = (typeof VIX_VKOSPI_PROXY !== 'undefined') ? VIX_VKOSPI_PROXY : 1.12;
+var _VIX_PROXY = (typeof VIX_VKOSPI_PROXY !== 'undefined') ? VIX_VKOSPI_PROXY : 1.12; // [C] Whaley (2009) KRX proxy
 
 // ── 복합 시그널 정의 ────────────────────────────────────
 const COMPOSITE_SIGNAL_DEFS = [
@@ -484,7 +484,7 @@ class SignalEngine {
    * @returns {{ signals: Array, cache: IndicatorCache, stats: Object }}
    */
   analyze(candles, candlePatterns = []) {
-    if (!candles || candles.length < 30) {
+    if (!candles || candles.length < 30) { // [B] minimum bars for indicator convergence
       return { signals: [], cache: null, stats: this._emptyStats() };
     }
 
@@ -553,15 +553,15 @@ class SignalEngine {
     // OLS 추세 확인 → 순방향 confidence boost — Lo & MacKinlay (1999)
     // R² > 0.50 = 강한 추세: 추세 방향 시그널에 +5 boost
     // [Phase0-B] OLS 상한 95→90 통일: ADX/CCI와 동일 상한 적용
-    const olsTrend = cache.olsTrend(20);
-    if (olsTrend && olsTrend.r2 > 0.50) {
+    const olsTrend = cache.olsTrend(20); // [B] 20-bar OLS window
+    if (olsTrend && olsTrend.r2 > 0.50) { // [D] R² threshold for strong trend
       const trendDir = olsTrend.direction; // 'up', 'down', 'flat'
       for (let si = 0; si < signals.length; si++) {
         const s = signals[si];
         if (trendDir === 'up' && s.signal === 'buy') {
-          s.confidence = Math.min(90, (s.confidence || 50) + 5);
+          s.confidence = Math.min(90, (s.confidence || 50) + 5); // [D] +5 OLS boost, 90 cap
         } else if (trendDir === 'down' && s.signal === 'sell') {
-          s.confidence = Math.min(90, (s.confidence || 50) + 5);
+          s.confidence = Math.min(90, (s.confidence || 50) + 5); // [D] +5 OLS boost, 90 cap
         }
       }
     }
@@ -595,7 +595,7 @@ class SignalEngine {
     // 개선: sqrt 감쇄 [0.80, 1.0] — 전 구간 적용, 다양성 높으면 빠르게 회복
     //   entropyNorm=0→0.80, 0.25→0.90, 0.50→0.94, 1.0→1.0
     if (signals.length > 2 && stats.entropyNorm < 1.0) {
-      const scale = 0.80 + 0.20 * Math.sqrt(Math.max(0, stats.entropyNorm));
+      const scale = 0.80 + 0.20 * Math.sqrt(Math.max(0, stats.entropyNorm)); // [D] entropy damping range [0.80, 1.0]
       for (let si = 0; si < signals.length; si++) {
         if (signals[si].confidence) {
           signals[si].confidence = Math.max(10, Math.round(signals[si].confidence * scale));
@@ -659,7 +659,7 @@ class SignalEngine {
       if (typeof lastDate === 'string' && SignalEngine._isNearExpiry(lastDate)) {
         for (var ei = 0; ei < signals.length; ei++) {
           if (signals[ei].confidence) {
-            signals[ei].confidence = Math.max(10, Math.round(signals[ei].confidence * 0.70));
+            signals[ei].confidence = Math.max(10, Math.round(signals[ei].confidence * 0.70)); // [C] Doc27 §4 expiry discount
           }
         }
       }
@@ -667,8 +667,8 @@ class SignalEngine {
 
     // [Phase 4-C] Crisis severity discount (Doc28 §1.2) — 위기 > 0.7 시 반전형 패턴 할인
     var _crisisSev = SignalEngine._calcCrisisSeverity();
-    if (_crisisSev > 0.7) {
-      var crisisScale = 1 - _crisisSev * 0.40; // severity 1.0 → 0.60 할인
+    if (_crisisSev > 0.7) { // [D] crisis severity threshold
+      var crisisScale = 1 - _crisisSev * 0.40; // [D] severity 1.0 → 0.60 discount
       for (var ci = 0; ci < signals.length; ci++) {
         // 반전형 패턴만 할인 (지속형은 위기에도 유효)
         var sig = signals[ci];
@@ -789,7 +789,7 @@ class SignalEngine {
       const prevDiff = ma5[i - 1] - ma20[i - 1];
       const currDiff = ma5[i] - ma20[i];
       // [ACC] ATR 대비 최소 이격도 0.3→0.4 상향: 횡보장 허위 크로스 감소
-      const minGap = atr[i] * 0.4;
+      const minGap = atr[i] * 0.4; // [C] ATR gap filter for KRX noise
 
       // 골든크로스: MA5가 MA20을 상향 돌파
       if (prevDiff <= 0 && currDiff > 0 && Math.abs(currDiff) >= minGap) {
@@ -800,7 +800,7 @@ class SignalEngine {
         // [D] Heuristic — EMA confirmation +12pp bonus, buy/sell asymmetry +2pp
         // (KRX short-sale constraint: buy signals slightly more reliable).
         // No published source for specific confidence values.
-        const confidence = emaConfirm ? 72 : 60;
+        const confidence = emaConfirm ? 72 : 60; // [D]
 
         signals.push({
           type: 'goldenCross',
@@ -821,7 +821,7 @@ class SignalEngine {
                            ema12[i] < ema26[i];
         const strength = emaConfirm ? 'strong' : 'medium';
         // [D] Heuristic — dead cross confidence 2pp below golden cross (sell asymmetry).
-        const confidence = emaConfirm ? 70 : 58;
+        const confidence = emaConfirm ? 70 : 58; // [D]
 
         signals.push({
           type: 'deadCross',
@@ -872,7 +872,7 @@ class SignalEngine {
           nameShort: 'MA 정배열',
           signal: 'buy',
           strength: 'medium',
-          confidence: 65,
+          confidence: 65, // [D]
           // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 정배열은
           // 추세 확인 지표로 단독 WR보다 복합 시그널 필터 역할이 핵심.
           // KRX 실측 WR 확보 시 confidence 재교정 필요.
@@ -891,7 +891,7 @@ class SignalEngine {
           nameShort: 'MA 역배열',
           signal: 'sell',
           strength: 'medium',
-          confidence: 63,
+          confidence: 63, // [D]
           // [Phase TA-2][B-3] measuredWR: 백테스트 미측정. Murphy (1999): MA 역배열은
           // 하락 추세 확인 필터. 단독 매도보다 MACD/RSI 복합 시 유효성 상승.
           // KRX 실측 WR 확보 시 confidence 재교정 필요.
@@ -931,7 +931,7 @@ class SignalEngine {
           nameShort: 'MACD 골든크로스',
           signal: 'buy',
           strength: aboveZero ? 'strong' : 'medium',
-          confidence: aboveZero ? 70 : 58,
+          confidence: aboveZero ? 70 : 58, // [D]
           index: i,
           time: candles[i].time,
           description: `MACD가 시그널선 상향 돌파${aboveZero ? ' (0선 위, 강세)' : ' (0선 아래)'}`,
@@ -947,7 +947,7 @@ class SignalEngine {
           nameShort: 'MACD 데드크로스',
           signal: 'sell',
           strength: belowZero ? 'strong' : 'medium',
-          confidence: belowZero ? 68 : 56,
+          confidence: belowZero ? 68 : 56, // [D]
           index: i,
           time: candles[i].time,
           description: `MACD가 시그널선 하향 돌파${belowZero ? ' (0선 아래, 약세)' : ' (0선 위)'}`,
@@ -984,7 +984,7 @@ class SignalEngine {
     const hurstQuality = (hurstR2 !== null && hurstR2 < 0.70) ? hurstR2 / 0.70 : 1.0;
     const hBase = (H !== null && H !== undefined && !isNaN(H))
       ? Math.round((65 - 20 * Math.max(0, Math.min(1, (H - 0.4) / 0.2))) * hurstQuality + 55 * (1 - hurstQuality))
-      : 55;  // H 없으면 기본 55
+      : 55;  // [D] H 없으면 기본 55
     // hBase: R²≥0.70 → H=0.4→65, H=0.5→55, H=0.6→45 (선형 보간)
     //        R²<0.70 → neutral(55)로 블렌딩 (예: R²=0.35 → 50% Hurst + 50% neutral)
     const entryConf = Math.max(40, hBase - 10);  // 진입은 탈출보다 10 낮음
@@ -1201,7 +1201,7 @@ class SignalEngine {
     const signals = [];
     // C-6 CZW: z-score 기반 동적 임계 (Ane & Geman 2000, 로그정규분포)
     // 대형주/소형주 거래량 분포 차이를 자동 보정
-    const zThreshold = 2.0;  // z >= 2.0 = 상위 2.28% (정규분포)
+    const zThreshold = 2.0;  // [A] z >= 2.0 = 상위 2.28% (정규분포)
 
     // [A-3][M-3 FIX] ADV 레벨 — analyze()에서 전달받거나 fallback 계산
     const advResult = advResultParam || this.calcADVLevel(candles, 60);
@@ -1266,7 +1266,7 @@ class SignalEngine {
   _detectVolumeExhaustion(candles, cache) {
     const signals = [];
     const volumes = cache.volumes;
-    const consecutiveRequired = 5;
+    const consecutiveRequired = 5; // [D]
 
     for (let i = consecutiveRequired; i < candles.length; i++) {
       let decreasing = true;
@@ -1290,7 +1290,7 @@ class SignalEngine {
           nameShort: '거래량 에너지 소진',
           signal: 'neutral',
           strength: 'weak',
-          confidence: 45,
+          confidence: 45, // [D]
           index: i,
           time: candles[i].time,
           description: `${consecutiveRequired}봉 연속 거래량 감소 — 추세 전환 또는 횡보 예상`,
@@ -1326,13 +1326,13 @@ class SignalEngine {
     if (!obv || obv.length < 30) return signals;
 
     const closes = cache.closes;
-    const lookback = 20; // 스윙 포인트 탐색 범위 (약 1거래월)
+    const lookback = 20; // [B] 스윙 포인트 탐색 범위 (약 1거래월)
 
     // 스윙 포인트 탐색: 좌우 3봉 대비 극값 (Zigzag 단순화)
     // NOTE: OBV swing uses 3-bar future confirmation (look-ahead). Signal index at swing, not confirmation bar.
     // This is consistent with _detectDivergence() behavior (see line ~1739).
     // [Phase TA-2] swingOrder=3: 너무 작으면 잡음, 너무 크면 놓침
-    const swingOrder = 3;
+    const swingOrder = 3; // [B] swing point confirmation order
     const swingLows = [];
     const swingHighs = [];
 
@@ -1455,7 +1455,7 @@ class SignalEngine {
             nameShort: '일목 강세 크로스',
             signal: 'buy',
             strength: aboveCloud ? 'strong' : 'medium',
-            confidence: aboveCloud ? 72 : 65,
+            confidence: aboveCloud ? 72 : 65, // [D]
             index: i,
             time: candles[i].time,
             description: `전환선이 기준선 상향 돌파${aboveCloud ? ' (구름 위, 강세)' : ''} — 단기 모멘텀 전환`,
@@ -1473,7 +1473,7 @@ class SignalEngine {
             nameShort: '일목 약세 크로스',
             signal: 'sell',
             strength: belowCloud ? 'strong' : 'medium',
-            confidence: belowCloud ? 72 : 65,
+            confidence: belowCloud ? 72 : 65, // [D]
             index: i,
             time: candles[i].time,
             description: `전환선이 기준선 하향 돌파${belowCloud ? ' (구름 아래, 약세)' : ''} — 단기 모멘텀 약화`,
@@ -1608,7 +1608,7 @@ class SignalEngine {
     const { k: stochK } = cache.stochRsi(14, 3, 3, 14);
     if (!stochK) return signals;
 
-    const COOLDOWN = 5; // 동일 방향 최소 간격 (whipsaw 방지)
+    const COOLDOWN = 5; // [D] 동일 방향 최소 간격 (whipsaw 방지)
     let lastBuyIdx = -COOLDOWN;
     let lastSellIdx = -COOLDOWN;
 
@@ -1679,13 +1679,13 @@ class SignalEngine {
     // Williams %R — 컨플루언스 확인용 (독립 시그널 아님)
     const wr = cache.williamsR(14);
 
-    const OVERSOLD   = 20;  // Lane (1984) 표준
-    const OVERBOUGHT = 80;
-    const EXTREME_OS = 10;  // Bulkowski (2005): 극단 반등 +12pp
-    const EXTREME_OB = 90;
-    const COOLDOWN   = 7;   // Slow Stochastic half-cycle (Appel 2005)
-    const BASE_CONF  = 52;
-    const WR_BONUS   = 3;   // %R 동시 확인 보너스
+    const OVERSOLD   = 20;  // [A] Lane (1984) standard
+    const OVERBOUGHT = 80;  // [A] Lane (1984) standard
+    const EXTREME_OS = 10;  // [B] Bulkowski (2005): extreme bounce +12pp
+    const EXTREME_OB = 90;  // [B] Bulkowski (2005)
+    const COOLDOWN   = 7;   // [D] Slow Stochastic half-cycle (Appel 2005)
+    const BASE_CONF  = 52;  // [D]
+    const WR_BONUS   = 3;   // [D] %R confluence bonus
 
     let lastBuyIdx  = -COOLDOWN;
     let lastSellIdx = -COOLDOWN;
@@ -1806,10 +1806,10 @@ class SignalEngine {
 
     if (vol == null) return null;
     // VKOSPI-calibrated thresholds (Doc26 §2.3, KRX 보정): <15 low, 15-22 normal, 22-30 high, >30 crisis
-    if (vol < 15) return 'low';
-    if (vol <= 22) return 'normal';
-    if (vol <= 30) return 'high';
-    return 'crisis';
+    if (vol < 15) return 'low';     // [C] Doc26 §2.3 KRX-calibrated
+    if (vol <= 22) return 'normal'; // [C] Doc26 §2.3
+    if (vol <= 30) return 'high';   // [C] Doc26 §2.3
+    return 'crisis';                // [C] Doc26 §2.3
   }
 
   /**
@@ -1844,10 +1844,10 @@ class SignalEngine {
    */
   static _volRegimeDiscount(regime) {
     switch (regime) {
-      case 'low':    return 1.00;
-      case 'normal': return 0.95;
-      case 'high':   return 0.80;
-      case 'crisis': return 0.60;
+      case 'low':    return 1.00; // [C] Doc26 §2.3
+      case 'normal': return 0.95; // [C] Doc26 §2.3
+      case 'high':   return 0.80; // [C] Doc26 §2.3
+      case 'crisis': return 0.60; // [C] Doc26 §2.3
       default:       return 1.00;
     }
   }
@@ -1878,19 +1878,19 @@ class SignalEngine {
       volForCrisis = macro.vix * _VIX_PROXY;  // [DEPRECATED FALLBACK] VIX→VKOSPI proxy — offline only
     }
     if (volForCrisis != null) {
-      score += Math.min(1, Math.max(0, (volForCrisis - 15) / 25));
+      score += Math.min(1, Math.max(0, (volForCrisis - 15) / 25)); // [C] VKOSPI 15-40 range
       components++;
     }
 
     // USD/KRW 기여: 1200 이하 → 0, 1500 이상 → 1 (원화 약세 = 위기)
     if (macro.usdkrw != null) {
-      score += Math.min(1, Math.max(0, (macro.usdkrw - 1200) / 300));
+      score += Math.min(1, Math.max(0, (macro.usdkrw - 1200) / 300)); // [C] KRX USD/KRW crisis band
       components++;
     }
 
     // DXY 기여: 95 이하 → 0, 110 이상 → 1 (달러 강세 = EM 위기)
     if (macro.dxy != null) {
-      score += Math.min(1, Math.max(0, (macro.dxy - 95) / 15));
+      score += Math.min(1, Math.max(0, (macro.dxy - 95) / 15)); // [D] DXY 95-110 crisis range
       components++;
     }
 
@@ -2452,11 +2452,11 @@ class SignalEngine {
     var lastIdx = candles.length - 1;
     var pcr = deriv.pcr;
 
-    if (pcr > 1.3) {
+    if (pcr > 1.3) { // [B] Pan & Poteshman (2006) extreme fear
       return [{ type: 'pcrFearExtreme', signal: 'buy', strength: 'medium',
         confidence: 62, index: lastIdx, category: 'derivatives',
         description: 'PCR ' + pcr.toFixed(2) + ' (극단적 공포): 역발상 매수 신호' }];
-    } else if (pcr < 0.5) {
+    } else if (pcr < 0.5) { // [B] Pan & Poteshman (2006) extreme greed
       return [{ type: 'pcrGreedExtreme', signal: 'sell', strength: 'medium',
         confidence: 62, index: lastIdx, category: 'derivatives',
         description: 'PCR ' + pcr.toFixed(2) + ' (극단적 탐욕): 역발상 매도 신호' }];
@@ -2492,7 +2492,7 @@ class SignalEngine {
     var fNet20 = (investor.foreign && investor.foreign.net_20d_eok != null)
       ? investor.foreign.net_20d_eok : investor.foreign_net_20d;
     if (fNet20 != null) {
-      if (fNet20 > 5000) {  // 5000억원 이상 누적 순매수
+      if (fNet20 > 5000) {  // [C] 5000억원 이상 누적 순매수
         signals.push({ type: 'flowForeignBuy', signal: 'buy', strength: 'weak',
           confidence: 58, index: lastIdx, category: 'flow',
           description: '외국인 20일 누적 순매수 ' + Math.round(fNet20) + '억원' });
@@ -2553,7 +2553,7 @@ class SignalEngine {
     }
     var erp = (1 / marketPER) * 100 - ktb10y;  // E/P(%) - KTB10Y(%)
 
-    if (erp > 5.5) {
+    if (erp > 5.5) { // [B] Asness (2003) ERP threshold
       return [{ type: 'erpUndervalued', signal: 'buy', strength: 'medium',
         confidence: 60, index: lastIdx, category: 'macro',
         description: 'ERP ' + erp.toFixed(1) + '%: 주식 채권 대비 저평가' }];
@@ -2605,7 +2605,7 @@ class SignalEngine {
     if (msr == null && shorts.marketTrend && shorts.marketTrend.length > 0) {
       msr = shorts.marketTrend[shorts.marketTrend.length - 1].shortRatio;
     }
-    if (msr != null && msr > 8) {
+    if (msr != null && msr > 8) { // [C] KRX short ratio threshold
       signals.push({ type: 'shortHighSIR', signal: 'buy', strength: 'weak',
         confidence: 56, index: lastIdx, category: 'flow',
         description: '시장 공매도 비율 ' + msr.toFixed(1) + '%: 숏커버 rally 가능' });
@@ -2637,7 +2637,7 @@ class SignalEngine {
 
     for (var i = 2; i < cci.length; i++) {
       if (cci[i] == null || cci[i - 1] == null) continue;
-      // 과매도 이탈: CCI가 -100 아래에서 위로 교차
+      // 과매도 이탈: CCI가 -100 아래에서 위로 교차 — [A] Lambert (1980) standard
       if (cci[i - 1] <= -100 && cci[i] > -100) {
         signals.push({
           type: 'cciOversoldExit', signal: 'buy', strength: 'weak',
@@ -2671,7 +2671,7 @@ class SignalEngine {
     for (var i = 2; i < adx.length; i++) {
       var cur = adx[i], prev = adx[i - 1];
       if (!cur || !prev) continue;
-      // +DI가 -DI를 상향 돌파 + ADX > 25 (추세 확인)
+      // +DI가 -DI를 상향 돌파 + ADX > 25 (추세 확인) — [A] Wilder (1978)
       if (prev.plusDI <= prev.minusDI && cur.plusDI > cur.minusDI && cur.adx > 25) {
         signals.push({
           type: 'adxBullishCross', signal: 'buy', strength: 'medium',
@@ -2704,7 +2704,7 @@ class SignalEngine {
 
     for (var i = 2; i < wr.length; i++) {
       if (wr[i] == null || wr[i - 1] == null) continue;
-      // 과매도 이탈: %R이 -80 아래에서 위로
+      // 과매도 이탈: %R이 -80 아래에서 위로 — [A] Williams (1979)
       if (wr[i - 1] <= -80 && wr[i] > -80) {
         signals.push({
           type: 'williamsROversold', signal: 'buy', strength: 'weak',
@@ -2741,7 +2741,7 @@ class SignalEngine {
     for (var i = 21; i < atr.length; i++) {
       if (atr[i] == null || atrMA[i] == null || atrMA[i] <= 0) continue;
       var ratio = atr[i] / atrMA[i];
-      // ATR이 MA의 1.5배 이상: 변동성 폭발 (Wilder threshold)
+      // ATR이 MA의 1.5배 이상: 변동성 폭발 — [B] Wilder (1978) threshold
       if (ratio >= 1.5 && (i < 2 || atr[i - 1] / (atrMA[i - 1] || 1) < 1.5)) {
         signals.push({
           type: 'atrExpansion', signal: 'neutral', strength: 'medium',
@@ -2825,7 +2825,7 @@ class SignalEngine {
     if (!signals.length) return this._emptyStats();
 
     // 최근 20봉 내 시그널만 집계
-    const recentWindow = 20;
+    const recentWindow = 20; // [B] ~1 trading month
     const lastIdx = candles.length - 1;
     const cutoff = lastIdx - recentWindow;
 
@@ -2933,10 +2933,10 @@ class SignalEngine {
    * 심리 지수 → 라벨
    */
   _sentimentLabel(sentiment) {
-    if (sentiment >= 60)  return '강한 매수';
-    if (sentiment >= 25)  return '매수 우세';
-    if (sentiment > -25)  return '중립';
-    if (sentiment > -60)  return '매도 우세';
+    if (sentiment >= 60)  return '강한 매수';  // [D]
+    if (sentiment >= 25)  return '매수 우세';  // [D]
+    if (sentiment > -25)  return '중립';       // [D]
+    if (sentiment > -60)  return '매도 우세';  // [D]
     return '강한 매도';
   }
 

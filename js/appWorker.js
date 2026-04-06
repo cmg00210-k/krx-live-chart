@@ -12,6 +12,15 @@ var _lastMarketDataLoad = 0;
 var _lastDerivativesDataLoad = 0;
 var _lastPhase8DataLoad = 0;
 
+// ── [Item 21] 데이터 경과(staleness) 추적 ──
+// >30일 경과 소스 → 신뢰도 조정 로직에서 스킵 가능 (_staleDataSources.has(name))
+var _staleDataSources = new Set();
+var _stalenessLoadersComplete = 0;  // 3개 로더 완료 카운트
+var _stalenessChecked = false;       // 1회만 실행
+
+// ── [Item 22] fetch 실패 토스트 중복 방지 (세션당 1회) ──
+var _fetchFailToasts = new Set();
+
 // ══════════════════════════════════════════════════════
 //  Web Worker 초기화 (Phase 9)
 //
@@ -237,6 +246,79 @@ function _requestWorkerAnalysis() {
 }
 
 /**
+ * [Item 21] 데이터 경과(staleness) 검사 유틸리티
+ * @param {Object|Array|null} data - 검사 대상 데이터
+ * @param {string} name - 소스 이름 (로그/토스트용)
+ * @param {string} dateField - 날짜 필드명 (updated/date/generated/time)
+ * @param {boolean} isArray - 배열 데이터 여부 (마지막 요소의 dateField 사용)
+ */
+function _checkDataStaleness(data, name, dateField, isArray) {
+  if (data == null) return;
+  var dateValue = null;
+  if (isArray) {
+    if (!Array.isArray(data) || data.length === 0) return;
+    dateValue = data[data.length - 1][dateField];
+  } else {
+    dateValue = data[dateField];
+  }
+  if (dateValue == null) return;
+  var parsed = new Date(dateValue);
+  if (isNaN(parsed.getTime())) return;
+  var ageDays = Math.floor((Date.now() - parsed.getTime()) / 86400000);
+  if (ageDays > 30) {
+    _staleDataSources.add(name);
+    _pipelineStatus[name] = 'stale';
+    console.warn('[KRX] 데이터 심각 경과: ' + name + ' ' + ageDays + '일 (' + dateValue + ')');
+  } else if (ageDays > 14) {
+    console.warn('[KRX] 데이터 경과: ' + name + ' ' + ageDays + '일 (' + dateValue + ')');
+  }
+  return ageDays;
+}
+
+/**
+ * [Item 21] 전체 파이프라인 staleness 일괄 검사 — 3개 로더 모두 완료 후 1회만 실행
+ * 3개 로더 (_loadMarketData, _loadDerivativesData, _loadPhase8Data)가 각각 호출,
+ * 카운터가 3에 도달해야 실제 검사 수행 (병렬 로더 데이터 누락 방지)
+ */
+function _runPipelineStalenessCheck() {
+  _stalenessLoadersComplete++;
+  if (_stalenessLoadersComplete < 3 || _stalenessChecked) return;
+  _stalenessChecked = true;
+
+  _checkDataStaleness(_macroLatest, 'macro_latest', 'updated', false);
+  _checkDataStaleness(_bondsLatest, 'bonds_latest', 'updated', false);
+  _checkDataStaleness(_kosisLatest, 'kosis_latest', 'updated', false);
+  _checkDataStaleness(_derivativesData, 'derivatives', 'time', true);
+  _checkDataStaleness(_investorData, 'investor', 'date', false);
+  _checkDataStaleness(_etfData, 'etf', 'date', false);
+  _checkDataStaleness(_shortSellingData, 'shortselling', 'date', false);
+  _checkDataStaleness(_flowSignals, 'flow_signals', 'generated', false);
+  // flow_signals fallback: try "updated" if "generated" not found
+  if (_flowSignals && _flowSignals.generated == null) {
+    _checkDataStaleness(_flowSignals, 'flow_signals', 'updated', false);
+  }
+  _checkDataStaleness(_optionsAnalytics, 'options_analytics', 'generated', false);
+  // _macroComposite: skip — no reliable date field
+
+  if (_staleDataSources.size > 0) {
+    var names = [];
+    _staleDataSources.forEach(function(n) { names.push(n); });
+    showToast(names.length + '개 데이터 소스 30일+ 경과', 'warning');
+    console.warn('[KRX] 경과 데이터 소스 (' + names.length + '):', names.join(', '));
+  }
+}
+
+/**
+ * [Item 22] fetch 실패 시 1회성 토스트 표시 유틸리티
+ * @param {string} name - 소스 이름 (중복 방지 키 + 토스트 표시용)
+ */
+function _notifyFetchFailure(name) {
+  if (_fetchFailToasts.has(name)) return;
+  _fetchFailToasts.add(name);
+  showToast(name + ' 로드 실패', 'warning');
+}
+
+/**
  * 매크로/채권 데이터 비동기 로드 — 차트 오버레이 정보용
  * data/macro/macro_latest.json (KTB10Y, USD/KRW, CPI 등)
  * data/macro/bonds_latest.json (수익률곡선 등)
@@ -254,10 +336,13 @@ async function _loadMarketData() {
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       try { _macroLatest = await results[0].value.json(); _pipelineStatus.macro_latest = 'ok'; } catch(e) { console.warn('[KRX] macro JSON parse error:', e); }
+    else _notifyFetchFailure('macro_latest');
     if (results[1].status === 'fulfilled' && results[1].value.ok)
       try { _bondsLatest = await results[1].value.json(); _pipelineStatus.bonds_latest = 'ok'; } catch(e) { console.warn('[KRX] bonds JSON parse error:', e); }
+    else _notifyFetchFailure('bonds_latest');
     if (results[2].status === 'fulfilled' && results[2].value.ok)
       try { _kosisLatest = await results[2].value.json(); _pipelineStatus.kosis_latest = 'ok'; } catch(e) { console.warn('[KRX] kosis JSON parse error:', e); }
+    else _notifyFetchFailure('kosis_latest');
     if (_macroLatest || _bondsLatest) {
       console.log('[KRX] 매크로/채권 데이터 로드 완료');
     }
@@ -292,13 +377,15 @@ async function _loadMarketData() {
           }
         }
       }
-    } catch (e) { /* vkospi.json 로드 실패 — 기존 VIX proxy fallback 유지 */ }
+    } catch (e) { _notifyFetchFailure('vkospi'); }
     // [H-2] 매크로 데이터에 VKOSPI/VIX가 있으면 Worker에 전달
     // _loadDerivativesData()와 병렬 실행되므로 양쪽 모두에서 호출 (중복 전송 안전)
     _sendMarketContextToWorker();
     var _mktHealth = _getPipelineHealth();
     console.log('[Pipeline] Health:', _mktHealth.ok + '/' + _mktHealth.total, 'sources OK');
-  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+    // [Item 21] staleness 검사 트리거 (3개 로더 중 마지막 완료 시 실행)
+    _runPipelineStalenessCheck();
+  } catch (e) { _notifyFetchFailure('매크로/채권'); }
 }
 
 /**
@@ -322,12 +409,16 @@ async function _loadDerivativesData() {
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       try { _derivativesData = await results[0].value.json(); _pipelineStatus.derivatives = 'ok'; } catch(e) { console.warn('[KRX] derivatives JSON parse error:', e); }
+    else _notifyFetchFailure('derivatives');
     if (results[1].status === 'fulfilled' && results[1].value.ok)
       try { _investorData = await results[1].value.json(); _pipelineStatus.investor = 'ok'; } catch(e) { console.warn('[KRX] investor JSON parse error:', e); }
+    else _notifyFetchFailure('investor');
     if (results[2].status === 'fulfilled' && results[2].value.ok)
       try { _etfData = await results[2].value.json(); _pipelineStatus.etf = 'ok'; } catch(e) { console.warn('[KRX] etf JSON parse error:', e); }
+    else _notifyFetchFailure('etf');
     if (results[3].status === 'fulfilled' && results[3].value.ok)
       try { _shortSellingData = await results[3].value.json(); _pipelineStatus.shortselling = 'ok'; } catch(e) { console.warn('[KRX] shortselling JSON parse error:', e); }
+    else _notifyFetchFailure('shortselling');
 
     // [H-13 FIX] source="sample" 데이터는 null 처리 — 가짜 데이터가 신뢰도 조정에 영향 방지
     if (_investorData && _investorData.source === 'sample') {
@@ -382,7 +473,7 @@ async function _loadDerivativesData() {
           console.log('[KRX] 베이시스 데이터 병합: basis=' + latestBasis.basis + ', basisPct=' + latestBasis.basisPct);
         }
       }
-    } catch (e) { /* basis_analysis.json 로드 실패 — 기존 무시 */ }
+    } catch (e) { _notifyFetchFailure('basis'); }
 
     // [H-2] Worker에 시장 맥락 데이터 주입 — signalEngine 레짐 분류용
     // 메인 스레드: 멀티플라이어 적용 (_applyDerivativesConfidenceToPatterns)
@@ -390,7 +481,9 @@ async function _loadDerivativesData() {
     _sendMarketContextToWorker();
     var _derivHealth = _getPipelineHealth();
     console.log('[Pipeline] Health:', _derivHealth.ok + '/' + _derivHealth.total, 'sources OK');
-  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+    // [Item 21] staleness 검사 트리거
+    _runPipelineStalenessCheck();
+  } catch (e) { _notifyFetchFailure('파생상품/수급'); }
 }
 
 /**
@@ -411,10 +504,13 @@ async function _loadPhase8Data() {
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       try { _macroComposite = await results[0].value.json(); _pipelineStatus.macro_composite = 'ok'; } catch(e) { console.warn('[KRX] macro_composite JSON parse error:', e); }
+    else _notifyFetchFailure('macro_composite');
     if (results[1].status === 'fulfilled' && results[1].value.ok)
       try { _flowSignals = await results[1].value.json(); _pipelineStatus.flow_signals = 'ok'; } catch(e) { console.warn('[KRX] flow_signals JSON parse error:', e); }
+    else _notifyFetchFailure('flow_signals');
     if (results[2].status === 'fulfilled' && results[2].value.ok)
       try { _optionsAnalytics = await results[2].value.json(); _pipelineStatus.options_analytics = 'ok'; } catch(e) { console.warn('[KRX] options_analytics JSON parse error:', e); }
+    else _notifyFetchFailure('options_analytics');
     // [P1-fix] Status/source guards for macro_composite and options_analytics
     if (_macroComposite && (_macroComposite.status === 'error' || _macroComposite.source === 'sample' || _macroComposite.source === 'demo')) {
       console.warn('[KRX] macro_composite rejected — status/source=' + (_macroComposite.status || _macroComposite.source));
@@ -437,7 +533,9 @@ async function _loadPhase8Data() {
     }
     var _p8Health = _getPipelineHealth();
     console.log('[Pipeline] Health:', _p8Health.ok + '/' + _p8Health.total, 'sources OK');
-  } catch (e) { /* 선택적 데이터 — 실패 시 무시 */ }
+    // [Item 21] staleness 검사 트리거
+    _runPipelineStalenessCheck();
+  } catch (e) { _notifyFetchFailure('Phase8 데이터'); }
 }
 
 /**

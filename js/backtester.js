@@ -13,12 +13,12 @@ class PatternBacktester {
 
   constructor() {
     /** 기본 분석 기간(N일 후) */
-    this.HORIZONS = [1, 3, 5, 10, 20];
+    this.HORIZONS = [1, 3, 5, 10, 20]; // [B] standard holding period horizons
 
     /** KRX 왕복 비용 구성 (%) — calibrated_constants.json 기준 */
-    this.KRX_COMMISSION = 0.03;   // 수수료 편도 0.015% × 2
-    this.KRX_TAX = 0.18;           // KOSPI 0.03%+농특세0.15% / KOSDAQ 0.18% (2025 동일)
-    this.KRX_SLIPPAGE = 0.10;     // 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
+    this.KRX_COMMISSION = 0.03;   // [C] 수수료 편도 0.015% × 2
+    this.KRX_TAX = 0.18;           // [C] KOSPI 0.03%+농특세0.15% / KOSDAQ 0.18% (2025 동일)
+    this.KRX_SLIPPAGE = 0.10;     // [D] 기본 슬리피지 편도 0.05% × 2 (KOSPI 대형 기준)
     this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
 
     /** [Phase I-L2] 적응형 슬리피지 — Amihud (2002), core_data/18 §3
@@ -30,10 +30,10 @@ class PatternBacktester {
       if (!stockData || !stockData[code]) return this.KRX_SLIPPAGE;
       var seg = stockData[code].segment;
       // Segment-based slippage: doc 18 table validated by compute_illiq_spread.py
-      if (seg === 'kospi_large') return 0.04;
-      if (seg === 'kospi_mid') return 0.10;
-      if (seg === 'kosdaq_large') return 0.15;
-      if (seg === 'kosdaq_small') return 0.25;
+      if (seg === 'kospi_large') return 0.04;  // [C] Amihud (2002) ILLIQ-calibrated
+      if (seg === 'kospi_mid') return 0.10;   // [C]
+      if (seg === 'kosdaq_large') return 0.15; // [C]
+      if (seg === 'kosdaq_small') return 0.25; // [C]
       return this.KRX_SLIPPAGE;
     };
 
@@ -772,7 +772,7 @@ class PatternBacktester {
     const avgIS = sumIS / validFolds;
     const avgOOS = sumOOS / validFolds;
     // WFE: avoid division by zero, sign-aware (both negative = not robust)
-    var minISEdge = 0.3; // P0-2 fix: 0.3pp minimum IS edge (~KRX round-trip cost 0.25%+0.015%); was 0.005 (60x too small, returns in pp)
+    var minISEdge = 0.3; // [C] P0-2 fix: 0.3pp minimum IS edge (~KRX round-trip cost 0.25%+0.015%)
     const wfe = Math.abs(avgIS) < minISEdge
       ? 0  // insufficient IS edge → WFE undefined
       : Math.round((avgOOS / avgIS) * 100);
@@ -804,7 +804,7 @@ class PatternBacktester {
    * @param {Object} results — { [patternType]: { horizons: { [h]: stats } } }
    */
   _applyBHFDR(results) {
-    const ALPHA = 0.05;
+    const ALPHA = 0.05; // [A] standard significance level
 
     // Step 1: 모든 검정 수집
     const tests = [];
@@ -898,7 +898,7 @@ class PatternBacktester {
     // Step 3: Hansen SPA 부트스트랩 — 귀무분포 생성
     // 귀무가설 하에서 각 전략의 excess return은 0-centered.
     // 부트스트랩: 관측된 t-stat에서 평균을 빼고 랜덤 부호 반전 (stationary bootstrap 근사)
-    var B = 500, bootMaxT = [];
+    var B = 500, bootMaxT = []; // [B] Politis & Romano (1994) bootstrap replicates
     var m = strategies.length;
 
     // Hansen (2005) 개선: 음의 mean을 가진 전략은 0으로 치환 (less conservative than White RC)
@@ -1481,7 +1481,7 @@ class PatternBacktester {
           }
         }
 
-        var B = 500, bootWR = []; // Efron & Tibshirani (1993): 200-1000 replicates for percentile CIs
+        var B = 500, bootWR = []; // [B] Efron & Tibshirani (1993): 200-1000 replicates for percentile CIs
 
         if (hasCalendarDates && Object.keys(monthGroups).length >= 3) { // [D] Heuristic — min 3 months for meaningful calendar resampling
           // ── Calendar-time bootstrap: resample months with replacement ──
@@ -1589,7 +1589,7 @@ class PatternBacktester {
       const significant = Math.abs(tStat) > tCritical;
 
       // [Expert Consensus] Harvey-Liu-Zhu (2016) stricter threshold for multiple testing
-      var hlzSignificant = Math.abs(tStat) > 3.0;
+      var hlzSignificant = Math.abs(tStat) > 3.0; // [A] Harvey, Liu & Zhu (2016)
 
       // MDE (Minimum Detectable Effect) — Cohen (1988), power analysis
       // The smallest mean return (%) reliably distinguishable from zero at 95% confidence.
@@ -1841,7 +1841,7 @@ class PatternBacktester {
         // Standard WLS is not robust to outliers; IRLS down-weights |resid| > delta.
         // Delta = 1.345 * MAD-sigma ≈ 5.8 for KRX 5-day return distribution.
         if (reg && reg.coeffs) {
-          var HUBER_DELTA = 5.8; // 1.345σ — Huber (1964) 95% efficiency; σ≈4.3 from KRX 5-day MAD
+          var HUBER_DELTA = 5.8; // [C] 1.345σ — Huber (1964) 95% efficiency; σ≈4.3 from KRX 5-day MAD
           var HUBER_ITERS = 5;  // [D] Heuristic — typically converges in 3-5 iterations (Street et al. 1988)
           for (var hIter = 0; hIter < HUBER_ITERS; hIter++) {
             var huberWeights = [];
@@ -1910,7 +1910,7 @@ class PatternBacktester {
                 var rlCtx = this._buildRLContext(predicted, patternSignal, patternType, latest, candles);
                 var rlResult = this._applyLinUCBGreedy(rlCtx);
                 // [H-20] Safety clamp: |factor| <= 3.0 prevents extreme adjustments
-                var MAX_FACTOR = 3.0;
+                var MAX_FACTOR = 3.0; // [D] LinUCB safety clamp
                 var clampedFactor = Math.max(-MAX_FACTOR, Math.min(MAX_FACTOR, rlResult.factor));
                 stats.expectedReturn = +(predicted * clampedFactor).toFixed(2);
                 stats.rlAction = rlResult.action;
