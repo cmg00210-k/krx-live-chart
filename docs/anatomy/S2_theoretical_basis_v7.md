@@ -1,6 +1,6 @@
-# Stage 2: Theoretical Basis v6 -- Sections 2.1-2.2
+# Stage 2: Theoretical Basis v7 -- Sections 2.1-2.2
 
-> ANATOMY V6 -- Mathematical & Statistical Foundations
+> ANATOMY V7 -- Mathematical & Statistical Foundations
 > Scope: Every formula used in CheeseStock's pattern detection, backtesting, and signal pipeline
 > Standard: CFA Paper Grade annotation (symbol table + constant grading [A]-[E])
 > Date: 2026-04-06

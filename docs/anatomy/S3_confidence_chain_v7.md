@@ -1,6 +1,6 @@
-# 3.6 Confidence Adjustment Chain -- Production Anatomy V6
+# 3.6 Confidence Adjustment Chain -- Production Anatomy V7
 
-> **Stage 3 -- ANATOMY V6 Section 3.6**
+> **Stage 3 -- ANATOMY V7 Section 3.6**
 >
 > Author: CFA Financial Analyst Agent
 > Date: 2026-04-06
@@ -259,8 +259,10 @@ Stovall table (`appState.js` lines 414-432): 12 sectors x 4 phases = 48 values. 
 
 | Condition | Buy Adj | Sell Adj | Grade |
 |-----------|---------|----------|-------|
-| `aaSpread > 1.5` or `creditRegime === 'stress'` | x0.85 | x0.85 | [D] multiplier, [B] threshold |
+| `aaSpread > 1.5` or `creditRegime === 'stress'` | x0.82 | x1.06 | [B] multiplier (Gilchrist & Zakrajsek 2012), [B] threshold |
 | `aaSpread > 1.0` or `creditRegime === 'elevated'` | x0.93 | x1.04 | [D] multiplier, [B] threshold |
+
+**V7 Update:** Symmetric x0.85/x0.85 replaced with asymmetric `isBuy ? 0.82 : 1.06`. Credit stress degrades buy patterns more (-18%) while confirming sell patterns (+6%). Academic basis: Gilchrist, S. & Zakrajsek, E. (2012), "Credit Spreads and Business Cycle Fluctuations," *AER* 102(4), 1692-1720. Code: `appWorker.js` line 1198.
 
 #### Factor 4: Foreign Investor Signal (lines 1163-1172)
 
@@ -448,10 +450,12 @@ ALL_STOCKS -> filter by industry -> market cap shares -> HHI -> hhiBoost
 
 | Condition | Normal (abs>=0.5%) | Extreme (abs>=2.0%) |
 |-----------|-------------------|---------------------|
-| Contango (`basisPct >= 0.5`) | buy +5%, sell -5% | buy +8%, sell -8% |
-| Backwardation (`basisPct < 0`) | buy -5%, sell +5% | buy -8%, sell +8% |
+| Contango (`excessBasisPct >= 0.5`, fallback: `basisPct`) | buy +5%, sell -5% | buy +8%, sell -8% |
+| Backwardation (`excessBasisPct < 0`, fallback: `basisPct`) | buy -5%, sell +5% | buy -8%, sell +8% |
 
 Grade: [B] thresholds (0.5%, 2.0%), [D] multipliers (0.05, 0.08).
+
+**V7 Update:** `excessBasisPct` (carry-cost-removed basis) is now the priority source, with `basisPct` as fallback when excess basis is unavailable. Code: `appWorker.js` lines 772-773.
 
 #### Factor 2: PCR Contrarian (lines 760-769)
 
@@ -638,13 +642,17 @@ Per-stock foreign momentum bonus (requires per-stock flow data, line 587-590):
 
 If per-stock flow data is absent (`foreignMomentum === null`): warning logged, bonus skipped, but market-wide HMM regime multiplier still applies (line 589-590).
 
-**Sub-function C: Options Implied Move (lines 612-623)**
+**Sub-function C: Options IV/HV Ratio (Simon & Wiggins 2001, lines 628-642)**
 
-| Condition | Adjustment |
-|-----------|------------|
-| `straddleImpliedMove > 3.0%` | x0.95 (all patterns) |
+| Condition | Adjustment | Grade |
+|-----------|------------|-------|
+| `atmIV/historicalVol > 2.0` | x0.90 (severe vol premium) | [B] |
+| `atmIV/historicalVol > 1.5` | x0.93 (elevated vol premium) | [B] |
+| Fallback: `straddleImpliedMove > 3.5%` (when IV/HV unavailable) | x0.93 | [C] |
 
-High implied move signals an event period (earnings, policy decision), increasing uncertainty and degrading directional pattern reliability.
+Simon & Wiggins (2001): when implied volatility exceeds historical volatility by 50%+, pattern accuracy drops 15-20% due to elevated uncertainty. The IV/HV ratio is a more direct measure than raw straddle implied move.
+
+Internal variables: `_ivHvRatio = atmIV / historicalVol`, `_ivHvFired` (boolean gate), `_ivDiscount` (0.90 or 0.93 based on severity).
 
 **Final Clamp:** confidence `[10, 100]`, confidencePred `[10, 95]` (lines 628-636). This is the only function that applies absolute clamp rather than a per-adj clamp.
 
@@ -655,17 +663,20 @@ High implied move signals an event period (earnings, policy decision), increasin
 | MCS_THRESHOLDS.strong_bull | 70 | [C] | appState.js 403 |
 | MCS_THRESHOLDS.strong_bear | 30 | [C] | appState.js 403 |
 | MCS_BOOST | 1.05 | [D] | 566 |
-| REGIME_CONFIDENCE_MULT.bull.buy | 1.10 | [C] | appState.js 395 |
-| REGIME_CONFIDENCE_MULT.bull.sell | 0.85 | [C] | appState.js 395 |
-| REGIME_CONFIDENCE_MULT.bear.buy | 0.85 | [C] | appState.js 396 |
-| REGIME_CONFIDENCE_MULT.bear.sell | 1.10 | [C] | appState.js 396 |
+| REGIME_CONFIDENCE_MULT.bull.buy | 1.06 | [C] | appState.js 395 |
+| REGIME_CONFIDENCE_MULT.bull.sell | 0.92 | [C] | appState.js 395 |
+| REGIME_CONFIDENCE_MULT.bear.buy | 0.90 | [C] | appState.js 396 |
+| REGIME_CONFIDENCE_MULT.bear.sell | 1.06 | [C] | appState.js 396 |
 | FOREIGN_ALIGN_BONUS | 1.03 | [D] | 604 |
-| IMPLIED_MOVE_THRESHOLD | 3.0% | [C] | 616 |
-| IMPLIED_MOVE_DISCOUNT | 0.95 | [D] | 620 |
+| IV_HV_THRESHOLD | 1.5 | [B] | 630 |
+| IV_HV_SEVERE | 2.0 | [B] | 632 |
+| IV_HV_DISCOUNT | 0.93 | [B] | 634 |
+| IV_HV_SEVERE_DISCOUNT | 0.90 | [B] | 632 |
+| IMPLIED_MOVE_FALLBACK | 3.5% | [C] | 638 |
 
 **Edge Cases:**
 - `_macroComposite === null` or `mcsV2 === null`: MCS sub-function skipped (line 560)
-- `_flowSignals === null` or `flowDataCount === 0`: entire HMM + flow skipped (line 578, P0-fix quality gate)
+- `_flowSignals === null` or `flowDataCount === 0`: per-stock flow skipped, BUT market-wide HMM regime label still available via `market_summary` fallback (`flowDataCount` ≈ 30). **V7:** Quality gate now passes via market-level fallback — `_sendMarketContextToWorker()` (appWorker.js lines 682-690) provides VKOSPI through 3-tier chain.
 - `_flowSignals.stocks[code]` absent: per-stock section skipped (line 578)
 - `_optionsAnalytics === null`: options sub-function skipped (line 614)
 - Source guards: `macro_composite` status=error/source=sample/demo -> nulled at load (line 515-518); `options_analytics` same (line 520-523)

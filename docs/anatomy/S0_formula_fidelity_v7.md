@@ -1,6 +1,6 @@
 # Section 0.2: Formula-Code Fidelity Audit
 
-> ANATOMY V6 -- CheeseStock Production Anatomy
+> ANATOMY V7 -- CheeseStock Production Anatomy
 > Author: statistical-validation-expert (Opus 4.6 1M context)
 > Date: 2026-04-06
 > Scope: 15 key formulas spot-checked against JS/Python implementation

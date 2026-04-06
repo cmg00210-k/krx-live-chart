@@ -1,6 +1,6 @@
-# Section 2.8: Bond Pricing & Credit Risk Theory -- Production Anatomy V6
+# Section 2.8: Bond Pricing & Credit Risk Theory -- Production Anatomy V7
 
-> ANATOMY V6 -- Stage 2, Section 2.8
+> ANATOMY V7 -- Stage 2, Section 2.8
 > Scope: NSS yield curve, Duration/Convexity/DV01, Merton DD, credit spreads, RORO, bond-equity relative value
 > Authority: CFA Paper Grade annotation, formula-to-code tracing, constant grading, fix recommendations
 > Date: 2026-04-06

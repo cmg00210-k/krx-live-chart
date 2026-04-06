@@ -1,4 +1,4 @@
-# Stage 1 API Pipeline Anatomy -- Sections 1.5-1.8 (ANATOMY V6)
+# Stage 1 API Pipeline Anatomy -- Sections 1.5-1.8 (ANATOMY V7)
 
 **Document version**: 2026-04-06
 **Scope**: Compute scripts (post-download processing), JSON data file catalog,
@@ -91,6 +91,14 @@ Every compute script uses **pure Python** (no scipy/numpy) unless otherwise note
 | **Source guards** | `investor_summary.json` source='sample' -> global fallback skipped. Per-stock data required for flow signals (C-5 fix: no global fabrication). |
 | **Error handling** | Missing `data/investors/` directory -> skips flow signals (only HMM label assigned). HMM stale > 30 days -> label = null. Stocks without investor data -> flow signals = null, only HMM label populated. |
 | **Critical design**: Stocks without per-stock investor data receive `foreignMomentum: null` (not global market direction), preventing false confidence propagation to 2,600+ stocks. |
+
+**V7 Market-Level Fallback:** When per-stock investor data is unavailable (`data/investors/{code}.json` missing), the pipeline falls back to market-level data:
+- Source: `data/derivatives/investor_summary.json` field `total_trading_days`
+- `effective_flow_count = market_flow_count` (typically ~30)
+- `flowDataSource: "market_summary"` tag added to output
+- **HMM regime:** Still applied (market-wide label available)
+- **Per-stock bonuses:** Set to `null` (skipped) — only market-wide adjustment applies
+- This ensures `flowDataCount > 0` passes the quality gate in `appWorker.js` line 534, enabling HMM regime multipliers even without granular per-stock data.
 
 ### 1.5.7 compute_capm_beta.py
 
@@ -199,6 +207,19 @@ Every compute script uses **pure Python** (no scipy/numpy) unless otherwise note
 | **Academic source** | Elton, Gruber & Blake (1996), JF 51(4):1097-1108 |
 | **Parameters** | `MIN_DELISTED_N=30`, `HORIZONS=['1','3','5','10','20']` |
 
+### 1.5.16 backtest_signals.py (V7)
+
+| Field | Value |
+|-------|-------|
+| **Input files** | `data/index.json` (stock list), `data/{market}/{code}.json` (per-stock OHLCV) |
+| **Output file** | `data/backtest/signal_wr.json` |
+| **Method** | Indicator-proxy signal detection: 10 signals (`goldenCross`, `deadCross`, `macdBullishCross`, `macdBearishCross`, `rsiOversoldExit`, `rsiOverboughtExit`, `bbLowerBounce`, `bbUpperBreak`, `volumeBreakout`, `volumeSelloff`) x 5 forward horizons (1d, 3d, 5d, 10d, 20d) |
+| **Universe** | 2,753 stocks (KOSPI + KOSDAQ), minimum 30 observations per signal/horizon |
+| **Statistics** | Wilson score confidence interval, Cohen's h effect size, Bonferroni correction (alpha = 0.05/200 = 0.00025) |
+| **Academic sources** | Wilson (1927) score interval, Cohen (1988) h effect size, Brock-Lakonishok-LeBaron (1992) null WR = 50% |
+| **Consumed by** | `PATTERN_WR_KRX` in `signalEngine.js` (offline calibration -- values manually transferred to JS constants) |
+| **Error handling** | Stocks with < 50 candles skipped. Signals with < 30 fires excluded from output. |
+
 ---
 
 ## 1.6 JSON Data File Catalog
@@ -277,6 +298,8 @@ Complete inventory of all JSON files in `data/` that participate in the pipeline
 | `rl_stage_c1_results.json` | offline | offline only | n/a | -- | -- |
 | `mra_*.json` (6 files) | MRA scripts | offline only | n/a | -- | -- |
 | `krx_anomalies.json` | `compute_krx_anomalies.py` | **[CRITICAL: Dead Data]** No JS consumer. Excluded from deploy (.cfignore). | n/a | -- | -- |
+| `signal_wr.json` | `backtest_signals.py` | Offline only (consumed by `PATTERN_WR_KRX` in signalEngine.js constants) | n/a | per-signal WR, CI, effect size | none |
+| `dgrade_promotion_roadmap.json` | D-grade audit (offline analysis) | Offline only | n/a | 64 D-grade constant classifications | none |
 
 ### 1.6.5 data/market/
 

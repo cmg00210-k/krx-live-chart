@@ -1,4 +1,4 @@
-# Stage 2 -- Section 2.7: Derivatives Theory (V6)
+# Stage 2 -- Section 2.7: Derivatives Theory (V7)
 
 ## Document Metadata
 

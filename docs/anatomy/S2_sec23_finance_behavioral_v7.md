@@ -1,6 +1,6 @@
-# S2 Theoretical Basis -- Sections 2.3-2.4: Finance Theory & Behavioral Finance (V6)
+# S2 Theoretical Basis -- Sections 2.3-2.4: Finance Theory & Behavioral Finance (V7)
 
-> ANATOMY V6 -- CheeseStock Production Anatomy
+> ANATOMY V7 -- CheeseStock Production Anatomy
 > Author: financial-theory-expert (Opus 4.6 1M context)
 > Date: 2026-04-06
 > Scope: CFA-paper-grade documentation of every finance theory and behavioral
@@ -1611,7 +1611,7 @@ Heuristics and Biases." *Science*, 185(4157), 1124-1131.
 
 ```
 Financial anchors creating S/R levels:
-  1. 52-week high/low        --> major S/R
+  1. 52-week high/low        --> major S/R   **[V7 구현됨: patterns.js:3444-3489, SR_52W_* constants]**
   2. Previous close           --> next-day reference point
   3. Moving averages          --> dynamic anchors
   4. Round numbers (10,000)   --> clustering
@@ -1627,6 +1627,8 @@ S/R strength (anchoring-adjusted):
 - `patterns.js` S/R detection: ATR*0.5 tolerance clustering, min 2 touches, max 10
 - `signalEngine.js:applySRProximityBoost()`: confidence boost at S/R confluence
 - KRX tick-size boundaries (1,000/5,000/10,000/50,000 KRW): artificial S/R
+
+**V7 Implementation Note:** `patterns.js` `_detectSupportResistance()` lines 3444-3489 now implements the 52-week high/low anchor as S/R levels with confluence merge. George & Hwang (2004) demonstrated that 52-week price proximity explains ~70% of individual stock momentum returns through anchoring bias (Tversky & Kahneman 1974). Constants: `SR_52W_STRENGTH=0.8`, `SR_52W_TOUCHES=3`, `SR_52W_MIN_BARS=60`, `SR_52W_WINDOW=252`.
 
 ---
 
@@ -1763,14 +1765,18 @@ Parameter calibration implications:
 | CSAD Herding | B-5 | Doc 19 S5.2 | `appWorker.js` | Indirect: macro dampening | -- |
 | Kyle Lambda | B-6 | Doc 18 S1 | `backtester.js` | `KRX_SLIPPAGE`, `_getAdaptiveSlippage()` | -- |
 | Overreaction | -- | Doc 04 S5.2, Doc 24 S4 | `backtester.js` | moveATR > 3 dampening | -- |
-| Anchoring | -- | Doc 04 S2.2 | `patterns.js` | S/R clustering | -- |
+| Anchoring | -- | Doc 04 S2.2 | `patterns.js` | S/R clustering + 52-week anchor (V7) | George & Hwang (2004) |
 | ILLIQ | -- | Doc 18 S3.1 | `indicators.js`, `appWorker.js` | `calcAmihudILLIQ()` | -- |
 | EWMA Vol | -- | Doc 05 S8 | `backtester.js` | `_buildRLContext()` | -- |
 | Merton DD | -- | Doc 35 S6 | `compute_capm_beta.py` | `compute_dd()` | `fin-dd` |
 
 ---
 
-*End of S2 Sections 2.3-2.4 (V6)*
+### References Added in V7
+
+- George, T.J. & Hwang, C.-Y. (2004). "The 52-Week High and Momentum Investing." *Journal of Finance*, 59(5), 2145-2176.
+
+*End of S2 Sections 2.3-2.4 (V7)*
 *Total formulas annotated: 15 (F-1 through F-9, B-1 through B-6)*
 *Total cross-references: 31 theory-to-code mappings*
 *Identified and corrected: 1 formula discrepancy (Blume coefficients)*

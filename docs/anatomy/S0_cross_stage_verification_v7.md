@@ -1,4 +1,4 @@
-# Stage 0 -- Cross-Stage Verification (V6)
+# Stage 0 -- Cross-Stage Verification (V7)
 
 ## Document Metadata
 

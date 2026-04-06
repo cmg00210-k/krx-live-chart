@@ -1,4 +1,4 @@
-# S3 Signal Engine & Backtester -- Production Anatomy v6
+# S3 Signal Engine & Backtester -- Production Anatomy v7
 
 > **Scope**: `js/signalEngine.js` (3,117 lines), `js/backtester.js` (2,538 lines)
 > **Date**: 2026-04-06
@@ -45,6 +45,13 @@
 **File**: `js/signalEngine.js`
 **Global**: `signalEngine` (SignalEngine), `COMPOSITE_SIGNAL_DEFS` (Array)
 **Dependencies**: `indicators.js` (IndicatorCache), `patterns.js` (patternEngine)
+
+**Module-Level Globals (V7):**
+
+| Global | Type | Location | Purpose | Grade |
+|--------|------|----------|---------|-------|
+| `PATTERN_WR_KRX` | `var`, Object (28 entries) | signalEngine.js:427-445 | KRX 5-year empirical win rate for 28 patterns (buy/sell). Source: `data/backtest/signal_wr.json` via offline calibration | [B] |
+| `ANTI_PREDICTOR_THRESHOLD` | `var`, 48 | signalEngine.js:448 | WR gate threshold. Patterns with WR < 48% are anti-predictive (below coin flip minus KRX ~2% round-trip cost). BLL (1992) null = 50% | [B-1] |
 
 ### 3.3.1 Base Signal Catalog
 
@@ -371,9 +378,35 @@ All derivatives/flow signals are grade [D] -- market-specific thresholds without
 | optionalBonus | 3-5 | [D] | Medium | Per-optional confidence increment |
 | composite cap | 95 | [D] | Low | Individual signals capped at 90 |
 
-**[CONCERN]**: `buy_engulfingMacdAlign` baseConfidence=48 correctly reflects bullishEngulfing WR=41.3% (anti-predictor). However, bullishEngulfing itself should be suppressed per prior audit finding. The composite inherits the problematic base pattern.
+**[RESOLVED V7]**: `buy_engulfingMacdAlign` now capped to WR=41 via anti-predictor gate (`PATTERN_WR_KRX[bullishEngulfing]=41.3`, threshold=48). The gate prevents this composite from inflating confidence beyond empirical ceiling regardless of baseConfidence (48) or optional bonuses. See "Anti-Predictor WR Gate" subsection below.
 
 **[CONCERN]**: `measuredWR: null` on ichimoku triple composites (buy_ichimokuTriple, sell_ichimokuTriple). baseConfidence=70 is theory-based estimate (Hosoda 65-75% range) without KRX empirical validation.
+
+#### Anti-Predictor WR Gate (V7, BLL 1992)
+
+**Code:** `signalEngine.js` lines 2354-2379
+
+After composite confidence is calculated from `baseConfidence + optional bonuses`, the anti-predictor gate checks each `def.required` pattern against `PATTERN_WR_KRX`:
+
+1. For each required pattern, look up its KRX 5-year win rate in `PATTERN_WR_KRX`
+2. If any required pattern has `WR < ANTI_PREDICTOR_THRESHOLD (48)`, set `_wrCapped = true`
+3. Cap confidence: `confidence = Math.min(confidence, Math.round(lowestWR))`
+4. Cap prediction: `confidencePred = Math.min(confidencePred, Math.round(lowestWR))`
+5. If capped: downgrade `strength` from `"strong"` to `"medium"`, set `wrCapped: true` flag
+
+**Academic basis:** Brock, Lakonishok & LeBaron (1992): technical rules with WR < 50% are not merely weak — they are anti-predictive. The 48% threshold accounts for KRX round-trip transaction costs (~2%).
+
+**Affected Composites (V7):**
+
+| Composite | Anti-predictor Pattern | Pattern WR | Effective Cap |
+|-----------|----------------------|------------|---------------|
+| `strongBuy_hammerRsiVolume` | hammer | 45.2% | 45 |
+| `buy_hammerBBVol` | hammer | 45.2% | 45 |
+| `buy_morningStarRsiVol` | morningStar | 40.5% | 41 |
+| `buy_engulfingMacdAlign` | bullishEngulfing | 41.3% | 41 |
+| `buy_goldenMarubozuVol` | bullishMarubozu | 41.8% | 42 |
+
+These 5 composites contain at least one required pattern with WR below the anti-predictor threshold. Their effective confidence is hard-capped to the lowest anti-predictor WR, regardless of `baseConfidence` or optional bonus accumulation.
 
 ---
 

@@ -1,4 +1,4 @@
-# S5 Lifecycle, Workers & Global Variable Graph (v6)
+# S5 Lifecycle, Workers & Global Variable Graph (v7)
 
 > Production anatomy for CheeseStock (cheesestock.co.kr).
 > Covers initialization lifecycle, Web Worker architecture, Service Worker caching,

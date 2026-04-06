@@ -1,4 +1,4 @@
-# S5 — UI Architecture v6
+# S5 — UI Architecture v7
 **CheeseStock ANATOMY | Section 5**
 **Generated:** 2026-04-06
 **Source files audited:**

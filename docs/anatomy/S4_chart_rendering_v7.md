@@ -1,5 +1,5 @@
 # Stage 4 — Chart Rendering Architecture
-## CheeseStock ANATOMY V6
+## CheeseStock ANATOMY V7
 
 **Last updated:** 2026-04-06
 **Scope:** `js/chart.js`, `js/patternRenderer.js`, `js/signalRenderer.js`, `js/drawingTools.js`, `js/colors.js`

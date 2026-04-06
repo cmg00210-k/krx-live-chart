@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-06
 **Auditor:** Code Audit Inspector (Claude Opus 4.6)
-**Scope:** 16 V6 anatomy documents in `docs/anatomy/`
+**Scope:** 17 V7 anatomy documents in `docs/anatomy/`
 **Method:** Automated grep + manual spot-check against source code
 
 ---

@@ -1,15 +1,15 @@
-# CheeseStock Production Anatomy V6 -- Master Index
+# CheeseStock Production Anatomy V7 -- Master Index
 
 ## www.cheesestock.co.kr | Deployed: Cloudflare Pages
 
 | Field | Value |
 |-------|-------|
-| Version | V6 |
+| Version | V7 |
 | Date | 2026-04-06 |
 | Total Documents | 19 |
 | Total Lines | 18,471 |
 | Formulas Documented | 218 (CFA Paper Grade) |
-| Constants Inventoried | 300+ (graded A-E) |
+| Constants Inventoried | 306+ (graded A-E) |
 | Pipeline Traces | 5/5 PASS |
 | Formula-Code Fidelity | 15/15 verified (12 MATCH, 3 MINOR_DIFF, 0 DISCREPANCY) |
 | Agents Deployed | 22 specialized agents across 7 waves |
@@ -37,10 +37,10 @@ JSON files       150+ formulas        45 patterns          9+4 layers      A|B|C
 
 | File | Lines | Content |
 |------|-------|---------|
-| [S0_index_v6.md](S0_index_v6.md) | this file | Master index, reading guide |
-| [S0_cross_stage_verification_v6.md](S0_cross_stage_verification_v6.md) | 114 | 5 end-to-end pipeline traces (all PASS) |
-| [S0_formula_fidelity_v6.md](S0_formula_fidelity_v6.md) | 131 | 15 formula-code spot-checks (0 discrepancies) |
-| [S0_consistency_audit_v6.md](S0_consistency_audit_v6.md) | 120 | ID uniqueness, line numbers, file paths (CONDITIONAL PASS) |
+| [S0_index_v7.md](S0_index_v7.md) | this file | Master index, reading guide |
+| [S0_cross_stage_verification_v7.md](S0_cross_stage_verification_v7.md) | 114 | 5 end-to-end pipeline traces (all PASS) |
+| [S0_formula_fidelity_v7.md](S0_formula_fidelity_v7.md) | 131 | 15 formula-code spot-checks (0 discrepancies) |
+| [S0_consistency_audit_v7.md](S0_consistency_audit_v7.md) | 120 | ID uniqueness, line numbers, file paths (CONDITIONAL PASS) |
 
 ### Stage 1: API Data Pipeline (2,187 lines)
 
@@ -54,34 +54,34 @@ JSON files       150+ formulas        45 patterns          9+4 layers      A|B|C
 
 | File | Lines | Domain | Formulas |
 |------|-------|--------|----------|
-| [S2_theoretical_basis_v6.md](S2_theoretical_basis_v6.md) | 1,057 | Mathematics & Statistics | M-1..M-5, S-1..S-13 (18 formulas) |
-| [S2_sec23_finance_behavioral_v6.md](S2_sec23_finance_behavioral_v6.md) | 1,768 | Classical Finance & Behavioral | F-1..F-9, B-1..B-6 (15 formulas) |
-| [S2_sec25_macroeconomics_v6.md](S2_sec25_macroeconomics_v6.md) | 1,183 | Macroeconomics | MAC-1..MAC-10 (10 formulas) |
-| [S2_sec26_microeconomics_v6.md](S2_sec26_microeconomics_v6.md) | 1,149 | Microeconomics | MIC-1..MIC-10 (10 formulas) |
-| [S2_sec27_derivatives_v6.md](S2_sec27_derivatives_v6.md) | 1,271 | Derivatives (Options/Futures/Flow) | DRV-1..DRV-17 (17 formulas) |
-| [S2_sec28_bonds_credit_v6.md](S2_sec28_bonds_credit_v6.md) | 1,405 | Bonds & Credit Risk | BND-1..BND-15 (15 formulas) |
-| [S2_sec29_rl_game_control_v6.md](S2_sec29_rl_game_control_v6.md) | 1,778 | RL, Game Theory, Adaptive Models | GT-1..3, OC-1..3, RL-1..4, AD-1..5 (15 formulas) |
+| [S2_theoretical_basis_v7.md](S2_theoretical_basis_v7.md) | 1,057 | Mathematics & Statistics | M-1..M-5, S-1..S-13 (18 formulas) |
+| [S2_sec23_finance_behavioral_v7.md](S2_sec23_finance_behavioral_v7.md) | 1,768 | Classical Finance & Behavioral | F-1..F-9, B-1..B-6 (15 formulas) |
+| [S2_sec25_macroeconomics_v7.md](S2_sec25_macroeconomics_v7.md) | 1,183 | Macroeconomics | MAC-1..MAC-10 (10 formulas) |
+| [S2_sec26_microeconomics_v7.md](S2_sec26_microeconomics_v7.md) | 1,149 | Microeconomics | MIC-1..MIC-10 (10 formulas) |
+| [S2_sec27_derivatives_v7.md](S2_sec27_derivatives_v7.md) | 1,271 | Derivatives (Options/Futures/Flow) | DRV-1..DRV-17 (17 formulas) |
+| [S2_sec28_bonds_credit_v7.md](S2_sec28_bonds_credit_v7.md) | 1,405 | Bonds & Credit Risk | BND-1..BND-15 (15 formulas) |
+| [S2_sec29_rl_game_control_v7.md](S2_sec29_rl_game_control_v7.md) | 1,778 | RL, Game Theory, Adaptive Models | GT-1..3, OC-1..3, RL-1..4, AD-1..5 (15 formulas) |
 
 ### Stage 3: TA & QA Methods (3,228 lines)
 
 | File | Lines | Content |
 |------|-------|---------|
-| [S3_ta_methods_v6.md](S3_ta_methods_v6.md) | 659 | 32 indicators (I-01..I-32), 45 patterns (P-01..P-45), 80+ thresholds, 5-tier system |
-| [S3_signal_backtester_v6.md](S3_signal_backtester_v6.md) | 1,452 | 16 signals, 22 composites, backtester (WLS/Ridge/HC3/LinUCB), 38 validated methods |
-| [S3_confidence_chain_v6.md](S3_confidence_chain_v6.md) | 1,117 | 10-function confidence chain (CONF-1..CONF-10), interaction effects, null safety |
+| [S3_ta_methods_v7.md](S3_ta_methods_v7.md) | 659 | 32 indicators (I-01..I-32), 45 patterns (P-01..P-45), 80+ thresholds, 5-tier system |
+| [S3_signal_backtester_v7.md](S3_signal_backtester_v7.md) | 1,452 | 16 signals, 22 composites, backtester (WLS/Ridge/HC3/LinUCB), 38 validated methods |
+| [S3_confidence_chain_v7.md](S3_confidence_chain_v7.md) | 1,117 | 10-function confidence chain (CONF-1..CONF-10), interaction effects, null safety |
 
 ### Stage 4: Chart Rendering (1,182 lines)
 
 | File | Lines | Content |
 |------|-------|---------|
-| [S4_chart_rendering_v6.md](S4_chart_rendering_v6.md) | 1,182 | 9-layer PatternRenderer, 4-layer SignalRenderer, ChartManager, 7 drawing tools |
+| [S4_chart_rendering_v7.md](S4_chart_rendering_v7.md) | 1,182 | 9-layer PatternRenderer, 4-layer SignalRenderer, ChartManager, 7 drawing tools |
 
 ### Stage 5: UI Architecture (1,898 lines)
 
 | File | Lines | Content |
 |------|-------|---------|
-| [S5_ui_architecture_v6.md](S5_ui_architecture_v6.md) | 956 | 4-column grid, 8 responsive breakpoints, virtual scroll, typography, colors |
-| [S5_lifecycle_workers_v6.md](S5_lifecycle_workers_v6.md) | 942 | 36-step init lifecycle, Worker protocol, SW cache, global variable graph |
+| [S5_ui_architecture_v7.md](S5_ui_architecture_v7.md) | 956 | 4-column grid, 8 responsive breakpoints, virtual scroll, typography, colors |
+| [S5_lifecycle_workers_v7.md](S5_lifecycle_workers_v7.md) | 942 | 36-step init lifecycle, Worker protocol, SW cache, global variable graph |
 
 ---
 
@@ -187,6 +187,21 @@ Start with S0_index (this file) → S5_ui_architecture → S3_ta_methods (patter
 | Critical Findings | 0 | 4 P0 + 8 P1 | NEW |
 | New Sections | -- | RL/Game, Signal/Backtester, Confidence Chain, Lifecycle/Workers | 4 NEW |
 | Agents Used | 9 | 22 | +144% |
+
+---
+
+## V6 → V7 Comparison
+
+| Metric | V6 | V7 | Change |
+|--------|----|----|--------|
+| Documents | 20 | 20 | All renamed `_v6` → `_v7` |
+| Constants Graded | 300+ | 306+ | +6 new globals |
+| New Globals | — | `PATTERN_WR_KRX`, `ANTI_PREDICTOR_THRESHOLD`, `SR_52W_STRENGTH`, `SR_52W_TOUCHES`, `SR_52W_MIN_BARS`, `SR_52W_WINDOW` | 6 structural additions |
+| Credit Model | Symmetric x0.85/x0.85 | Asymmetric 0.82/1.06 (Gilchrist & Zakrajsek 2012) | UPDATED |
+| Options Model | `straddleImpliedMove > 3.0%`, x0.95 | IV/HV ratio primary (Simon & Wiggins 2001) | UPDATED |
+| S/R Detection | Swing-point clustering only | + 52-week anchor (George & Hwang 2004) | EXTENDED |
+| Anti-predictor | — | WR gate caps composites with WR < 48% (BLL 1992) | NEW |
+| Composites Affected | 0 | 5 WR-capped | NEW gate |
 
 ---
 

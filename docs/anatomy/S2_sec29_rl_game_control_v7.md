@@ -1,6 +1,6 @@
 # Section 2.9 — RL, Game Theory, & Adaptive Models
 
-> Production Anatomy v6 — CheeseStock (cheesestock.co.kr)
+> Production Anatomy v7 — CheeseStock (cheesestock.co.kr)
 > CFA Paper Grade Annotation Standard
 >
 > Scope: Game theory in markets, optimal control (Kalman, HJB/Merton),

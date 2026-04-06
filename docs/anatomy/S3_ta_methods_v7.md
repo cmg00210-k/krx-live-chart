@@ -1,6 +1,6 @@
 # S3: Technical Analysis Methods — Pattern Detection & Indicator Functions
 
-> **ANATOMY V6** | Stage 3 Sections 3.1-3.2 | 2026-04-06
+> **ANATOMY V7** | Stage 3 Sections 3.1-3.2 | 2026-04-06
 >
 > Definitive production audit of PatternEngine (js/patterns.js ~4,200 lines) and
 > Indicator Module (js/indicators.js ~2,218 lines). Every threshold constant
@@ -211,8 +211,39 @@ Every pattern object returned by `analyze()`:
 
 | Function | Type | Line | Method |
 |----------|------|------|--------|
-| `detectSupportResistance` | S/R | 3395 | Swing-point clustering (ATR*0.5 tolerance), min 2 touches, max 10 levels, sorted by touch count |
+| `detectSupportResistance` | S/R | 3395 | Swing-point clustering (ATR*0.5 tolerance), min 2 touches, max 10 levels, sorted by touch count. **V7:** + 52-week high/low anchor (George & Hwang 2004) |
 | `detectValuationSR` | Valuation S/R | (inline in analyze) | BPS/EPS-based price levels within VALUATION_SR_RANGE=0.30 (KRX daily limit), max 5 levels |
+
+#### 52-Week High/Low Anchor (V7, George & Hwang 2004)
+
+**Code:** `patterns.js` lines 3444-3489
+
+The 52-week high and low prices serve as powerful psychological anchors that create implicit support/resistance levels. This extends the existing swing-point clustering with anchoring bias from behavioral finance.
+
+**Algorithm:**
+1. Compute window: `min(candles.length, SR_52W_WINDOW)` (default 252 trading days)
+2. Guard: skip if window < `SR_52W_MIN_BARS` (60 days, ~3 months minimum)
+3. Extract `max(high)` and `min(low)` over the window
+4. **Confluence merge:** If an existing S/R cluster is within ATR×0.5 tolerance of the 52-week level:
+   - Boost touches by `SR_52W_TOUCHES` (+3)
+   - Set strength to `max(existing, SR_52W_STRENGTH)` (0.8)
+   - Tag `source: '52w_merged'`
+   - No new level added (merged into existing)
+5. **Standalone addition:** If no merge candidate:
+   - Add new level with `touches = SR_52W_TOUCHES`, `strength = SR_52W_STRENGTH`
+   - Tag `source: '52w'`
+   - **Polarity flip:** 52w high above current close → resistance; below → support. 52w low below current close → support; above → resistance.
+
+**Constants:**
+
+| Constant | Value | Grade | Academic Source | Line |
+|----------|-------|-------|---------------|------|
+| `SR_52W_STRENGTH` | 0.80 | [C] | George & Hwang (2004): 52-week anchoring | patterns.js:369 |
+| `SR_52W_TOUCHES` | 3 | [C] | Virtual touches (strong psychological anchor) | patterns.js:370 |
+| `SR_52W_MIN_BARS` | 60 | [C] | Minimum ~3 months of data required | patterns.js:371 |
+| `SR_52W_WINDOW` | 252 | [B] | Standard annual trading days | patterns.js:372 |
+
+**Academic basis:** George, T.J. & Hwang, C.-Y. (2004), "The 52-Week High and Momentum Investing," *Journal of Finance* 59(5), 2145-2176. The 52-week price proximity explains approximately 70% of individual stock momentum profits through anchoring bias (Tversky & Kahneman 1974).
 
 ---
 

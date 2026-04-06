@@ -1,6 +1,6 @@
-# Section 2.6: Microeconomic Foundations -- V6
+# Section 2.6: Microeconomic Foundations -- V7
 
-> Stage 2 -- ANATOMY V6, CheeseStock KRX Live Chart
+> Stage 2 -- ANATOMY V7, CheeseStock KRX Live Chart
 > Author: Microeconomics Analyst Agent
 > Date: 2026-04-06
 > Supersedes: S2_sec26_microeconomics.md (V5, 1,241 lines)
