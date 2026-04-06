@@ -738,6 +738,7 @@ def check_scripts(strict=False):
 #   - sample_guard_field: if set, FAIL when data[field] == "sample" or "error"
 #   - is_array: if True, check keys against the last element of the array
 PIPELINE_CONTRACT = [
+    # ── appWorker.js: macro/derivatives pipeline (12 original) ──
     ("data/macro/macro_latest.json",                ["updated", "mcs", "vix", "bok_rate"],  None,      False),
     ("data/macro/bonds_latest.json",                ["updated"],                             None,      False),
     ("data/macro/kosis_latest.json",                ["updated", "source"],                   None,      False),
@@ -750,6 +751,14 @@ PIPELINE_CONTRACT = [
     ("data/derivatives/basis_analysis.json",        ["basis", "basisPct"],                   None,      True),
     ("data/backtest/flow_signals.json",             ["stocks", "hmmRegimeLabel"],            "status",  False),
     ("data/derivatives/options_analytics.json",     [],                                      "status",  False),
+    # ── P1-fix: 7 additional JS runtime data sources ──
+    ("data/backtest/capm_beta.json",                ["stocks"],                              None,      False),
+    ("data/backtest/eva_scores.json",               ["stocks"],                              None,      False),
+    ("data/backtest/hmm_regimes.json",              ["daily"],                               None,      False),
+    ("data/backtest/rl_policy.json",                ["thetas", "d"],                         None,      False),
+    ("data/macro/ff3_factors.json",                 ["daily", "rf_daily"],                   None,      False),
+    ("data/macro/bond_metrics.json",                ["benchmarks"],                          None,      False),
+    ("data/sector_fundamentals.json",               ["sectors", "date"],                     None,      False),
 ]
 
 # Staleness threshold: WARN if data file not updated within this many days
@@ -782,7 +791,7 @@ def _parse_date_field(data, field_candidates):
 
 
 def check_pipeline(strict=False):
-    section("CHECK 6 - JSON Pipeline Connectivity (12 data sources)")
+    section("CHECK 6 - JSON Pipeline Connectivity (19 data sources)")
     errors = 0
     warnings = 0
 

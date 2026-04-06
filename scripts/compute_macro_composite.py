@@ -390,6 +390,19 @@ def main():
     bonds = _load_json(os.path.join(MACRO_DIR, 'bonds_latest.json'))
     ecos = None  # [C-3] was phantom ecos_latest.json — all ECOS fields live in macro_latest
 
+    # Source guards — reject fake/sample/demo data per input
+    for _name, _data in [('kosis_latest.json', kosis), ('macro_latest.json', macro), ('bonds_latest.json', bonds)]:
+        if _data:
+            _src = _data.get('source', '')
+            if _src in ('sample', 'seed', 'demo'):
+                print(f'  [WARN] Skipping {_name}: source={_src} (not real data)')
+    if kosis and kosis.get('source', '') in ('sample', 'seed', 'demo'):
+        kosis = None
+    if macro and macro.get('source', '') in ('sample', 'seed', 'demo'):
+        macro = None
+    if bonds and bonds.get('source', '') in ('sample', 'seed', 'demo'):
+        bonds = None
+
     sources_loaded = sum(1 for s in [kosis, macro, bonds] if s is not None)
     print(f'  Data sources loaded: {sources_loaded}/3')
     if kosis:

@@ -40,6 +40,12 @@ def _load_json(path):
 def _get_risk_free_rate():
     """KTB 3Y from bonds_latest.json (annualized %)."""
     bonds = _load_json(os.path.join(DATA, 'macro', 'bonds_latest.json'))
+    if bonds:
+        # Source guard — reject fake/sample/demo data
+        _src = bonds.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            print(f'  [WARN] Skipping bonds_latest.json: source={_src} (not real data)')
+            bonds = None
     if bonds and 'yields' in bonds and bonds['yields'].get('ktb_3y') is not None:
         return bonds['yields']['ktb_3y'] / 100.0  # 3.37% -> 0.0337
     print('  [WARN] KTB 3Y not available, using default 3.5%')
@@ -90,6 +96,13 @@ def compute_basis_analysis():
     if not deriv_data:
         print('[ERROR] derivatives_summary.json not found')
         return None
+
+    # Source guard — reject fake/sample/demo data
+    if isinstance(deriv_data, dict):
+        _src = deriv_data.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            print(f'[WARN] Skipping derivatives_summary.json: source={_src} (not real data)')
+            return None
 
     if isinstance(deriv_data, list):
         if len(deriv_data) == 0:

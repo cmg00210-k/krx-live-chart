@@ -317,6 +317,12 @@ def main():
     with open(LATEST_FILE, 'r', encoding='utf-8') as f:
         latest = json.load(f)
 
+    # Source guard — reject fake/sample/demo data
+    _src = latest.get('source', '')
+    if _src in ('sample', 'seed', 'demo'):
+        print(f'[BOND-METRICS] Skipping: source={_src} (not real data)')
+        sys.exit(0)
+
     yields_data = latest.get('yields', {})
     updated = latest.get('updated', 'unknown')
     print(f"\n[BOND-METRICS] 데이터 기준일: {updated}")

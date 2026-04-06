@@ -80,6 +80,13 @@ def main():
     with open(DELISTED_PERF, "r", encoding="utf-8") as f:
         delisted = json.load(f)
 
+    # Source guards — reject fake/sample/demo data
+    for _name, _data in [("pattern_performance.json", listed), ("delisted_pattern_performance.json", delisted)]:
+        if isinstance(_data, dict):
+            _src = _data.get('source', '')
+            if _src in ('sample', 'seed', 'demo'):
+                print(f"[WARN] {_name}: source={_src} (not real data) — results may be unreliable")
+
     print("=" * 60)
     print("D-1 Survivorship Bias Correction Factor Computation")
     print("=" * 60)

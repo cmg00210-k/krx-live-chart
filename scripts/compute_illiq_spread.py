@@ -28,6 +28,10 @@ def load_candles(market, code):
         return []
     with open(path, 'r', encoding='utf-8') as f:
         d = json.load(f)
+    # Source guard — reject fake/sample/demo data
+    _src = d.get('source', '')
+    if _src in ('sample', 'seed', 'demo'):
+        return []
     return d.get('candles', [])
 
 def compute_illiq(candles, window=20):

@@ -1805,7 +1805,7 @@ class SignalEngine {
     }
 
     if (vol == null) return null;
-    // VKOSPI-calibrated thresholds (Doc26 §2.3): <15 low, 15-22 normal, 22-30 high, >30 crisis
+    // VKOSPI-calibrated thresholds (Doc26 §2.3, KRX 보정): <15 low, 15-22 normal, 22-30 high, >30 crisis
     if (vol < 15) return 'low';
     if (vol <= 22) return 'normal';
     if (vol <= 30) return 'high';

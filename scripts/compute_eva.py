@@ -85,8 +85,9 @@ def load_financials(code):
         return None
     with open(fpath, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    # seed 데이터는 실제 DART 데이터가 아니므로 제외
-    if data.get('source') == 'seed':
+    # seed/demo 데이터는 실제 DART 데이터가 아니므로 제외
+    # [P0-fix] demo 소스도 거부 — 129개 demo 재무제표에서 가짜 EVA 생성 방지
+    if data.get('source') in ('seed', 'demo'):
         return None
     return data
 

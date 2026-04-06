@@ -334,6 +334,7 @@ class KRXDataService {
       if (candles.length === 0) {
         console.log('[KRX] 파일 없음, 데모 폴백:', stock.code);
         candles = this._demoGenerateCandles(stock, timeframe);
+        candles._dataSource = 'demo';  // [P0-fix] prevent IDB persistence as 'file'
       }
     } else if (KRX_API_CONFIG.mode === 'file' && (timeframe === '1w' || timeframe === '1M')) {
       // 주봉/월봉: 일봉에서 클라이언트 리샘플링
@@ -375,6 +376,7 @@ class KRXDataService {
           candles = await this._fileGetCandles(stock);
           if (candles.length === 0) {
             candles = this._demoGenerateCandles(stock, timeframe);
+            candles._dataSource = 'demo';  // [P0-fix] prevent IDB persistence as 'file'
           }
         }
       }
@@ -397,9 +399,10 @@ class KRXDataService {
     }
 
     // [FIX-TRUST] 캔들 데이터 출처 추적 — 가짜 데이터를 실제처럼 표시 방지
-    // candles._dataSource: 'ws' | 'file' | 'demo' | 'idb' | 'koscom'
-    // [FIX-DQ1] synthetic 태그가 이미 있으면 보존, 아니면 모드 사용
-    var candleSource = (candles._dataSource === 'synthetic') ? 'synthetic' : KRX_API_CONFIG.mode;
+    // candles._dataSource: 'ws' | 'file' | 'demo' | 'synthetic' | 'idb' | 'koscom'
+    // [FIX-DQ1] synthetic/demo 태그가 이미 있으면 보존, 아니면 모드 사용
+    var candleSource = (candles._dataSource === 'synthetic' || candles._dataSource === 'demo')
+      ? candles._dataSource : KRX_API_CONFIG.mode;
 
     if (candles.length > 0) {
       // 캔들 정제: 검증 + 시간순 정렬 + 메모리 상한

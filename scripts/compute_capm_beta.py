@@ -240,7 +240,7 @@ def load_market_closes(market):
 
 
 def load_rf_annual():
-    """Load KTB 10Y from bonds_latest.json, fallback 0"""
+    """Load KTB 10Y from bonds_latest.json, fallback 3.5% (KTB 10Y historical median)"""
     bonds_path = os.path.join(DATA_DIR, 'macro', 'bonds_latest.json')
     if os.path.exists(bonds_path):
         with open(bonds_path, 'r', encoding='utf-8') as f:
@@ -256,7 +256,9 @@ def load_rf_annual():
         ktb10y = data.get('ktb10y')
         if ktb10y is not None:
             return float(ktb10y)
-    return 0.0
+    # [P2-fix] Fallback: 3.5% (KTB 10Y historical median) — consistent with compute_eva.py DEFAULT_RF_PCT
+    # Previous fallback of 0% distorted Jensen's Alpha and equity risk premium calculations
+    return 3.5
 
 
 def compute_beta(stock_closes, market_closes_map, window, rf_daily):

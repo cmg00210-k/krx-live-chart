@@ -341,6 +341,17 @@ async function _loadDerivativesData() {
       _pipelineStatus.shortselling = 'sample';
       _shortSellingData = null;
     }
+    // [P1-fix] Source guards for 3 remaining derivative data paths
+    if (_derivativesData && !Array.isArray(_derivativesData) && (_derivativesData.source === 'sample' || _derivativesData.source === 'demo')) {
+      console.warn('[KRX] derivatives_summary is ' + _derivativesData.source + ' data — derivatives adjustments disabled');
+      _pipelineStatus.derivatives = _derivativesData.source;
+      _derivativesData = null;
+    }
+    if (_etfData && (_etfData.source === 'sample' || _etfData.source === 'demo')) {
+      console.warn('[KRX] etf_summary is ' + _etfData.source + ' data — ETF adjustments disabled');
+      _pipelineStatus.etf = _etfData.source;
+      _etfData = null;
+    }
 
     var loaded = [_derivativesData, _investorData, _etfData, _shortSellingData].filter(Boolean).length;
     if (loaded > 0) {
@@ -404,6 +415,22 @@ async function _loadPhase8Data() {
       try { _flowSignals = await results[1].value.json(); _pipelineStatus.flow_signals = 'ok'; } catch(e) { console.warn('[KRX] flow_signals JSON parse error:', e); }
     if (results[2].status === 'fulfilled' && results[2].value.ok)
       try { _optionsAnalytics = await results[2].value.json(); _pipelineStatus.options_analytics = 'ok'; } catch(e) { console.warn('[KRX] options_analytics JSON parse error:', e); }
+    // [P1-fix] Status/source guards for macro_composite and options_analytics
+    if (_macroComposite && (_macroComposite.status === 'error' || _macroComposite.source === 'sample' || _macroComposite.source === 'demo')) {
+      console.warn('[KRX] macro_composite rejected — status/source=' + (_macroComposite.status || _macroComposite.source));
+      _pipelineStatus.macro_composite = 'rejected';
+      _macroComposite = null;
+    }
+    if (_optionsAnalytics && (_optionsAnalytics.status === 'error' || _optionsAnalytics.source === 'sample' || _optionsAnalytics.source === 'demo')) {
+      console.warn('[KRX] options_analytics rejected — status/source=' + (_optionsAnalytics.status || _optionsAnalytics.source));
+      _pipelineStatus.options_analytics = 'rejected';
+      _optionsAnalytics = null;
+    }
+    // [P0-fix] flow_signals quality gate: flowDataCount=0 means no real investor data
+    if (_flowSignals && _flowSignals.flowDataCount === 0) {
+      console.warn('[KRX] flow_signals has flowDataCount=0 — HMM regime adjustments disabled');
+      _pipelineStatus.flow_signals = 'empty';
+    }
     var loaded = [_macroComposite, _flowSignals, _optionsAnalytics].filter(Boolean).length;
     if (loaded > 0) {
       console.log('[KRX] Phase 8 데이터 로드 완료 (' + loaded + '/3)');
@@ -446,8 +473,11 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   }
 
   // HMM 레짐 + 수급 조정 (종목별)
+  // [P0-fix] Quality gate: flowDataCount=0 → no real per-stock investor data exists.
+  // Without real data, hmmRegimeLabel is unreliable (e.g., "bear" applied to ALL 2,651 stocks
+  // when investor_daily is empty). Skip regime multiplier entirely when data quality is insufficient.
   // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
-  if (code && _flowSignals && _flowSignals.stocks && _flowSignals.stocks[code]) {
+  if (code && _flowSignals && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
     var flow = _flowSignals.stocks[code];
     var regime = flow.hmmRegimeLabel || null;
     var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
@@ -593,7 +623,7 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
   // 데이터 전무 시 no-op
   if (!deriv && !investor && !etf && !shorts) return;
 
-  // [Phase 4-B] USD/KRW 수출주 채널 — 루프 밖 1회 산출 (Doc28 §3, Baek & Kang 2018)
+  // [Phase 4-B] USD/KRW 수출주 채널 — 루프 밖 1회 산출 (Doc28 §3)
   // β_FX +0.3~+0.5: KRW 약세 → 수출주 매출↑ → 매수 부스트, 역방향도 적용
   var _fxExportDir = 0;  // 0=neutral, +1=KRW weak (exporter bullish), -1=KRW strong
   if (_macroLatest && _macroLatest.usdkrw != null && currentStock) {
@@ -1206,7 +1236,7 @@ function _applyMacroConfidenceToPatterns(patterns) {
 // 기존 10-factor 매크로 조정과 독립 레이어로 운용.
 // clamp [0.92, 1.08]: VIX(Factor8)/credit(Factor3) 이중 적용 방지.
 //
-// 이론: Baele et al.(2019) Flights to Safety, IMF WP/2012/173
+// 이론: Baele, Bekaert & Inghelbrecht (2010) "The Determinants of Stock and Bond Return Comovements", RFS 23(6)
 // ══════════════════════════════════════════════════════════════
 function _classifyRORORegime() {
   var score = 0;

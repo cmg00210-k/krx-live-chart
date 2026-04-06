@@ -247,6 +247,12 @@ def main():
     # ── 스팟 데이터 로드 ──
     spot_path = os.path.join(DATA_DIR, 'market', 'kospi_daily.json')
     spot_data = _load_json(spot_path)
+    # Source guard — reject fake/sample/demo data
+    if isinstance(spot_data, dict):
+        _src = spot_data.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            print(f'  [WARN] Skipping kospi_daily.json: source={_src} (not real data)')
+            spot_data = None
     if not spot_data or not isinstance(spot_data, list):
         print(f'  [ERROR] {spot_path} not found or invalid')
         # Graceful null output
@@ -267,10 +273,22 @@ def main():
     # ── 선물 데이터 로드 ──
     futures_path = os.path.join(DATA_DIR, 'derivatives', 'futures_daily.json')
     futures_data = _load_json(futures_path)
+    # Source guard — reject fake/sample/demo data
+    if isinstance(futures_data, dict):
+        _src = futures_data.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            print(f'  [WARN] Skipping futures_daily.json: source={_src} (not real data)')
+            futures_data = None
     if not futures_data or not isinstance(futures_data, list):
         # derivatives_summary.json에서 futuresClose 추출 시도
         deriv_path = os.path.join(DATA_DIR, 'derivatives', 'derivatives_summary.json')
         deriv_data = _load_json(deriv_path)
+        # Source guard — reject fake/sample/demo data
+        if isinstance(deriv_data, dict):
+            _src = deriv_data.get('source', '')
+            if _src in ('sample', 'seed', 'demo'):
+                print(f'  [WARN] Skipping derivatives_summary.json: source={_src} (not real data)')
+                deriv_data = None
         if deriv_data and isinstance(deriv_data, list):
             futures_data = [{'time': d.get('time'), 'close': d.get('futuresClose')}
                             for d in deriv_data if d.get('futuresClose')]

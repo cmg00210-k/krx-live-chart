@@ -44,6 +44,10 @@ def load_kospi_returns():
         try:
             with open(fpath, 'r', encoding='utf-8') as f:
                 d = json.load(f)
+            # Source guard — reject fake/sample/demo data
+            _src = d.get('source', '')
+            if _src in ('sample', 'seed', 'demo'):
+                continue
             candles = d.get('candles', [])
         except (json.JSONDecodeError, OSError, KeyError) as e:
             continue

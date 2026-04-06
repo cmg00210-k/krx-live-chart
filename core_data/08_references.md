@@ -288,6 +288,12 @@
 - Miller, E.M. (1977). *Risk, Uncertainty, and Divergence of Opinion*. Journal of Finance, 32(4), 1151-1168.
   → 의견 분산과 과대평가 이론. 공매도 제약. [Doc42 §6]
 
+- Desai, H., Ramesh, K., Thiagarajan, S.R. & Balachandran, B.V. (2002). *An Investigation of the Informational Role of Short Interest in the Nasdaq Market*. Journal of Finance, 57(5), 2263-2287.
+  → 공매도 비율의 정보 효과. 높은 공매도 비율 → 이후 부진한 수익. [Doc40 §4, appWorker.js 공매도 신호]
+
+- Baele, L., Bekaert, G. & Inghelbrecht, K. (2010). *The Determinants of Stock and Bond Return Comovements*. Review of Financial Studies, 23(6), 2374-2428.
+  → 주식-채권 수익률 공변동 결정요인. Flight-to-safety 현상 분석. [appWorker.js 채권-주식 분기 감지]
+
 - Roll, R. (1977). *A Critique of the Asset Pricing Theory's Tests*. Journal of Financial Economics, 4(2), 129-176.
   → Roll의 비판. 시장 포트폴리오 관측 불가능성. [Doc42 §7]
 
@@ -299,6 +305,12 @@
 
 - Titman, S., Wei, K.C.J. & Xie, F. (2004). *Capital Investments and Stock Returns*. Journal of Financial and Quantitative Analysis, 39(4), 677-700.
   → 자본적 지출과 주식 수익률의 음의 관계. [Doc42 §6]
+
+- Lemmon, M. & Portniaguina, E. (2006). *Consumer Confidence and Asset Prices: Some Empirical Evidence*. Review of Financial Studies, 19(4), 1499-1529.
+  → 소비자심리지수와 주식수익률의 관계. CCSI 임계값의 학술적 근거. [appWorker.js CCSI 조정]
+
+- Qian, E.E., Hua, R.H. & Sorensen, E.H. (2007). *Quantitative Equity Portfolio Management*. Chapman & Hall/CRC.
+  → IC 임계값 해석 기준 (0.05 operational, 0.10 strong). [backtester.js OOS IC gate]
 
 - Vasicek, O.A. (1973). *A Note on Using Cross-Sectional Information in Bayesian Estimation of Security Betas*. Journal of Finance, 28(5), 1233-1239.
   → 베이지안 베타 축소 추정(Vasicek shrinkage). [Doc42 §7]
@@ -378,6 +390,23 @@
 
 - Jiang, W. et al. (2020). *Applications of Deep Learning in Stock Market Prediction*. Journal of Financial Data Science.
   → 딥러닝의 금융 시장 예측 적용 서베이.
+
+### 통계학 & 로버스트 방법론
+
+- Carroll, R.J. & Ruppert, D. (1988). *Transformation and Weighting in Regression*. Chapman & Hall.
+  → IRLS(반복 재가중 최소제곱) 방법론. Huber 로버스트 추정과 결합. [backtester.js WLS]
+
+- Gneiting, T. & Raftery, A.E. (2007). *Strictly Proper Scoring Rules, Prediction, and Estimation*. Journal of the American Statistical Association, 102(477), 359-378.
+  → 예측구간 커버리지 캘리브레이션 이론. [backtester.js 90% PI coverage]
+
+- Huber, P.J. (1964). *Robust Estimation of a Location Parameter*. Annals of Mathematical Statistics, 35(1), 73-101.
+  → 로버스트 통계학의 기초. Huber loss, M-estimation 원전. [backtester.js Huber-IRLS]
+
+- Kutner, M.H., Nachtsheim, C.J., Neter, J. & Li, W. (2005). *Applied Linear Statistical Models* (5th ed.). McGraw-Hill.
+  → VIF 다중공선성 진단 기준 (>5 moderate, >10 severe). [indicators.js VIF check]
+
+- Wilcox, R.R. (2005). *Introduction to Robust Estimation and Hypothesis Testing* (2nd ed.). Academic Press.
+  → 윈저화(Winsorization), 트림 평균 등 로버스트 통계 기법. [backtester.js bootstrap 전처리]
 
 ---
 
@@ -501,6 +530,15 @@
 
 - Bekaert, G. & Hoerova, M. (2014). *The VIX, the Variance Premium and Stock Market Volatility*. Journal of Econometrics, 183(2), 181-192.
   → VIX와 분산프리미엄, 주식 변동성의 관계. [Doc34 §8]
+
+- Carr, P. & Wu, L. (2009). *Variance Risk Premiums*. Review of Financial Studies, 22(3), 1311-1341.
+  → VRP(분산 리스크 프리미엄) 이론 원전. 실현변동성과 내재변동성 차이의 리스크 보상. [Doc26 §3, appWorker.js VRP 조정]
+
+- Whaley, R.E. (2000). *The Investor Fear Gauge*. Journal of Portfolio Management, 26(3), 12-17.
+  → VIX 지수의 "공포 지표" 해석 원전. [Doc26 §2.3, signalEngine.js volRegime]
+
+- Whaley, R.E. (2009). *Understanding the VIX*. Journal of Portfolio Management, 35(3), 98-105.
+  → VIX 구조와 VKOSPI 관계. VKOSPI ≈ VIX × 1.12 추정의 학술적 근거. [Doc26 §2.3, appState.js]
 
 - Campbell, J.Y. & Ammer, J. (1993). *What Moves the Stock and Bond Markets? A Variance Decomposition for Long-Term Asset Returns*. Journal of Finance, 48(1), 3-37.
   → 주식-채권 수익률의 분산 분해. [Doc35 §15]

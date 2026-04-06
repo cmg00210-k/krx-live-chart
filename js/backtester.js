@@ -253,6 +253,25 @@ class PatternBacktester {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (data && data.thetas && data.action_factors && typeof data.d === 'number') {
+          // [P0-fix] IC threshold gate: reject policy with negative IC (anti-predictive)
+          // IC < 0 means the policy's predictions are inversely correlated with outcomes.
+          // All sub-data (isotonic, platt, composite_windows) calibrated under same regime → also suspect.
+          if (data.training_summary && typeof data.training_summary.mean_ic_adjusted === 'number'
+              && data.training_summary.mean_ic_adjusted < 0) {
+            console.warn('[RL] Policy rejected: IC=' + data.training_summary.mean_ic_adjusted.toFixed(4) + ' < 0 (anti-predictive)');
+            // Still inject win_rates_live (Beta-Binomial posteriors are IC-independent empirical data)
+            if (data.win_rates_live && typeof PatternEngine !== 'undefined') {
+              var liveWR = {};
+              for (var pKey in data.win_rates_live) {
+                var ab = data.win_rates_live[pKey];
+                if (ab && ab.alpha > 0 && ab.beta > 0) {
+                  liveWR[pKey] = +(ab.alpha / (ab.alpha + ab.beta) * 100).toFixed(1);
+                }
+              }
+              PatternEngine.PATTERN_WIN_RATES_LIVE = liveWR;
+            }
+            return;  // _rlPolicy stays null → LinUCB disabled, all sub-data fallback to defaults
+          }
           that._rlPolicy = data;
           // [C-9] Staleness guard: warn if policy older than 90 days
           // [D] Heuristic — 90-day policy staleness: ~1 quarterly regime cycle
@@ -1817,7 +1836,7 @@ class PatternBacktester {
         var optLambda = selectRidgeLambdaGCV(X, returns, weights, 5);
         var reg = calcWLSRegression(X, returns, weights, optLambda);
 
-        // ── Huber-IRLS re-weighting (Huber 1964, Street, Carroll & Ruppert 1988) ──
+        // ── Huber-IRLS re-weighting (Huber 1964, Carroll & Ruppert 1988) ──
         // KRX 5-day returns have excess kurtosis (fat tails from limit-up/down ±30%).
         // Standard WLS is not robust to outliers; IRLS down-weights |resid| > delta.
         // Delta = 1.345 * MAD-sigma ≈ 5.8 for KRX 5-day return distribution.
@@ -1846,7 +1865,7 @@ class PatternBacktester {
         }
 
         if (reg) {
-          // Reverse-transform coefficients to original scale (Friedman, Hastie & Tibshirani 2010)
+          // Reverse-transform coefficients to original scale (Hastie, Tibshirani & Friedman 2009)
           for (var rj = 1; rj < reg.coeffs.length; rj++) {
             reg.coeffs[rj] /= scales[rj];
           }

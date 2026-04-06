@@ -158,6 +158,11 @@ def _load_json(path):
 def _get_risk_free_rate():
     """KTB 3Y from bonds_latest.json."""
     bonds = _load_json(os.path.join(DATA_DIR, 'macro', 'bonds_latest.json'))
+    if bonds:
+        # Source guard — reject fake/sample/demo data
+        _src = bonds.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            bonds = None
     if bonds and 'yields' in bonds:
         ktb3y = bonds['yields'].get('ktb_3y')
         if ktb3y is not None:
@@ -372,6 +377,13 @@ def main():
     # ── 입력 데이터 로드 ──
     options_path = os.path.join(DATA_DIR, 'derivatives', 'options_latest.json')
     options_data = _load_json(options_path)
+
+    # Source guard — reject fake/sample/demo data
+    if isinstance(options_data, dict):
+        _src = options_data.get('source', '')
+        if _src in ('sample', 'seed', 'demo'):
+            print(f'  [WARN] Skipping options_latest.json: source={_src} (not real data)')
+            options_data = None
 
     if not options_data:
         print(f'  [WARN] {options_path} not found or empty — generating null result')
