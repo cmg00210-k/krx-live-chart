@@ -46,6 +46,14 @@ server/.login_guard.json
 server/*.log
 .wrangler/
 
+# Generated documents (built by scripts/generate_word.py)
+docs/*.docx
+docs/*.pdf
+docs/reference.docx
+
+# TinyTeX installer (one-time use)
+scripts/_install_tinytex.py
+
 # Cloudflare Pages staging directory (built by scripts/stage_deploy.py)
 # Hard-linked from project root -- never commit
 deploy/
