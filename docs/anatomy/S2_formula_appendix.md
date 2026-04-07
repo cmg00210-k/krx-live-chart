@@ -64,7 +64,7 @@
 | D-12 | SW Beta | -- | S-15 | NEW in V7 |
 | D-13 | Vol Regime | S-13 | S-16 | NEW in V7 |
 | D-14 | Huber-IRLS | -- | -- | NEW (this session) |
-| D-15 | Beta-Binomial | -- | S-12 | V7 canonical |
+| D-15 | Beta-Binomial | -- | S-22 | V7 canonical |
 | D-16 | BCa Bootstrap | -- | S-4 | V7 canonical |
 | D-17 | CUSUM ARL | -- | S-12 | V7 canonical |
 | D-18 | GCV Eigendecomp | -- | S-2 | V7 canonical |
@@ -913,7 +913,7 @@ Code reference: backtester.js:1859-1885
 
 ---
 
-## Derivation D-15: Beta-Binomial Posterior for Pattern Win Rates [S-12]
+## Derivation D-15: Beta-Binomial Posterior for Pattern Win Rates [V7: S-22]
 
 ### Problem
 

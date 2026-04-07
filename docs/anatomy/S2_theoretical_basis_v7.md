@@ -1395,6 +1395,66 @@ _rollingOOSIC(pairs, minWindow)  // OOS: expanding window, non-overlapping folds
 
 ---
 
+## S-22: Beta-Binomial Posterior for Pattern Win Rates
+
+### Academic Source
+- DeGroot, M.H. (1970). *Optimal Statistical Decisions*. McGraw-Hill. Ch.9.
+- Gelman, A. et al. (2013). *Bayesian Data Analysis*. 3rd ed. CRC Press. Ch.2.
+
+### Formula
+
+The Beta distribution is the conjugate prior for the Binomial likelihood. Given prior belief $p \sim \text{Beta}(\alpha_0, \beta_0)$ and observed data ($w$ wins in $n$ trials), the posterior is:
+
+$$p \mid w, n \sim \text{Beta}(\alpha_0 + w, \;\beta_0 + n - w)$$
+
+**Prior parametrization from empirical win rate:**
+
+$$\alpha_0 = p_0 \cdot n_0, \quad \beta_0 = (1 - p_0) \cdot n_0$$
+
+where $p_0$ is the prior win rate and $n_0$ is the effective prior sample size.
+
+**Posterior mean (Bayes estimator under squared loss):**
+
+$$\hat{p} = \frac{\alpha_0 + w}{\alpha_0 + \beta_0 + n} = \frac{n_0 \cdot p_0 + w}{n_0 + n}$$
+
+This is a weighted average of the prior mean $p_0$ and the MLE $w/n$, with weights proportional to effective sample sizes $n_0$ and $n$.
+
+**95% credible interval:**
+
+$$\text{CI}_{95} = \left[F^{-1}_{\text{Beta}}(0.025;\;\alpha_{\text{post}},\;\beta_{\text{post}}),\; F^{-1}_{\text{Beta}}(0.975;\;\alpha_{\text{post}},\;\beta_{\text{post}})\right]$$
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $p$ | True win rate | Probability of pattern predicting correct direction | dimensionless | $[0, 1]$ | -- |
+| $\alpha_0, \beta_0$ | Prior shape parameters | Encode prior belief strength and location | dimensionless | $(0, \infty)$ | DeGroot (1970) |
+| $n_0$ | Effective prior sample size | Controls shrinkage toward prior | integer | $[10, 100]$ | Design choice |
+| $p_0$ | Prior win rate | From academic literature or PATTERN_WR_KRX | dimensionless | $[0.40, 0.65]$ | Empirical |
+| $w$ | Observed wins | Count of correct-direction predictions | integer | $[0, n]$ | Backtest data |
+| $n$ | Total observations | Pattern occurrences in backtest window | integer | $\ge 1$ | Backtest data |
+
+### Constants
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| Prior $n_0$ | 50 (default) | [B] | [20, 100] | Pattern-specific in `PATTERN_SAMPLE_SIZES` | `backtester.js:288` |
+| Prior $p_0$ | Pattern-specific | [C] | [0.40, 0.65] | `PATTERN_WR_KRX` (signalEngine.js:427) | `backtester.js:289` |
+
+### Implementation: `backtester.js:288-294`, `scripts/update_win_rates.py:62-67`
+
+The posterior mean is computed in `backtester.js` and injected into PatternEngine for live win rate display. The Python script `update_win_rates.py` computes offline posteriors from batch backtest results and exports to `PATTERN_WR_KRX`.
+
+### Audit Findings
+
+**`[VALID]` Conjugacy derivation:** The posterior kernel $p^{\alpha+w-1}(1-p)^{\beta+n-w-1}$ is correctly identified as $\text{Beta}(\alpha+w, \beta+n-w)$. This is a textbook result (Gelman et al. 2013, §2.1).
+
+**`[VALID]` Posterior mean formula:** $(\alpha+w)/(\alpha+\beta+n)$ correctly implements the Bayes estimator. The shrinkage interpretation (weighted average of prior and MLE) is standard.
+
+**`[NOTE]` Prior sensitivity:** With $n_0 = 50$, the prior dominates until ~50 observations accumulate. For patterns with fewer than 30 occurrences, the posterior is essentially the prior. This is by design -- insufficient data should not override academic priors.
+
+> **Extended derivation:** See S2_formula_appendix.md D-15 for the full 5-step derivation chain.
+
+---
+
 ## Appendix A: Cross-Reference Summary Table
 
 | ID | Formula | File:Lines | Constants Count | Grade Profile | Verdict |
@@ -1425,18 +1485,19 @@ _rollingOOSIC(pairs, minWindow)  // OOS: expanding window, non-overlapping folds
 | S-19 | 52-week S/R anchor | patterns.js:3444-3498 | 4 (1B, 3C) | Good | VALID (virtual touches: NOTE) |
 | S-20 | Platt sigmoid calibration | signalEngine.js:2381-2392 | 3 (2B, 1C) | Good | VALID |
 | S-21 | Spearman rank IC | backtester.js:617-694 | 3 (3B) | All B | VALID (OOS fallback: NOTE) |
+| S-22 | Beta-Binomial posterior | backtester.js:288-294 | 2 (1B, 1C) | Good | VALID (prior sensitivity: NOTE) |
 
 ### Aggregate Grades
 
 | Grade | Count | % |
 |-------|-------|---|
 | [A] Academic Fixed | 21 | 24% |
-| [B] Tunable with basis | 29 | 33% |
-| [C] KRX-Adapted | 13 | 15% |
-| [D] Heuristic | 24 | 28% |
+| [B] Tunable with basis | 30 | 34% |
+| [C] KRX-Adapted | 14 | 16% |
+| [D] Heuristic | 24 | 27% |
 | [E] Deprecated | 0 | 0% |
 
-**Total constants audited: 87**
+**Total constants audited: 89**
 
 ### Overall System Assessment
 
