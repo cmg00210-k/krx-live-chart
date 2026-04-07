@@ -27,7 +27,7 @@
 | S-3 | ACF | calcHurst (implicit) | [A] |
 | S-4 | GARCH(1,1) | indicators.js:1336-1376 (EWMA) | 3[B] |
 | S-5 | WLS | indicators.js:558-749 | 1[C] (lambda) |
-| S-6 | Ridge | indicators.js:581-585 | 1[C] (lambda=2.0) |
+| S-6 | Ridge | indicators.js:581-585 | 1[C] (lambda=GCV auto) |
 | S-7 | HC3 | indicators.js:636-674 | 1[A] |
 | S-8 | VIF | indicators.js:676-733 | [A] |
 | S-9 | GEV | Theoretical reference | [A] |
@@ -37,29 +37,44 @@
 | S-13 | Mean Reversion | patterns.js:245-250 | 1[B], 1[C], 2[D] |
 | S-14 | BCa Bootstrap | backtester.js | [A] |
 | S-15 | BH-FDR | backtester.js | 1[B] |
-| S-16 | Cornish-Fisher | backtester.js:334-370 | All [A] |
+| S-16 | Cornish-Fisher | backtester.js _tCriticalForAlpha() (lines 976-1010) | All [A] |
 | S-17 | Kalman Filter | indicators.js:170-199 | 1[A], 1[B], 2[C] |
 | S-18 | VRP Proxy | signalEngine.js, indicators.js | 3[D] |
 | S-19 | WLS 6-Variable | backtester.js:590-614 | [B] |
 
+### V5 to V7 Formula ID Mapping
+
+> This appendix (V5) uses Derivation IDs (D-1 through D-19).
+> The main theoretical basis (V7) uses Section IDs (M-* and S-*).
+> The following table maps between them.
+
+| Derivation | Topic | V5 Appendix ID | V7 Section ID | Status |
+|-----------|-------|----------------|---------------|--------|
+| D-1 | Hurst R/S | M-6 | M-2 | V7 canonical |
+| D-2 | Hurst Shrinkage | M-7 | -- | V5-only |
+| D-3 | Hill Estimator | S-11 | S-6 | V7 canonical |
+| D-4 | GPD Tail Model | S-10 | S-7 | V7 canonical |
+| D-5 | WLS/Ridge/HC3 | S-5,S-6,S-7 | S-1,S-2,S-3 | V7 canonical |
+| D-6 | EWMA Volatility | S-4 | S-8 | V7 canonical |
+| D-7 | Mean Reversion | -- | -- | V5-only |
+| D-8 | Cornish-Fisher | S-16 | S-11 | V7 canonical |
+| D-9 | Kalman Filter | S-17 | M-3 | V7 canonical |
+| D-10 | Parkinson HV | -- | S-14 | NEW in V7 |
+| D-11 | VRP Calculation | S-18 | S-10 | V7 canonical |
+| D-12 | SW Beta | -- | S-15 | NEW in V7 |
+| D-13 | Vol Regime | S-13 | S-16 | NEW in V7 |
+| D-14 | Huber-IRLS | -- | -- | NEW (this session) |
+| D-15 | Beta-Binomial | -- | S-12 | V7 canonical |
+| D-16 | BCa Bootstrap | -- | S-4 | V7 canonical |
+| D-17 | CUSUM ARL | -- | S-12 | V7 canonical |
+| D-18 | GCV Eigendecomp | -- | S-2 | V7 canonical |
+| D-19 | Walk-Forward | -- | -- | NEW (this session) |
+
 ---
 
-## Derivation D-1: Hurst Exponent R/S Analysis [M-6]
+## Derivation D-1: Hurst Exponent R/S Analysis [V7: M-2]
 
-### Step 1: Log-return transformation
-
-Given closing prices P_0, P_1, ..., P_T, compute log-returns:
-
-```
-r_t = ln(P_{t+1} / P_t),  t = 0, 1, ..., T-1
-```
-
-This produces T data points. Log-returns are used (not arithmetic) because:
-1. They are additive over time: ln(P_T/P_0) = sum(r_t)
-2. They are approximately stationary for equity data
-3. R/S on non-stationary prices gives H ~ 0.9+ (biased upward by ~0.4)
-
-Code reference: indicators.js:216-220
+> **Log-return definition and rationale:** See V7 M-1 (S2_theoretical_basis_v7.md section M-1).
 
 ### Step 2: Block partition
 
@@ -140,7 +155,7 @@ Code reference: indicators.js:214
 
 ---
 
-## Derivation D-2: James-Stein Hurst Shrinkage [M-7]
+## Derivation D-2: James-Stein Hurst Shrinkage [V5-only: M-7]
 
 ### Theoretical foundation
 
@@ -220,7 +235,7 @@ Code reference: patterns.js:230-237
 
 ---
 
-## Derivation D-3: Hill Tail Index Estimator [S-11]
+## Derivation D-3: Hill Tail Index Estimator [V7: S-6]
 
 ### Setup
 
@@ -283,7 +298,7 @@ Code reference: indicators.js:276-307
 
 ---
 
-## Derivation D-4: GPD Fit via Probability Weighted Moments [S-10]
+## Derivation D-4: GPD Fit via Probability Weighted Moments [V7: S-7]
 
 ### Step 1: Threshold selection
 
@@ -349,7 +364,7 @@ Code reference: indicators.js:323-376
 
 ---
 
-## Derivation D-5: WLS with Ridge and HC3 [S-5, S-6, S-7]
+## Derivation D-5: WLS with Ridge and HC3 [V7: S-1, S-2, S-3]
 
 ### Full pipeline derivation
 
@@ -357,7 +372,7 @@ Code reference: indicators.js:323-376
 - X: n x p design matrix (with intercept in column 0)
 - y: n x 1 response (forward returns)
 - w: n x 1 time-decay weights: w_i = 0.995^(T - t_i)
-- lambda: Ridge penalty (default 2.0)
+- lambda: GCV auto-selected (indicators.js:826 selectRidgeLambdaGCV), fallback 1.0
 
 **Step 1: Form weighted cross-product**
 
@@ -444,30 +459,9 @@ HC3_t_j = beta_j / HC3_SE_j
 
 Code: indicators.js:636-674
 
-**Verification of HC3 formula against canonical form:**
-
-The canonical HC3 (Davidson & MacKinnon 1993, Long & Ervin 2000):
-
-```
-Cov_HC3 = (X'X)^{-1} [sum e_i^2/(1-h_ii)^2 * x_i x_i'] (X'X)^{-1}
-```
-
-For WLS, replacing (X'X) with (X'WX) and incorporating weights into
-the meat matrix, we get:
-
-```
-Cov_HC3_WLS = (X'WX)^{-1} [sum (w_i * e_i)^2/(1-h_ii)^2 * x_i x_i'] (X'WX)^{-1}
-```
-
-The code at indicators.js:654 computes:
-
-```
-eScaled = w * w * residuals[i] / (denom * denom)   // w^2 * e_i / (1-h_ii)^2
-meat[j][k] += X[i][j] * eScaled * residuals[i] * X[i][k]
-            = X[i][j] * w^2 * e_i^2 / (1-h_ii)^2 * X[i][k]
-```
-
-This matches the canonical WLS HC3 form. VALID.
+**Verification against canonical form:** The WLS HC3 sandwich is
+`Cov_HC3_WLS = (X'WX)^{-1} [sum (w_i * e_i)^2/(1-h_ii)^2 * x_i x_i'] (X'WX)^{-1}`.
+The code (indicators.js:654) computes `w^2 * e^2 / (1-h)^2 * x x'`, matching this form exactly. VALID.
 
 **Step 8: VIF diagnostics**
 
@@ -481,7 +475,7 @@ Code: indicators.js:676-733
 
 ---
 
-## Derivation D-6: EWMA Volatility [S-4]
+## Derivation D-6: EWMA Volatility [V7: S-8]
 
 ### Initialization
 
@@ -547,7 +541,7 @@ Code: indicators.js:1336-1376
 
 ---
 
-## Derivation D-7: Mean Reversion Weight (OU-Based) [S-13]
+## Derivation D-7: Mean Reversion Weight (OU-Based) [V5-only]
 
 ### Ornstein-Uhlenbeck process
 
@@ -604,7 +598,7 @@ Code reference: patterns.js:245-250
 
 ---
 
-## Derivation D-8: Cornish-Fisher t-Quantile Approximation [S-16]
+## Derivation D-8: Cornish-Fisher t-Quantile Approximation [V7: S-11]
 
 ### Problem
 
@@ -640,60 +634,16 @@ approaches normal). For small df, the correction adds mass to the tails.
 
 ### Accuracy analysis
 
-```
-df=30:  Cornish-Fisher vs exact (scipy.stats.t.ppf)
-  alpha=0.05: CF=2.042, exact=2.042, error < 0.001
-  alpha=0.001: CF=3.385, exact=3.385, error < 0.001
+> **Numerical accuracy analysis:** Migrated to V7 S-11 (S2_theoretical_basis_v7.md §S-11, Appendix: Numerical Accuracy).
 
-df=10:
-  alpha=0.05: CF=2.228, exact=2.228, error < 0.002
-  alpha=0.001: CF=3.581, exact=3.581, error < 0.005
-
-df=5:
-  alpha=0.05: CF=2.571, exact=2.571, error < 0.01
-  alpha=0.001: CF=4.03, exact=4.032, error ~ 0.05
-```
-
-Since the pattern backtester requires n >= 30 for WLS regression, df >= 29.
-In this regime, the Cornish-Fisher approximation is essentially exact.
-
-Code reference: backtester.js:334-370
+Code reference: backtester.js _tCriticalForAlpha() (lines 976-1010)
 
 ---
 
-## Derivation D-9: Adaptive Kalman Filter [S-17]
+## Derivation D-9: Adaptive Kalman Filter [V7: M-3]
 
-### State-space model
-
-The Kalman filter treats the closing price as a noisy observation of a
-latent "true" price state:
-
-```
-State equation:    x_t = x_{t-1} + w_t,      w_t ~ N(0, Q_t)
-Observation eq:    z_t = x_t + v_t,           v_t ~ N(0, R)
-```
-
-This is a random walk state model with time-varying process noise Q_t
-and fixed observation noise R.
-
-### Prediction step
-
-```
-x_{t|t-1} = x_{t-1|t-1}           (predicted state = previous state)
-P_{t|t-1} = P_{t-1|t-1} + Q_t     (predicted covariance grows by Q_t)
-```
-
-### Update step
-
-```
-K_t = P_{t|t-1} / (P_{t|t-1} + R)    (Kalman gain)
-x_{t|t} = x_{t|t-1} + K_t * (z_t - x_{t|t-1})   (updated state)
-P_{t|t} = (1 - K_t) * P_{t|t-1}       (updated covariance shrinks)
-```
-
-**Kalman gain interpretation:**
-- K_t close to 1: trust observation (low P/high R)
-- K_t close to 0: trust prediction (high P/low R)
+> **State-space model, prediction, and update equations:** See V7 M-3 (S2_theoretical_basis_v7.md section M-3).
+> Only the adaptive-Q extension is derived below (unique to this appendix).
 
 ### Adaptive Q (Mohamed & Schwarz 1999)
 
@@ -708,6 +658,11 @@ When current volatility exceeds the running average (ewmaVar/meanVar > 1),
 Q_t increases, making the filter more responsive (higher K). In low
 volatility periods, Q_t decreases, making the filter smoother.
 
+**Return type note:** The Kalman filter operates on price levels (closing prices),
+NOT log-returns. The output `x_t` is a smoothed price estimate. The innovation
+`z_t - x_{t|t-1}` is a simple price difference, not a log-return. See V7 M-3
+for the complete state-space specification.
+
 **Behavior at extremes:**
 - High vol: K -> ~0.5, filter tracks price closely
 - Low vol: K -> ~0.01, filter produces very smooth output
@@ -716,7 +671,7 @@ Code reference: indicators.js:170-199
 
 ---
 
-## Derivation D-10: Parkinson Historical Volatility [indicators.js:481-522]
+## Derivation D-10: Parkinson Historical Volatility [V7: S-14]
 
 ### Formula
 
@@ -759,7 +714,7 @@ Code reference: indicators.js:481-522
 
 ---
 
-## Derivation D-11: VRP Calculation [indicators.js:536-543]
+## Derivation D-11: VRP Calculation [V7: S-10]
 
 ### Formula
 
@@ -791,7 +746,7 @@ Code reference: indicators.js:536-543
 
 ---
 
-## Derivation D-12: CAPM Beta with Scholes-Williams Correction [indicators.js:391-477]
+## Derivation D-12: CAPM Beta with Scholes-Williams Correction [V7: S-15]
 
 ### Standard OLS Beta
 
@@ -826,7 +781,7 @@ Code reference: indicators.js:391-477
 
 ---
 
-## Derivation D-13: Volatility Regime Classification [indicators.js:1385-1416]
+## Derivation D-13: Volatility Regime Classification [V7: S-16]
 
 ### Formula
 
@@ -861,6 +816,575 @@ which is approximate (half-life is exactly 69 for alpha=0.01).
 | EMA alpha | 0.01 | [B] | Long lookback for structural volatility level |
 
 Code reference: indicators.js:1385-1416
+
+---
+
+## Derivation D-14: Huber-IRLS Robust Regression [backtester.js:1859-1885]
+
+### Problem
+
+Standard WLS (Weighted Least Squares) is sensitive to outliers. KRX 5-day
+returns exhibit excess kurtosis (~18.7) due to daily limit-up/down (+-30%)
+events, meaning fat-tailed residuals violate the Gaussian WLS assumption.
+Huber's M-estimation down-weights large residuals via Iteratively Reweighted
+Least Squares (IRLS).
+
+### Step 1: Huber loss function
+
+The Huber loss replaces the quadratic loss with a linear penalty beyond
+a threshold delta:
+
+```
+                 { e^2 / 2                   if |e| <= delta
+rho(e; delta) = {
+                 { delta * |e| - delta^2 / 2  if |e| > delta
+```
+
+This is convex and continuously differentiable (unlike trimmed least squares),
+guaranteeing a unique minimum.
+
+### Step 2: Influence function and weights
+
+The psi-function (derivative of rho):
+
+```
+psi(e) = d/de rho(e) = { e        if |e| <= delta
+                        { delta * sign(e)  if |e| > delta
+```
+
+The IRLS weight function w(e) = psi(e) / e:
+
+```
+w(e) = { 1              if |e| <= delta
+       { delta / |e|    if |e| > delta
+```
+
+This is exactly the formula implemented at backtester.js:1875:
+`hw = absR > HUBER_DELTA ? HUBER_DELTA / absR : 1.0`
+
+### Step 3: IRLS convergence
+
+At each iteration t, solve the weighted least squares problem:
+
+```
+beta^{(t+1)} = argmin sum_i w(e_i^{(t)}) * (y_i - x_i' beta)^2
+```
+
+where `e_i^{(t)} = y_i - x_i' beta^{(t)}`. Because Huber's rho is
+strictly convex, the IRLS iterates converge to the unique M-estimator
+(Huber 1981, Theorem 7.6.1). The convergence is essentially Fisher
+scoring applied to the M-estimation score equations. In practice, 3-5
+iterations suffice for financial data (Street, Carroll & Ruppert 1988).
+
+### Step 4: Delta = 5.8 calibration for KRX
+
+The canonical Huber delta = 1.345 * sigma achieves 95% asymptotic
+efficiency at the Gaussian model. For non-Gaussian returns, sigma
+must be estimated robustly:
+
+```
+MAD = median(|r_i - median(r)|)    (Median Absolute Deviation)
+sigma_MAD = MAD / 0.6745           (consistency factor for normal)
+```
+
+Empirical calibration on KRX 5-day returns (2,704 stocks, 2023-2025):
+
+```
+MAD of 5-day returns    = 2.91%
+sigma_MAD               = 2.91 / 0.6745 = 4.31%
+delta = 1.345 * 4.31    = 5.80%
+```
+
+The empirical kurtosis is ~18.7 (vs 3.0 for normal), confirming
+fat tails that justify robust regression.
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| HUBER_DELTA | 5.8 | [C] | 1.345 * sigma_MAD; sigma_MAD = 4.31 from KRX 5-day returns |
+| HUBER_ITERS | 5 | [B] | Street, Carroll & Ruppert (1988): 3-5 for convex M-estimators |
+
+References: Huber (1964) "Robust Estimation of a Location Parameter",
+Maronna, Martin & Yohai (2006) "Robust Statistics" Ch.4,
+Street, Carroll & Ruppert (1988) JASA 83(404).
+
+Code reference: backtester.js:1859-1885
+
+---
+
+## Derivation D-15: Beta-Binomial Posterior for Pattern Win Rates [S-12]
+
+### Problem
+
+Given a pattern type with prior win rate belief and observed backtest
+results, compute the posterior distribution of the true win rate p.
+The Beta-Binomial model is the natural choice because the Beta prior
+is conjugate to the Binomial likelihood.
+
+### Step 1: Prior specification
+
+For each pattern, the prior encodes empirical win rate from published
+studies and initial KRX observations:
+
+```
+p ~ Beta(alpha_prior, beta_prior)
+
+alpha_prior = p_0 * n_0
+beta_prior  = (1 - p_0) * n_0
+```
+
+where p_0 is the prior win rate (e.g., 0.52) and n_0 is the effective
+prior sample size (controls prior strength).
+
+### Step 2: Binomial likelihood
+
+Given n independent pattern occurrences with w wins:
+
+```
+L(p | w, n) = C(n,w) * p^w * (1-p)^(n-w)
+```
+
+### Step 3: Posterior derivation (conjugacy)
+
+```
+posterior  proportional to  prior * likelihood
+Beta(alpha_post, beta_post) = Beta(alpha_prior + w, beta_prior + (n - w))
+```
+
+This follows because:
+
+```
+f(p | data) ~ p^(alpha-1) * (1-p)^(beta-1) * p^w * (1-p)^(n-w)
+            = p^(alpha+w-1) * (1-p)^(beta+n-w-1)
+```
+
+which is the kernel of Beta(alpha + w, beta + n - w).
+
+### Step 4: Posterior mean and credible interval
+
+```
+E[p | data] = (alpha + w) / (alpha + beta + n)
+```
+
+This is a weighted average of the prior mean alpha/(alpha+beta) and the
+MLE w/n, with weights proportional to effective sample sizes. The 95%
+credible interval uses Beta quantiles: [B^{-1}(0.025), B^{-1}(0.975)].
+
+### Step 5: Implementation
+
+In `scripts/update_win_rates.py:62-67`, the prior is computed from
+empirical win rates. In `backtester.js:288-294`, the posterior mean
+`alpha / (alpha + beta) * 100` is injected into PatternEngine for
+live win rate display.
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| Prior n_0 | 50 (default) | [B] | Effective sample size; pattern-specific in PATTERN_SAMPLE_SIZES |
+| Posterior mean | (alpha+w)/(alpha+beta+n) | [A] | Conjugate prior theorem |
+
+References: DeGroot (1970) "Optimal Statistical Decisions",
+Gelman et al. (2013) "Bayesian Data Analysis" 3rd ed. Ch.2.
+
+Code reference: scripts/update_win_rates.py:62-106, backtester.js:288-294
+
+---
+
+## Derivation D-16: BCa Bootstrap Confidence Intervals [S-14]
+
+### Problem
+
+Standard percentile bootstrap CIs have poor coverage when the
+statistic's sampling distribution is skewed or biased. The BCa
+(Bias-Corrected and accelerated) method corrects both deficiencies
+by adjusting the percentile cutoffs.
+
+### Step 1: Bootstrap replication
+
+Generate B bootstrap replicates theta_hat*_1, ..., theta_hat*_B by
+resampling the original n observations with replacement and computing
+the statistic on each resample.
+
+### Step 2: Bias correction factor z_0
+
+The bias-correction z_0 measures median bias of the bootstrap
+distribution relative to the original estimate:
+
+```
+z_0 = Phi^{-1}( #{theta_hat*_b < theta_hat} / B )
+```
+
+where Phi^{-1} is the standard normal quantile function. If the
+bootstrap distribution is centered on theta_hat, z_0 = 0. Positive
+z_0 means the bootstrap distribution is shifted below theta_hat.
+
+Implementation (backtester.js:1127-1130):
+```
+countBelow = sum(bootStats[i] < thetaHat for i=1..B)
+z0 = normInv(countBelow / B)
+```
+
+### Step 3: Acceleration factor a_hat
+
+The acceleration corrects for skewness in the sampling distribution.
+It is estimated from jackknife values theta_hat_(i) (statistic computed
+with observation i removed):
+
+```
+theta_bar = (1/n) * sum(theta_hat_(i))
+
+a_hat = sum( (theta_bar - theta_hat_(i))^3 )
+        -------------------------------------------
+        6 * [ sum( (theta_bar - theta_hat_(i))^2 ) ]^{3/2}
+```
+
+This is the skewness of the influence function, normalized by the cube
+of its standard deviation. When a_hat = 0, BCa reduces to BC (bias-corrected
+only).
+
+Implementation (backtester.js:1132-1146):
+```
+num = sum(d^3), den = sum(d^2), where d = jMean - jackValues[i]
+aHat = num / (6 * pow(den, 1.5))
+```
+
+### Step 4: Adjusted percentile formula
+
+The BCa interval endpoints are:
+
+```
+alpha_1 = Phi( z_0 + (z_0 + z_{alpha/2}) / (1 - a_hat * (z_0 + z_{alpha/2})) )
+alpha_2 = Phi( z_0 + (z_0 + z_{1-alpha/2}) / (1 - a_hat * (z_0 + z_{1-alpha/2})) )
+```
+
+The CI is then [theta_hat*_{(alpha_1 * B)}, theta_hat*_{(alpha_2 * B)}]
+from the sorted bootstrap distribution.
+
+### Correctness proof sketch (Efron 1987, Theorem 2.1)
+
+If the statistic has a monotone transformation phi = m(theta) such that
+phi_hat ~ N(phi - z_0 * sigma_phi, sigma_phi^2) with sigma_phi = 1 + a*phi,
+then the BCa interval achieves exact coverage in the transformed space.
+The z_0 and a_hat parameters are identified from the bootstrap and
+jackknife respectively, without knowing m explicitly.
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| B (bootstrap reps) | varies | [B] | Minimum 50 enforced (line 1125) |
+| alpha | 0.05 | [B] | 95% CI standard |
+
+References: Efron (1987) "Better Bootstrap Confidence Intervals" JASA 82(397),
+DiCiccio & Efron (1996) "Bootstrap Confidence Intervals" Statistical Science.
+
+Code reference: backtester.js:1113-1166
+
+---
+
+## Derivation D-17: CUSUM Average Run Length [indicators.js:1480-1570]
+
+### Problem
+
+The Page (1954) CUSUM procedure detects shifts in the mean of a
+sequential process. The key design parameters are the slack k and
+threshold h, which jointly determine the Average Run Length (ARL) --
+the expected number of observations before a false alarm (in-control)
+or before detection (out-of-control).
+
+### Step 1: Standard one-sided CUSUM
+
+For standardized observations z_t = (x_t - mu_0) / sigma:
+
+```
+S_t^+ = max(0, S_{t-1}^+ + z_t - k)     (upward shift detection)
+S_t^- = max(0, S_{t-1}^- - z_t - k)     (downward shift detection)
+```
+
+An alarm fires when S_t^+ > h or S_t^- > h, where k is the slack
+(allowance) and h is the decision threshold.
+
+### Step 2: In-control ARL (Wald approximation)
+
+Under H_0 (no shift), the in-control ARL is approximately:
+
+```
+ARL_0 ~ exp(2 * h * k + C) / (2 * k^2)
+```
+
+where C depends on the reference distribution. For Gaussian observations:
+
+```
+ARL_0(k=0.5, h=2.5) ~ 250    (approximately 1 year of trading days)
+ARL_0(k=0.5, h=4.0) ~ 4,100  (approximately 16 years)
+ARL_0(k=0.5, h=5.0) ~ 30,000
+```
+
+### Step 3: Optimality of k = 0.5
+
+Lorden (1971) showed that for detecting a shift of magnitude delta
+in the mean, the minimax-optimal slack is k = delta/2. For a 1-sigma
+shift (delta = 1):
+
+```
+k_opt = delta / 2 = 0.5
+```
+
+The implementation uses k = 0.5 (indicators.js:1511 variable `slack`),
+which is optimal for detecting shifts of approximately 1 standard
+deviation.
+
+### Step 4: Adaptive variant caveat
+
+**CRITICAL:** The implementation at indicators.js:1509-1555 uses
+time-varying mean and variance (EMA-based running statistics with
+alpha = 2/31). This violates the standard CUSUM assumption of known
+mu_0 and sigma. Consequences:
+
+1. The theoretical ARL tables no longer apply exactly
+2. The adaptive CUSUM has shorter effective ARL_0 because the running
+   mean tracks the true mean, effectively recentering the CUSUM
+3. The vol-regime adaptive threshold (h = 1.5/2.5/3.5) partially
+   compensates by widening h during high-volatility regimes
+
+The code comment at line 1508 flags this explicitly:
+"ARL calibration assumes standard CUSUM; adaptive h/k variant may differ"
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| slack (k) | 0.5 | [B] | Lorden (1971) minimax for 1-sigma shift |
+| threshold (h) | 2.5 default | [B] | Roberts (1966) ARL optimization |
+| warmup | 30 | [B] | Initial mean/variance stabilization |
+| EMA alpha | 2/31 | [B] | ~30-bar half-life for adaptive statistics |
+| h_high | 3.5 | [C] | Vol-regime adaptive; reduces false alarms in high-vol |
+| h_low | 1.5 | [C] | Vol-regime adaptive; increases sensitivity in low-vol |
+
+References: Page (1954) "Continuous Inspection Schemes" Biometrika,
+Lorden (1971) "Procedures for Reacting to a Change in Distribution"
+Annals of Mathematical Statistics, Roberts (1966) Technometrics.
+
+Code reference: indicators.js:1480-1570
+
+---
+
+## Derivation D-18: GCV Eigendecomposition for Ridge Lambda Selection [indicators.js:826-900]
+
+### Problem
+
+Ridge regression adds an L2 penalty lambda * ||beta||^2 to the WLS
+objective. The regularization parameter lambda controls bias-variance
+tradeoff. Generalized Cross-Validation (GCV) selects lambda by
+minimizing a rotation-invariant estimate of prediction error, without
+requiring leave-one-out refitting.
+
+### Step 1: Eigendecomposition of the weighted normal equations
+
+Form the weighted design matrix product A = X^T W X (p x p) and the
+weighted response b = X^T W y (p x 1). Eigendecompose A:
+
+```
+A = Q * diag(sigma_1, ..., sigma_p) * Q^T
+```
+
+where Q is orthogonal (eigenvectors) and sigma_j >= 0 are eigenvalues.
+The implementation uses Jacobi iteration (indicators.js:750-824) for
+this p x p eigendecomposition (p = 5 in the 6-variable WLS model).
+
+### Step 2: Rotated response
+
+Define the rotated response vector z = Q^T b:
+
+```
+z_j = sum_k Q_{kj} * b_k,   j = 1, ..., p
+```
+
+This transforms the ridge problem into p independent scalar problems.
+
+### Step 3: Hat matrix trace
+
+The ridge hat matrix is H_lambda = X(X^T W X + lambda I)^{-1} X^T W.
+In the eigenspace:
+
+```
+tr(H_lambda) = sum_{j=1}^{p} sigma_j / (sigma_j + lambda_j)
+```
+
+where lambda_j = lambda for j >= 1 (feature columns) and lambda_0 = 0
+(intercept column is never regularized). This is implemented at
+indicators.js:875-877:
+```
+lamj = (j === 0) ? 0 : lam
+trH += sigma[j] / (sigma[j] + lamj)
+```
+
+### Step 4: RSS decomposition
+
+The residual sum of squares decomposes into a lambda-independent
+perpendicular component and a lambda-dependent bias component:
+
+```
+RSS_perp = ||W^{1/2} y||^2 - sum_j z_j^2 / sigma_j
+```
+
+This is the projection of y onto the null space of X (unaffected by
+regularization). The bias component introduced by shrinkage:
+
+```
+RSS_bias(lambda) = sum_j lambda_j^2 * z_j^2 / (sigma_j * (sigma_j + lambda_j)^2)
+```
+
+Total: RSS(lambda) = RSS_perp + RSS_bias(lambda).
+
+Derivation of RSS_bias: The ridge solution is beta_j = z_j / (sigma_j + lambda_j).
+The unpenalized solution is beta_j^OLS = z_j / sigma_j. The shrinkage bias
+for component j is z_j * lambda_j / (sigma_j * (sigma_j + lambda_j)), and
+its squared contribution to RSS is:
+
+```
+sigma_j * (z_j * lambda_j / (sigma_j * (sigma_j + lambda_j)))^2
+= lambda_j^2 * z_j^2 / (sigma_j * (sigma_j + lambda_j)^2)
+```
+
+### Step 5: GCV formula
+
+The GCV score (Golub, Heath & Wahba 1979):
+
+```
+GCV(lambda) = (1/n) * RSS(lambda) / [(1/n) * tr(I - H_lambda)]^2
+            = (RSS_perp + RSS_bias) / n  /  (1 - tr(H_lambda)/n)^2
+```
+
+GCV is an approximately unbiased estimate of prediction error that is
+invariant to orthogonal rotations of the design matrix. It avoids the
+O(n) leave-one-out refits that ordinary CV requires.
+
+Implementation (indicators.js:880-884):
+```
+rss = rssPerp + rssBias
+gcvDen = 1 - trH / n
+gcv = (rss / n) / (gcvDen * gcvDen)
+```
+
+### Step 6: Grid search and flatness guard
+
+The implementation searches over lambda in {0.01, 0.05, 0.1, 0.25, 0.5,
+1.0, 2.0, 5.0, 10.0}. If the GCV surface varies less than 1% across
+the grid (flat surface), lambda = 1.0 is returned as a conservative
+default (indicators.js:897).
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| Lambda grid | 9 values, 0.01-10.0 | [B] | Covers 3 orders of magnitude |
+| Flatness threshold | 1% | [B] | Below noise floor; default conservative |
+| Default fallback | lambda = 1.0 | [C] | Moderate regularization when GCV uninformative |
+| Intercept exclusion | lambda_0 = 0 | [A] | Never regularize the intercept (Hastie et al. 2009) |
+| Min eigenvalue | 1e-10 | [A] | Numerical stability guard |
+
+References: Golub, Heath & Wahba (1979) "Generalized Cross-Validation as
+a Method for Choosing a Good Ridge Parameter" Technometrics 21(2),
+Hastie, Tibshirani & Friedman (2009) "Elements of Statistical Learning" Ch.3.
+
+Code reference: indicators.js:826-900
+
+---
+
+## Derivation D-19: Walk-Forward Efficiency [backtester.js:697-790]
+
+### Problem
+
+A model that fits well in-sample (IS) may fail out-of-sample (OOS)
+due to overfitting. Walk-Forward Efficiency (WFE) quantifies how much
+of the IS performance survives in OOS conditions, providing a single
+metric to detect overfitting.
+
+### Step 1: Walk-Forward protocol
+
+The time series of length T is divided into K folds using an expanding
+training window:
+
+```
+Fold k (k = 1, ..., K):
+  Training: candles[0 .. T - K*oosSize + (k-1)*oosSize - purge]
+  Purge:    purge = 2 * horizon bars (eliminates look-ahead leakage)
+  Test:     candles[trainEnd + purge .. trainEnd + purge + oosSize]
+```
+
+The expanding (not sliding) window ensures later folds have more
+training data, mimicking realistic model deployment. The purge gap
+follows Bailey & Lopez de Prado (2014): for AR(1) returns with
+half-life ~6.5 bars, purge = 2 * horizon(5) = 10 bars provides
+sufficient decorrelation.
+
+### Step 2: WFE computation
+
+For each fold, compute the mean return of detected patterns:
+
+```
+IS_return_k  = mean return of pattern occurrences in training period
+OOS_return_k = mean return of pattern occurrences in test period
+```
+
+Average across valid folds:
+
+```
+avgIS  = (1/K_valid) * sum(IS_return_k)
+avgOOS = (1/K_valid) * sum(OOS_return_k)
+```
+
+Walk-Forward Efficiency:
+
+```
+WFE = (avgOOS / avgIS) * 100%
+```
+
+### Step 3: Interpretation thresholds (Pardo 2008)
+
+| WFE Range | Label | Interpretation |
+|-----------|-------|----------------|
+| >= 50% | 'robust' | OOS retains majority of IS edge |
+| 30-50% | 'marginal' | Some degradation but potentially viable |
+| < 30% | 'overfit' | IS performance does not generalize |
+
+The 30% threshold is Pardo's empirical recommendation from systematic
+trading system development. Below 30%, the IS-to-OOS decay is so
+severe that the model's apparent predictive power is likely spurious.
+
+### Step 4: Edge cases
+
+1. **Insufficient IS edge**: If |avgIS| < 0.3pp (approximately KRX
+   round-trip cost of 0.25% + 0.015% slippage), WFE is set to 0
+   because there is no meaningful edge to measure efficiency against.
+
+2. **Both-negative returns**: If both avgIS < 0 and avgOOS < 0, the
+   WFE ratio is numerically positive but strategically useless (both
+   periods lose money). Labeled 'negative' regardless of WFE value.
+
+3. **Reliability gating**: When WFE < 30, backtester.js:585 caps the
+   pattern's reliability tier at 'C' (cannot achieve A or B), directly
+   penalizing overfitted patterns in the signal pipeline.
+
+**Constants:**
+
+| Constant | Value | Grade | Justification |
+|----------|-------|-------|---------------|
+| WFE robust threshold | 50% | [B] | Pardo (2008) |
+| WFE overfit threshold | 30% | [B] | Pardo (2008); below this, cap reliability at C |
+| OOS ratio | 20% | [D] | Practitioner convention |
+| Min OOS bars | 15 | [D] | Minimum for statistical stability |
+| Purge | 2 * horizon | [B] | Bailey & Lopez de Prado (2014) AR(1) decorrelation |
+| Min IS edge | 0.3pp | [C] | KRX round-trip cost approximation |
+
+References: Pardo (2008) "The Evaluation and Optimization of Trading
+Strategies" 2nd ed., Bailey & Lopez de Prado (2014) "The Deflated
+Sharpe Ratio" Journal of Portfolio Management.
+
+Code reference: backtester.js:697-790
 
 ---
 
@@ -911,7 +1435,7 @@ Code reference: indicators.js:1385-1416
 | Constant | Value | Calibration status |
 |----------|-------|--------------------|
 | WLS time-decay lambda | 0.995 | Half-life 139 days. Lo (2004) motivated. |
-| Ridge lambda | 2.0 | GCV not applied. Grid search recommended. |
+| Ridge lambda | GCV auto (fallback 1.0) | GCV applied since v58. selectRidgeLambdaGCV(). |
 | Hurst minWindow | 10 | R/S block minimum. Calibratable. |
 | Hurst prior strength k | 20 | Effective prior observations. Calibratable. |
 | mw threshold | 3 ATR | Normal 3-sigma analogy. Uncalibrated. |
@@ -936,7 +1460,7 @@ Code reference: indicators.js:1385-1416
 
 ---
 
-*Document generated: 2026-04-06*
+*Document generated: 2026-04-07*
 *Total formulas documented: 19 (M-1 through M-12, S-1 through S-19)*
 *Total constants graded: 51 (24A + 14B + 6C + 6D + 1E)*
-*Derivations: 13 (D-1 through D-13)*
+*Derivations: 19 (D-1 through D-19)*

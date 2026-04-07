@@ -212,6 +212,8 @@ This matches the scalar Kalman equations exactly.
 
 **Edge case:** `closes[i-1] <= 0` (line 183) skips the bar with `continue`, leaving `result[i] = null`. This can cause gaps in the output array. Downstream code (`signalEngine._detectKalmanTurn`) must handle nulls.
 
+> **Extended derivation:** See S2_formula_appendix.md D-9 for the adaptive-Q derivation unique to this implementation.
+
 ---
 
 ## M-4: Ito's Lemma / Geometric Brownian Motion
@@ -603,6 +605,8 @@ function calcHillEstimator(returns, k)
 
 **`[DISCREPANCY]` $k = \lfloor\sqrt{n}\rfloor$ rule-of-thumb:** The code attributes this to "Drees & Kaufmann (1998)" in the function docstring, but Drees & Kaufmann actually proposed a bootstrap-based adaptive $k$ selection, not the $\sqrt{n}$ rule. The $\sqrt{n}$ rule is a widespread heuristic without specific authorship. **Severity: NOTE -- attribution imprecise but value is reasonable for $n \sim 250$-$500$ ($k \sim 16$-$22$).**
 
+> **Derivation chain:** See S2_formula_appendix.md D-3 for the full Hill-to-GPD derivation chain.
+
 ---
 
 ## S-7: GPD VaR (Pickands-Balkema-de Haan)
@@ -839,7 +843,7 @@ where $\nu = \text{df}$ (degrees of freedom).
 | $\text{df} = 5$ | $< 0.05$ |
 | $\text{df} < 3$ | Not reliable |
 
-### Implementation: `backtester.js:956-991`
+### Implementation: backtester.js `_tCriticalForAlpha()` (lines 976-1010)
 
 ```
 _tCriticalForAlpha(alpha, df)
@@ -852,6 +856,21 @@ _tCriticalForAlpha(alpha, df)
 **`[VALID]` Cornish-Fisher expansion (lines 979-991):** 2nd-order expansion correctly implements $z + (z^3 + z)/(4\nu) + (5z^5 + 16z^3 + 3z)/(96\nu^2)$. The 2nd-order term is only applied for $\text{df} \ge 3$ (line 987).
 
 **`[VALID]` Fat-tail adjustment (lines 994-1033):** `_tCritFatTail()` computes excess kurtosis and reduces effective df when $K_e > 0.5$, using the inverse relationship $\nu \approx 4 + 6/K_e$. This is a sound heuristic based on the t-distribution's kurtosis formula $K = 6/(\nu - 4)$ for $\nu > 4$. This widens CIs for heavy-tailed return distributions.
+
+### Appendix: Numerical Accuracy
+
+Verification against `scipy.stats.t.ppf`:
+
+| df | alpha | CF approx | Exact | Error |
+|----|-------|-----------|-------|-------|
+| 30 | 0.05 | 2.042 | 2.042 | < 0.001 |
+| 30 | 0.001 | 3.385 | 3.385 | < 0.001 |
+| 10 | 0.05 | 2.228 | 2.228 | < 0.002 |
+| 10 | 0.001 | 3.581 | 3.581 | < 0.005 |
+| 5 | 0.05 | 2.571 | 2.571 | < 0.01 |
+| 5 | 0.001 | 4.03 | 4.032 | ~0.05 |
+
+Since the pattern backtester requires $n \ge 30$ for WLS regression ($\text{df} \ge 29$), the Cornish-Fisher approximation is essentially exact in practice.
 
 ---
 
@@ -958,6 +977,424 @@ function calcBinarySegmentation(returns, maxBreaks, minSegment)
 
 ---
 
+## S-14: Parkinson Historical Volatility
+
+### Academic Source
+- Parkinson, M. (1980). "The Extreme Value Method for Estimating the Variance of the Rate of Return." *Journal of Business*, 53(1), 61-65.
+
+### Formula
+
+$$\hat{\sigma}^2_P = \frac{1}{4n \ln 2} \sum_{i=1}^{n} \left[\ln\!\left(\frac{H_i}{L_i}\right)\right]^2$$
+
+$$\text{HV} = \sqrt{\hat{\sigma}^2_P} \times \sqrt{T}$$
+
+The key theoretical result from Parkinson (1980) is $E\!\left[\ln(H/L)^2\right] = 4 \ln 2 \cdot \sigma^2 \cdot \Delta t$, which makes the high-low range estimator approximately 5 times more efficient than the close-to-close estimator under GBM assumptions.
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\hat{\sigma}^2_P$ | Parkinson variance | Daily variance estimate from H/L range | dimensionless | $(0, +\infty)$ | Parkinson (1980) |
+| $H_i$ | Daily high price | Intraday maximum price | KRW | $(0, +\infty)$ | Market data |
+| $L_i$ | Daily low price | Intraday minimum price | KRW | $(0, +\infty)$; $L_i \le H_i$ | Market data |
+| $n$ | Valid observation count | Number of bars with valid H/L data | integer | $[\lceil \text{period}/2 \rceil, \text{period}]$ | -- |
+| $T$ | Annualization factor | KRX trading days per year | integer | 250 | KRX convention |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| `period` | 20 | [B] | [10, 60] | Standard 1-month lookback | `indicators.js:493` param default |
+| `KRX_TRADING_DAYS` | 250 | [A] | fixed | KRX annual trading days | `indicators.js:10` |
+| `validCount` threshold | `n/2` (min 5) | [D] | [n/3, 2n/3] | Heuristic minimum data fraction | `indicators.js:512` |
+
+### Implementation: `indicators.js:481-522`
+
+```
+function calcHV(candles, period)
+```
+
+### Audit Findings
+
+**`[VALID]` Parkinson formula (lines 514-516):** $\text{variance} = \text{sumLogSq} / (4 \times \text{validCount} \times \text{LN2})$, where LN2 = 0.6931471805599453. This exactly implements $\hat{\sigma}^2_P = \frac{1}{4n\ln 2}\sum[\ln(H/L)]^2$.
+
+**`[VALID]` Annualization (line 519):** Uses $\sqrt{250}$ (KRX trading days), consistent with the convention in S-8 (EWMA vol) and S-9 (HAR-RV).
+
+**`[DISCREPANCY]` KRX price limits truncate H/L range:** KRX $\pm 30\%$ daily price limits compress the observed $\ln(H/L)$ range. Under severe limit-up/limit-down events, $H = L$ (locked limit), producing $\ln(1) = 0$ which is excluded by the `hi <= 0 || lo <= 0` guard but not by an explicit `H = L` guard. However, the `validCount` threshold ensures that days with zero range do not dominate the estimate. **Severity: NOTE -- the bias is downward (HV underestimated on limit days), which is conservative for risk applications.**
+
+---
+
+## S-15: Scholes-Williams Beta Correction
+
+### Academic Source
+- Scholes, M. & Williams, J. (1977). "Estimating Betas from Nonsynchronous Data." *Journal of Financial Economics*, 5(3), 309-327.
+- Sharpe, W.F. (1964). "Capital Asset Prices: A Theory of Market Equilibrium Under Conditions of Risk." *Journal of Finance*, 19(3), 425-442.
+- Jensen, M.C. (1968). "The Performance of Mutual Funds in the Period 1945-1964." *Journal of Finance*, 23(2), 389-416.
+
+### Formula
+
+**Standard OLS CAPM:**
+$$r_{i,t} - r_f = \alpha_i + \beta_i (r_{m,t} - r_f) + \varepsilon_{i,t}$$
+
+**Scholes-Williams corrected beta:**
+$$\beta_{SW} = \frac{\beta_{-1} + \beta_0 + \beta_{+1}}{1 + 2\rho_m}$$
+
+where:
+$$\beta_{-1} = \frac{\text{Cov}(r_{i,t},\; r_{m,t-1})}{\text{Var}(r_m)}, \quad \beta_{+1} = \frac{\text{Cov}(r_{i,t},\; r_{m,t+1})}{\text{Var}(r_m)}$$
+
+$$\rho_m = \frac{\text{Cov}(r_{m,t},\; r_{m,t-1})}{\text{Var}(r_m)}$$
+
+**Activation criterion (thin trading):**
+$$\text{thinTrading} = \mathbf{1}\!\left[\frac{\#\{t : |r_{i,t}| < 10^{-10}\}}{T} > 0.10\right]$$
+
+**Jensen's alpha (annualized):**
+$$\alpha_{\text{annual}} = \hat{\alpha} \times T_{\text{KRX}} = (\bar{r}_i - \hat{\beta}_{SW} \cdot \bar{r}_m) \times 250$$
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\beta_{SW}$ | Scholes-Williams beta | Thin-trading-corrected systematic risk | dimensionless | typically $(-1, 3)$ | Scholes & Williams (1977) |
+| $\beta_0$ | Contemporaneous beta | Standard OLS CAPM beta | dimensionless | $(-\infty, +\infty)$ | Sharpe (1964) |
+| $\beta_{-1}, \beta_{+1}$ | Lead/lag betas | Cross-covariance with lagged/led market returns | dimensionless | $(-\infty, +\infty)$ | Scholes & Williams (1977) |
+| $\rho_m$ | Market autocorrelation | First-order autocorrelation of market excess returns | dimensionless | $(-1, 1)$ | -- |
+| $r_f$ | Risk-free rate (daily) | KTB 10Y annual rate converted to daily compound rate | dimensionless | $\ge 0$ | `bonds_latest.json` |
+| $\alpha_i$ | Jensen's alpha | Risk-adjusted abnormal return | annualized decimal | $(-\infty, +\infty)$ | Jensen (1968) |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| `MIN_OBS` | 60 | [B] | [40, 120] | ~3 months; aligned with `compute_capm_beta.py` | `indicators.js:395,416` |
+| Thin trading threshold | 10% zero-vol days | [C] | [5%, 20%] | KRX small-cap empirical; Lo & MacKinlay (1990) | `indicators.js:435` |
+| `denomSW` guard | 0.01 | [A] | fixed | Prevents division by near-zero; degenerate $\rho_m \approx -0.5$ | `indicators.js:453` |
+| `window` | 250 (KRX_TRADING_DAYS) | [A] | fixed | 1 year lookback | `indicators.js:392` |
+
+### Implementation: `indicators.js:391-477`
+
+```
+function calcCAPMBeta(stockCloses, marketCloses, window, rfAnnual)
+```
+
+### Audit Findings
+
+**`[VALID]` OLS beta (lines 418-430):** Standard Cov/Var computation with mean-centered deviations. Excess returns correctly subtract daily $r_f$ derived from KTB 10Y annual rate via $(1 + r_f^{\text{annual}}/100)^{1/250} - 1$.
+
+**`[VALID]` Scholes-Williams correction (lines 437-457):** Activated only when `thinTrading = true` (>10% zero-volume days). The lead/lag covariances and market autocorrelation are computed with consistent loop ranges aligned with `compute_capm_beta.py`. The denominator guard $|1 + 2\rho_m| > 0.01$ prevents numerical instability when market returns exhibit strong negative autocorrelation.
+
+**`[VALID]` R-squared recomputation (lines 460-469):** After SW correction, $\alpha$ and $R^2$ are recomputed using the corrected $\beta_{SW}$, ensuring consistency. This is important because the SW-corrected beta may differ substantially from $\beta_0$.
+
+**`[VALID]` Jensen's alpha annualization (line 473):** $\hat{\alpha} \times 250$ converts daily intercept to annualized alpha. This is the standard Jensen (1968) convention.
+
+---
+
+## S-16: Volatility Regime Classification
+
+### Academic Source
+- RiskMetrics (1996). *Technical Document*. 4th ed. JP Morgan. (EMA smoothing framework)
+- Hamilton, J.D. (1989). "A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle." *Econometrica*, 57(2), 357-384. (Regime-switching motivation)
+
+### Formula
+
+**Long-run EMA of volatility:**
+$$\bar{\sigma}_t = \alpha \cdot \sigma_t + (1 - \alpha) \cdot \bar{\sigma}_{t-1}$$
+
+**Half-life:** $h = -\ln 2 / \ln(1 - \alpha) \approx 69$ bars for $\alpha = 0.01$.
+
+**Regime ratio and classification:**
+$$\text{ratio}_t = \frac{\sigma_t}{\bar{\sigma}_t}$$
+
+$$\text{regime}_t = \begin{cases} \text{low} & \text{if } \text{ratio}_t < 0.75 \\ \text{mid} & \text{if } 0.75 \le \text{ratio}_t \le 1.50 \\ \text{high} & \text{if } \text{ratio}_t > 1.50 \end{cases}$$
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\sigma_t$ | Current EWMA volatility | Output of `calcEWMAVol()` (S-8) | annualized decimal | $(0, +\infty)$ | RiskMetrics (1996) |
+| $\bar{\sigma}_t$ | Long-run EMA of volatility | Slow-moving mean-reversion anchor | annualized decimal | $(0, +\infty)$ | -- |
+| $\text{ratio}_t$ | Volatility ratio | Current vol relative to long-run mean | dimensionless | $(0, +\infty)$ | -- |
+| $\alpha$ | EMA decay parameter | Controls half-life of long-run mean | dimensionless | $(0, 1)$ | RiskMetrics (1996) |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| `VOL_REGIME_LOW` | 0.75 | [D] | [0.60, 0.85] | Heuristic; 25% below long-run mean | `indicators.js:1386` |
+| `VOL_REGIME_HIGH` | 1.50 | [D] | [1.25, 2.00] | Heuristic; 50% above long-run mean | `indicators.js:1387` |
+| `alpha` (long-run EMA) | 0.01 | [B] | [0.005, 0.02] | Half-life ~69 bars; spans ~1 quarter | `indicators.js:1392` |
+
+### Implementation: `indicators.js:1385-1416`
+
+```
+function classifyVolRegime(ewmaVol)
+```
+
+### Audit Findings
+
+**`[VALID]` EMA recursion (lines 1398-1401):** Standard exponential smoothing with initialization at first valid observation. Matches RiskMetrics (1996) convention.
+
+**`[VALID]` Ratio computation (line 1405):** Guards against $\bar{\sigma}_t \le 0$ before division.
+
+**`[DISCREPANCY]` Regime thresholds are symmetric-looking but asymmetric in log-space:** The low threshold (0.75 = $-$29% from mean) and high threshold (1.50 = $+$50% from mean) are not symmetric in either linear or logarithmic space. In log-space: $\ln(0.75) = -0.288$ vs $\ln(1.50) = +0.405$. This means the "mid" regime is wider on the high side, which biases regime classification toward "mid" during volatility spikes. **Severity: NOTE -- this asymmetry is arguably appropriate because volatility is positively skewed (leverage effect), so a wider mid-to-high boundary prevents excessive "high" regime triggering during normal volatility clustering.**
+
+---
+
+## S-17: Anti-Predictor Win Rate Gate
+
+### Academic Source
+- Brock, W., Lakonishok, J. & LeBaron, B. (1992). "Simple Technical Trading Rules and the Stochastic Properties of Stock Returns." *Journal of Finance*, 47(5), 1731-1764.
+
+### Formula
+
+**Win rate null hypothesis (BLL 1992):** Under the random walk null, directional win rate $\text{WR} = 50\%$.
+
+**Anti-predictor identification:**
+$$\text{isAntiPredictor}(p) = \mathbf{1}\!\left[\text{WR}_{\text{KRX}}(p) < \tau_{\text{AP}}\right]$$
+
+**Composite confidence cap:**
+$$\text{confidence}_{\text{capped}} = \min\!\left(\text{confidence},\; \min_{p \in \text{required}} \text{WR}_{\text{KRX}}(p) \;\middle|\; \text{isAntiPredictor}(p)\right)$$
+
+**Threshold derivation:** KRX roundtrip transaction cost $\approx 2\%$ (commission + slippage). Breakeven win rate $\text{WR}_{\text{BE}} = 50\% + \text{cost}/\text{avgGain} \approx 48\%$ assuming symmetric average gain/loss. The 2pp buffer below the 50% null hypothesis accounts for this friction.
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\text{WR}_{\text{KRX}}(p)$ | Pattern win rate | KRX 5-year empirical directional win rate | % | $[0, 100]$ | `data/backtest/wr_5year.json` |
+| $\tau_{\text{AP}}$ | Anti-predictor threshold | Win rate below which a pattern is deemed anti-predictive | % | 48 | BLL (1992) + KRX cost |
+| $p$ | Pattern type | Candle or chart pattern identifier | categorical | -- | -- |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| `ANTI_PREDICTOR_THRESHOLD` | 48 | [B] | [45, 50] | BLL (1992) null WR=50%, minus KRX cost drag ~2pp | `signalEngine.js:448` |
+| `PATTERN_WR_KRX` | (table of 28 patterns) | [C] | varies per pattern | KRX 5-year empirical backtest | `signalEngine.js:427-445` |
+
+### Implementation: `signalEngine.js:2354-2392`
+
+```
+// Anti-predictor WR gate (BLL 1992)
+var _wrCap = 100;
+for (var _ri = 0; _ri < def.required.length; _ri++) { ... }
+if (_wrCapped) { confidence = Math.min(confidence, Math.round(_wrCap)); }
+```
+
+### Audit Findings
+
+**`[VALID]` Gate logic (lines 2358-2369):** Iterates over all required patterns in a composite signal definition. If any required pattern has $\text{WR} < 48\%$, the composite confidence is capped at the weakest anti-predictor's WR. The `Math.min` accumulator correctly finds the global minimum across all required patterns.
+
+**`[VALID]` Dual application (lines 2377-2379, 2390-2392):** The cap is applied to both `confidence` (rule-based) and `confidencePred` (calibration-based), and re-applied after Platt sigmoid calibration (S-20) to prevent re-inflation. This three-point application ensures no path bypasses the anti-predictor gate.
+
+---
+
+## S-18: IV/HV Ratio Confidence Discount
+
+### Academic Source
+- Simon, D.P. & Wiggins, R.A. (2001). "S&P Futures Returns and Contrary Sentiment Indicators." *Journal of Futures Markets*, 21(5), 447-462.
+
+### Formula
+
+**IV/HV ratio:**
+$$\text{IVHVratio} = \frac{\sigma_{\text{IV}}^{\text{ATM}}}{\sigma_{\text{HV}}}$$
+
+**Confidence discount:**
+$$d = \begin{cases} 0.90 & \text{if } \text{IVHVratio} > 2.0 \\ 0.93 & \text{if } 1.5 < \text{IVHVratio} \le 2.0 \\ 1.00 & \text{if } \text{IVHVratio} \le 1.5 \end{cases}$$
+
+$$\text{confidence}_i' = \text{confidence}_i \times d$$
+
+**Fallback (when IV/HV unavailable):** If `straddleImpliedMove > 3.5%`, apply $d = 0.93$ uniformly.
+
+**Rationale:** Simon & Wiggins (2001) show that high implied-to-historical volatility ratios signal event uncertainty periods where directional pattern accuracy drops 15-20%. The two-tier discount (7%/10%) approximates this empirical degradation.
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\sigma_{\text{IV}}^{\text{ATM}}$ | ATM implied volatility | At-the-money options implied vol | annualized decimal | $(0, +\infty)$ | `options_analytics.json` |
+| $\sigma_{\text{HV}}$ | Historical volatility | Realized (Parkinson or EWMA) vol | annualized decimal | $(0, +\infty)$ | S-14 or S-8 |
+| $d$ | Discount factor | Multiplicative confidence reduction | dimensionless | $\{0.90, 0.93, 1.00\}$ | Simon & Wiggins (2001) |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| IV/HV low threshold | 1.5 | [D] | [1.2, 1.8] | Simon & Wiggins (2001): elevated uncertainty | `appWorker.js:635` |
+| IV/HV high threshold | 2.0 | [D] | [1.8, 2.5] | Severe event risk | `appWorker.js:637` |
+| Discount (moderate) | 0.93 | [D] | [0.90, 0.95] | ~7% confidence reduction | `appWorker.js:637` |
+| Discount (severe) | 0.90 | [D] | [0.85, 0.93] | ~10% confidence reduction | `appWorker.js:637` |
+| Fallback impliedMove threshold | 3.5% | [D] | [2.5%, 5.0%] | Backward compat; absolute move proxy | `appWorker.js:645` |
+
+### Implementation: `appWorker.js:628-649`
+
+```
+if (_ivHvRatio > 1.5) {
+  var _ivDiscount = _ivHvRatio > 2.0 ? 0.90 : 0.93;
+  patterns[k].confidence *= _ivDiscount;
+}
+```
+
+### Audit Findings
+
+**`[VALID]` Preference ordering (lines 632-643):** The code prefers IV/HV ratio (expiry-independent, theoretically grounded) over absolute `straddleImpliedMove` (expiry-dependent). The fallback only fires when IV/HV is unavailable.
+
+**`[DISCREPANCY]` Discount constants are heuristic:** The 0.93/0.90 values approximate the 15-20% accuracy drop cited by Simon & Wiggins (2001) but are not derived from a formal calibration. The mapping from "accuracy drop" (change in hit rate) to "confidence multiplier" assumes a roughly linear relationship between pattern confidence and predictive accuracy, which is an approximation. **Severity: NOTE -- the direction is correct (discount during high IV/HV), and the magnitude is conservative (7-10% vs 15-20% cited).**
+
+---
+
+## S-19: 52-Week S/R Anchor
+
+### Academic Source
+- George, T.J. & Hwang, C.Y. (2004). "The 52-Week High and Momentum Investing." *Journal of Finance*, 59(5), 2145-2176.
+- Tversky, A. & Kahneman, D. (1974). "Judgment under Uncertainty: Heuristics and Biases." *Science*, 185(4157), 1124-1131.
+
+### Formula
+
+**52-week extremes:**
+$$H_{52} = \max_{t \in [T-W,\; T]} H_t, \quad L_{52} = \min_{t \in [T-W,\; T]} L_t$$
+
+**Support/Resistance role assignment:**
+$$\text{type}(H_{52}) = \begin{cases} \text{resistance} & \text{if } H_{52} > P_T \times 1.001 \\ \text{support} & \text{otherwise (breakout confirmed)} \end{cases}$$
+
+$$\text{type}(L_{52}) = \begin{cases} \text{support} & \text{if } L_{52} < P_T \times 0.999 \\ \text{resistance} & \text{otherwise (breakdown confirmed)} \end{cases}$$
+
+**Confluence merge:** If $|H_{52} - P_{\text{cluster}}| < \text{ATR}(14) \times 0.5$, reinforce existing cluster touches and strength instead of adding a duplicate level.
+
+**Theoretical basis:** George & Hwang (2004) find that proximity to the 52-week high explains approximately 70% of momentum profits, attributing this to anchoring bias (Tversky & Kahneman 1974). Investors use 52-week extremes as reference points, leading to underreaction near these levels and subsequent support/resistance formation.
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $H_{52}$ | 52-week high | Maximum high price over window $W$ | KRW | $(0, +\infty)$ | Market data |
+| $L_{52}$ | 52-week low | Minimum low price over window $W$ | KRW | $(0, +\infty)$ | Market data |
+| $W$ | Lookback window | Number of trading days | integer | $[60, 252]$ | George & Hwang (2004) |
+| $P_T$ | Current close | Most recent closing price | KRW | $(0, +\infty)$ | Market data |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| `SR_52W_WINDOW` | 252 | [B] | [200, 260] | Annual trading days; George & Hwang (2004) use 52 calendar weeks | `patterns.js:372` |
+| `SR_52W_MIN_BARS` | 60 | [C] | [40, 120] | Minimum ~3 months data to establish meaningful H/L | `patterns.js:371` |
+| `SR_52W_TOUCHES` | 3 | [C] | [2, 5] | Virtual touch count; at least cluster-minimum strength | `patterns.js:370` |
+| `SR_52W_STRENGTH` | 0.8 | [C] | [0.6, 1.0] | High but below multi-touch technical clusters (max 1.0) | `patterns.js:369` |
+
+### Implementation: `patterns.js:3444-3498`
+
+```
+// 52주 고가/저가 앵커 S/R — George & Hwang (2004)
+var _52wWindow = Math.min(candles.length, PatternEngine.SR_52W_WINDOW);
+if (_52wWindow >= PatternEngine.SR_52W_MIN_BARS) { ... }
+```
+
+### Audit Findings
+
+**`[VALID]` Confluence merge (lines 3461-3477):** Before adding 52-week levels, the code checks existing S/R clusters within ATR*0.5 tolerance. If a match exists, it reinforces the existing level's touches and strength instead of creating a duplicate. This prevents overcrowding and respects the established cluster hierarchy.
+
+**`[VALID]` Role assignment (lines 3479-3498):** The 0.1% buffer (1.001/0.999) avoids flip-flopping between support and resistance when the current price is exactly at the 52-week extreme. The role-reversal logic (breakout converts resistance to support) is consistent with classical technical analysis theory.
+
+**`[DISCREPANCY]` Virtual touches are synthetic:** The `SR_52W_TOUCHES = 3` assigns virtual touches that were not empirically observed. This inflates the touch count relative to organically formed S/R clusters. However, the 52-week extreme is a psychologically anchored level (Tversky & Kahneman 1974) whose significance does not require multiple physical price touches. **Severity: NOTE -- the virtual touch count is a reasonable proxy for the behavioral anchoring effect.**
+
+---
+
+## S-20: Platt Sigmoid Calibration
+
+### Academic Source
+- Platt, J.C. (1999). "Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Likelihood Methods." In *Advances in Large Margin Classifiers*, MIT Press, 61-74.
+
+### Formula
+
+$$P = \frac{1}{1 + \exp(-(ax + b))}$$
+
+where $x = \text{confidencePred} / 100$ (raw confidence mapped to $[0, 1]$), and $(a, b)$ are per-composite-signal parameters pre-computed from the RL calibration policy.
+
+**Post-calibration bounds:** $P_{\text{final}} = \text{clamp}(\lfloor 100 \cdot P + 0.5 \rfloor, 10, 90)$
+
+**Anti-predictor re-cap:** After Platt calibration, the anti-predictor WR cap (S-17) is re-applied to prevent the sigmoid from inflating confidence above the empirical ceiling.
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $P$ | Calibrated probability | Sigmoid-transformed confidence | dimensionless | $(0, 1)$ | Platt (1999) |
+| $x$ | Raw confidence input | `confidencePred / 100` | dimensionless | $[0.10, 0.90]$ | -- |
+| $a$ | Sigmoid slope | Pre-computed per composite signal | dimensionless | typically $(-10, 10)$ | RL policy `platt_params` |
+| $b$ | Sigmoid intercept | Pre-computed per composite signal | dimensionless | typically $(-5, 5)$ | RL policy `platt_params` |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| Output floor | 10 | [B] | [5, 15] | Prevents degenerate zero-confidence signals | `signalEngine.js:2386` |
+| Output ceiling | 90 | [B] | [85, 95] | Prevents overconfidence; aligns with composite cap | `signalEngine.js:2386` |
+| $(a, b)$ params | Per-signal | [C] | calibration-dependent | Platt (1999); fitted via RL policy | `backtester._rlPolicy.platt_params` |
+
+### Implementation: `signalEngine.js:2381-2392`
+
+```
+// G-3: Platt calibration — Platt (1999), P = 1/(1+exp(-(a*x+b)))
+var _pz = _plattP[0] * (confidencePred / 100) + _plattP[1];
+confidencePred = Math.max(10, Math.min(90, Math.round(100 / (1 + Math.exp(-_pz)))));
+```
+
+### Audit Findings
+
+**`[VALID]` Sigmoid formula (line 2386):** `100 / (1 + Math.exp(-_pz))` correctly implements $100 \times \sigma(ax+b)$ where $\sigma$ is the standard logistic function. The `Math.round` converts to integer percentage.
+
+**`[VALID]` Anti-predictor re-cap (lines 2390-2392):** The WR cap is applied a third time after Platt calibration, preventing the sigmoid's monotonic transformation from re-inflating confidence above the empirical anti-predictor ceiling. This is necessary because the sigmoid can map low inputs to higher outputs depending on $(a, b)$.
+
+**`[VALID]` Guard for missing params (lines 2382-2383):** Platt calibration is skipped entirely when `backtester._rlPolicy` or `platt_params[def.id]` is null, falling back to the uncalibrated `confidencePred`.
+
+---
+
+## S-21: Spearman Rank IC
+
+### Academic Source
+- Grinold, R.C. & Kahn, R.N. (2000). *Active Portfolio Management*. 2nd ed. McGraw-Hill. Ch.14.
+- Kendall, M.G. & Gibbons, J.D. (1990). *Rank Correlation Methods*. 5th ed. Oxford University Press.
+- Lo, A.W. (2002). "The Statistics of Sharpe Ratios." *Financial Analysts Journal*, 58(4), 36-52.
+
+### Formula
+
+**Spearman rank IC (Pearson-of-ranks):**
+$$\text{IC} = \frac{n\sum R_i^P R_i^A - \left(\sum R_i^P\right)\left(\sum R_i^A\right)}{\sqrt{\left[n\sum (R_i^P)^2 - \left(\sum R_i^P\right)^2\right]\left[n\sum (R_i^A)^2 - \left(\sum R_i^A\right)^2\right]}}$$
+
+where $R_i^P = \text{rank}(\hat{y}_i)$ and $R_i^A = \text{rank}(y_i)$ with averaged tied ranks (Kendall & Gibbons 1990).
+
+**Tie handling:** When ties exist, the shortcut formula $\rho = 1 - 6\sum d_i^2 / (n^3 - n)$ is invalid. The implementation uses the full Pearson correlation of ranks, which handles ties exactly.
+
+**Rolling OOS IC (Lo 2002 motivation):**
+$$\text{IC}_{\text{OOS}} = \frac{1}{K} \sum_{k=1}^{K} \text{IC}_k^{\text{test}}$$
+
+where each $\text{IC}_k^{\text{test}}$ is computed on a non-overlapping out-of-sample window of size $W_{\text{min}}$. The expanding-window structure ensures each test window uses only data unseen during model fitting, addressing the in-sample IC inflation identified by Lo (2002).
+
+| Symbol | Name | Definition | Unit | Range | Source |
+|--------|------|------------|------|-------|--------|
+| $\text{IC}$ | Information Coefficient | Spearman rank correlation between predicted and actual returns | dimensionless | $[-1, +1]$ | Grinold & Kahn (2000) |
+| $R_i^P$ | Predicted rank | Rank of $i$-th predicted value (ties averaged) | integer/half-integer | $[1, n]$ | Kendall & Gibbons (1990) |
+| $R_i^A$ | Actual rank | Rank of $i$-th actual value (ties averaged) | integer/half-integer | $[1, n]$ | Kendall & Gibbons (1990) |
+| $K$ | Number of OOS windows | Count of non-overlapping test folds | integer | $\ge 1$ | -- |
+| $W_{\text{min}}$ | Minimum window size | Minimum observations per OOS test fold | integer | 12 | -- |
+
+**Constants:**
+
+| Constant | Value | Grade | Sensitivity Range | Academic Source | JS Location |
+|----------|-------|-------|-------------------|----------------|-------------|
+| Minimum pairs | 5 | [B] | [3, 10] | Minimum for meaningful rank correlation | `backtester.js:618` |
+| OOS `minWindow` | 12 | [B] | [8, 20] | ~2-3 weeks of daily observations | `backtester.js:668` |
+| OOS minimum total | $2 \times W_{\text{min}} = 24$ | [B] | [16, 40] | Need training + test | `backtester.js:671` |
+
+**IC interpretation thresholds (Grinold & Kahn 2000):**
+- IC $> 0.05$: operationally significant
+- IC $> 0.10$: strong signal
+- IC $< 0$: anti-predictive
+
+### Implementation: `backtester.js:617-694`
+
+```
+_spearmanCorr(pairs)     // Base: Pearson-of-ranks with tied rank averaging
+_rollingOOSIC(pairs, minWindow)  // OOS: expanding window, non-overlapping folds
+```
+
+### Audit Findings
+
+**`[VALID]` Tied rank averaging (lines 629-638):** The `rank()` inner function sorts by value, assigns consecutive ranks, then scans for ties and replaces tied ranks with their arithmetic mean. This is the standard Kendall & Gibbons (1990) procedure.
+
+**`[VALID]` Pearson-of-ranks formula (lines 645-654):** Uses the full Pearson product-moment formula on ranks rather than the shortcut $1 - 6\sum d^2/(n^3-n)$. Comment at line 643-644 explicitly notes that the shortcut is invalid with ties. The denominator guard `den > 0` returns 0 for degenerate cases (all values identical).
+
+**`[VALID]` OOS structure (lines 676-684):** Non-overlapping windows of size `step = minWindow` ensure genuine out-of-sample evaluation. The loop `for (i = minWindow; i + step <= n; i += step)` correctly starts at the boundary between training and first test window.
+
+**`[DISCREPANCY]` OOS fallback (lines 671-673):** When total pairs $< 2 \times W_{\text{min}}$, the code falls back to full-sample IC with `isOOS: false`. Callers should check the `isOOS` flag to avoid treating in-sample IC as validated. **Severity: NOTE -- the flag is available for downstream filtering; no silent data quality issue.**
+
+---
+
 ## Appendix A: Cross-Reference Summary Table
 
 | ID | Formula | File:Lines | Constants Count | Grade Profile | Verdict |
@@ -977,21 +1414,29 @@ function calcBinarySegmentation(returns, maxBreaks, minSegment)
 | S-8 | EWMA vol | indicators.js:1336-1376 | 4 (3B, 1D) | Good | VALID (init: NOTE) |
 | S-9 | HAR-RV | indicators.js:2062-2178 | 7 (3A, 2B, 1C, 1D) | Good | WARNING ($RV^{(d)}$ proxy) |
 | S-10 | VRP proxy | signalEngine.js | 5 (2B, 3D) | D-heavy | WARNING (not true VRP) |
-| S-11 | Cornish-Fisher | backtester.js:956-991 | 6 (all A) | All A | VALID |
+| S-11 | Cornish-Fisher | backtester.js:976-1010 | 6 (all A) | All A | VALID |
 | S-12 | CUSUM | indicators.js:1480-1570 | 6 (2B, 4D) | D-heavy | WARNING (ARL uncalibrated) |
 | S-13 | Binary segmentation | indicators.js:1573-1685 | 3 (1A, 1B, 1D) | Mixed | VALID (greedy approx: NOTE) |
+| S-14 | Parkinson HV | indicators.js:481-522 | 3 (1A, 1B, 1D) | Mixed | VALID (price limit: NOTE) |
+| S-15 | Scholes-Williams beta | indicators.js:391-477 | 4 (2A, 1B, 1C) | Good | VALID |
+| S-16 | Vol regime classification | indicators.js:1385-1416 | 3 (1B, 2D) | D-heavy | VALID (asymmetry: NOTE) |
+| S-17 | Anti-predictor WR gate | signalEngine.js:2354-2392 | 2 (1B, 1C) | Good | VALID |
+| S-18 | IV/HV confidence discount | appWorker.js:628-649 | 5 (5D) | D-heavy | VALID (heuristic: NOTE) |
+| S-19 | 52-week S/R anchor | patterns.js:3444-3498 | 4 (1B, 3C) | Good | VALID (virtual touches: NOTE) |
+| S-20 | Platt sigmoid calibration | signalEngine.js:2381-2392 | 3 (2B, 1C) | Good | VALID |
+| S-21 | Spearman rank IC | backtester.js:617-694 | 3 (3B) | All B | VALID (OOS fallback: NOTE) |
 
 ### Aggregate Grades
 
 | Grade | Count | % |
 |-------|-------|---|
-| [A] Academic Fixed | 18 | 30% |
-| [B] Tunable with basis | 19 | 32% |
-| [C] KRX-Adapted | 7 | 12% |
-| [D] Heuristic | 16 | 27% |
+| [A] Academic Fixed | 21 | 24% |
+| [B] Tunable with basis | 29 | 33% |
+| [C] KRX-Adapted | 13 | 15% |
+| [D] Heuristic | 24 | 28% |
 | [E] Deprecated | 0 | 0% |
 
-**Total constants audited: 60**
+**Total constants audited: 87**
 
 ### Overall System Assessment
 
@@ -1003,10 +1448,11 @@ Strengths:
 - The KRX-specific adaptations (price limit truncation awareness, KRX_TRADING_DAYS = 250, calendar-time bootstrap) are well-motivated
 
 Weaknesses:
-- 27% of constants are [D]-grade heuristics, concentrated in CUSUM ($h = 2.5$, warmup, vol-adaptive scaling) and Kalman ($Q, R, P_0$)
+- 28% of constants are [D]-grade heuristics, concentrated in CUSUM ($h = 2.5$, warmup, vol-adaptive scaling), Kalman ($Q, R, P_0$), IV/HV discount thresholds (S-18), and vol regime boundaries (S-16)
 - VRP proxy (S-10) is a directional approximation, not a true variance risk premium
 - HAR-RV uses single squared returns instead of true intraday realized volatility
 - CUSUM ARL has not been empirically validated under the adaptive standardization variant
+- IV/HV discount factors (S-18) are directionally correct but not formally calibrated to KRX options data
 
 **Recommendations (priority order):**
 1. Calibrate CUSUM threshold $h$ via simulation: generate synthetic KRX returns with known changepoints, measure detection power and false alarm rate
@@ -1045,13 +1491,26 @@ Weaknesses:
 | 23 | Page (1954) | S-12 | University of Cambridge |
 | 24 | Pickands (1975) | S-7 | University of Pennsylvania |
 | 25 | Reschenhofer et al. (2021) | S-1 | University of Vienna |
-| 26 | RiskMetrics (1996) | S-8 | JP Morgan |
+| 26 | RiskMetrics (1996) | S-8, S-16 | JP Morgan |
 | 27 | Roberts (1966) | S-12 | Bell Telephone Labs |
 | 28 | Scott & Knott (1974) | S-13 | Rothamsted Experimental Station |
 | 29 | White (1980) | S-3 | UCSD |
 | 30 | Golub, Heath & Wahba (1979) | S-2 | Stanford University |
+| 31 | Parkinson (1980) | S-14 | University of California, San Diego |
+| 32 | Scholes & Williams (1977) | S-15 | University of Chicago |
+| 33 | Sharpe (1964) | S-15 | University of Washington |
+| 34 | Jensen (1968) | S-15 | University of Rochester |
+| 35 | Hamilton (1989) | S-16 | University of Virginia |
+| 36 | Brock, Lakonishok & LeBaron (1992) | S-17 | University of Wisconsin |
+| 37 | Simon & Wiggins (2001) | S-18 | Temple University |
+| 38 | George & Hwang (2004) | S-19 | National University of Singapore |
+| 39 | Tversky & Kahneman (1974) | S-19 | Hebrew University of Jerusalem |
+| 40 | Platt (1999) | S-20 | Microsoft Research |
+| 41 | Grinold & Kahn (2000) | S-21 | BARRA / Berkeley |
+| 42 | Kendall & Gibbons (1990) | S-21 | University of London |
+| 43 | Lo (2002) | S-21 | MIT |
 
 ---
 
-*Document generated 2026-04-06 by Statistical Validation Expert.*
-*60 constants audited across 13 formulas. 0 CRITICAL discrepancies, 4 WARNINGs, 4 NOTEs.*
+*Document generated 2026-04-07 by Statistical Validation Expert.*
+*87 constants audited across 21 formulas. 0 CRITICAL discrepancies, 4 WARNINGs, 11 NOTEs.*
