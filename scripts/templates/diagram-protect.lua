@@ -11,6 +11,26 @@ local STAGE_COLORS = {
   ["5"] = "stageFiveMarker",
 }
 
+-- Stage color prefixes (for CodeBg / QuoteBg / Dark aliases)
+local STAGE_PREFIXES = {
+  ["1"] = "stageOne",
+  ["2"] = "stageTwo",
+  ["3"] = "stageThree",
+  ["4"] = "stageFour",
+  ["5"] = "stageFive",
+}
+
+-- Generate LaTeX commands to switch dynamic color aliases
+local function stage_color_switch(stage_num)
+  local pfx = STAGE_PREFIXES[stage_num]
+  if not pfx then return "" end
+  return "\\colorlet{curStageMarker}{" .. pfx .. "Marker}\n"
+    .. "\\colorlet{curStageCodeBg}{" .. pfx .. "CodeBg}\n"
+    .. "\\colorlet{curStageQuoteBg}{" .. pfx .. "QuoteBg}\n"
+    .. "\\colorlet{curStageDark}{" .. pfx .. "}\n"
+    .. "\\arrayrulecolor{" .. pfx .. "Marker!30}\n"
+end
+
 -- ============================================================
 -- 1. HEADERS: inject Stage navigator + color accent on Stage H1
 -- ============================================================
@@ -20,8 +40,9 @@ function Header(el)
     local stage_num = text:match("^Stage (%d)")
     if stage_num and STAGE_COLORS[stage_num] then
       local color = STAGE_COLORS[stage_num]
-      -- clearpage + navigator + heading (no decorative rule)
+      -- clearpage + color switch + navigator + heading
       local pre = "\\clearpage\n"
+        .. stage_color_switch(stage_num)
         .. "\\stagenavigator{" .. stage_num .. "}\n"
         .. "\\vspace{6pt}\n"
       local heading_latex = pandoc.write(pandoc.Pandoc({
@@ -29,7 +50,31 @@ function Header(el)
       }), "latex")
       return pandoc.RawBlock("latex", pre .. heading_latex)
     end
+
+    -- "CheeseStock" title: inline, no page break (flows after TOC)
+    if text:match("^CheeseStock") then
+      return pandoc.RawBlock("latex",
+        "{\\Large\\bfseries\\sffamily\\color{dark} " .. text .. "}\\par\\vspace{2pt}\n")
+    end
+
+    -- "부록" appendix titles: clearpage but no navigator
+    if text:match("^부록") then
+      local heading_latex = pandoc.write(pandoc.Pandoc({
+        pandoc.Header(1, el.content, el.attr)
+      }), "latex")
+      return pandoc.RawBlock("latex", "\\clearpage\n" .. heading_latex)
+    end
   end
+
+  -- H2 "ANATOMY V7": inline subtitle, no page break
+  if el.level == 2 then
+    local text = pandoc.utils.stringify(el)
+    if text:match("^ANATOMY V7") then
+      return pandoc.RawBlock("latex",
+        "{\\large\\bfseries\\sffamily\\color{navy} " .. text .. "}\\par\\vspace{4pt}\n")
+    end
+  end
+
   return el
 end
 
@@ -74,7 +119,8 @@ function CodeBlock(el)
     .. "\\vspace{1pt}\n"
     .. "\\begin{Verbatim}[fontsize=" .. fontcmd .. ","
     .. "xleftmargin=4pt,xrightmargin=4pt,"
-    .. "frame=leftline,framerule=1.5pt,rulecolor=\\color{gold!50},"
+    -- !70 for visible left bar on the code-block background (#F4F4F6 vs stage marker tint)
+    .. "frame=leftline,framerule=1.5pt,rulecolor=\\color{curStageMarker!70},"
     .. "formatcom=\\color{bodytext}]\n"
     .. text .. "\n"
     .. "\\end{Verbatim}\n"
@@ -111,41 +157,65 @@ function BlockQuote(el)
 end
 
 -- ============================================================
--- 4. TABLES: scale wide tables to prevent font overlap
+-- 4. HORIZONTAL RULES: Stage-colored instead of black
+-- ============================================================
+function HorizontalRule(el)
+  return pandoc.RawBlock("latex",
+    "\\vspace{2pt}\\noindent{\\color{curStageMarker!25}\\rule{\\linewidth}{0.4pt}}\\vspace{2pt}\n")
+end
+
+-- ============================================================
+-- 5. PARAGRAPHS: source citations as scriptsize italic
+-- ============================================================
+function Para(el)
+  local text = pandoc.utils.stringify(el)
+
+  -- Standalone "출처:" lines -> sourcecite environment
+  if text:match("^출처:") or text:match("^출처：") then
+    local body = pandoc.write(pandoc.Pandoc({el}), "latex")
+    return pandoc.RawBlock("latex",
+      "\\begin{sourcecite}\n" .. body .. "\n\\end{sourcecite}\n")
+  end
+
+  return el
+end
+
+-- ============================================================
+-- 5. TABLES: prevent font overlap via font scaling
 -- ============================================================
 function Table(el)
   local ncols = #el.colspecs
-  if ncols < 5 then
-    return el  -- narrow tables: pandoc default is fine
+
+  -- Font size by column count.
+  -- All tables go through this filter so font sizing is centralized here
+  -- (AtBeginEnvironment hooks in the template only enforce \sloppy, not font size).
+  local fontcmd
+  if ncols >= 9 then
+    -- 9+ cols: very dense, minimum legible size
+    fontcmd = "\\fontsize{6pt}{7.5pt}\\selectfont"
+  elseif ncols >= 7 then
+    fontcmd = "\\fontsize{6.5pt}{8.5pt}\\selectfont"
+  elseif ncols >= 5 then
+    fontcmd = "\\fontsize{7.5pt}{9.5pt}\\selectfont"
+  elseif ncols >= 3 then
+    -- 3-4 col: give CJK text room; line-height 11.5pt matches arraystretch=1.35 * 8.5pt
+    fontcmd = "\\fontsize{8.5pt}{11.5pt}\\selectfont"
+  else
+    -- 1-2 col: body text size, no shrinkage
+    fontcmd = "\\fontsize{9.5pt}{13pt}\\selectfont"
   end
 
-  -- Convert table to LaTeX via pandoc
+  -- Let pandoc produce longtable with its own p{} column widths.
+  -- Wrap in a TeX group (not \begingroup..\endgroup as a token sequence) so that
+  -- the font command is properly scoped and does not bleed into surrounding text.
   local latex = pandoc.write(pandoc.Pandoc({el}), "latex")
 
-  -- Convert longtable -> tabular for adjustbox compatibility
-  latex = latex:gsub("\\begin{longtable}%[%]", "\\begin{tabular}")
-  latex = latex:gsub("\\end{longtable}", "\\end{tabular}")
-  latex = latex:gsub("\\endhead%s*\n?", "")
-  latex = latex:gsub("\\endfoot%s*\n?", "")
-  latex = latex:gsub("\\endlastfoot%s*\n?", "")
-  latex = latex:gsub("\\endfirsthead%s*\n?", "")
-
-  -- Font size by column count
-  local fontcmd
-  if ncols >= 7 then
-    fontcmd = "\\scriptsize"
-  elseif ncols >= 6 then
-    fontcmd = "\\fontsize{7.5pt}{9.5pt}\\selectfont"
-  else
-    fontcmd = "\\footnotesize"
-  end
-
-  -- Wrap in adjustbox as safety net
-  local result = "\\begingroup" .. fontcmd .. "\\sloppy\n"
-    .. "\\noindent\\begin{adjustbox}{max width=\\linewidth}\n"
+  -- Use brace-group: { fontcmd \sloppy latex }
+  -- This is safer than \begingroup..\endgroup when fontcmd contains \selectfont
+  -- which has side effects that \begingroup does not fully contain.
+  local result = "{" .. fontcmd .. "\\sloppy\n"
     .. latex
-    .. "\\end{adjustbox}\n"
-    .. "\\endgroup\n"
+    .. "}\n"
 
   return pandoc.RawBlock("latex", result)
 end
