@@ -50,41 +50,44 @@
 \definecolor{stageTwo}{HTML}{3D3000}
 \definecolor{stageTwoMarker}{HTML}{A08830}
 \definecolor{stageTwoCodeBg}{HTML}{FDFAF0}
-\definecolor{stageTwoQuoteBg}{HTML}{F9F4E3}
+\definecolor{stageTwoQuoteBg}{HTML}{F2EAC8}
 
 % Stage 3: 분석 엔진과 신호 체계 -- Emerald Teal
 \definecolor{stageThree}{HTML}{1A3D35}
 \definecolor{stageThreeMarker}{HTML}{2A7A6A}
 \definecolor{stageThreeCodeBg}{HTML}{F0FAF7}
-\definecolor{stageThreeQuoteBg}{HTML}{E8F5F1}
+\definecolor{stageThreeQuoteBg}{HTML}{DFF0E8}
 
 % Stage 4: 검증과 리스크 통제 -- Deep Violet
 \definecolor{stageFour}{HTML}{2D1B4E}
 \definecolor{stageFourMarker}{HTML}{6A4FA5}
 \definecolor{stageFourCodeBg}{HTML}{F5F0FA}
-\definecolor{stageFourQuoteBg}{HTML}{EEE8F7}
+\definecolor{stageFourQuoteBg}{HTML}{E5DAEF}
 
 % Stage 5: 로드맵과 확장 전략 -- Warm Espresso
 \definecolor{stageFive}{HTML}{3A2010}
 \definecolor{stageFiveMarker}{HTML}{8B5A2B}
 \definecolor{stageFiveCodeBg}{HTML}{FAF5EF}
-\definecolor{stageFiveQuoteBg}{HTML}{F5EDE2}
+\definecolor{stageFiveQuoteBg}{HTML}{EEE0D0}
 
 % Common colors
 \definecolor{navy}{HTML}{2C3E6B}
-\definecolor{gold}{HTML}{C9A84C}
 \definecolor{dark}{HTML}{1A1A2E}
 \definecolor{bodytext}{HTML}{1A1A1A}
 \definecolor{muted}{HTML}{555555}
 \definecolor{tableodd}{HTML}{F7F7F7}
-\definecolor{codebg}{HTML}{F4F4F6}
-\definecolor{inlinecode}{HTML}{F0F0F0}
 
 % Dynamic Stage color aliases -- switched by Lua filter on each Stage entry
 \colorlet{curStageMarker}{stageOneMarker}
 \colorlet{curStageCodeBg}{stageOneCodeBg}
 \colorlet{curStageQuoteBg}{stageOneQuoteBg}
 \colorlet{curStageDark}{stageOne}
+
+% ============================================================
+% 3b. MATH PACKAGES -- required for D3 theoretical foundations (amsmath text, symbols)
+% ============================================================
+\usepackage{amsmath}
+\usepackage{amssymb}
 
 % ============================================================
 % 4. PARAGRAPH SPACING
@@ -108,23 +111,26 @@
 \titleformat{\section}
   {\needspace{4\baselineskip}\Large\bfseries\sffamily\color{dark}}
   {}{0pt}{}
-\titlespacing*{\section}{0pt}{14pt}{4pt}
+\titlespacing*{\section}{0pt}{14pt}{4pt}[0pt]
 
 % H2: Stage-colored, clear separation from H1
+% needspace 12 = ~162pt (23% of page) -- pushes headings at 85%+ to next page
+% 12pt (not 13pt): widens gap from H1(14.3pt) -- ratio 1.19x vs 1.10x
 \titleformat{\subsection}
-  {\needspace{3\baselineskip}\fontsize{13pt}{16pt}\selectfont\bfseries\sffamily\color{curStageMarker}}
+  {\needspace{12\baselineskip}\fontsize{12pt}{15pt}\selectfont\bfseries\sffamily\color{curStageMarker}}
   {}{0pt}{}
-\titlespacing*{\subsection}{0pt}{10pt}{3pt}
+\titlespacing*{\subsection}{0pt}{10pt}{3pt}[0pt]
 
 % H3: muted color, smaller -- clearly subordinate
+% needspace 8 = ~108pt (16% of page) -- pushes headings at 88%+ to next page
 \titleformat{\subsubsection}
-  {\needspace{2\baselineskip}\fontsize{10.5pt}{13pt}\selectfont\bfseries\sffamily\color{muted}}
+  {\needspace{8\baselineskip}\fontsize{10.5pt}{13pt}\selectfont\bfseries\sffamily\color{muted}}
   {}{0pt}{}
-\titlespacing*{\subsubsection}{0pt}{6pt}{2pt}
+\titlespacing*{\subsubsection}{0pt}{6pt}{4pt}[0pt]
 
-% H4: inline, small
+% H4: inline, small -- needspace prevents orphan at very bottom
 \titleformat{\paragraph}[runin]
-  {\small\bfseries\sffamily\color{muted}}
+  {\needspace{3\baselineskip}\small\bfseries\sffamily\color{muted}}
   {}{0pt}{}[.]
 \titlespacing*{\paragraph}{0pt}{4pt}{4pt}
 
@@ -148,6 +154,7 @@
 % arraystretch=1.35 provides symmetric spacing instead.
 \setlength{\aboverulesep}{2pt}             % booktabs: slightly more breathing above rules
 \setlength{\belowrulesep}{2pt}             % booktabs: slightly more breathing below rules
+\setlength{\LTpost}{3pt}                   % longtable post-spacing (default 12pt -> 3pt to tighten sourcecite gap)
 
 % Booktabs + hline rules: Stage-colored at 55% for screen/print visibility
 \arrayrulecolor{curStageMarker!55}
@@ -183,7 +190,7 @@
 \definecolor{shadecolor}{HTML}{F4F4F6}
 
 % ============================================================
-% 8. BLOCKQUOTES -- gold left bar + light background
+% 8. BLOCKQUOTES -- Stage-colored left bar + light background
 % ============================================================
 \usepackage{mdframed}
 
@@ -207,13 +214,12 @@
 % ============================================================
 % 8b. SOURCE CITATIONS -- small, muted, right-aligned
 % ============================================================
+% sourcecite: \hfill avoids trivlist topsep; 3pt lead prevents flush-to-table
 \newenvironment{sourcecite}{%
-  \vspace{1pt}%
-  \begin{flushright}%
+  \par\vspace{3pt}\noindent\hfill%
   \fontsize{7.5pt}{9.5pt}\selectfont\sffamily\color{muted}\itshape%
 }{%
-  \end{flushright}%
-  \vspace{1pt}%
+  \par\vspace{2pt}%
 }
 
 % ============================================================
@@ -269,7 +275,7 @@
 \setlist[itemize]{label=\textbullet}
 
 % ============================================================
-% 10. HEADERS / FOOTERS -- gold accent rule, lowered position
+% 10. HEADERS / FOOTERS -- Stage-colored accent rule
 % ============================================================
 \usepackage{fancyhdr}
 \pagestyle{fancy}
@@ -278,11 +284,17 @@
   CheeseStock ANATOMY V7%
   {\color{curStageMarker!60}~|~}%
   구조 흐름}
+% Right header: show current Stage (set by Lua filter), NOT subsection name.
+% Subsection \rightmark was duplicating the heading text below it.
+\newcommand{\currentstage}{}
 \fancyhead[R]{\fontsize{8pt}{10pt}\selectfont\sffamily\color{muted}%
-  \nouppercase{\rightmark}}
+  \currentstage}
 \fancyfoot[C]{\small\sffamily\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 \renewcommand{\headrule}{{\color{curStageMarker!40}\hrule width\headwidth height\headrulewidth}}
+% Prevent subsection from setting \rightmark (avoids header/heading duplication)
+\renewcommand{\subsectionmark}[1]{}
+\renewcommand{\subsubsectionmark}[1]{}
 
 \fancypagestyle{plain}{
   \fancyhf{}
@@ -320,10 +332,22 @@
 \setlength{\abovecaptionskip}{4pt}
 \setlength{\belowcaptionskip}{2pt}
 
-\newcommand{\HRule}{\noindent\rule{\linewidth}{0.4pt}}
-
 \widowpenalty=10000
 \clubpenalty=10000
+
+% Suppress page breaks immediately after headings (keep heading with content)
+\makeatletter
+\renewcommand\@afterheading{%
+  \@nobreaktrue
+  \everypar{%
+    \if@nobreak
+      \@nobreakfalse
+      \clubpenalty \@M  % 10000 = effectively infinite penalty
+    \else
+      \clubpenalty \@clubpenalty
+      \everypar{}%
+    \fi}}
+\makeatother
 
 % ============================================================
 % 13. STAGE NAVIGATOR
@@ -366,7 +390,6 @@
 % ============================================================
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-\providecommand{\passmark}[1]{#1}
 \newcounter{none}
 
 $if(highlighting-macros)$

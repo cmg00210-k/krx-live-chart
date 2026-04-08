@@ -20,15 +20,27 @@ local STAGE_PREFIXES = {
   ["5"] = "stageFive",
 }
 
+-- Stage short labels for running header
+local STAGE_LABELS = {
+  ["1"] = "Stage 1: 문제 정의",
+  ["2"] = "Stage 2: 데이터 기반",
+  ["3"] = "Stage 3: 분석 엔진",
+  ["4"] = "Stage 4: 검증·통제",
+  ["5"] = "Stage 5: 로드맵",
+}
+
 -- Generate LaTeX commands to switch dynamic color aliases
 local function stage_color_switch(stage_num)
   local pfx = STAGE_PREFIXES[stage_num]
   if not pfx then return "" end
+  local label = STAGE_LABELS[stage_num] or ("Stage " .. stage_num)
   return "\\colorlet{curStageMarker}{" .. pfx .. "Marker}\n"
     .. "\\colorlet{curStageCodeBg}{" .. pfx .. "CodeBg}\n"
     .. "\\colorlet{curStageQuoteBg}{" .. pfx .. "QuoteBg}\n"
     .. "\\colorlet{curStageDark}{" .. pfx .. "}\n"
-    .. "\\arrayrulecolor{" .. pfx .. "Marker!30}\n"
+    .. "\\colorlet{shadecolor}{" .. pfx .. "CodeBg}\n"
+    .. "\\arrayrulecolor{" .. pfx .. "Marker!55}\n"
+    .. "\\renewcommand{\\currentstage}{" .. label .. "}\n"
 end
 
 -- ============================================================
@@ -57,12 +69,16 @@ function Header(el)
         "{\\Large\\bfseries\\sffamily\\color{dark} " .. text .. "}\\par\\vspace{2pt}\n")
     end
 
-    -- "부록" appendix titles: clearpage but no navigator
+    -- "부록" appendix titles: muted banner with subtle rule
     if text:match("^부록") then
-      local heading_latex = pandoc.write(pandoc.Pandoc({
-        pandoc.Header(1, el.content, el.attr)
-      }), "latex")
-      return pandoc.RawBlock("latex", "\\clearpage\n" .. heading_latex)
+      return pandoc.RawBlock("latex",
+        "\\clearpage\n"
+        .. "\\vspace{8pt}\n"
+        .. "\\noindent\\colorbox{tableodd}{\\parbox{\\dimexpr\\linewidth-2\\fboxsep\\relax}"
+        .. "{\\centering\\vspace{6pt}\n"
+        .. "{\\Large\\bfseries\\sffamily\\color{muted} " .. text .. "}\\vspace{6pt}\n"
+        .. "}}\\par\n"
+        .. "\\vspace{4pt}\\noindent{\\color{muted!40}\\rule{\\linewidth}{0.4pt}}\\vspace{8pt}\n")
     end
   end
 
@@ -79,7 +95,7 @@ function Header(el)
 end
 
 -- ============================================================
--- 2. CODE BLOCKS: aggressive compact sizing
+-- 2. CODE BLOCKS: Stage-colored mdframed + adaptive font sizing
 -- ============================================================
 function CodeBlock(el)
   local text = el.text or ""
@@ -104,28 +120,31 @@ function CodeBlock(el)
     fontcmd = "\\fontsize{8pt}{10pt}\\selectfont"
   end
 
-  -- Page-split strategy
+  -- Page-split: needspace for short/medium, free flow for long
   local pre = ""
-  local post = ""
   if lines <= 15 then
-    pre = "\\begin{samepage}\n"
-    post = "\\end{samepage}\n"
+    pre = string.format("\\needspace{%d\\baselineskip}\n", lines)
   elseif lines <= 25 then
     pre = string.format("\\needspace{%d\\baselineskip}\n", math.ceil(lines * 0.5))
   end
-  -- 25+ lines: no constraint, free flow
 
+  -- Stage-colored background via mdframed + left accent bar
   local latex = pre
     .. "\\vspace{1pt}\n"
+    .. "\\begin{mdframed}["
+    .. "backgroundcolor=curStageCodeBg,"
+    .. "linewidth=1.5pt,linecolor=curStageMarker!70,"
+    .. "leftline=true,topline=false,rightline=false,bottomline=false,"
+    .. "innerleftmargin=6pt,innerrightmargin=4pt,"
+    .. "innertopmargin=2pt,innerbottommargin=2pt,"
+    .. "skipabove=1pt,skipbelow=1pt"
+    .. "]\n"
     .. "\\begin{Verbatim}[fontsize=" .. fontcmd .. ","
-    .. "xleftmargin=4pt,xrightmargin=4pt,"
-    -- !70 for visible left bar on the code-block background (#F4F4F6 vs stage marker tint)
-    .. "frame=leftline,framerule=1.5pt,rulecolor=\\color{curStageMarker!70},"
     .. "formatcom=\\color{bodytext}]\n"
     .. text .. "\n"
     .. "\\end{Verbatim}\n"
+    .. "\\end{mdframed}\n"
     .. "\\vspace{1pt}\n"
-    .. post
 
   return pandoc.RawBlock("latex", latex)
 end
@@ -181,10 +200,20 @@ function Para(el)
 end
 
 -- ============================================================
--- 5. TABLES: prevent font overlap via font scaling
+-- 6. TABLES: font scaling + header rowcolor + short-table needspace
 -- ============================================================
+-- Count data rows in a pandoc Table element
+local function count_table_rows(el)
+  local nrows = 0
+  for _, body in ipairs(el.bodies) do
+    nrows = nrows + #body.body
+  end
+  return nrows
+end
+
 function Table(el)
   local ncols = #el.colspecs
+  local nrows = count_table_rows(el)
 
   -- Font size by column count.
   -- All tables go through this filter so font sizing is centralized here
@@ -205,17 +234,75 @@ function Table(el)
     fontcmd = "\\fontsize{9.5pt}{13pt}\\selectfont"
   end
 
+  -- Make header cells bold at AST level (works with both p{} and l-type columns)
+  if el.head and el.head.rows then
+    for _, row in ipairs(el.head.rows) do
+      for _, cell in ipairs(row.cells) do
+        for _, block in ipairs(cell.contents) do
+          if block.t == "Para" or block.t == "Plain" then
+            block.content = {pandoc.Strong(block.content)}
+          end
+        end
+      end
+    end
+  end
+
   -- Let pandoc produce longtable with its own p{} column widths.
-  -- Wrap in a TeX group (not \begingroup..\endgroup as a token sequence) so that
-  -- the font command is properly scoped and does not bleed into surrounding text.
   local latex = pandoc.write(pandoc.Pandoc({el}), "latex")
 
+  -- Left-align all tables (pandoc default [] = centered)
+  latex = latex:gsub("\\begin{longtable}%[%]", "\\begin{longtable}[l]")
+
+  -- Header row: stage-colored background + bold/larger font
+  -- Insert \rowcolor after \toprule, and wrap header cells in bold font group
+  latex = latex:gsub("(\\toprule[^\n]*\n)", "%1\\rowcolor{curStageQuoteBg}\n")
+  -- Prevent header row duplication on continuation pages:
+  -- Full header (with bold/rowcolor) only on first page via \endfirsthead,
+  -- continuation pages get just a thin \midrule via \endhead
+  latex = latex:gsub(
+    "(\\midrule[^\n]*\n)(\\endhead)",
+    "%1\\endfirsthead\n\\midrule\\noalign{}\n\\endhead"
+  )
+
+  -- Short tables (<=12 rows): keep on same page via needspace estimate
+  -- Row height ~16pt (arraystretch 1.35 * ~12pt line), +30pt for rules/header
+  local pre = ""
+  if nrows <= 12 then
+    local est_height = nrows * 16 + 30
+    pre = string.format("\\needspace{%dpt}\n", est_height)
+  elseif nrows <= 20 then
+    -- Medium tables: request at least half the table stays together
+    local est_half = math.ceil(nrows * 0.5) * 16 + 30
+    pre = string.format("\\needspace{%dpt}\n", est_half)
+  end
+
   -- Use brace-group: { fontcmd \sloppy latex }
-  -- This is safer than \begingroup..\endgroup when fontcmd contains \selectfont
-  -- which has side effects that \begingroup does not fully contain.
-  local result = "{" .. fontcmd .. "\\sloppy\n"
+  local result = pre .. "{" .. fontcmd .. "\\sloppy\n"
     .. latex
     .. "}\n"
 
   return pandoc.RawBlock("latex", result)
+end
+
+-- ============================================================
+-- 7. PANDOC-LEVEL: inject \nopagebreak after headings
+-- ============================================================
+-- Element filters run first (Header, Table, etc.), then Pandoc() runs.
+-- Standard H2/H3 headers that Header() returned unchanged are still Header
+-- elements here, so we can detect them and inject page-break suppression.
+function Pandoc(doc)
+  local blocks = doc.blocks
+  local result = {}
+
+  for i, block in ipairs(blocks) do
+    table.insert(result, block)
+
+    -- After H2/H3/H4 headers: suppress page break to keep heading with content
+    if block.t == "Header" and block.level >= 2 then
+      table.insert(result, pandoc.RawBlock("latex", "\\nopagebreak[4]\n"))
+    end
+  end
+
+  doc.blocks = result
+  return doc
 end
