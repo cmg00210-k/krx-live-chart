@@ -176,6 +176,19 @@ for _tier, _types in STRENGTH_MAP.items():
         TYPE_TO_STRENGTH[_t] = _tier
 
 
+# ──────────────────────────────────────────────
+# [V22-B Gap C] n_scale search configuration
+# ──────────────────────────────────────────────
+# Grid bracketed by Bayesian shrinkage floor (~400, Gelman 2020 beta-binomial
+# posterior variance at p=0.5) and empirical Cox-Snell estimate (~2074 at
+# current event rate). runtime N_scale=300 included so "no change" is
+# expressible. Upper bound 1500 chosen to detect genuine upward drift without
+# pretending precision the 44-pattern partition cannot support.
+# See results/gap_c_synthesis.md for full rationale.
+N_SCALE_GRID = [200, 300, 500, 750, 1000, 1500]
+HARD_FLOOR_N_SCALE = 300  # CFA hybrid safety net — never allow below runtime
+
+
 def load_data():
     """모든 데이터 소스를 한 번에 로드"""
     print("[1/7] Loading data...")
@@ -612,31 +625,84 @@ def calibrate_conf_L(df, pattern_perf):
         # 큰 표본 패턴은 weight=1, 작은 표본 패턴은 weight<1
         # 최적 N_scale = accuracy와 weighted accuracy의 차이가 가장 의미있는 값
         # [V22-B] default를 runtime_n_scale로 변경 — 기존 100은 runtime과 무관한 magic number
+        # [V22-B Gap C] Cox-Snell floor + hard pin + tightened guard. Three independent
+        # safety mechanisms from 3-agent synthesis (architect + stat-valid + CFA):
+        #   (1) Empirical n_cox from directed sample (was ~1058 stale, actual ~2074)
+        #   (2) Guard len >= 5 (was len >= 2 — 2-point variance meaningless on 44 patterns)
+        #   (3) Hard floor max(HARD_FLOOR_N_SCALE, n_cox) — CFA safety net
+        #   (4) Empty-candidate fallback to runtime_n_scale (do not raise)
+        #   (5) var_ratio > 1.5 threshold for `changed` detection (signal vs noise)
+        # See results/gap_c_synthesis.md + results/gap_c_stat_rec.md + results/gap_c_cfa_rec.md
         best_n_scale = runtime_n_scale
+        best_var_ratio = None
+        n_cox = None
+        cox_excluded = []
         if len(pat_acc) >= 5:
             accuracies = pat_acc['accuracy'].values
             n_vals = pat_acc['count'].values
 
-            # N_scale 후보별: weighted accuracy가 raw accuracy와 가장 다른 정보를 제공하는 스케일
-            # 사실상 작은 표본의 불안정한 accuracy를 감쇠하는 역할이므로,
-            # 표본 수가 N_scale 이하인 패턴의 accuracy 분산이 높다는 기준
-            best_var_ratio = 0
-            for n_scale in [30, 50, 75, 100, 150, 200, 300, 500]:
-                small = accuracies[n_vals < n_scale]
-                large = accuracies[n_vals >= n_scale]
-                if len(small) >= 2 and len(large) >= 2:
-                    var_ratio = np.var(small) / (np.var(large) + 1e-10)
-                    if var_ratio > best_var_ratio:
-                        best_var_ratio = var_ratio
-                        best_n_scale = n_scale
+            # Cox-Snell floor: applies to logistic fit at L_X (k=2 predictors),
+            # but reused here as a conservative upper-bound on n_scale sanity.
+            # Stat-valid R3 Step 1: compute from df_directed event balance.
+            n_events = int(df_directed['correct'].sum())
+            n_nonevents = int(len(df_directed) - n_events)
+            k_predictors = 2  # 'confidence', 'wc' (see X = df_directed[['confidence','wc']])
+            n_cox = min(n_events, n_nonevents) // (10 * k_predictors)
 
-            print(f"  -> 최적 N_scale: {best_n_scale} (var_ratio={best_var_ratio:.2f})")
+            # Effective floor: max of CFA hard pin (300) and dynamic Cox-Snell
+            effective_floor = max(HARD_FLOOR_N_SCALE, n_cox)
+            print(f"  -> [Gap C] n_events={n_events}, n_nonevents={n_nonevents}, k={k_predictors}")
+            print(f"  -> [Gap C] n_cox={n_cox}, hard_floor={HARD_FLOOR_N_SCALE}, effective_floor={effective_floor}")
 
-        # [V22-B] Fix changed-detection bug:
-        #   (1) 기존 `best_n_scale != 100` 비교는 runtime(300)과 무관 — runtime_n_scale 기준으로 교체
-        #   (2) 기존 `b_conf_opt > 0.1`는 양의 효과만 인정 — abs()로 음수 효과(-0.278)도 포착
-        #   (3) OR 조건 유지: N_scale 변경만 있어도 changed=True (significance 독립)
-        formula_changed = (best_n_scale != runtime_n_scale) or (significant and abs(b_conf_opt) > 0.1)
+            # Filter candidates (stat-valid R3 Step 2)
+            candidates = [n for n in N_SCALE_GRID if n >= effective_floor]
+            cox_excluded = sorted(set(N_SCALE_GRID) - set(candidates))
+            if cox_excluded:
+                print(f"  -> [Gap C] n_scale excluded by effective_floor={effective_floor}: {cox_excluded}")
+
+            if not candidates:
+                # Empty-candidate fallback (stat-valid R3 Step 3) — honor user intent
+                print(f"  -> [Gap C] all candidates < effective_floor={effective_floor}; "
+                      f"defaulting to runtime_n_scale={runtime_n_scale}")
+                best_n_scale = runtime_n_scale
+                best_var_ratio = None
+            else:
+                best_var_ratio = 0.0
+                for n_scale in candidates:
+                    small = accuracies[n_vals < n_scale]
+                    large = accuracies[n_vals >= n_scale]
+                    # Guard raised from >= 2 to >= 5 (stat-valid R5-3):
+                    # 2-point variance is statistically meaningless on 44 patterns.
+                    if len(small) >= 5 and len(large) >= 5:
+                        var_ratio = np.var(small) / (np.var(large) + 1e-10)
+                        if var_ratio > best_var_ratio:
+                            best_var_ratio = var_ratio
+                            best_n_scale = n_scale
+                    else:
+                        print(f"  -> [Gap C] n_scale={n_scale} skipped: "
+                              f"len(small)={len(small)}, len(large)={len(large)} (need >= 5)")
+
+                if best_var_ratio == 0.0:
+                    # No candidate satisfied the >= 5 guard
+                    print(f"  -> [Gap C] no candidate passed len>=5 guard, "
+                          f"defaulting to runtime_n_scale={runtime_n_scale}")
+                    best_n_scale = runtime_n_scale
+                    best_var_ratio = None
+
+            _vr_str = f"{best_var_ratio:.2f}" if best_var_ratio is not None else "N/A"
+            print(f"  -> 최적 N_scale: {best_n_scale} (var_ratio={_vr_str})")
+
+        # [V22-B Gap C] Tighten changed detection — var_ratio > 1.5 threshold
+        # (stat-valid R3 Step 5). Conservative by design: false negatives preferred
+        # to false positives because the cost of a spurious changed=True is a
+        # verify.py WARN every session. The best_var_ratio guard prevents
+        # triggering on the empty-candidate fallback path (best_var_ratio is None).
+        n_scale_changed = (
+            (best_n_scale != runtime_n_scale)
+            and (best_var_ratio is not None)
+            and (best_var_ratio > 1.5)
+        )
+        formula_changed = n_scale_changed or (significant and abs(b_conf_opt) > 0.1)
         if formula_changed:
             new_formula = f"R_sq * min(n/{best_n_scale}, 1)"
         else:
@@ -675,7 +741,25 @@ def calibrate_conf_L(df, pattern_perf):
         },
         "b_conf_CI_95": [round(float(ci_low), 4), round(float(ci_high), 4)],
         "overall_direction_accuracy": round(float(df_directed['correct'].mean()), 4),
-        "evidence": evidence
+        "evidence": evidence,
+        # [V22-B Gap C] Synthesis audit metadata (stat-valid R5-1 freeze support)
+        "gap_c_n_cox": int(n_cox) if 'n_cox' in dir() and n_cox is not None else None,
+        "gap_c_effective_floor": (
+            max(HARD_FLOOR_N_SCALE, n_cox)
+            if 'n_cox' in dir() and n_cox is not None
+            else HARD_FLOOR_N_SCALE
+        ),
+        "gap_c_cox_excluded": cox_excluded if 'cox_excluded' in dir() else [],
+        "gap_c_best_var_ratio": (
+            float(best_var_ratio) if 'best_var_ratio' in dir() and best_var_ratio is not None else None
+        ),
+        "gap_c_amendments_applied": [
+            "empirical_n_cox",
+            "len_guard_5",
+            "hard_floor_300",
+            "var_ratio_threshold_1.5",
+            "grid_200_300_500_750_1000_1500"
+        ]
     }
 
 
