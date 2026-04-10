@@ -404,6 +404,80 @@ def calibrate_conf_L(df, pattern_perf):
         (df_directed['ret_5'] < 0).astype(int)
     )
 
+    # ──────────────────────────────────────────────
+    # [Gap A] V25 Contrarian Graduation Propagation
+    # ──────────────────────────────────────────────
+    # Runtime (js/patterns.js:976-989) inverts confidencePred = 100 - dirWr for
+    # patterns whose historical oos_wr < 50 (BH-FDR q<0.10), but the emitted
+    # 'signal' field and the wc_return_pairs.csv schema are NOT touched. To make
+    # the batch calibrator's overall_direction_accuracy consistent with runtime,
+    # we flip correct := 1 - correct for rows whose pattern type is flagged
+    # contrarian in pattern_winrates_oos.json. This is algebraically equivalent
+    # to flipping the prediction sign (see results/gap_a_theory.md V1).
+    #
+    # Caveats addressed:
+    #   (1) Tie handling: ret_5 == 0 rows would spuriously flip 0→1; drop them.
+    #   (2) Schema coupling: soft-warn if OOS file is >7 days old.
+    #   (3) Delta logging: capture pre/post mean(correct) and log the delta.
+    #   (5) Scope isolation: mutation stays on df_directed (local), not df/df_valid.
+    contrarian_set = set()
+    try:
+        oos_path = os.path.join(DATA_DIR, 'pattern_winrates_oos.json')
+        with open(oos_path, 'r', encoding='utf-8') as _f:
+            _oos_json = json.load(_f)
+        contrarian_set = {
+            name for name, info in _oos_json.get('patterns', {}).items()
+            if info.get('contrarian') is True
+        }
+        # Caveat 2: schema coupling — soft warn if OOS file is stale (>7 days).
+        # Wave 2 regenerates this file shortly; do not hard-fail.
+        _gen_str = _oos_json.get('generated', '')
+        try:
+            from datetime import date as _date
+            _gen_date = _date.fromisoformat(_gen_str)
+            _age_days = (_date.today() - _gen_date).days
+            if _age_days > 7:
+                print(f"  -> [Gap A] WARNING: pattern_winrates_oos.json is {_age_days} days old "
+                      f"(generated={_gen_str}); contrarian set may be stale.")
+        except (ValueError, TypeError):
+            print(f"  -> [Gap A] WARNING: could not parse OOS 'generated' field: {_gen_str!r}")
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as _e:
+        print(f"  -> [Gap A] WARNING: contrarian set unavailable ({type(_e).__name__}: {_e}); "
+              f"using unmodified direction_accuracy")
+        contrarian_set = set()
+
+    if contrarian_set:
+        # Caveat 1: drop ties (ret_5 == 0) to avoid spuriously flipping 0→1.
+        # Placed immediately before the flip so that the original correct
+        # semantics for non-contrarian rows remain untouched downstream.
+        _pre_tie_n = len(df_directed)
+        df_directed = df_directed[df_directed['ret_5'] != 0].copy()
+        _ties_dropped = _pre_tie_n - len(df_directed)
+        if _ties_dropped > 0:
+            print(f"  -> [Gap A] Dropped {_ties_dropped} tie rows (ret_5 == 0)")
+
+        # Caveat 3: capture pre-flip accuracy for delta logging.
+        pre_flip_acc = float(df_directed['correct'].mean())
+
+        # Caveat 5: scope-isolated mutation on df_directed only.
+        mask = df_directed['type'].isin(contrarian_set)
+        df_directed.loc[mask, 'correct'] = 1 - df_directed.loc[mask, 'correct']
+
+        post_flip_acc = float(df_directed['correct'].mean())
+        _n_total = len(df_directed)
+        _n_flipped = int(mask.sum())
+        _pct_flipped = (_n_flipped / _n_total * 100.0) if _n_total > 0 else 0.0
+
+        print(f"  -> [Gap A] Contrarian set: {len(contrarian_set)} patterns ({sorted(contrarian_set)})")
+        print(f"  -> [Gap A] df_directed total rows: {_n_total}")
+        print(f"  -> [Gap A] Contrarian rows flipped: {_n_flipped} ({_pct_flipped:.1f}%)")
+        print(f"  -> [Gap A] Pre-flip mean(correct): {pre_flip_acc:.4f}")
+        print(f"  -> [Gap A] Post-flip mean(correct): {post_flip_acc:.4f}")
+        print(f"  -> [Gap A] Direction accuracy delta: {post_flip_acc - pre_flip_acc:+.4f}")
+    # ──────────────────────────────────────────────
+    # [Gap A] End of contrarian propagation block
+    # ──────────────────────────────────────────────
+
     # confidence 구간별 정확도 분석
     df_directed['conf_bin'] = (df_directed['confidence'] / 10).apply(np.floor) * 10
 
