@@ -2818,7 +2818,16 @@ class SignalEngine {
    */
   _detectCUSUMBreak(candles, cache) {
     var signals = [];
-    var cusum = cache.cusum();
+    // [V25 FIX-2] volRegime 전달 — Doc34 §2.3 적응형 임계값 활성화
+    // cache.volRegime()은 per-bar 배열 → 마지막 non-null 값을 현재 레짐으로 사용
+    var vrArr = cache.volRegime();
+    var vr = null;
+    if (vrArr && vrArr.length > 0) {
+      for (var vi = vrArr.length - 1; vi >= 0; vi--) {
+        if (vrArr[vi] != null) { vr = vrArr[vi]; break; }
+      }
+    }
+    var cusum = cache.cusum(2.5, vr);
     if (!cusum || !cusum.breakpoints || cusum.breakpoints.length === 0) return signals;
 
     // 최근 20봉 내 breakpoint만 시그널화
@@ -2826,13 +2835,18 @@ class SignalEngine {
     var lastIdx = candles.length - 1;
     var recentBPs = cusum.breakpoints.filter(function(bp) { return bp.index >= lastIdx - 20; });
     for (var bi = 0; bi < recentBPs.length; bi++) {
-      var bpIdx = recentBPs[bi].index;
+      // [V25 FIX-1] Off-by-one: bp.index는 returns-space (rets[k] = log(cl[k+1]/cl[k]))
+      // breakpoint가 returns-index k에서 발동 → 변화가 나타나는 봉은 candle k+1
+      var bpIdx = recentBPs[bi].index + 1;
       if (bpIdx < 0 || bpIdx >= candles.length) continue;
+      // [V25 FIX-3] direction 전파 — bp.direction ('up'/'down') 활용
+      var dir = recentBPs[bi].direction;
+      var sig = (dir === 'up') ? 'buy' : (dir === 'down') ? 'sell' : 'neutral';
       signals.push({
-        type: 'cusumBreak', signal: 'neutral', strength: 'medium',
+        type: 'cusumBreak', signal: sig, strength: 'medium',
         confidence: 52, index: bpIdx, time: candles[bpIdx].time,
         nameShort: 'CUSUM 변곡', source: 'indicator',
-        description: 'CUSUM 구조적 변화 감지: 추세 전환 가능',
+        description: 'CUSUM 구조적 변화 감지: ' + (dir === 'up' ? '상승' : dir === 'down' ? '하락' : '추세') + ' 전환',
       });
     }
     return signals;

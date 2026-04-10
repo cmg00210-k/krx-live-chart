@@ -218,13 +218,13 @@
       "significant_count": 161,
       "adjusted_significant_count": 2,
       "avg_wls_coeffs": [
-        1.617529,
-        -5.942049,
-        -0.917583,
-        0.074592,
-        3.261331
+        0.090739,
+        -0.78898,
+        -0.431153,
+        0.135252,
+        11.615513
       ],
-      "avg_r_squared": 0.0978,
+      "avg_r_squared": 0.0939,
       "regression_count": 8
     },
     "3": {
@@ -235,13 +235,13 @@
       "significant_count": 152,
       "adjusted_significant_count": 1,
       "avg_wls_coeffs": [
-        3.384802,
-        -9.996804,
-        -0.382049,
-        0.081557,
-        -16.360956
+        -0.105957,
+        0.030876,
+        0.603959,
+        0.033756,
+        -11.388373
       ],
-      "avg_r_squared": 0.1539,
+      "avg_r_squared": 0.1026,
       "regression_count": 8
     },
     "5": {
@@ -252,13 +252,13 @@
       "significant_count": 143,
       "adjusted_significant_count": 1,
       "avg_wls_coeffs": [
-        5.077949,
-        -13.343411,
-        -1.449238,
-        0.310673,
-        -34.279432
+        0.14704,
+        0.340017,
+        0.175613,
+        0.220649,
+        -23.00202
       ],
-      "avg_r_squared": 0.1925,
+      "avg_r_squared": 0.1479,
       "regression_count": 8
     },
     "10": {
@@ -269,13 +269,13 @@
       "significant_count": 163,
       "adjusted_significant_count": 1,
       "avg_wls_coeffs": [
-        11.320149,
-        -26.11454,
-        -5.044063,
-        0.20487,
-        -95.463265
+        3.19264,
+        -1.362461,
+        -2.544479,
+        0.253811,
+        -68.603034
       ],
-      "avg_r_squared": 0.1916,
+      "avg_r_squared": 0.2023,
       "regression_count": 7
     },
     "20": {
@@ -286,13 +286,13 @@
       "significant_count": 198,
       "adjusted_significant_count": 4,
       "avg_wls_coeffs": [
-        16.317273,
-        -47.548271,
-        -8.009319,
-        0.400553,
-        -21.293746
+        7.827516,
+        -9.948234,
+        -8.478234,
+        1.143389,
+        20.088206
       ],
-      "avg_r_squared": 0.1976,
+      "avg_r_squared": 0.2105,
       "regression_count": 5
     }
   },
@@ -473,13 +473,13 @@
       "significant_count": 98,
       "adjusted_significant_count": 0,
       "avg_wls_coeffs": [
-        0.119506,
-        -3.334841,
-        3.388276,
-        0.091729,
-        19.288769
+        2.075631,
+        -6.018425,
+        4.130225,
+        0.168821,
+        6.537495
       ],
-      "avg_r_squared": 0.3328,
+      "avg_r_squared": 0.3594,
       "regression_count": 2
     },
     "3": {
@@ -490,13 +490,13 @@
       "significant_count": 81,
       "adjusted_significant_count": 0,
       "avg_wls_coeffs": [
-        0.732303,
-        -3.217667,
-        6.048048,
-        -0.144228,
-        -46.22477
+        2.666054,
+        -5.79146,
+        7.069242,
+        -0.101767,
+        -66.380178
       ],
-      "avg_r_squared": 0.2969,
+      "avg_r_squared": 0.3041,
       "regression_count": 2
     },
     "5": {
@@ -507,13 +507,13 @@
       "significant_count": 89,
       "adjusted_significant_count": 0,
       "avg_wls_coeffs": [
-        1.605882,
-        -4.550365,
-        7.180972,
-        0.113329,
-        -80.483614
+        5.355603,
+        -10.175364,
+        9.789492,
+        0.263906,
+        -118.750671
       ],
-      "avg_r_squared": 0.2814,
+      "avg_r_squared": 0.307,
       "regression_count": 2
     },
     "10": {
@@ -524,13 +524,13 @@
       "significant_count": 120,
       "adjusted_significant_count": 0,
       "avg_wls_coeffs": [
-        0.046347,
-        -1.541929,
-        4.732675,
-        -0.278903,
-        -46.133395
+        1.352748,
+        -3.357861,
+        6.018394,
+        -0.221134,
+        -67.250507
       ],
-      "avg_r_squared": 0.1437,
+      "avg_r_squared": 0.1528,
       "regression_count": 2
     },
     "20": {
@@ -541,13 +541,13 @@
       "significant_count": 147,
       "adjusted_significant_count": 2,
       "avg_wls_coeffs": [
-        -2.04656,
-        -2.578854,
-        8.377257,
-        0.035808,
-        48.763653
+        1.061,
+        -8.019187,
+        12.290593,
+        0.102145,
+        13.477007
       ],
-      "avg_r_squared": 0.1779,
+      "avg_r_squared": 0.1969,
       "regression_count": 2
     }
   },
@@ -686,13 +686,13 @@
       "significant_count": 333,
       "adjusted_significant_count": 26,
       "avg_wls_coeffs": [
-        -0.805241,
-        1.282187,
-        -1.142494,
-        -0.040018,
-        8.564622
+        -1.065368,
+        1.429878,
+        -1.028913,
+        -0.062616,
+        6.955121
       ],
-      "avg_r_squared": 0.2125,
+      "avg_r_squared": 0.2131,
       "regression_count": 10
     },
     "3": {
@@ -703,13 +703,13 @@
       "significant_count": 192,
       "adjusted_significant_count": 12,
       "avg_wls_coeffs": [
-        -0.796787,
-        1.58659,
-        -1.38028,
-        -0.024456,
-        15.20488
+        -1.75063,
+        2.645295,
+        -1.005923,
+        -0.094845,
+        15.784009
       ],
-      "avg_r_squared": 0.1533,
+      "avg_r_squared": 0.1616,
       "regression_count": 9
     },
     "5": {
@@ -720,13 +720,13 @@
       "significant_count": 187,
       "adjusted_significant_count": 13,
       "avg_wls_coeffs": [
-        1.680447,
-        -2.934336,
-        -2.714951,
-        0.170926,
-        -8.084342
+        1.711019,
+        -2.12052,
+        -2.664701,
+        0.169803,
+        -9.766485
       ],
-      "avg_r_squared": 0.2123,
+      "avg_r_squared": 0.2121,
       "regression_count": 6
     },
     "10": {
@@ -737,13 +737,13 @@
       "significant_count": 245,
       "adjusted_significant_count": 15,
       "avg_wls_coeffs": [
-        3.101191,
-        -4.540444,
-        1.81284,
-        0.071006,
-        -40.135465
+        2.988245,
+        -3.030894,
+        1.818088,
+        0.061744,
+        -41.878695
       ],
-      "avg_r_squared": 0.2756,
+      "avg_r_squared": 0.2781,
       "regression_count": 5
     },
     "20": {
@@ -754,13 +754,13 @@
       "significant_count": 422,
       "adjusted_significant_count": 50,
       "avg_wls_coeffs": [
-        5.329001,
-        -8.197007,
-        -2.382482,
-        0.199459,
-        -70.780405
+        5.872677,
+        -6.844927,
+        -2.477564,
+        0.239716,
+        -71.617114
       ],
-      "avg_r_squared": 0.2243,
+      "avg_r_squared": 0.2183,
       "regression_count": 4
     }
   },
@@ -1421,13 +1421,13 @@
       "significant_count": 562,
       "adjusted_significant_count": 158,
       "avg_wls_coeffs": [
-        -0.275269,
-        0.268283,
-        -0.1687,
-        -0.096601,
-        -8.531934
+        -0.129461,
+        -0.050452,
+        -0.156529,
+        -0.0819,
+        -8.258149
       ],
-      "avg_r_squared": 0.1136,
+      "avg_r_squared": 0.1119,
       "regression_count": 2520
     },
     "3": {
@@ -1438,13 +1438,13 @@
       "significant_count": 214,
       "adjusted_significant_count": 47,
       "avg_wls_coeffs": [
-        0.242824,
-        -0.102954,
-        0.278848,
-        -0.149319,
-        -14.306146
+        0.469909,
+        -0.511445,
+        0.295905,
+        -0.114498,
+        -13.931458
       ],
-      "avg_r_squared": 0.131,
+      "avg_r_squared": 0.1297,
       "regression_count": 2517
     },
     "5": {
@@ -1455,13 +1455,13 @@
       "significant_count": 286,
       "adjusted_significant_count": 77,
       "avg_wls_coeffs": [
-        1.253225,
-        -0.927248,
-        0.413776,
-        -0.125834,
-        -28.793916
+        1.085468,
+        -0.521964,
+        0.464031,
+        -0.104668,
+        -28.007569
       ],
-      "avg_r_squared": 0.1558,
+      "avg_r_squared": 0.1525,
       "regression_count": 2514
     },
     "10": {
@@ -1472,13 +1472,13 @@
       "significant_count": 536,
       "adjusted_significant_count": 179,
       "avg_wls_coeffs": [
-        5.00304,
-        -5.65468,
-        0.953381,
-        -0.034548,
-        -66.537537
+        3.260082,
+        -1.848183,
+        1.033706,
+        -0.026826,
+        -62.851217
       ],
-      "avg_r_squared": 0.2108,
+      "avg_r_squared": 0.2032,
       "regression_count": 2509
     },
     "20": {
@@ -1489,13 +1489,13 @@
       "significant_count": 973,
       "adjusted_significant_count": 399,
       "avg_wls_coeffs": [
-        10.51161,
-        -10.263767,
-        0.447159,
-        0.202199,
-        -126.927642
+        6.457929,
+        -1.500105,
+        0.304443,
+        0.075492,
+        -123.415033
       ],
-      "avg_r_squared": 0.2802,
+      "avg_r_squared": 0.2735,
       "regression_count": 2493
     }
   },
