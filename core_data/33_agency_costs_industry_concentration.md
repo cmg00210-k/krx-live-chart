@@ -268,10 +268,103 @@ Bae et al. (2002)는 재벌 계열사 간 인수합병이 소액주주 가치를
 RPRR이 높더라도 경쟁력 있는 내부 거래일 수 있고, CSS가 높더라도 오너의 이해와
 소수주주 이해가 정렬될 수 있다. 따라서 복합 지수(§4의 ARI)로 통합해야 한다.
 
+### 3.3 지배구조 괴리도 (Control-Ownership Wedge)
+
+재벌 지배주주의 대리인 비용은 현금흐름권(cash flow rights, C)과 의결권(voting rights,
+α)의 괴리로 측정된다. La Porta, Lopez-de-Silanes & Shleifer (1999)가 정립하고,
+Claessens et al. (2000)이 동아시아 9개국에 적용한 이 프레임워크는 한국 재벌 분석의
+핵심 도구이다.
+
+```
+정의:
+
+  C: 현금흐름권 (cash flow rights)
+     — 지배주주가 보유한 실질적 배당/잔여재산 청구권 비율
+     — 피라미드 구조에서: C = Π(직접 지분율)  (경로상 지분율의 곱)
+
+  α: 의결권 (voting rights / control rights)
+     — 지배주주가 행사하는 실질적 의사결정권 비율
+     — 피라미드 구조에서: α = min(경로상 각 지분율)  (약결합 규칙)
+     — 순환출자에서는 행렬 방정식으로 해를 구함
+
+  괴리도 (Wedge):
+    W = α - C
+    — W > 0이면 의결권이 현금흐름권을 초과: 터널링 유인 존재
+
+  괴리도 비율 (Wedge Ratio):
+    WR = α / C
+    — WR = 1: 1주 1의결권 원칙 충족 (no wedge)
+    — WR > 1: 적은 현금흐름권으로 큰 의결권 행사
+    — WR > 5: 극단적 괴리 → 터널링 고위험
+
+터널링 유인의 미시경제학적 분석:
+
+  지배주주의 터널링 이익:
+    π_tunnel = α · ΔV_control - C · ΔV_firm
+
+  여기서:
+    ΔV_control: 터널링으로 이전하는 자원의 가치
+    ΔV_firm: 터널링에 의한 기업가치 감소 (ΔV_firm > ΔV_control, 비효율 발생)
+
+  터널링 조건 (지배주주에게 유리한 경우):
+    π_tunnel > 0
+    α · ΔV_control > C · ΔV_firm
+    α / C > ΔV_firm / ΔV_control
+
+  ∴ α/C가 클수록 (괴리 클수록) 터널링 유인 강화
+     ΔV_firm/ΔV_control이 클수록 (비효율 클수록) 터널링 억제
+
+  한계 터널링 조건: α/C = ΔV_firm / ΔV_control
+```
+
+**한국 4대 재벌의 C/α 실증 데이터:**
+
+| 재벌 그룹 | 총수 일가 C (%) | 총수 일가 α (%) | WR (α/C) | 괴리도 등급 |
+| ----------- | ----------------- | ----------------- | ---------- | ------------- |
+| 삼성 | ~1.7 | ~35 | ~20.6 | 극심 |
+| SK | ~3.5 | ~40 | ~11.4 | 극심 |
+| 현대차 | ~2.8 | ~30 | ~10.7 | 극심 |
+| LG | ~4.2 | ~38 | ~9.0 | 심각 |
+| 롯데 | ~2.1 | ~32 | ~15.2 | 극심 |
+
+출처: 공정거래위원회 대규모기업집단 현황공시 (2024). C는 직접+간접 현금흐름권 합계.
+α는 직접+간접 의결권 합계 (피라미드·순환출자 효과 포함).
+
+**국제 비교:**
+
+```
+한국 재벌 평균 WR ≈ 10-20  (Claessens et al. 2000: 동아시아 최고 수준)
+일본 계열 평균 WR ≈ 1.5-3  (상호출자이나 경영 개입 제한적)
+미국 대기업 평균 WR ≈ 1.0-1.5  (1주 1의결권 원칙, dual-class는 예외)
+스웨덴 재벌 평균 WR ≈ 5-8  (Wallenberg 등, 차등의결권 보통주)
+```
+
+**패턴 분석 함의:**
+
+```
+WR > 10인 재벌 계열사:
+  — 터널링 이벤트(내부거래 공시, 유상증자, 합병) 시 패턴 신뢰도 하향
+  — 이유: 기업가치가 펀더멘탈이 아닌 지배주주 의사결정에 의해 급변
+  — 보정: conf_adj = conf_base × (1 - wedge_discount)
+  — wedge_discount = min(0.15, 0.01 × WR)
+    WR = 10: -10%, WR = 15: -15% (cap)
+
+WR < 3인 기업:
+  — 소유-경영 분리가 약하거나 정렬되어 있음
+  — 펀더멘탈 기반 패턴의 신뢰도가 상대적으로 높음
+```
+
+**CheeseStock 매핑:** C/α 비율이 극단적인 종목(α/C > 10)에서 EVA 해석 시 보수적
+할인을 적용하는 것이 이론적으로 타당하다. 현재 미구현이나, §4 ARI의 하위 지표로서
+`RPRR`(관계사 매출 비중)과 함께 `wedge_discount`를 설계할 수 있다. DART 사업보고서의
+"최대주주 및 특수관계인 현황" 섹션에서 C와 α를 추출 가능하다.
+
 참고문헌:
+
+- La Porta, R., Lopez-de-Silanes, F. & Shleifer, A. (1999). Corporate Ownership Around the World. *JF*, 54(2), 471-517.
+- Claessens, S., Djankov, S. & Lang, L.H.P. (2000). The Separation of Ownership and Control in East Asian Corporations. *JFE*, 58(1-2), 81-112.
 - Bae, K.-H., Kang, J.-K. & Kim, J.-M. (2002). Tunneling or Value Added? *JF*, 57(6), 2695-2740.
 - Friedman, E., Johnson, S. & Mitton, T. (2003). Propping and Tunneling. *JCE*, 31(4), 732-750.
-- Claessens, S., Djankov, S. & Lang, L.H.P. (2000). The Separation of Ownership and Control in East Asian Corporations. *JFE*, 58(1-2), 81-112.
 - Johnson, S., La Porta, R., Lopez-de-Silanes, F. & Shleifer, A. (2000). Tunneling. *AER P&P*, 90(2), 22-27.
 
 ---

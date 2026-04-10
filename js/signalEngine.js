@@ -2818,14 +2818,15 @@ class SignalEngine {
    */
   _detectCUSUMBreak(candles, cache) {
     var signals = [];
-    var cusum = cache.onlineCUSUM();
+    var cusum = cache.cusum();
     if (!cusum || !cusum.breakpoints || cusum.breakpoints.length === 0) return signals;
 
     // 최근 20봉 내 breakpoint만 시그널화
+    // breakpoints는 {index, direction, magnitude} 객체 배열
     var lastIdx = candles.length - 1;
-    var recentBPs = cusum.breakpoints.filter(function(bp) { return bp >= lastIdx - 20; });
+    var recentBPs = cusum.breakpoints.filter(function(bp) { return bp.index >= lastIdx - 20; });
     for (var bi = 0; bi < recentBPs.length; bi++) {
-      var bpIdx = recentBPs[bi];
+      var bpIdx = recentBPs[bi].index;
       if (bpIdx < 0 || bpIdx >= candles.length) continue;
       signals.push({
         type: 'cusumBreak', signal: 'neutral', strength: 'medium',

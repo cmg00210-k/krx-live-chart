@@ -36,6 +36,101 @@ lambda_b = lambda * (1 + k * PI(loss_aversion))
 
 ---
 
+## 1A. Glosten-Milgrom (1985) 순차적 거래 모형
+
+Kyle (1985)가 시장조성자의 가격발견(price discovery)과 가격 충격(lambda)에 초점을
+맞추었다면, Glosten-Milgrom (1985)은 호가 스프레드(bid-ask spread)의 정보비대칭
+분해에 초점을 맞춘다. 두 모형은 시장 미시구조의 양대 축이다.
+
+### 1A.1 모형 구조
+
+```
+시장 참여자:
+  - 정보거래자 (informed trader): 비율 mu, 자산 진가 V를 관측
+  - 유동성거래자 (liquidity trader): 비율 1-mu, V를 모름
+  - 경쟁적 시장조성자 (competitive market maker): 호가 설정
+
+자산 진가: V = V_H (확률 pi) 또는 V = V_L (확률 1-pi)
+  delta = V_H - V_L (정보의 가치)
+```
+
+경쟁적 시장조성자는 기대 손실 = 0 조건에서 호가를 설정한다:
+
+```
+매도 호가 (ask):
+  ask = E[V | 매수 주문 관측]
+      = V_H * Pr(V_H | buy) + V_L * Pr(V_L | buy)
+
+매수 호가 (bid):
+  bid = E[V | 매도 주문 관측]
+      = V_H * Pr(V_H | sell) + V_L * Pr(V_L | sell)
+```
+
+베이즈 정리를 적용하면:
+
+```
+Pr(V_H | buy) = Pr(buy | V_H) * pi / Pr(buy)
+
+  Pr(buy | V_H) = mu * 1 + (1-mu) * 0.5
+    → 정보거래자는 V_H이면 반드시 매수, 유동성거래자는 50% 확률 매수
+
+  Pr(buy) = pi * [mu + (1-mu)*0.5] + (1-pi) * [(1-mu)*0.5]
+```
+
+### 1A.2 스프레드 공식
+
+단순화된 균형 스프레드:
+
+```
+spread = ask - bid = 2 * mu * delta
+
+  mu: 정보거래자 비율 (0 < mu < 1)
+  delta: V_H - V_L (정보의 가치)
+
+직관:
+  mu = 0 (정보거래자 없음) → spread = 0 (완전 유동적)
+  mu → 1 (대부분 정보거래자) → spread → 2*delta (극대화)
+  delta = 0 (정보 없음) → spread = 0
+```
+
+### 1A.3 Kyle vs Glosten-Milgrom 비교
+
+| 차원 | Kyle (1985) | Glosten-Milgrom (1985) |
+|------|------------|----------------------|
+| 거래 방식 | 연속(batch auction) | 순차적(sequential) |
+| 내부자 | 단일, 전략적 | 다수, 경쟁적 |
+| 핵심 산출물 | 가격 충격 lambda | 호가 스프레드 spread |
+| 정보 반영 | 점진적 (주문흐름 누적) | 순차적 베이지안 갱신 |
+| 균형 유형 | 선형 균형 (lambda 고정) | 동적 (스프레드 수렴) |
+
+### 1A.4 KRX 적용
+
+```
+KOSPI 대형주 (삼성전자, SK하이닉스):
+  스프레드 ≈ 5-10 bps
+  외국인 + 기관 비중 높음 → mu 상대적 높음
+  그러나 경쟁적 유동성 공급 (LP 제도, HFT) → 스프레드 상쇄
+
+KOSDAQ 소형주:
+  스프레드 ≈ 50-100 bps
+  개인투자자 지배 → mu 낮으나, 유동성 부족으로 스프레드 확대
+  정보 비대칭보다 재고 위험(inventory risk)이 스프레드의 주 원인
+
+패턴 분석 시사점:
+  스프레드가 넓은 종목(KOSDAQ 소형)에서 패턴 신호의 실현 비용이 높음
+  → backtester.js의 KRX_SLIPPAGE = 0.10%는 KOSPI 대형주 기준이므로
+    KOSDAQ 소형주에서는 과소 추정 (§3.1 Amihud ILLIQ 참조)
+
+  Glosten-Milgrom의 mu 추정은 tick-level 데이터가 필요하므로
+  현재 OHLCV 기반 시스템에서는 직접 계산 불가 (§2 VPIN과 동일한 제약)
+```
+
+참고문헌:
+- Glosten, L.R. & Milgrom, P.R. (1985). Bid, Ask and Transaction Prices in a
+  Specialist Market with Heterogeneously Informed Traders. *JFE*, 14(1), 71-100.
+
+---
+
 ## 2. 주문흐름 독성 측정 (Order Flow Toxicity — VPIN)
 
 Easley, Lopez de Prado & O'Hara (2012):
@@ -182,6 +277,7 @@ R_strength = sum(V_i * w(P_anchor - P_i))
 | 개념 | 학술 출처 | JS 연결 |
 |------|----------|--------|
 | 가격 충격 | Kyle (1985) | backtester.js 비용 |
+| 호가 스프레드 분해 | Glosten-Milgrom (1985) | ILLIQ 프록시 (tick 데이터 시 직접 구현) |
 | 주문흐름 독성 | Easley et al. (2012) | LinUCB 확장 후보 |
 | 비유동성 | Amihud (2002) | 시장별 슬리피지 |
 | 노이즈 필터링 | Hansen & Lunde (2006) | calcKalman Q |
@@ -193,6 +289,7 @@ R_strength = sum(V_i * w(P_anchor - P_i))
 ## 참고문헌
 
 1. Kyle, A.S. (1985). Continuous Auctions. *Econometrica*, 53(6).
+1A. Glosten, L.R. & Milgrom, P.R. (1985). Bid, Ask and Transaction Prices. *JFE*, 14(1).
 2. Easley, D. et al. (2012). Flow Toxicity. *RFS*, 25(5).
 3. Amihud, Y. (2002). Illiquidity. *JFM*, 5(1).
 4. Hansen, P.R. & Lunde, A. (2006). Microstructure Noise. *JBES*, 24(2).

@@ -825,6 +825,28 @@ Journal of Monetary Economics, 15(2), 145-161
   → Epstein-Zin: gamma와 psi를 독립적으로 조절 가능
   → 높은 위험회피 + 합리적 대체탄력성 = 퍼즐 완화
 
+  Epstein-Zin SDF (확률적 할인 인자의 명시적 형태):
+
+    M_{t+1} = delta^theta * (C_{t+1}/C_t)^(-theta/psi) * R_{w,t+1}^(theta-1)
+
+    theta = (1 - gamma) / (1 - 1/psi)
+    delta: 시간 할인 인자
+    gamma: 상대적 위험회피계수
+    psi: 시점간 대체탄력성 (Elasticity of Intertemporal Substitution)
+    R_w: 부(wealth) 포트폴리오 수익률
+
+  특수 경우:
+    gamma = 1/psi → theta = 1 → M = delta * (C_{t+1}/C_t)^(-gamma)
+    → 표준 CRRA 효용의 SDF로 환원 (CCAPM)
+
+  의의:
+    gamma와 psi를 독립적으로 설정하여 Equity Premium Puzzle 완화
+    Bansal & Yaron (2004) Long-Run Risk 모형에서 핵심 SDF로 활용
+    → 소비 성장의 장기 불확실성(long-run consumption risk)이
+      주식 프리미엄의 상당 부분을 설명
+    Campbell & Vuolteenaho (2004)의 Good Beta/Bad Beta 분해와 결합 시
+      ICAPM 상태변수의 미시적 기초(micro-foundation)를 제공
+
 해결 시도 3: 희귀 재난 (Rare Disasters)
   Robert Barro (2006), "Rare Disasters and Asset Markets in the
   Twentieth Century"
@@ -1554,8 +1576,114 @@ SDF (Stochastic Discount Factor) 통합 프레임워크:
     CAPM:    M = a - b*R_m
     FF3:     M = a - b*MKT - s*SMB - h*HML
     CCAPM:   M = beta * (C_{t+1}/C_t)^(-gamma)
+    EZ:      M = delta^theta * (C_{t+1}/C_t)^(-theta/psi) * R_w^(theta-1)
     APT:     M = a - SUM b_k*F_k
+```
 
+### 9.5.1 SDF 존재의 삼단 논증
+
+SDF가 왜 존재하는가에 대한 이론적 기반은 세 단계의 논증으로 구성된다:
+
+```
+1. 일물일가의 법칙 (Law of One Price):
+   동일한 미래 현금흐름을 가진 두 자산은 동일한 가격을 가져야 한다.
+   → 가격결정 함수가 선형(linear)임을 보장한다:
+     p(x) = E[M * x]  (선형 함수 M이 존재)
+
+2. 무차익 (No-Arbitrage):
+   비용 0으로 양의 수익을 얻는 전략은 존재하지 않는다.
+   → 1단계의 M에 양수성(positivity) 조건을 추가한다: M > 0
+   → 이 조건이 핵심이다: M > 0 ⟺ 무차익 ⟺ 위험중립 측도 Q 존재
+
+3. 완전시장 (Complete Market):
+   모든 상태에 대한 Arrow-Debreu 증권이 존재한다.
+   → M이 유일(unique)하다.
+   → 불완전 시장에서는 M이 존재하되, 유일하지 않다.
+     (무한히 많은 SDF 중 하나를 선택하는 문제가 남는다)
+```
+
+**자산가격결정의 제1기본정리 (First Fundamental Theorem of Asset Pricing):**
+
+Harrison & Kreps (1979), Harrison & Pliska (1981):
+
+```
+  M > 0 (양의 SDF 존재)
+  ⟺ 무차익 조건 (no-arbitrage)
+  ⟺ 위험중립 측도 Q 존재 (risk-neutral measure)
+  ⟺ E^Q[X_T / B_T] = X_0 (위험중립 가격결정)
+```
+
+이 등가성은 파생상품 가격결정(BSM, 26_options_volatility_signals.md)과
+자산가격결정(CAPM, APT)을 통합하는 수학적 기반이다.
+
+### 9.5.2 Hansen-Jagannathan (1991) 경계
+
+SDF M이 존재할 때, 임의의 자산 i에 대해 다음 부등식이 성립한다:
+
+```
+Hansen-Jagannathan Bound:
+
+  sigma(M) / E[M] >= |E[R_i] - R_f| / sigma(R_i)
+
+  좌변: SDF의 변동계수 (coefficient of variation)
+  우변: 자산 i의 Sharpe Ratio
+
+  즉, "SDF의 최소 변동성은 시장에서 관찰되는 최대 Sharpe Ratio 이상"이어야 한다.
+```
+
+도출:
+
+```
+  출발점: 1 = E[M * (1+R_i)]
+  
+  공분산 분해:
+    E[R_i] - R_f = -Cov(M, R_i) / E[M]
+  
+  Cauchy-Schwarz 부등식 적용:
+    |Cov(M, R_i)| <= sigma(M) * sigma(R_i)
+  
+  결합:
+    |E[R_i] - R_f| = |Cov(M, R_i)| / E[M]
+                   <= sigma(M) * sigma(R_i) / E[M]
+  
+  정리:
+    sigma(M) / E[M] >= |E[R_i] - R_f| / sigma(R_i)   Q.E.D.
+```
+
+Equity Premium Puzzle 연결:
+
+```
+  미국 주식 역사적 Sharpe Ratio ≈ 0.40
+  소비 기반 SDF: M = delta * (C_{t+1}/C_t)^(-gamma)
+
+  sigma(M)/E[M] ≈ gamma * sigma(Delta_c) ≈ gamma * 0.036
+
+  HJ bound 충족: gamma * 0.036 >= 0.40
+  → gamma >= 11.1 (최소치)
+  → 보다 정밀한 추정: gamma ≈ 27 (Mehra & Prescott 1985)
+  → 비현실적으로 높은 위험회피계수 → Equity Premium Puzzle
+
+  해결: Epstein-Zin SDF (§5.5), 습관 형성, 희귀 재난 모형
+```
+
+KRX 적용:
+
+```
+  KOSPI 연환산 Sharpe Ratio ≈ 0.25-0.35 (미국 0.4보다 낮음)
+  → HJ bound가 덜 제약적: SDF 변동성 조건이 완화됨
+  → Korea Discount의 일부가 이 낮은 Sharpe Ratio에 반영
+
+  CheeseStock 연결:
+  MRA Ridge 계수벡터 b = (b_1, ..., b_17)가 암묵적 SDF 가격이므로:
+    M_CS = a - SUM b_k * X_k
+    sigma(M_CS) / E[M_CS] 를 계산하여 HJ bound 충족 여부를 검증할 수 있다.
+    만약 미충족 시, 모형이 관측된 risk-return tradeoff를 설명하기에
+    불충분하다는 의미이다.
+```
+
+### 9.5.3 CheeseStock SDF와 장기 비전
+
+```
   CheeseStock의 SDF:
     M_CS = a - SUM_{k=1}^{17} b_k * X_k
     where X_k = 17열 MRA 설명변수
@@ -1768,6 +1896,78 @@ CheeseStock의 현행 대응:
   → 시변적 위험 프리미엄은 ICAPM의 자연스러운 결과
 ```
 
+### 11.4 Fama-MacBeth (1973) 2단계 횡단면 회귀
+
+Fama, E.F. & MacBeth, J.D. (1973), *Risk, Return, and Equilibrium: Empirical Tests*,
+Journal of Political Economy, 81(3), 607-636
+
+자산가격결정 모형의 실증 검정을 위한 표준 방법론이다. 모든 다중 팩터 모형
+(CAPM, FF3, FF5, APT)의 위험 프리미엄을 추정하고 검정하는 데 사용된다.
+
+```
+1단계 — 시계열 회귀 (Time-Series Regression):
+
+  각 자산 i에 대해 팩터 노출(beta)을 추정한다.
+
+  R_{i,t} - R_{f,t} = alpha_i + beta_{i,1}*F_{1,t} + ... + beta_{i,K}*F_{K,t} + epsilon_{i,t}
+
+  T개 시점의 시계열 OLS → 각 자산마다 K개의 beta 추정치 획득
+  → N개 자산에 대해 반복 → N x K 행렬 (beta 행렬)
+
+2단계 — 횡단면 회귀 (Cross-Sectional Regression):
+
+  매 시점 t에서, N개 자산의 평균 초과수익률을 1단계 beta에 회귀한다.
+
+  R_bar_i - R_f = lambda_0 + lambda_1 * beta_hat_{i,1} + ... + lambda_K * beta_hat_{i,K} + eta_i
+
+  lambda_k = 팩터 k의 위험 프리미엄 (risk premium)
+
+  위험 프리미엄의 최종 추정:
+    lambda_hat_k = (1/T) * SUM_{t=1}^{T} lambda_{k,t}
+    (매 시점의 2단계 회귀 기울기를 시계열 평균)
+
+  t-통계량:
+    t(lambda_k) = lambda_hat_k / (SE(lambda_k) / sqrt(T))
+
+Shanken (1992) 수정:
+  1단계 beta가 추정치(estimated)이므로 표준오차에 EIV(errors-in-variables) 보정 필요:
+    SE_Shanken = SE_FM * sqrt(1 + lambda' * Sigma_F^{-1} * lambda)
+  → 미보정 시 t-stat이 과대 추정됨
+```
+
+검정 기준:
+
+```
+  lambda_0 ≈ 0 (SML 절편이 0 → 모형이 수익률의 체계적 부분을 잘 설명)
+  lambda_1 > 0 (시장 위험에 양의 프리미엄 → CAPM의 핵심 예측)
+  유의하지 않은 lambda_k → 해당 팩터는 횡단면 수익률 변동을 설명하지 못함
+
+  모형 비교:
+    R^2_CS (횡단면 R^2)가 높을수록 모형의 설명력이 좋음
+    GRS test (Gibbons, Ross & Shanken, 1989):
+      H0: alpha_1 = alpha_2 = ... = alpha_N = 0 (모든 절편이 동시에 0)
+      → F-분포 검정으로 모형의 적합도를 종합 평가
+```
+
+KRX에서의 적용:
+
+```
+  CheeseStock에서 Fama-MacBeth는 직접 구현되어 있지 않으나,
+  MRA 파이프라인의 Ridge 회귀가 실질적으로 유사한 역할을 수행한다:
+
+  Fama-MacBeth:  R_i = lambda_0 + SUM lambda_k * beta_{i,k}
+  MRA Ridge:     Y_i = b_0 + SUM b_k * X_{i,k} + lambda*||b||^2
+
+  차이점:
+    1. FM은 2단계 OLS, MRA는 단일 단계 Ridge (정규화)
+    2. FM은 위험 프리미엄 추정이 목적, MRA는 예측이 목적
+    3. FM의 lambda_k는 경제적 해석 가능, Ridge의 b_k는 예측 가중치
+
+  향후 구현 계획:
+    FF5 팩터의 한국 시장 위험 프리미엄을 FM으로 추정하여
+    MRA 결과의 경제적 타당성을 교차 검증할 수 있다.
+```
+
 ---
 
 ## 12. 참고문헌 (References)
@@ -1802,9 +2002,20 @@ CheeseStock의 현행 대응:
 - Campbell, J.Y. & Cochrane, J.H. (1999). *By Force of Habit: A Consumption-Based Explanation of Aggregate Stock Market Behavior*. Journal of Political Economy, 107(2), 205-251.
 - Barro, R.J. (2006). *Rare Disasters and Asset Markets in the Twentieth Century*. Quarterly Journal of Economics, 121(3), 823-866.
 
+### SDF 이론과 검증 (SDF Theory and Testing)
+
+- Hansen, L.P. & Jagannathan, R. (1991). *Implications of Security Market Data for Models of Dynamic Economies*. Journal of Political Economy, 99(2), 225-262.
+- Harrison, J.M. & Kreps, D.M. (1979). *Martingales and Arbitrage in Multiperiod Securities Markets*. Journal of Economic Theory, 20(3), 381-408.
+- Harrison, J.M. & Pliska, S.R. (1981). *Martingales and Stochastic Integrals in the Theory of Continuous Trading*. Stochastic Processes and their Applications, 11(3), 215-260.
+- Bansal, R. & Yaron, A. (2004). *Risks for the Long Run: A Potential Resolution of Asset Pricing Puzzles*. Journal of Finance, 59(4), 1481-1509.
+- Campbell, J.Y. & Vuolteenaho, T. (2004). *Bad Beta, Good Beta*. American Economic Review, 94(5), 1249-1275.
+
 ### 비판과 검증 (Critiques and Testing)
 
 - Roll, R. (1977). *A Critique of the Asset Pricing Theory's Tests*. Journal of Financial Economics, 4(2), 129-176.
+- Fama, E.F. & MacBeth, J.D. (1973). *Risk, Return, and Equilibrium: Empirical Tests*. Journal of Political Economy, 81(3), 607-636.
+- Shanken, J. (1992). *On the Estimation of Beta-Pricing Models*. Review of Financial Studies, 5(1), 1-33.
+- Gibbons, M.R., Ross, S.A. & Shanken, J. (1989). *A Test of the Efficiency of a Given Portfolio*. Econometrica, 57(5), 1121-1152.
 - Blume, M.E. (1971). *On the Assessment of Risk*. Journal of Finance, 26(1), 1-10.
 - Vasicek, O.A. (1973). *A Note on Using Cross-Sectional Information in Bayesian Estimation of Security Betas*. Journal of Finance, 28(5), 1233-1239.
 - Scholes, M. & Williams, J. (1977). *Estimating Betas from Nonsynchronous Data*. Journal of Financial Economics, 5(3), 309-327.
@@ -1846,6 +2057,10 @@ CheeseStock의 현행 대응:
   ICAPM   = Intertemporal CAPM
   CCAPM   = Consumption-Based CAPM
   SDF     = Stochastic Discount Factor
+  HJ      = Hansen-Jagannathan (Bound)
+  FM      = Fama-MacBeth (2-step cross-sectional regression)
+  GRS     = Gibbons-Ross-Shanken (joint alpha test)
+  EZ      = Epstein-Zin (recursive utility)
   FF3/FF5 = Fama-French 3-Factor / 5-Factor Model
   BAB     = Betting Against Beta
 

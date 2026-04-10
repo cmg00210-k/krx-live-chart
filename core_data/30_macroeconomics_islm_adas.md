@@ -697,7 +697,8 @@ i = r* + pi + a_pi * (pi - pi*) + a_y * (y - y*)
 
 여기서:
   i     = 명목 정책금리
-  r*    = 자연이자율 (균형 실질이자율) ≈ 1.0% (한국, 2020s)
+  r*    = 자연이자율 (균형 실질이자율) ≈ 0.5% (한국, 2020s)
+        Laubach-Williams (2003) 추정 하한. `macro_composite.json`의 `taylor_r_star=0.5`과 동기화.
   pi    = 현재 인플레이션율
   pi*   = 인플레이션 목표 = 2.0% (한국은행 공식 목표)
   y     = 실제 산출량 (또는 log GDP)
@@ -762,7 +763,7 @@ Taylor_gap < 0: 과도한 완화 (overtly loose)
 
 | Parameter | Symbol | Value | Tier | Learn | Range | Source |
 |-----------|--------|-------|------|-------|-------|--------|
-| 자연이자율 (한국) | r_star | 1.0% | [C] | [L:MAN] | [0.5%, 2.0%] | Laubach-Williams (2003) method; BOK (2023) 추정. 불확실성 대역 ±1pp |
+| 자연이자율 (한국) | r_star | 0.5% | [C] | [L:MAN] | [0.5%, 2.0%] | Laubach-Williams (2003) 추정 하한; `macro_composite.json`의 `taylor_r_star=0.5`과 동기화. 불확실성 대역 ±1pp |
 | 인플레이션 목표 | pi_star | 2.0% | [A] | [L:MAN] | fixed | BOK 공식 목표 |
 | 인플레 반응 계수 | a_pi | 0.50 | [B] | [L:GS] | [0.30, 0.80] | Taylor (1993) |
 | 산출량 갭 반응 계수 | a_y | 0.50 | [B] | [L:GS] | [0.25, 0.75] | Taylor (1993) |
@@ -1207,7 +1208,675 @@ CheeseStock 매핑: 모든 상수는 오프라인 `calibrated_constants.json`에
 
 ---
 
-## 7. 참고문헌 (References)
+## 7. 환율결정 모형 (Exchange Rate Determination Models)
+
+한국은 GDP 대비 수출 비중 ~50%, 반도체·자동차·조선이 KOSPI 시가총액의 40% 이상을
+차지하는 구조이므로 환율(USD/KRW)이 주식시장의 핵심 가격변수(pricing variable)이다.
+§1.4의 먼델-플레밍이 환율의 "정책 반응"을 설명한다면, 본 절은 환율 "수준"의
+이론적 결정 메커니즘을 다룬다.
+
+### 7.1 구매력평가설 (Purchasing Power Parity — Cassel 1922)
+
+**절대적 PPP (Absolute PPP):**
+
+```
+e = P / P*
+
+여기서:
+  e   = 명목환율 (원/달러)
+  P   = 국내 물가수준 (한국 CPI)
+  P*  = 해외 물가수준 (미국 CPI)
+
+일물일가의 법칙(Law of One Price)이 모든 재화에 성립할 때 도출.
+현실: 비교역재(non-tradables), 운송비용, 관세 → 절대적 PPP는 성립하지 않음.
+```
+
+**상대적 PPP (Relative PPP):**
+
+```
+Δe/e ≈ π - π*
+
+여기서:
+  Δe/e = 환율 변화율
+  π    = 국내 인플레이션율
+  π*   = 해외 인플레이션율
+
+의미: 한국 인플레이션이 미국보다 2%p 높으면, 원화는 연 2% 절하하여
+      실질환율을 유지하는 방향으로 조정된다.
+```
+
+**실증적 유효성과 한국 데이터:**
+
+```
+PPP 반감기 (half-life of PPP deviations):
+  국제 실증: 3-5년 (Rogoff 1996, "PPP puzzle")
+  한미 간: ~4년 (Engel 2000 방법론 적용 추정)
+
+원인: 명목 가격 경직성(Calvo θ=0.75, §2.2)이 실질환율의 빠른 조정을 차단.
+
+KRX 적용:
+  장기(3-5년): PPP 수렴 가능 → USD/KRW의 장기 균형환율 추정에 유용
+  단기(1년 이하): PPP 예측력 극히 낮음 → 트레이딩 신호로 부적합
+  빅맥지수(Big Mac Index): 2024년 한국 원화 PPP 대비 ~15% 저평가 추정
+```
+
+| Parameter | Symbol | Value | Tier | Learn | Range | Source |
+|-----------|--------|-------|------|-------|-------|--------|
+| PPP 반감기 (한미) | ppp_halflife | 4년 | [B] | [L:MAN] | [3, 5] | Rogoff (1996); 한미 데이터 추정 |
+| 상대적 PPP 유효 시계 | ppp_horizon | 3~5년 | [A] | [L:MAN] | fixed | 학술 컨센서스 |
+
+### 7.2 금리평가설 (Interest Rate Parity — IRP)
+
+**피보증 금리평가 (Covered Interest Rate Parity — CIP):**
+
+```
+F/S = (1 + i_d) / (1 + i_f)
+
+여기서:
+  F   = 선물환율 (forward rate, 원/달러)
+  S   = 현물환율 (spot rate, 원/달러)
+  i_d = 국내 금리 (BOK 기준금리 또는 CD 91일)
+  i_f = 해외 금리 (Fed Funds Rate 또는 SOFR)
+
+의미: 선물환 프리미엄/디스카운트가 내외금리차를 정확히 반영.
+CIP는 차익거래 조건이므로 거의 항상 성립 (±10bp 이내).
+2008 GFC 시 CIP basis 확대가 달러 유동성 위기의 조기 신호 역할.
+```
+
+**비보증 금리평가 (Uncovered Interest Rate Parity — UIP):**
+
+```
+E[Δe] = i_d - i_f
+
+여기서:
+  E[Δe] = 기대 환율 변화율
+
+의미: 한국 금리가 미국보다 높으면, 원화는 금리차만큼 절하될 것으로 기대.
+→ 고금리 통화 투자의 초과수익은 환율 절하로 상쇄 (이론)
+
+실증: UIP는 단기적으로 체계적으로 위반됨
+  Fama (1984): 고금리 통화가 절상하는 "forward premium puzzle"
+  → 캐리트레이드(carry trade) 수익의 원천
+```
+
+**한미 금리차와 KRX:**
+
+```
+2024-2025 상황:
+  한국 기준금리: 3.00% (2025.04 기준, BOK 인하 사이클)
+  미국 기준금리: 4.25-4.50% (2025.04 기준)
+  금리차: -125bp ~ -150bp (한국 < 미국)
+
+금리차 → KRW 경로:
+  한미 금리차 -100bp → USD/KRW 약 +30~50원 절하 압력 (추정)
+  이유: (1) 채권 차익거래 자금 유출, (2) 스왑레이트 디스카운트 확대
+
+KOSPI 영향:
+  원화 약세 → 수출주 매출 환산 이익↑ (삼성전자 USD 매출 70%+)
+  원화 약세 → 외국인 원화표시 자산 가치↓ → 외국인 순매도 압력
+  순효과: 과거 10년 상관분석 결과 KOSPI-KRW 약 -0.4 (원화 약세 = KOSPI 약세 경향)
+  단, 업종별 차이 극대: 수출주(+), 내수주/수입원자재 의존주(-)
+```
+
+| Parameter | Symbol | Value | Tier | Learn | Range | Source |
+|-----------|--------|-------|------|-------|-------|--------|
+| CIP basis 정상 범위 | cip_basis | ±10bp | [A] | [L:MAN] | fixed | 차익거래 조건 |
+| 한미 금리차 KRW 민감도 | irp_krw_sens | 30~50원/100bp | [C] | [L:GS] | [20, 80] | 추정; 시기별 변동 |
+
+### 7.3 Dornbusch (1976) 환율 오버슈팅 (Exchange Rate Overshooting)
+
+**핵심 메커니즘:**
+
+```
+전제:
+  ① 자본 완전이동 (UIP 성립): i_d = i_f + E[Δe]
+  ② 물가 경직성 (Calvo 가격설정, §2.2): 단기에 P 고정
+  ③ 통화수량설 장기 성립: M↑ → P↑ (비례)
+
+통화 확장(M↑) 충격:
+  장기: P↑ → e_bar (장기균형환율) 비례 절하
+  단기: P 고정 → (M/P)↑ → r↓ → UIP에 의해 e 즉각 절하
+        단, r↓ → 원화 자산 수익률↓ → 자본유출 → e 장기균형 이상으로 절하
+        = OVERSHOOTING
+```
+
+**동학 (Dynamics):**
+
+```
+e(t) = ē + (e₀ - ē) * exp(-θt)
+
+여기서:
+  ē     = 장기균형 환율 (PPP에 의해 결정)
+  e₀    = 충격 직후 환율 (오버슈팅 수준)
+  θ     = 수렴 속도 = δ(λ + φ) / λ
+  δ     = 물가 조정 속도 (1/Calvo θ에 비례)
+  λ     = 화폐수요의 소득 탄력성
+  φ     = 화폐수요의 이자율 반탄력성
+
+오버슈팅 크기:
+  e₀ - ē = -(1/θ) * (ΔM/M)
+  물가가 경직적일수록(δ 작을수록, θ 작을수록) 오버슈팅 확대
+```
+
+**KRX 적용:**
+
+```
+BOK 기준금리 인하 시나리오:
+  ① BOK -25bp → 한미 금리차 확대 → 원화 즉각 절하 (e₀, 오버슈팅)
+  ② 이후 국내 물가 점진적 상승 → 실질환율 조정 → 원화 점진적 절상
+  ③ 수렴 반감기: δ^{-1} ≈ 4~6분기 (한국 Calvo θ=0.75 기반)
+
+시장 영향:
+  Day 0-5: 수출주 급등 (환율 오버슈팅 + 금리 인하 이중 효과)
+  Month 1-6: 수출주 이익 점진적 반납 (환율 수렴)
+  Month 6+: 실물 효과(투자↑) 반영 → 내수주로 순환
+
+패턴 함의:
+  금리 인하 직후 수출주의 추세 패턴(ascending triangle 등) 신뢰도 ↑
+  6개월 후 수출주 반전 패턴(double top 등) 경계
+```
+
+**한국 특수성 — EM 프록시 통화 (Emerging Market Proxy Currency):**
+
+```
+DXY (달러인덱스) 1% 강세 → KRW 약 0.7-1.2% 절하
+
+원화의 DXY 민감도가 높은 이유:
+  ① 무역 결제의 80%+ 달러 표시
+  ② 외국인 주식·채권 보유 비중 높음 (KOSPI 외국인 비중 ~30%)
+  ③ NDF(역외선물환) 시장의 글로벌 투기 포지션
+  ④ EM 위험 선호(risk appetite) 프록시로 거래
+
+자체 요인 vs 글로벌 요인:
+  글로벌 요인(DXY, VIX, EM 전반): 약 60-70%
+  자체 요인(무역수지, BOK 정책, 지정학): 약 30-40%
+
+관리변동환율제 (Managed Float):
+  de jure: 자유변동환율제
+  de facto: BOK + 외환당국의 스무딩 오퍼레이션 (smoothing operation)
+  → 급격한 절하 시 구두개입(verbal intervention) + 외환보유고 매도
+  → 급격한 절상 시 외환보유고 매입
+  → 일중 변동폭 축소 효과 → 기술적 패턴의 일중 신호 왜곡 가능
+
+NDF 시장 선행성:
+  서울 외환시장 마감(15:30) 후 NDF 거래 → 익일 시가에 반영
+  → 야간 NDF 변동이 익일 KOSPI 갭(gap)의 주요 결정 요인
+```
+
+| Parameter | Symbol | Value | Tier | Learn | Range | Source |
+|-----------|--------|-------|------|-------|-------|--------|
+| DXY-KRW 민감도 | dxy_krw_beta | 0.7~1.2 | [C] | [L:GS] | [0.5, 1.5] | 실증 추정; 시기별 변동 |
+| 자체 요인 비중 | krw_idio_share | 30~40% | [C] | [L:MAN] | [20%, 50%] | 분산분해 추정 |
+| 오버슈팅 수렴 반감기 (분기) | overshoot_hl | 4~6 | [C] | [L:MAN] | [3, 8] | Calvo θ=0.75 기반 |
+
+CheeseStock 매핑: 환율결정 모형은 Doc 28 §3의 USD/KRW-KOSPI 상관분석과
+Doc 29 §2.5의 수출동향 분석의 이론적 기반이다. 현재 `download_macro.py`가
+FRED에서 DXY 데이터를, ECOS에서 USD/KRW를 수집하며, `macro_latest.json`의
+`usdkrw` 필드에 저장한다. Dornbusch 오버슈팅은 BOK 금리 변경 후 수출주의
+시간 경과에 따른 패턴 신뢰도 감쇠(decay)를 모형화하는 근거가 된다.
+
+---
+
+## 8. 뉴케인지언 필립스 곡선 확장 (New Keynesian Phillips Curve — Extended)
+
+§2.2에서 NKPC의 Calvo(1983) 도출과 한국 파라미터를 제시했다. 본 절은
+그 학설사적 전개(intellectual lineage)를 Phillips 원형에서 하이브리드 NKPC까지
+체계적으로 추적하고, 한국 인플레이션 동학에의 적용을 심화한다.
+
+### 8.1 Phillips (1958) 원형 — 임금-실업 역관계
+
+```
+Δw = f(u)
+
+여기서:
+  Δw = 명목임금 변화율
+  u   = 실업률
+
+Phillips (1958)는 영국 1861-1957년 데이터에서 명목임금 상승률과 실업률 간
+안정적 역관계를 발견했다. Samuelson & Solow (1960)가 이를 인플레이션-실업
+trade-off로 재해석:
+
+π = -ε(u - ū) + ν
+
+여기서:
+  π  = 인플레이션율
+  ε  = 필립스 곡선 기울기 (양수)
+  ū  = "정상" 실업률
+  ν  = 비용 충격 항
+
+정책 함의: 정부는 인플레이션과 실업 사이를 "선택"할 수 있다.
+→ 1960년대 미국 경제정책의 이론적 기반.
+```
+
+### 8.2 Friedman (1968) / Phelps (1967) — 기대보강 필립스 곡선
+
+```
+π = πᵉ - α(u - u*)
+
+여기서:
+  πᵉ = 기대 인플레이션 (expected inflation)
+  u*  = 자연실업률 (natural rate of unemployment, NAIRU)
+  α   = 인플레이션의 실업 민감도
+
+Friedman의 핵심 비판:
+  ① Phillips의 trade-off는 단기적(temporary)일 뿐
+  ② 장기적으로 πᵉ가 실제 π에 수렴 → trade-off 소멸
+  ③ 자연실업률 u*는 통화정책과 무관하게 결정 (노동시장 구조)
+
+적응적 기대 (Adaptive Expectations):
+  πᵉ_t = π_{t-1}  (가장 단순한 형태)
+
+장기 필립스 곡선: 수직 (u = u*, 어떤 π에서도)
+  → 인플레이션-실업 장기 trade-off 부재
+  → 지속적 인플레이션은 지속적 통화팽창의 결과 ("inflation is always and
+     everywhere a monetary phenomenon" — Friedman)
+```
+
+**가속주의 명제 (Accelerationist Hypothesis):**
+
+```
+u < u*를 유지하려면 → πᵉ↑ → π를 πᵉ 이상으로 올려야 → π 지속 가속
+  → 1970년대 스태그플레이션의 이론적 설명
+
+한국 이력:
+  1970-80년대: 고도성장 과정에서 π 지속 상승 (적응적 기대 구조)
+  2010년대: 저인플레이션 고착 (πᵉ ≈ 1.5%, BOK 목표 2.0% 미달)
+  2022-2023: COVID 후 공급 충격 → π 급등 (5.1%) → πᵉ 재상승 (3%+)
+```
+
+### 8.3 Lucas (1972) — 합리적 기대와 정책 무력성
+
+```
+πᵉ = E[π | Ω_t]
+
+여기서:
+  E[·|Ω_t] = 정보집합 Ω_t에 조건부한 수학적 기대
+
+Lucas 비판 (Lucas Critique, 1976):
+  과거 데이터에 기반한 계량모형은 정책 변화 시 구조적으로 변한다.
+  → Phillips 곡선 파라미터 자체가 정책 레짐에 의존
+  → "reduced-form" 회귀로 정책 효과 추정 불가
+
+정책 무력성 명제 (Policy Ineffectiveness Proposition):
+  합리적 기대 하에서, 예측된(systematic) 통화정책은 Y에 무영향.
+  오직 예측되지 않은(surprise) 정책만이 실물에 영향.
+
+KRX 함의:
+  ① BOK 금리 결정이 시장 기대(Consensus)와 일치 → KOSPI 반응 미미
+  ② BOK 서프라이즈 (기대 대비 ±25bp 이상) → KOSPI ±1.5%+ 반응
+  ③ 기대 형성 채널: 금통위 의사록, 총재 기자회견, 선물시장 내재 금리
+```
+
+### 8.4 Calvo (1983) 가격설정과 NKPC 도출
+
+```
+Calvo 가격설정 메커니즘:
+  매 기간 기업의 (1-θ) 비율만이 가격 재설정 가능 (외생적 확률)
+  θ = 가격 재설정 불가 확률 (한국: 0.75, §2.2)
+  → 평균 가격 지속기간: 1/(1-θ) = 4분기 = 1년
+
+최적 가격설정 (forward-looking):
+  p*_t = (1-βθ) Σ_{k=0}^{∞} (βθ)^k E_t[mc_{t+k}]
+
+  여기서 mc = 실질 한계비용 (real marginal cost)
+  기업은 미래 한계비용의 가중 평균에 기반하여 가격을 설정
+
+로그 선형화 (log-linearization) 후 NKPC 도출:
+
+  π_t = β · E_t[π_{t+1}] + κ · mc_hat_t
+
+  mc_hat ≈ (σ + φ) · ỹ_t  (산출량 갭에 비례, 일반균형 조건)
+
+  따라서:
+  π_t = β · E_t[π_{t+1}] + κ · ỹ_t
+
+  κ = (1-θ)(1-βθ)/θ · (σ + φ)
+    = (1-0.75)(1-0.99*0.75)/0.75 · (σ + φ)
+    ≈ 0.085 · (σ + φ)
+
+한국 추정치 (§2.2 재확인):
+  θ = 0.75, β = 0.99, κ ≈ 0.05
+  → σ + φ ≈ 0.59 (소비·노동 대체탄력성 역수의 합)
+```
+
+### 8.5 Gali & Gertler (1999) 하이브리드 NKPC
+
+```
+π_t = γ_f · E_t[π_{t+1}] + γ_b · π_{t-1} + κ · ỹ_t
+
+여기서:
+  γ_f = 전향적(forward-looking) 기대의 가중치
+  γ_b = 후향적(backward-looking) 인덱싱의 가중치
+  γ_f + γ_b = β ≈ 0.99
+
+하이브리드 NKPC의 동기:
+  순수 NKPC(§8.4)는 인플레이션의 관성(persistence)을 설명하지 못함.
+  일부 기업은 과거 인플레이션에 기계적으로 연동(indexation)하여 가격 조정.
+
+한국 추정치:
+  γ_f ≈ 0.65 (전향적 기대 지배)
+  γ_b ≈ 0.34 (상당한 관성 존재)
+  κ   ≈ 0.05 (§2.2와 동일)
+  출처: Kim & Park (2016), 한국 분기별 데이터 GMM 추정
+```
+
+**인플레이션 동학의 함의:**
+
+```
+γ_f > γ_b (한국):
+  → 인플레이션이 기대에 의해 주도 (forward-looking dominant)
+  → BOK의 기대 관리(expectation management)가 핵심 정책 수단
+  → 포워드 가이던스의 실효성 높음
+
+γ_b 존재 (관성):
+  → 인플레이션 충격이 완전히 소멸되기까지 수 분기 소요
+  → 2022년 인플레이션 충격(5.1%) → 2023-2024 점진적 하락 → 2025 ~2.2%
+  → 관성의 존재가 BOK의 점진적(gradual) 금리 조정 전략을 정당화
+```
+
+### 8.6 한국 인플레이션 동학과 KOSPI 상관
+
+```
+post-COVID 한국 CPI 연간 변화율:
+  2020: 0.5%  (디스인플레이션, COVID 수요 충격)
+  2021: 2.5%  (회복 + 공급병목)
+  2022: 5.1%  (에너지·식품 가격 급등, 원화 약세)
+  2023: 3.6%  (점진적 하락)
+  2024: 2.3%  (BOK 목표 근접)
+  2025: ~2.2% (추정, 안정화)
+
+BOK 기준금리 대응:
+  2020 Q2: 0.50% (역사적 최저, ZLB 근접)
+  2022 Q3: 2.50% (인상 사이클)
+  2023 Q1: 3.50% (최고)
+  2024 Q4: 3.00% (인하 전환)
+  2025 Q2: 2.75% (추정, 점진적 인하)
+
+인플레이션-KOSPI 관계:
+  π ≤ 2.5% (안정적): KOSPI 밸류에이션 확장 가능 (r↓ → PER↑)
+  2.5% < π ≤ 4.0% (경계): BOK 긴축 기대 → 성장주 압박
+  π > 4.0% (위험): 스태그플레이션 우려 → 전반 bearish
+
+기대인플레이션(BEI) 지표:
+  국고채 10Y 명목금리 - 물가연동국고채(TIPS 상당) 10Y 수익률
+  한국: 공식 BEI 데이터 제한적 → 서베이 기반 기대인플레이션 사용
+  BOK 기대인플레이션 서베이: 분기별 공표
+```
+
+| Parameter | Symbol | Korea Value | Tier | Learn | Range | Source |
+|-----------|--------|-------------|------|-------|-------|--------|
+| 하이브리드 NKPC γ_f | nkpc_gamma_f | 0.65 | [B] | [L:MAN] | [0.55, 0.75] | Kim & Park (2016) |
+| 하이브리드 NKPC γ_b | nkpc_gamma_b | 0.34 | [B] | [L:MAN] | [0.25, 0.44] | Kim & Park (2016) |
+| 인플레이션 안정 상한 | pi_stable | 2.5% | [C] | [L:GS] | [2.0%, 3.0%] | BOK 목표 + 0.5pp 허용 |
+| 인플레이션 위험 상한 | pi_danger | 4.0% | [C] | [L:GS] | [3.5%, 5.0%] | 실증적; 스태그플레이션 임계 |
+
+CheeseStock 매핑: NKPC 확장은 §6.2의 레짐 판별에서 인플레이션 임계값
+(cpi_goldilocks=2.5%, cpi_stagflation=3.0%)의 이론적 근거를 강화한다.
+하이브리드 NKPC의 γ_b=0.34는 인플레이션 충격 후 레짐 판별이 최소 2-3분기
+지연될 수 있음을 의미하며, MCS_v2의 인플레이션 구성요소 업데이트 빈도에
+반영해야 한다. 현재 `download_macro.py`가 ECOS에서 CPI 데이터를 수집하며,
+`macro_latest.json`의 `cpi_yoy` 필드에 저장한다.
+
+---
+
+## 9. 리카디안 등가 (Ricardian Equivalence — Barro 1974)
+
+§5의 재정승수 분석은 소비자가 정부지출 확대에 응답하여 소비를 증가시킨다고
+가정했다. Barro (1974)의 리카디안 등가 정리는 이 가정에 대한 근본적 반론이며,
+재정승수의 상한을 이론적으로 제약한다.
+
+### 9.1 핵심 명제 (Core Proposition)
+
+```
+리카디안 등가 (Ricardian Equivalence Theorem):
+
+정부가 조세 대신 국채 발행으로 지출을 조달하더라도,
+합리적 소비자는 미래 세금 증가를 예상하여 현재 소비를 변화시키지 않는다.
+
+형식적 표현:
+  정부 예산제약: G_t = T_t + ΔB_t  (세수 + 국채 발행)
+  이기간 제약: Σ G_t / (1+r)^t = Σ T_t / (1+r)^t
+  → 조세의 현재가치 = 지출의 현재가치 (정부의 이기간 예산 제약)
+
+소비자 반응:
+  국채 발행 ΔB_t ↑ → 소비자는 미래 ΔT_{t+k} 예상
+  → 현재 소비 ΔC = 0 (리카디안)
+  → 재정승수 = 0 (극단적 경우)
+```
+
+### 9.2 성립 조건 (Required Conditions)
+
+```
+리카디안 등가가 성립하려면:
+
+① 무한 계획 기간 (Infinite Planning Horizon)
+   소비자가 자녀·손자 세대까지 고려 (유산 동기, bequest motive)
+   Barro (1974): 세대 간 이타적 연결 → 사실상 무한수명 가계
+
+② 완전 자본시장 (Perfect Capital Markets)
+   정부와 가계의 차입 금리가 동일
+   유동성 제약(liquidity constraint) 부재
+
+③ 일시세 (Lump-Sum Taxation)
+   세금이 경제적 의사결정을 왜곡하지 않음
+   소득세·법인세 등 왜곡적 조세(distortionary tax)가 아닌 경우
+
+④ 확실성 등가 (Certainty Equivalence)
+   미래 소득과 세금에 대한 불확실성이 없거나 무시 가능
+```
+
+### 9.3 한국에서의 현실 — 리카디안 등가의 약화
+
+```
+한국 경제에서 리카디안 등가가 약화되는 구체적 요인:
+
+① 가계부채 — 유동성 제약
+   가처분소득 대비 가계부채: ~170% (2024, OECD 최고 수준)
+   → 상당수 가계가 유동성 제약(liquidity-constrained)
+   → 정부 이전지급(재난지원금 등)이 즉시 소비로 전환
+   → 리카디안 전제(완전 자본시장) 위반
+
+   실증: 2020 긴급재난지원금 14.3조원
+     소비 진작 효과: 약 60% 수준에서 소비 전환 (한국개발연구원, 2021)
+     리카디안이면: 0% → 실제: ~60% → 리카디안 등가 현저히 약화
+
+② 세대 간 이전 단절
+   한국의 고령화 속도 (2025 초고령사회 진입)
+   → 젊은 세대: "국채 상환은 내 문제" → 일부 리카디안
+   → 고령 세대: "내 생전에 상환 안 됨" → 비리카디안
+   → 세대 간 이타적 연결 약화
+
+③ 왜곡적 조세
+   한국의 실효세율은 소득에 비례 (누진 구조)
+   → 일시세 가정 위반
+   → 조세 왜곡이 재정승수에 추가 영향
+
+결론:
+  한국의 재정승수 > 0 (리카디안 등가 불성립)
+  추경(보충예산)의 실물 효과 존재, 단 §5.1의 개방경제 승수(≈0.86~1.04)가 상한
+  리카디안 약화 정도: 약 40-60% (완전 리카디안 = 0%, 완전 케인지언 = 100%)
+```
+
+**재정 지속가능성과 주식시장:**
+
+```
+GDP 대비 국가채무: ~55% (2025 추정, 한국)
+국제 비교: 일본 260%, 미국 130%, OECD 평균 ~110%
+→ 한국의 재정 여력은 상대적으로 양호
+
+그러나:
+  급속한 고령화 → 복지지출 증가 → 잠재적 재정 악화 경로
+  국가채무 증가 속도: 2019년 38% → 2025년 55% (6년간 +17%p)
+
+주식시장 영향:
+  재정 건전성 유지 → 국가 신용등급 유지 (AA, Moody's Aa2)
+  → 외국인 투자자의 한국 자산 선호 유지
+  → 재정 악화 시그널 → CDS 스프레드 확대 → 외국인 이탈 → KOSPI 하락
+```
+
+| Parameter | Symbol | Value | Tier | Learn | Range | Source |
+|-----------|--------|-------|------|-------|-------|--------|
+| 리카디안 약화 정도 (한국) | ricardian_offset | 0.40~0.60 | [C] | [L:MAN] | [0.30, 0.70] | KDI (2021); 재난지원금 실증 |
+| 유동성 제약 가구 비율 | liq_constrained | ~30% | [C] | [L:MAN] | [20%, 40%] | BOK 가계금융복지조사 추정 |
+
+CheeseStock 매핑: 리카디안 등가의 약화는 §5의 재정승수가 0보다 크게 유지되는
+이론적 근거이며, 추경 발표 시 conf_fiscal=1.03(§1.4)이 0이 아닌 양의 값을 갖는
+정당화이다. 다만 승수가 1 이하(§5.1)이므로 conf_adj는 여전히 제한적이다.
+가계부채의 유동성 제약은 Doc 29 §2.3의 소비자심리지수(CSI)가 저소득층
+소비 반응을 과소추정할 가능성을 시사하며, CSI 해석 시 주의가 필요하다.
+
+---
+
+## 10. 금리 기간구조 이론 (Term Structure of Interest Rates)
+
+금리 기간구조(yield curve)는 만기별 채권 수익률의 관계를 나타내며,
+경기 선행지표로서 주식시장 분석에 핵심적이다. §4.1의 테일러 준칙이
+단기 정책금리를 결정한다면, 기간구조 이론은 장기 금리가 단기 금리와
+어떻게 연결되는지를 설명한다.
+
+### 10.1 기대가설 (Pure Expectations Hypothesis — Fisher 1930)
+
+```
+(1 + R_n)^n = Π_{k=0}^{n-1} (1 + E_t[r_{t+k}])
+
+로그 근사:
+  R_n ≈ (1/n) Σ_{k=0}^{n-1} E_t[r_{t+k}]
+
+여기서:
+  R_n       = n기간 만기 채권의 수익률 (장기 금리)
+  r_{t+k}   = t+k 시점의 1기간 단기 금리
+  E_t[·]    = t 시점의 기대
+
+의미: 장기 금리 = 미래 단기 금리의 기대 평균
+  → 수익률 곡선의 기울기는 미래 단기 금리의 기대 경로를 반영
+  → 우상향: 시장이 금리 인상 기대
+  → 우하향(역전): 시장이 금리 인하 기대 → 경기 침체 신호
+
+한계: 만기 프리미엄(term premium) = 0을 가정
+  → 투자자가 장단기 채권에 무차별하다는 비현실적 가정
+```
+
+### 10.2 유동성 프리미엄 이론 (Liquidity Premium Theory — Hicks 1939)
+
+```
+R_n ≈ (1/n) Σ_{k=0}^{n-1} E_t[r_{t+k}] + L_n
+
+여기서:
+  L_n = 유동성 프리미엄 (term premium), L_n > 0, dL_n/dn > 0
+
+의미: 장기 채권은 가격 변동 위험(duration risk)이 크므로
+  투자자에게 추가 보상(유동성 프리미엄)이 필요하다.
+
+함의:
+  수익률 곡선이 우상향해도 반드시 금리 인상 기대는 아님
+  → 유동성 프리미엄이 포함되어 있으므로
+  → "기대 경로 + 프리미엄"의 합으로 해석해야 함
+
+한국 추정:
+  3Y-1Y 스프레드 중 유동성 프리미엄: ~20-40bp (Kim & Wright 2005 방법론)
+  10Y-3Y 스프레드 중 유동성 프리미엄: ~30-60bp
+  → 총 10Y 국고채의 기간프리미엄: ~50-100bp
+```
+
+### 10.3 시장분할 가설 (Market Segmentation Hypothesis — Culbertson 1957)
+
+```
+핵심: 각 만기 시장은 독립적으로 수급에 의해 금리가 결정된다.
+
+전제:
+  투자자(은행, 보험, 연기금)는 부채의 만기 구조에 따라
+  특정 만기 채권만 선호 (habitat preference)
+  → 단기: 은행 (예금 만기 매칭)
+  → 장기: 보험·연기금 (보험금·연금 지급 매칭)
+  → 만기 간 차익거래 불완전
+
+함의:
+  수익률 곡선 형태가 기대와 무관하게 수급으로 결정 가능
+  → 중앙은행의 양적완화(QE)가 특정 만기 금리에 직접 영향
+  → BOK의 국고채 매입 프로그램(2020)이 장기금리 하락에 기여한 이론적 근거
+```
+
+### 10.4 선호서식처 이론 (Preferred Habitat Theory — Modigliani & Sutch 1966)
+
+```
+R_n = (1/n) Σ_{k=0}^{n-1} E_t[r_{t+k}] + H_n
+
+여기서:
+  H_n = 서식처 프리미엄 (habitat premium)
+  H_n의 부호와 크기: 해당 만기의 수급 불균형에 의해 결정
+  → 유동성 프리미엄과 달리 항상 양수일 필요 없음
+
+시장분할 가설의 수정:
+  투자자는 선호 만기(preferred habitat)가 있지만,
+  충분한 프리미엄이 주어지면 다른 만기로도 이동 가능
+  → 차익거래가 부분적으로 존재
+
+현대적 해석 (Vayanos & Vila 2021):
+  선호서식처 모형이 양적완화의 효과를 설명하는 데 가장 적합
+  → 중앙은행이 장기채 매입 → 장기채 공급↓ → H_n↓ → 장기금리↓
+```
+
+### 10.5 KRX 적용 — 수익률 곡선과 경기·주가 선행성
+
+**BOK 기준금리 → 수익률 곡선 전달 경로:**
+
+```
+BOK 기준금리 변경:
+  → 단기(CD 91일, 1Y KTB): 즉시~1주 내 거의 완전 반영
+  → 중기(3Y KTB): 1~4주 내 반영, 기대 경로 의존
+  → 장기(10Y KTB): 글로벌 요인(US 10Y Treasury, 기간프리미엄)에 더 의존
+
+한국 수익률 곡선 (10Y-3Y KTB 스프레드):
+  정상(우상향): 경기 확장 기대 → KOSPI 상승 환경
+  평탄화(flattening): 긴축 후반 또는 경기 둔화 초기
+  역전(inverted): 경기 침체 선행 신호
+
+수익률 곡선과 KOSPI 실증:
+  Estrella & Mishkin (1998): 10Y-3M 스프레드가 경기 침체 12-18개월 선행 (미국)
+  한국 실증: 10Y-3Y 스프레드가 KOSPI 6-12개월 수익률과 양(+)의 상관
+  → 스프레드 역전 → 12개월 후 KOSPI 평균 -8~-15% (표본 제한적)
+```
+
+**수익률 곡선 형태별 패턴 함의:**
+
+```
+① 정상 수익률 곡선 (Normal Yield Curve)
+   10Y-3Y > +50bp
+   의미: 경기 확장 지속 기대
+   패턴: 추세추종 패턴 유효, 성장주 선호 환경
+   conf_adj: trend +0.04, reversal -0.02
+
+② 평탄 수익률 곡선 (Flat Yield Curve)
+   |10Y-3Y| < 50bp
+   의미: 전환기, 불확실성 증대
+   패턴: 방향성 약화, 박스권 패턴(symmetricTriangle) 빈도 증가
+   conf_adj: ALL -0.03 (신호 약화)
+
+③ 역전 수익률 곡선 (Inverted Yield Curve)
+   10Y-3Y < -20bp
+   의미: 경기 침체 선행 (12-18개월)
+   패턴: 반전 패턴(H&S, doubleTop) 신뢰도 ↑, 추세추종 ↓
+   conf_adj: reversal +0.06, trend -0.08
+```
+
+| Parameter | Symbol | Value | Tier | Learn | Range | Source |
+|-----------|--------|-------|------|-------|-------|--------|
+| 정상 수익률 곡선 기준 | yc_normal_threshold | +50bp | [C] | [L:GS] | [30, 80] | 실증적 |
+| 역전 수익률 곡선 기준 | yc_invert_threshold | -20bp | [C] | [L:GS] | [-50, 0] | 실증적 |
+| 역전 후 침체 선행 기간 | yc_recession_lead | 12~18개월 | [B] | [L:MAN] | [6, 24] | Estrella & Mishkin (1998) |
+| 역전→KOSPI 하락 평균 | yc_kospi_drawdown | -8~-15% | [C] | [L:MAN] | [-20%, -5%] | 한국 데이터 제한적 |
+| 3Y 유동성 프리미엄 | liq_prem_3y | ~30bp | [C] | [L:MAN] | [15, 50] | Kim & Wright (2005) 방법론 |
+| 10Y 기간 프리미엄 | term_prem_10y | ~75bp | [C] | [L:MAN] | [40, 120] | 추정; 글로벌 요인 의존 |
+
+CheeseStock 매핑: 기간구조 이론은 MCS v1의 yield_curve_norm 구성요소(w4=0.15)의
+이론적 기반이다. 현재 `download_macro.py`가 ECOS에서 국고채 3Y, 10Y 수익률을 수집하며
+장단기 금리차를 계산한다(`macro_latest.json`의 `yield_spread` 필드). 수익률 곡선
+형태별 패턴 신뢰도 조정은 §6.2의 레짐별 conf_adj 매트릭스와 결합하여
+2차원(AD-AS 레짐 + 수익률 곡선 형태) 조정 체계로 확장 가능하다.
+
+---
+
+## 11. 참고문헌 (References)
 
 ### 거시경제학 기초
 
@@ -1237,6 +1906,8 @@ CheeseStock 매핑: 모든 상수는 오프라인 `calibrated_constants.json`에
 ### 총공급 및 필립스 곡선
 
 - Phillips, A.W. (1958). "The Relation between Unemployment and the Rate of Change of Money Wage Rates in the United Kingdom, 1861-1957." *Economica*, 25(100), 283-299.
+- Samuelson, P.A. & Solow, R.M. (1960). "Analytical Aspects of Anti-Inflation Policy." *American Economic Review*, 50(2), 177-194.
+- Phelps, E.S. (1967). "Phillips Curves, Expectations of Inflation and Optimal Unemployment over Time." *Economica*, 34(135), 254-281.
 - Friedman, M. (1968). "The Role of Monetary Policy." *American Economic Review*, 58(1), 1-17.
 - Calvo, G.A. (1983). "Staggered Prices in a Utility-Maximizing Framework." *Journal of Monetary Economics*, 12(3), 383-398.
 - Gali, J. & Gertler, M. (1999). "Inflation Dynamics: A Structural Econometric Analysis." *Journal of Monetary Economics*, 44(2), 195-222.
@@ -1244,12 +1915,31 @@ CheeseStock 매핑: 모든 상수는 오프라인 `calibrated_constants.json`에
 ### 학파 통합 및 현대 거시
 
 - Lucas, R.E. (1972). "Expectations and the Neutrality of Money." *Journal of Economic Theory*, 4(2), 103-124.
+- Lucas, R.E. (1976). "Econometric Policy Evaluation: A Critique." *Carnegie-Rochester Conference Series on Public Policy*, 1, 19-46.
 - Goodfriend, M. & King, R. (1997). "The New Neoclassical Synthesis and the Role of Monetary Policy." *NBER Macroeconomics Annual*, 12, 231-283.
 - Christiano, L.J., Eichenbaum, M. & Rebelo, S. (2011). "When Is the Government Spending Multiplier Large?" *Journal of Political Economy*, 119(1), 78-121.
 - Estrella, A. & Mishkin, F.S. (1998). "Predicting U.S. Recessions: Financial Variables as Leading Indicators." *Review of Economics and Statistics*, 80(1), 45-61.
 
-### 재정정책
+### 환율결정 이론
 
+- Cassel, G. (1922). *Money and Foreign Exchange After 1914*. Macmillan.
+- Dornbusch, R. (1976). "Expectations and Exchange Rate Dynamics." *Journal of Political Economy*, 84(6), 1161-1176.
+- Fama, E.F. (1984). "Forward and Spot Exchange Rates." *Journal of Monetary Economics*, 14(3), 319-338.
+- Rogoff, K. (1996). "The Purchasing Power Parity Puzzle." *Journal of Economic Literature*, 34(2), 647-668.
+- Engel, C. (2000). "Long-Run PPP May Not Hold After All." *Journal of International Economics*, 51(2), 243-273.
+
+### 금리 기간구조
+
+- Fisher, I. (1930). *The Theory of Interest*. Macmillan.
+- Hicks, J.R. (1939). *Value and Capital*. Oxford University Press.
+- Culbertson, J.M. (1957). "The Term Structure of Interest Rates." *Quarterly Journal of Economics*, 71(4), 485-517.
+- Modigliani, F. & Sutch, R. (1966). "Innovations in Interest Rate Policy." *American Economic Review*, 56(1/2), 178-197.
+- Kim, D.H. & Wright, J.H. (2005). "An Arbitrage-Free Three-Factor Term Structure Model and the Recent Behavior of Long-Term Yields and Distant-Horizon Forward Rates." *Finance and Economics Discussion Series*, 2005-33, Federal Reserve Board.
+- Vayanos, D. & Vila, J.-L. (2021). "A Preferred-Habitat Model of the Term Structure of Interest Rates." *Econometrica*, 89(1), 77-112.
+
+### 재정정책 및 리카디안 등가
+
+- Barro, R.J. (1974). "Are Government Bonds Net Wealth?" *Journal of Political Economy*, 82(6), 1095-1117.
 - Blanchard, O. & Perotti, R. (2002). "An Empirical Characterization of the Dynamic Effects of Changes in Government Spending and Taxes on Output." *Quarterly Journal of Economics*, 117(4), 1329-1368.
 - Bruckner, M. & Tuladhar, A. (2014). "Local Government Spending Multipliers and Financial Distress." *Economic Journal*, 124(574), F33-F60.
 
@@ -1280,3 +1970,8 @@ CheeseStock 매핑: 모든 상수는 오프라인 `calibrated_constants.json`에
 - Scope: IS-LM, AD-AS, Keynesian-Classical synthesis, Taylor Rule, fiscal multipliers, macro-pattern transmission
 - Constants registered: #83~#98 (15 new)
 - Dependencies: Doc 22 (constants), Doc 26 (VKOSPI), Doc 28 (cross-market), Doc 29 (macro indicators)
+- 2026-04-10: §7~§10 확장 (macro-economist agent)
+- Added: Exchange rate models (PPP/IRP/Dornbusch), NKPC full lineage (Phillips→Friedman→Lucas→Calvo→Gali), Ricardian Equivalence (Barro 1974), Term structure theories (Fisher/Hicks/Culbertson/Modigliani)
+- Fixed: r* = 1.0% → 0.5% (§4.1, code sync with macro_composite.json taylor_r_star=0.5)
+- New constants: nkpc_gamma_f, nkpc_gamma_b, pi_stable, pi_danger, ppp_halflife, irp_krw_sens, dxy_krw_beta, overshoot_hl, ricardian_offset, yc_normal_threshold, yc_invert_threshold, yc_recession_lead, liq_prem_3y, term_prem_10y
+- New references: 16 (Cassel, Dornbusch, Fama, Rogoff, Engel, Barro, Samuelson & Solow, Phelps, Lucas 1976, Fisher 1930, Hicks 1939, Culbertson, Modigliani & Sutch, Kim & Wright, Vayanos & Vila, KDI 2021)

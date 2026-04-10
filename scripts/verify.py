@@ -14,6 +14,7 @@ Usage:
   python scripts/verify.py --check globals
   python scripts/verify.py --check scripts
   python scripts/verify.py --check pipeline
+  python scripts/verify.py --check criteria
 
 Run from the project root (same dir as index.html).
 """
@@ -464,13 +465,13 @@ def check_dashes(strict=False):
 
 FILE_EXPORTS = {
     "colors.js":           {"KRX_COLORS"},
-    "data.js":             {"PAST_DATA", "getPastData", "getFinancialData"},
+    "data.js":             {"getFinancialData"},  # PAST_DATA, getPastData are data.js-internal helpers
     "api.js":              {"_idb", "KRX_API_CONFIG", "ALL_STOCKS", "DEFAULT_STOCKS",
                             "TIMEFRAMES", "dataService"},
     "realtimeProvider.js": {"realtimeProvider"},
     "indicators.js":       {"calcMA", "calcEMA", "calcBB", "calcRSI", "calcMACD",
                             "calcATR", "calcIchimoku", "calcKalman", "calcHurst",
-                            "calcWLSRegression", "_invertMatrix", "IndicatorCache"},
+                            "calcWLSRegression", "IndicatorCache"},  # _invertMatrix is indicators.js-internal
     "patterns.js":         {"patternEngine"},
     "signalEngine.js":     {"COMPOSITE_SIGNAL_DEFS", "signalEngine"},
     "chart.js":            {"chartManager"},
@@ -1161,6 +1162,216 @@ def check_canvas(strict=False):
 
 
 # =============================================================================
+# CHECK 10 - Backtest Acceptance Criteria (7 criteria)
+# =============================================================================
+
+def _resolve_nested(data, key_path):
+    """Resolve a dot-separated key path in nested dicts. Returns None if any segment missing."""
+    parts = key_path.split(".")
+    cur = data
+    for p in parts:
+        if not isinstance(cur, dict) or p not in cur:
+            return None
+        cur = cur[p]
+    return cur
+
+
+def check_criteria(strict=False):
+    section("CHECK 10 - Backtest Acceptance Criteria (7 criteria)")
+    errors = 0
+    warnings = 0
+
+    # --- Load data files ---
+    agg_path = ROOT / "data" / "backtest" / "aggregate_stats.json"
+    tva_path = ROOT / "data" / "backtest" / "theory_vs_actual.json"
+    cal_path = ROOT / "data" / "backtest" / "calibrated_constants.json"
+    oos_path = ROOT / "data" / "backtest" / "pattern_winrates_oos.json"
+
+    agg_data = None
+    tva_data = None
+    cal_data = None
+    oos_data = None
+
+    for label, fpath, target_name in [
+        ("aggregate_stats.json",       agg_path, "agg_data"),
+        ("theory_vs_actual.json",      tva_path, "tva_data"),
+        ("calibrated_constants.json",  cal_path, "cal_data"),
+        ("pattern_winrates_oos.json",  oos_path, "oos_data"),
+    ]:
+        if not fpath.exists():
+            fail(f"{label} -- file not found")
+            errors += 1
+            continue
+        try:
+            raw = fpath.read_text(encoding="utf-8", errors="replace")
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            fail(f"{label} -- JSON parse error: {e}")
+            errors += 1
+            continue
+        if target_name == "agg_data":
+            agg_data = parsed
+        elif target_name == "tva_data":
+            tva_data = parsed
+        elif target_name == "cal_data":
+            cal_data = parsed
+        elif target_name == "oos_data":
+            oos_data = parsed
+
+    if not cal_data:
+        fail("calibrated_constants.json is required for criteria check -- cannot proceed")
+        return errors + 1, warnings
+
+    # =========================================================================
+    # Criterion 1: direction_accuracy >= 0.52
+    # Source: calibrated_constants.json -> C2_conf_L.overall_direction_accuracy
+    # =========================================================================
+    dir_acc = _resolve_nested(cal_data, "C2_conf_L.overall_direction_accuracy")
+    if dir_acc is None:
+        warn("Criterion 1 (direction_accuracy): field C2_conf_L.overall_direction_accuracy not found")
+        warnings += 1
+    elif dir_acc >= 0.52:
+        ok(f"Criterion 1: direction_accuracy = {dir_acc:.4f} >= 0.52")
+    else:
+        warn(f"Criterion 1: direction_accuracy = {dir_acc:.4f} < 0.52")
+        warnings += 1
+
+    # =========================================================================
+    # Criterion 2: IC > 0 (Information Coefficient)
+    # Source: calibrated_constants.json -> oos_validation.oos_ic
+    # =========================================================================
+    ic_val = _resolve_nested(cal_data, "oos_validation.oos_ic")
+    if ic_val is None:
+        warn("Criterion 2 (IC > 0): field oos_validation.oos_ic not found")
+        warnings += 1
+    elif ic_val > 0:
+        ok(f"Criterion 2: IC = {ic_val:.6f} > 0")
+    else:
+        warn(f"Criterion 2: IC = {ic_val:.6f} <= 0")
+        warnings += 1
+
+    # =========================================================================
+    # Criterion 3: b_confidence significant
+    # Source: calibrated_constants.json -> C2_conf_L.b_conf_CI_95
+    #   If 95% CI excludes 0, coefficient is significant at p < 0.05.
+    #   Also check logistic_coeffs.b_confidence for existence.
+    # =========================================================================
+    b_conf = _resolve_nested(cal_data, "C2_conf_L.logistic_coeffs.b_confidence")
+    b_conf_ci = _resolve_nested(cal_data, "C2_conf_L.b_conf_CI_95")
+
+    if b_conf is None:
+        warn("Criterion 3 (b_confidence): field C2_conf_L.logistic_coeffs.b_confidence not found")
+        warnings += 1
+    elif b_conf_ci is None:
+        warn("Criterion 3 (b_confidence): field C2_conf_L.b_conf_CI_95 not found (cannot check significance)")
+        warnings += 1
+    elif isinstance(b_conf_ci, list) and len(b_conf_ci) == 2:
+        ci_lo, ci_hi = b_conf_ci
+        # Significant if 95% CI does not include 0
+        if ci_lo > 0 or ci_hi < 0:
+            ok(f"Criterion 3: b_confidence = {b_conf:.4f}, 95% CI [{ci_lo:.4f}, {ci_hi:.4f}] excludes 0 (significant)")
+        else:
+            warn(f"Criterion 3: b_confidence = {b_conf:.4f}, 95% CI [{ci_lo:.4f}, {ci_hi:.4f}] includes 0 (not significant)")
+            warnings += 1
+    else:
+        warn(f"Criterion 3 (b_confidence): b_conf_CI_95 has unexpected format: {b_conf_ci}")
+        warnings += 1
+
+    # =========================================================================
+    # Criterion 4: OOS WR > 50%
+    # Source: calibrated_constants.json -> oos_validation.oos_wr
+    # Fallback: pattern_winrates_oos.json -> grand_mean_candle_oos / grand_mean_chart_oos
+    # =========================================================================
+    oos_wr = _resolve_nested(cal_data, "oos_validation.oos_wr")
+    oos_wr_source = "calibrated_constants.json -> oos_validation.oos_wr"
+
+    if oos_wr is None and oos_data:
+        # Fallback: use grand means from pattern_winrates_oos.json
+        candle_oos = oos_data.get("grand_mean_candle_oos")
+        chart_oos = oos_data.get("grand_mean_chart_oos")
+        if candle_oos is not None and chart_oos is not None:
+            oos_wr = (candle_oos + chart_oos) / 2.0
+            oos_wr_source = "pattern_winrates_oos.json -> avg(candle_oos, chart_oos)"
+
+    if oos_wr is None:
+        warn("Criterion 4 (OOS WR > 50%): no OOS win rate field found")
+        warnings += 1
+    elif oos_wr > 50.0:
+        ok(f"Criterion 4: OOS WR = {oos_wr:.2f}% > 50% (source: {oos_wr_source})")
+    else:
+        warn(f"Criterion 4: OOS WR = {oos_wr:.2f}% <= 50% (source: {oos_wr_source})")
+        warnings += 1
+
+    # =========================================================================
+    # Criterion 5: cascade_range < 3
+    # Interpretation: count of calibration dimensions that changed.
+    # A cascade_range >= 3 means too many parameters shifted simultaneously,
+    # risking overfitting. Source: calibrated_constants.json dimension sections.
+    # =========================================================================
+    # Check for explicit field first
+    cascade_val = cal_data.get("cascade_range")
+    if cascade_val is not None:
+        if cascade_val < 3:
+            ok(f"Criterion 5: cascade_range = {cascade_val} < 3")
+        else:
+            warn(f"Criterion 5: cascade_range = {cascade_val} >= 3")
+            warnings += 1
+    else:
+        # Derive: count calibration sections with "changed": true
+        dim_sections = ["C1_rr_thresholds", "C2_conf_L", "D1_candle_target_atr",
+                        "D2_sell_hw_inversion", "D3_rr_penalty"]
+        n_changed = 0
+        for dim in dim_sections:
+            if isinstance(cal_data.get(dim), dict) and cal_data[dim].get("changed") is True:
+                n_changed += 1
+        if n_changed < 3:
+            ok(f"Criterion 5: cascade_range (derived) = {n_changed} < 3 ({n_changed}/{len(dim_sections)} dims changed)")
+        else:
+            warn(f"Criterion 5: cascade_range (derived) = {n_changed} >= 3 ({n_changed}/{len(dim_sections)} dims changed)")
+            warnings += 1
+
+    # =========================================================================
+    # Criterion 6: calibrator changed == false
+    # At least the core confidence formula (C2_conf_L) should be stable.
+    # Source: calibrated_constants.json -> C2_conf_L.changed
+    # =========================================================================
+    cal_changed = _resolve_nested(cal_data, "C2_conf_L.changed")
+    if cal_changed is None:
+        warn("Criterion 6 (calibrator changed): field C2_conf_L.changed not found")
+        warnings += 1
+    elif cal_changed is False:
+        ok("Criterion 6: calibrator changed = false (confidence formula stable)")
+    else:
+        warn(f"Criterion 6: calibrator changed = {cal_changed} (confidence formula was recalibrated)")
+        warnings += 1
+
+    # =========================================================================
+    # Criterion 7: direction_accuracy improvement >= 0
+    # Baseline: 0.50 (random). Improvement = actual - baseline.
+    # Source: calibrated_constants.json -> C2_conf_L.overall_direction_accuracy
+    # =========================================================================
+    BASELINE_ACCURACY = 0.50
+    if dir_acc is not None:
+        improvement = dir_acc - BASELINE_ACCURACY
+        if improvement >= 0:
+            ok(f"Criterion 7: direction_accuracy improvement = {improvement:+.4f} >= 0 (vs baseline {BASELINE_ACCURACY})")
+        else:
+            warn(f"Criterion 7: direction_accuracy improvement = {improvement:+.4f} < 0 (vs baseline {BASELINE_ACCURACY})")
+            warnings += 1
+    else:
+        warn("Criterion 7 (direction_accuracy improvement): direction_accuracy not available (see Criterion 1)")
+        warnings += 1
+
+    # --- Summary ---
+    n_pass = 7 - errors - warnings
+    info(f"")
+    n_criteria_warn = warnings  # criteria threshold misses (data quality, not code defects)
+    info(f"Criteria summary: {n_pass} PASS, {n_criteria_warn} below threshold, {errors} data errors out of 7")
+
+    return errors, warnings
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -1169,7 +1380,7 @@ def main():
     parser.add_argument(
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
-                 "collision", "dead_exports", "canvas", "all"],
+                 "collision", "dead_exports", "canvas", "criteria", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -1195,6 +1406,7 @@ def main():
         "collision":     check_globals_collision,
         "dead_exports":  check_dead_exports,
         "canvas":        check_canvas,
+        "criteria":      check_criteria,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

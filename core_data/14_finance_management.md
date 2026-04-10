@@ -162,6 +162,43 @@ Rm - Rf: 시장 위험 프리미엄 (한국 약 6~8%)
   → β의 추정 기간과 현재 시장 상태가 괴리될 수 있음
   → KRX 종목의 β는 증권사 HTS에서 확인 가능 (통상 60개월 기준)
 
+### Hamada 방정식 (Hamada, 1972)
+
+Robert S. Hamada (1972), *The Effect of the Firm's Capital Structure on the Systematic
+Risk of Common Stocks*, Journal of Finance, 27(2), 435-452.
+
+Hamada 방정식은 기업의 자본구조(레버리지)가 변할 때 주식 베타가 어떻게 조정되는지를 설명한다.
+
+$$\beta_L = \beta_U \times \left[1 + (1 - T_c) \cdot \frac{D}{E}\right]$$
+
+여기서 $\beta_L$은 레버리지 베타(levered beta), $\beta_U$는 무차입 베타(unlevered beta),
+$T_c$는 법인세율, $D/E$는 부채-자기자본 비율이다.
+
+역방향 — unlevering:
+
+$$\beta_U = \frac{\beta_L}{1 + (1 - T_c) \cdot D/E}$$
+
+WACC 산출 시 비교 대상 기업(peer group)의 베타를 활용하려면 3단계 절차가 필요하다:
+
+```text
+[1] Unlevering: 각 비교 기업의 β_L → β_U
+    β_U_i = β_L_i / [1 + (1 - Tc_i) · (D/E)_i]
+
+[2] 평균: β_U_peer = mean(β_U_i)
+
+[3] Re-levering: 분석 대상 기업의 D/E를 적용
+    β_L_target = β_U_peer × [1 + (1 - Tc_target) · (D/E)_target]
+```
+
+Hamada 방정식의 가정과 한계:
+  — MM (1963) 법인세 모형 기반 (부채의 세금절감만 고려)
+  — 파산비용, 대리인비용, 개인세 미반영
+  — Miles-Ezzell (1980) 확장: 부채비율이 시장가 기준으로 재조정될 때 수정식 존재
+
+**한국 적용:** DART `자본총계`와 `이자부채`에서 D/E 산출.
+KOSPI 대형주 평균 D/E ≈ 0.8–1.2, KOSDAQ 기술주 ≈ 0.3–0.6.
+한국 법인세 실효세율(Tc): 대기업 약 22–24% (지방소득세 포함).
+
 ### 2.4 터미널 밸류 (Terminal Value)
 
 #### 고든 성장 모형 (Gordon Growth Model)
@@ -192,6 +229,34 @@ TV = EBITDAₙ × 출구 배수 (Exit Multiple)
 출구 배수: 업종 평균 EV/EBITDA 적용
   → 상대가치 평가와의 결합
 ```
+
+### DCF 민감도 분석 (Sensitivity Analysis)
+
+터미널밸류(TV)가 총 기업가치의 60–80%를 차지하므로, WACC와 성장률(g)의 작은 변화가
+가치 평가에 미치는 영향을 정량화해야 한다.
+
+Gordon Growth Model `TV = FCFF₁ / (WACC - g)` 의 편미분:
+
+$$\frac{\partial TV}{\partial g} = \frac{FCFF_1}{(WACC - g)^2} > 0$$
+
+$$\frac{\partial TV}{\partial WACC} = -\frac{FCFF_1}{(WACC - g)^2} < 0$$
+
+두 편미분의 절댓값이 같다: WACC↑ 1bp와 g↓ 1bp는 TV에 동일한 크기의 반대 방향 충격을 준다.
+
+**WACC–g 민감도 표** (FCFF₁ = 1조원 가정, TV 단위: 조원):
+
+| WACC \\ g | 1.5% | 2.0% | 2.5% | 3.0% |
+|-----------|------|------|------|------|
+| 7.0%      | 18.2 | 20.0 | 22.2 | 25.0 |
+| 8.0%      | 15.4 | 16.7 | 18.2 | 20.0 |
+| 9.0%      | 13.3 | 14.3 | 15.4 | 16.7 |
+| 10.0%     | 11.8 | 12.5 | 13.3 | 14.3 |
+
+실무 지침:
+
+- WACC 추정 표준오차 ±1%p, g 추정 표준오차 ±0.5%p → TV 불확실성 ±20–35%
+- 민감도 표는 DCF 분석의 필수 부록 (투자보고서 작성 시 항상 포함)
+- TV 비중이 80% 초과 시 상대가치(PER/EV-EBITDA) 크로스체크 권고
 
 ### 2.5 상대가치 평가 (Relative Valuation)
 
@@ -609,6 +674,35 @@ Stock Market* (2006)
   - 실전에서 가장 널리 사용되는 비율
 
 일반적 권장: 0.2f* ~ 0.5f* (켈리의 20~50%)
+```
+
+### 5.2a 다자산 Kelly 기준 (Multi-Asset Kelly)
+
+Thorp, E.O. (2006), *The Kelly Criterion in Blackjack, Sports Betting, and the Stock
+Market*, in S.A. Zenios & W.T. Ziemba (eds.), *Handbook of Asset and Liability Management*
+
+N개 자산의 동시 투자 시, 장기 기하 성장률을 최대화하는 최적 비중 벡터는:
+
+$$\mathbf{f}^* = \Sigma^{-1} \boldsymbol{\mu}$$
+
+여기서 $\Sigma$는 $N \times N$ 수익률 공분산 행렬, $\boldsymbol{\mu}$는 기대 초과수익률 벡터($N \times 1$)이다.
+
+```text
+다자산 Kelly의 도출 (연속 수익률 확장):
+
+단일 자산: f* = μ / σ²
+다자산: f* = Σ⁻¹ μ
+
+이는 Markowitz 접선 포트폴리오(μ/σ² 최적화)와 수학적으로 동치이다.
+차이: Markowitz는 기대효용 최대화, Kelly는 기하 성장률(로그 부의 기대값) 최대화.
+두 기준은 로그 효용함수 U(W) = ln(W) 하에서 일치한다.
+
+실무 제약:
+  — Σ 추정 오차: 표본 공분산 행렬의 역행렬은 추정 오차에 극도로 민감
+  — 해결: Ledoit-Wolf 수축 추정(shrinkage) 또는 Ridge 정규화
+    Σ_shrink = (1-α)·Σ_sample + α·F   (F: 구조적 목표 행렬)
+  — 실전에서는 half-Kelly(0.5·f*)를 사용하여 추정 오차 버퍼 확보
+  — 최대 개별 비중 상한(position cap) 별도 적용 권고 (예: 최대 20%)
 ```
 
 ### 5.3 고정 비율 포지션 사이징 (Fixed Fractional Position Sizing)
@@ -1629,6 +1723,40 @@ WACC × IC: 자본비용 금액 (capital charge)
   EVA > 0 → 자본비용 이상의 수익 창출 → 주주가치 증가
   EVA = 0 → 자본비용만 충족 → 가치 중립
   EVA < 0 → 자본비용 미달 → 주주가치 파괴
+```
+
+### ROIC 분해 트리 (ROIC Decomposition)
+
+투하자본수익률(ROIC)은 EVA 양수 여부의 핵심 기준이다. EVA > 0 ⟺ ROIC > WACC.
+
+$$\text{ROIC} = \frac{NOPAT}{IC}$$
+
+DuPont 방식으로 분해하면 가치 창출의 원천을 식별할 수 있다:
+
+$$\text{ROIC} = \underbrace{\frac{NOPAT}{\text{매출액}}}_{\text{(1) 세후 영업마진}} \times \underbrace{\frac{\text{매출액}}{IC}}_{\text{(2) 투하자본 회전율}}$$
+
+따라서:
+
+$$EVA = IC \times (ROIC - WACC)$$
+
+```text
+ROIC 개선 경로:
+
+(1) 세후 영업마진 개선:
+    — 가격 결정력 (pricing power) 강화
+    — 원가 절감 (COGS, SG&A)
+    — 고마진 제품·사업 믹스 개선
+
+(2) 투하자본 회전율 개선:
+    — 매출채권 회수 단축 (DSO 감소)
+    — 재고 관리 효율화 (DIO 감소)
+    — 비핵심 고정자산 매각 (IC 축소)
+
+한국 섹터별 ROIC 특성 (KOSPI 기준):
+  반도체(삼성, SK하이닉스): ROIC 10~30% (호황기), WACC 8~10%
+  자동차: ROIC 5~12%, WACC 8~9%
+  유틸리티: ROIC 4~7%, WACC 6~7% (규제 산업)
+  바이오/플랫폼(성장기): ROIC 음수, WACC 12~15% → EVA 적자 정상
 ```
 
 ### 2.8.6 MVA와 EVA의 관계
