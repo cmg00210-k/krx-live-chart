@@ -971,7 +971,10 @@ class PatternEngine {
         pred = Math.max(10, pred - PatternEngine.TRIANGLE_UNCONFIRMED_PRED_PENALTY);
       }
       // [RX-08] continuation 패턴은 "추세 확인"용 — 예측 신호가 아니므로 confidencePred 미부여
-      if (patterns[pi]._continuationOnly) {
+      // [V23] ANTI_PREDICTOR: dirWr < 50 → confidencePred = null (Stat-Expert Option A)
+      //   direction_accuracy 메트릭에서 제외 — 방향 정보가 없는 패턴.
+      //   차트에는 낮은 confidence로 표시 유지. 별도 binomial test 후 contrarian graduation 검토.
+      if (patterns[pi]._continuationOnly || (wr != null && dirWr < 50)) {
         patterns[pi].confidencePred = null;
       } else {
         patterns[pi].confidencePred = pred;

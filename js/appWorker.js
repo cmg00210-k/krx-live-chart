@@ -90,6 +90,75 @@ function _markFactorsAfterMacro() {
 }
 
 // ══════════════════════════════════════════════════════
+// [V23] PCA Effect Budget — correlated factor 누적 승수 총량 제어
+//
+// 문제: VIX/credit/FX가 동시 발동 시 latent factor 공유(ρ≈0.6-0.85)로 과도한 cascading.
+// 해법: Kish (1965) N_eff + Longin & Solnik (2001) 비대칭 cap.
+// avg_|ρ| 계산은 _appliedFactors에서 실제 fired된 subset만 사용.
+// ══════════════════════════════════════════════════════
+
+// KRX 2018-2024 blended crisis/normal 실증 상관계수 (|ρ|)
+var _FACTOR_CORR = {
+  RISK_VOL_EQUITY: { RISK_CREDIT: 0.72, RISK_FX: 0.65, FLOW_FOREIGN: 0.45 },
+  RISK_CREDIT:     { RISK_VOL_EQUITY: 0.72, RISK_FX: 0.58, FLOW_FOREIGN: 0.38 },
+  RISK_FX:         { RISK_VOL_EQUITY: 0.65, RISK_CREDIT: 0.58, FLOW_FOREIGN: 0.52 },
+  FLOW_FOREIGN:    { RISK_VOL_EQUITY: 0.45, RISK_CREDIT: 0.38, RISK_FX: 0.52 }
+};
+var _CORRELATED_FACTORS = ['RISK_VOL_EQUITY', 'RISK_CREDIT', 'RISK_FX', 'FLOW_FOREIGN'];
+var _BUDGET_DOWN = 0.10;  // per-factor log budget (downside — crisis clustering)
+var _BUDGET_UP   = 0.12;  // per-factor log budget (upside — recovery heterogeneous)
+
+function _applyPCABudgetCap(patterns) {
+  // 1. fired correlated factors 추출
+  var fired = [];
+  for (var fi = 0; fi < _CORRELATED_FACTORS.length; fi++) {
+    if (_appliedFactors.has(_CORRELATED_FACTORS[fi])) fired.push(_CORRELATED_FACTORS[fi]);
+  }
+  if (fired.length <= 1) {
+    // cleanup _confBefore
+    for (var ci = 0; ci < patterns.length; ci++) delete patterns[ci]._confBefore;
+    return;
+  }
+
+  // 2. avg |ρ| over fired subset (pairwise)
+  var sumRho = 0, pairs = 0;
+  for (var i = 0; i < fired.length; i++) {
+    for (var j = i + 1; j < fired.length; j++) {
+      var r = _FACTOR_CORR[fired[i]] && _FACTOR_CORR[fired[i]][fired[j]];
+      if (r != null) { sumRho += r; pairs++; }
+    }
+  }
+  var avgRho = pairs > 0 ? sumRho / pairs : 0;
+
+  // 3. N_eff (Kish 1965 equicorrelation)
+  var nEff = fired.length / (1 + (fired.length - 1) * avgRho);
+
+  // 4. asymmetric budget (Longin & Solnik 2001)
+  var budgetDown = _BUDGET_DOWN * Math.sqrt(nEff);
+  var budgetUp   = _BUDGET_UP   * Math.sqrt(nEff);
+
+  // 5. cap cumulative log-adjustment
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var p = patterns[pi];
+    if (p._confBefore == null || p.confidence == null || p._confBefore <= 0) {
+      delete p._confBefore;
+      continue;
+    }
+    var logAdj = Math.log(p.confidence / p._confBefore);
+    if (logAdj === 0) { delete p._confBefore; continue; }
+
+    var capped = logAdj < 0
+      ? Math.max(logAdj, -budgetDown)
+      : Math.min(logAdj, budgetUp);
+
+    if (capped !== logAdj) {
+      p.confidence = Math.round(p._confBefore * Math.exp(capped));
+    }
+    delete p._confBefore;
+  }
+}
+
+// ══════════════════════════════════════════════════════
 //  Web Worker 초기화 (Phase 9)
 //
 //  패턴 분석 + 시그널 분석 + 백테스트를 별도 스레드에서 수행.
@@ -178,6 +247,10 @@ function _initAnalysisWorker() {
             _currentVolRegime = classifyAtrVolRegime(calcATR(candles, 14));
           }
         } catch (_e) { _currentVolRegime = 'mid'; }
+        // [V23] PCA budget: save initial confidence before adjustment chain
+        for (var bi = 0; bi < detectedPatterns.length; bi++) {
+          detectedPatterns[bi]._confBefore = detectedPatterns[bi].confidence;
+        }
         // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
         _applyMarketContextToPatterns(detectedPatterns);
         // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
@@ -199,6 +272,8 @@ function _initAnalysisWorker() {
         _applyPhase8ConfidenceToPatterns(detectedPatterns);
         // [D-1] Survivorship bias: mild confidence discount for buy patterns
         _applySurvivorshipAdjustment(detectedPatterns);
+        // [V23] PCA effect budget — cap correlated factor cumulative adjustment
+        _applyPCABudgetCap(detectedPatterns);
         // [V6-FIX] C-1: Compound floor — prevent 8-phase multiplicative cascade from
         // crushing confidence below 25. Without this, worst-case 7+ sequential discounts
         // can reduce 70 → 10 (floor). Minimum meaningful confidence = 25.
@@ -844,6 +919,10 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
   // 데이터 전무 시 no-op
   if (!deriv && !investor && !etf && !shorts) return;
 
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
   // [Phase 4-B] USD/KRW 수출주 채널 — 루프 밖 1회 산출 (Doc28 §3)
   // β_FX +0.3~+0.5: KRW 약세 → 수출주 매출↑ → 매수 부스트, 역방향도 적용
   var _fxExportDir = 0;  // 0=neutral, +1=KRW weak (exporter bullish), -1=KRW strong
@@ -945,9 +1024,9 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
     // clamp [0.70, 1.30]
     adj = Math.max(0.70, Math.min(1.30, adj));
     if (adj !== 1.0) {
-      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
       if (p.confidencePred != null) {
-        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+        p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
       }
     }
   }
@@ -1054,6 +1133,10 @@ function _applyMertonDDToPatterns(patterns) {
   var dd = _currentDD.dd;
   if (dd >= 2.0) return;  // 안전 — 조정 없음
 
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
   for (var i = 0; i < patterns.length; i++) {
     var p = patterns[i];
     var isBuy = (p.signal === 'buy');
@@ -1072,9 +1155,9 @@ function _applyMertonDDToPatterns(patterns) {
 
     // clamp [0.75, 1.15] — 하한 0.75: DD<1.0 tier (매우 위험) 구분 유효
     adj = Math.max(0.75, Math.min(1.15, adj));
-    p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+    p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
     if (p.confidencePred != null) {
-      p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
     }
   }
 }
@@ -1147,6 +1230,10 @@ function _applyMarketContextToPatterns(patterns) {
   if (!_marketContext || !patterns || patterns.length === 0) return;
   if (_marketContext.source === 'demo') return; // 데모 데이터는 실제 조정 미적용
 
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
   var ccsi = _marketContext.ccsi;
   // [C-11 FIX] vkospi 제거 — patterns.js regimeWeight 3-tier cascade가 권위적 소스
   var netForeign = _marketContext.net_foreign_eok;
@@ -1173,9 +1260,9 @@ function _applyMarketContextToPatterns(patterns) {
     adj = Math.max(0.55, Math.min(1.35, adj));
 
     if (adj !== 1.0) {
-      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
       if (p.confidencePred != null) {
-        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+        p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
       }
     }
   }
@@ -1609,6 +1696,10 @@ function _applyRORORegimeToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
   if (_currentRORORegime === 'neutral') return;
 
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
   var buyAdj, sellAdj;
   if (_currentRORORegime === 'risk-on') {
     buyAdj = 1.06; sellAdj = 0.94;
@@ -1622,9 +1713,9 @@ function _applyRORORegimeToPatterns(patterns) {
     var adj = (p.signal === 'buy') ? buyAdj : sellAdj;
     // clamp [0.92, 1.08]
     adj = Math.max(0.92, Math.min(1.08, adj));
-    p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+    p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
     if (p.confidencePred != null) {
-      p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+      p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
     }
   }
 }
@@ -1709,6 +1800,10 @@ function _isInShortBan(dateStr) {
 function _applyMicroConfidenceToPatterns(patterns, microCtx) {
   if (!patterns || patterns.length === 0 || !microCtx) return;
 
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
   var MEAN_REV_TYPES = {
     doubleBottom: true, doubleTop: true,
     headAndShoulders: true, inverseHeadAndShoulders: true
@@ -1746,9 +1841,9 @@ function _applyMicroConfidenceToPatterns(patterns, microCtx) {
     adj = Math.max(0.55, Math.min(1.15, adj));
 
     if (adj !== 1.0) {
-      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
       if (p.confidencePred != null) {
-        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+        p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
       }
     }
   }
@@ -1766,6 +1861,10 @@ function _applyMacroConditionsToSignals(signals) {
   var macro = _macroLatest;
   var bonds = _bondsLatest;
   if (!macro && !bonds) return;
+
+  // [V23] ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
 
   var cp = macro && macro.cycle_phase;
   var phase = cp ? cp.phase : null;
@@ -1816,9 +1915,9 @@ function _applyMacroConditionsToSignals(signals) {
     adj = Math.max(0.70, Math.min(1.25, adj));
 
     if (adj !== 1.0) {
-      s.confidence = Math.max(10, Math.min(95, Math.round(s.confidence * adj)));
+      s.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(s.confidence * adj)));
       if (s.confidencePred != null) {
-        s.confidencePred = Math.max(10, Math.min(95, Math.round(s.confidencePred * adj)));
+        s.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(s.confidencePred * adj)));
       }
     }
   }
@@ -1863,6 +1962,10 @@ function _analyzeOnMainThread() {
       _currentVolRegime = classifyAtrVolRegime(calcATR(candles, 14));
     }
   } catch (_e) { _currentVolRegime = 'mid'; }
+  // [V23] PCA budget: save initial confidence before adjustment chain
+  for (var bi = 0; bi < detectedPatterns.length; bi++) {
+    detectedPatterns[bi]._confBefore = detectedPatterns[bi].confidence;
+  }
   // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
   _applyMarketContextToPatterns(detectedPatterns);
   // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
@@ -1884,6 +1987,8 @@ function _analyzeOnMainThread() {
   _applyPhase8ConfidenceToPatterns(detectedPatterns);
   // [D-1] Survivorship bias: mild confidence discount for buy patterns
   _applySurvivorshipAdjustment(detectedPatterns);
+  // [V23] PCA effect budget — cap correlated factor cumulative adjustment
+  _applyPCABudgetCap(detectedPatterns);
   // [V6-FIX] C-1: Compound floor (drag/resize path — same as Worker path)
   for (var cf = 0; cf < detectedPatterns.length; cf++) {
     if (detectedPatterns[cf].confidence != null && detectedPatterns[cf].confidence < 25) {
@@ -1935,6 +2040,10 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   // [V22-B] factor guard Set 초기화 — 드래그 경로
   _appliedFactors.clear();
   // [V22-B] drag 경로: 기존 _currentVolRegime 재사용 (드래그는 재계산 비활성)
+  // [V23] PCA budget: save initial confidence
+  for (var bi = 0; bi < detectedPatterns.length; bi++) {
+    detectedPatterns[bi]._confBefore = detectedPatterns[bi].confidence;
+  }
   _applyMarketContextToPatterns(detectedPatterns);
   _applyRORORegimeToPatterns(detectedPatterns);
   _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
@@ -1945,6 +2054,8 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   _applyMertonDDToPatterns(detectedPatterns);
   _applyPhase8ConfidenceToPatterns(detectedPatterns);
   _applySurvivorshipAdjustment(detectedPatterns);
+  // [V23] PCA effect budget — cap correlated factor cumulative adjustment
+  _applyPCABudgetCap(detectedPatterns);
 
   chartManager._drawPatterns(candles, chartType, _filterPatternsForViz(detectedPatterns));
   _renderOverlays();
