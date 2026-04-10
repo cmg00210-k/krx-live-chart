@@ -1,7 +1,7 @@
 {
   "horizon": 5,
-  "total_records": 253829,
-  "valid_ret5_records": 249962,
+  "total_records": 244765,
+  "valid_ret5_records": 240912,
   "calibration_metadata": {
     "initial_values": "current_calibrated",
     "academic_defaults": {
@@ -16,22 +16,22 @@
       ],
       "note": "Flat ATR 2.0 academic baseline; use --reset-initial to document"
     },
-    "dataset_period": "2021-03-30 ~ 2026-04-02",
-    "train_records": 10448,
-    "test_records": 243381,
-    "train_period": "2021-03-30 ~ 2024-09-09",
-    "test_period": "2024-09-10 ~ 2026-04-02",
+    "dataset_period": "2025-04-11 ~ 2026-04-09",
+    "train_records": 165801,
+    "test_records": 78964,
+    "train_period": "2025-04-11 ~ 2025-12-18",
+    "test_period": "2025-12-19 ~ 2026-04-09",
     "oos_split": 0.3,
-    "cutoff_date": "2024-09-10",
+    "cutoff_date": "2025-12-19",
     "circular_check": false
   },
   "oos_validation": {
     "status": "rejected",
-    "n": 239514,
-    "n_directed": 83793,
-    "oos_ic": 0.042939,
+    "n": 75122,
+    "n_directed": 30060,
+    "oos_ic": 0.025416,
     "oos_ic_pvalue": 0.0,
-    "oos_wr": 50.37,
+    "oos_wr": 51.35,
     "rejection_criteria": "OOS IC < 0.02 OR OOS WR < 52%"
   },
   "C1_rr_thresholds": {
@@ -41,41 +41,41 @@
     ],
     "calibrated": [
       1.0,
-      1.5
+      1.25
     ],
-    "changed": false,
-    "p_value_overall": 0.75963,
-    "p_value_low": 0.75963,
-    "p_value_high": 1.0,
-    "score": -0.4088,
+    "changed": true,
+    "p_value_overall": 0.020268,
+    "p_value_low": 0.126321,
+    "p_value_high": 0.00201,
+    "score": -0.6449,
     "zone_counts": {
-      "below": 4848,
-      "mid": 0,
-      "above": 48
+      "below": 75643,
+      "mid": 2504,
+      "above": 1149
     },
     "zone_means": {
-      "below": -0.5277,
-      "mid": null,
-      "above": -0.9364
+      "below": 0.0921,
+      "mid": 0.1375,
+      "above": -0.5529
     },
-    "evidence": "best_pair=[2.25, 2.5], score=-0.4088%, F/t=-0.31, p=7.5963e-01, p_low=7.5963e-01, p_high=1.0000e+00, n_below=4848, n_mid=0, n_above=48"
+    "evidence": "best_pair=[1.0, 1.25], score=-0.6449%, F/t=3.90, p=2.0268e-02, p_low=1.2632e-01, p_high=2.0099e-03, n_below=75643, n_mid=2504, n_above=1149"
   },
   "C2_conf_L": {
     "current_formula": "R_sq * min(n/300, 1)",
-    "calibrated_formula": "R_sq * min(n/50, 1)",
-    "calibrated_n_scale": 50,
+    "calibrated_formula": "R_sq * min(n/30, 1)",
+    "calibrated_n_scale": 30,
     "changed": true,
     "logistic_coeffs": {
-      "intercept": 0.3862,
-      "b_confidence": -0.2778,
-      "b_wc": -0.2547
+      "intercept": 0.0054,
+      "b_confidence": 0.1057,
+      "b_wc": -0.0952
     },
     "b_conf_CI_95": [
-      -0.6757,
-      0.1168
+      0.0093,
+      0.2033
     ],
-    "overall_direction_accuracy": 0.5083,
-    "evidence": "Logistic: a=0.386, b_conf=-0.278, b_wc=-0.255; b_conf CI=[-0.676, 0.117]; N_scale=50; overall_accuracy=0.508"
+    "overall_direction_accuracy": 0.4928,
+    "evidence": "Logistic: a=0.005, b_conf=0.106, b_wc=-0.095; b_conf CI=[0.009, 0.203]; N_scale=30; overall_accuracy=0.493"
   },
   "D1_candle_target_atr": {
     "current": {
@@ -84,50 +84,50 @@
       "weak": 0.5
     },
     "calibrated": {
-      "strong": 2.85,
-      "medium": 3.11,
-      "weak": 2.88
+      "strong": 1.82,
+      "medium": 1.93,
+      "weak": 1.73
     },
     "changed": true,
     "atr_norm_used": 0.025,
     "tier_details": {
       "strong": {
-        "n": 1326,
-        "mean_abs_ret5": 7.1241,
-        "std_abs_ret5": 8.5619,
-        "atr_multiplier": 2.85,
+        "n": 21225,
+        "mean_abs_ret5": 4.5569,
+        "std_abs_ret5": 7.4932,
+        "atr_multiplier": 1.82,
         "CI_95": [
-          2.665,
-          3.034
+          1.782,
+          1.863
         ],
         "fallback": false
       },
       "medium": {
-        "n": 1235,
-        "mean_abs_ret5": 7.7749,
-        "std_abs_ret5": 18.8888,
-        "atr_multiplier": 3.11,
+        "n": 20457,
+        "mean_abs_ret5": 4.8146,
+        "std_abs_ret5": 5.9419,
+        "atr_multiplier": 1.93,
         "CI_95": [
-          2.689,
-          3.531
+          1.893,
+          1.958
         ],
         "fallback": false
       },
       "weak": {
-        "n": 7079,
-        "mean_abs_ret5": 7.1992,
-        "std_abs_ret5": 19.9132,
-        "atr_multiplier": 2.88,
+        "n": 110100,
+        "mean_abs_ret5": 4.3315,
+        "std_abs_ret5": 5.7575,
+        "atr_multiplier": 1.73,
         "CI_95": [
-          2.694,
-          3.065
+          1.719,
+          1.746
         ],
         "fallback": false
       }
     },
-    "kruskal_wallis_H": 2.9441,
-    "kruskal_wallis_p": 0.229454,
-    "evidence": "ATR_NORM=0.025, strong=2.85x, medium=3.11x, weak=2.88x, KW p=2.2945e-01"
+    "kruskal_wallis_H": 201.2354,
+    "kruskal_wallis_p": 0.0,
+    "evidence": "ATR_NORM=0.025, strong=1.82x, medium=1.93x, weak=1.73x, KW p=2.0058e-44"
   },
   "D2_sell_hw_inversion": {
     "current": {
@@ -135,23 +135,23 @@
       "b": -1
     },
     "calibrated": {
-      "a": 3.063,
-      "b": -2.0
+      "a": 2,
+      "b": -1
     },
-    "changed": true,
+    "changed": false,
     "ols": {
-      "intercept": -42.6462,
-      "slope": 40.7292,
-      "r_squared": 0.006037,
-      "p_value": 0.002004,
-      "std_err": 13.1607,
-      "t_stat": 3.0948
+      "intercept": -15.5839,
+      "slope": 15.36,
+      "r_squared": 0.003134,
+      "p_value": 0.0,
+      "std_err": 1.6709,
+      "t_stat": 9.1927
     },
-    "n_sell": 1579,
-    "mean_hw_sell": 1.0313,
-    "corr_current": 0.0777,
-    "corr_new": 0.0777,
-    "evidence": "OLS: ret5 = -42.6462 + 40.7292*hw, R^2=0.006037, p=2.0044e-03, corr_current=0.0777, corr_new=0.0777"
+    "n_sell": 26879,
+    "mean_hw_sell": 1.031,
+    "corr_current": 0.056,
+    "corr_new": 0.056,
+    "evidence": "OLS: ret5 = -15.5839 + 15.3600*hw, R^2=0.003134, p=4.0983e-20, corr_current=0.0560, corr_new=0.0560"
   },
   "D3_rr_penalty": {
     "current": {
@@ -159,29 +159,29 @@
       "high": 5
     },
     "calibrated": {
-      "low": 15,
-      "high": 5
+      "low": 2.5,
+      "high": 3.2
     },
-    "changed": false,
+    "changed": true,
     "rr_thresholds_used": [
       1.0,
-      1.5
+      1.25
     ],
     "zone_counts": {
-      "below": 4708,
-      "mid": 114,
-      "above": 74
+      "below": 75643,
+      "mid": 2504,
+      "above": 1149
     },
     "zone_means": {
-      "below": -0.5224,
-      "mid": -0.2089,
-      "above": -1.6171
+      "below": 0.0921,
+      "mid": 0.1375,
+      "above": -0.5529
     },
-    "cohens_d_low": -0.0785,
-    "p_value_low": 0.247391,
-    "cohens_d_high": -0.1115,
-    "p_value_high": 0.400292,
+    "cohens_d_low": -0.082,
+    "p_value_low": 0.000343,
+    "cohens_d_high": -0.1053,
+    "p_value_high": 0.00201,
     "penalty_scale": 30,
-    "evidence": "thresholds=[1.0,1.5], d_low=-0.079(p=2.4739e-01), d_high=-0.112(p=4.0029e-01), scale=30"
+    "evidence": "thresholds=[1.0,1.25], d_low=-0.082(p=3.4313e-04), d_high=-0.105(p=2.0099e-03), scale=30"
   }
 }
