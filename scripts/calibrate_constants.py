@@ -40,6 +40,51 @@ DATA_DIR = os.path.join(BASE_DIR, 'data', 'backtest')
 
 
 # ──────────────────────────────────────────────
+# Gap B — canonical OOS split loader
+# ──────────────────────────────────────────────
+OOS_CONFIG_PATH = os.path.join(BASE_DIR, 'config', 'oos_split.json')
+
+
+def _load_oos_config():
+    """Load canonical OOS split config from config/oos_split.json.
+
+    Returns:
+        tuple[str, float]: (cutoff_date, oos_ratio).
+
+    Exits with code 1 if the config file is missing or malformed. Gap B's
+    purpose is to eliminate silent inconsistency between calibrate_constants.py
+    and compute_oos_winrates.py, so a missing config must FAIL LOUD instead of
+    silently falling back to the historical 70/30 default.
+    """
+    try:
+        with open(OOS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        print(f"[FATAL] OOS config not found: {OOS_CONFIG_PATH}", file=sys.stderr)
+        print("[FATAL] Gap B requires config/oos_split.json to exist.", file=sys.stderr)
+        print("[FATAL] Create the file or run from the repo root.", file=sys.stderr)
+        sys.exit(1)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[FATAL] OOS config unreadable: {OOS_CONFIG_PATH}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    cutoff = cfg.get('cutoff_date')
+    ratio = cfg.get('oos_ratio')
+    if cutoff is None or ratio is None:
+        print(f"[FATAL] OOS config missing required keys "
+              f"'cutoff_date' and/or 'oos_ratio': {OOS_CONFIG_PATH}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        ratio = float(ratio)
+    except (TypeError, ValueError):
+        print(f"[FATAL] OOS config 'oos_ratio' not a number: {ratio!r}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  [OOS config] cutoff_date={cutoff}, oos_ratio={ratio} (from {OOS_CONFIG_PATH})")
+    return str(cutoff), ratio
+
+
+# ──────────────────────────────────────────────
 # numpy/pandas → JSON 직렬화 헬퍼
 # ──────────────────────────────────────────────
 class NumpyEncoder(json.JSONEncoder):
@@ -987,10 +1032,10 @@ def main():
         description="Calibrate Wc system 5 constants with OOS validation")
     parser.add_argument("--reset-initial", action="store_true",
                         help="Document academic flat defaults (Fix-14: circular calibration)")
-    parser.add_argument("--oos-split", type=float, default=0.3,
-                        help="OOS validation split ratio (default: 0.3)")
+    parser.add_argument("--oos-split", type=float, default=None,
+                        help="OOS validation split ratio (default: from config/oos_split.json)")
     parser.add_argument("--oos-cutoff", type=str, default=None,
-                        help="OOS cutoff date YYYY-MM-DD (overrides --oos-split)")
+                        help="OOS cutoff date YYYY-MM-DD (default: from config/oos_split.json, overrides --oos-split)")
     parser.add_argument("--no-oos", action="store_true",
                         help="Disable OOS split (legacy mode, calibrate on full dataset)")
     args = parser.parse_args()
@@ -998,14 +1043,20 @@ def main():
     df, theory_vs_actual, pattern_perf = load_data()
 
     # Fix-12: Time-based OOS split
+    # Gap B: canonical split loaded from config/oos_split.json; CLI args override.
     if args.no_oos:
         print("[INFO] --no-oos: Using full dataset (legacy mode, no OOS)")
         df_train = df
         df_test = pd.DataFrame()
         cutoff_date = None
+        effective_oos_split = None
     else:
-        print(f"\n[OOS] Time-based train/test split (ratio={args.oos_split})...")
-        df_train, df_test, cutoff_date = time_split(df, args.oos_split, args.oos_cutoff)
+        cfg_cutoff, cfg_ratio = _load_oos_config()
+        effective_cutoff = args.oos_cutoff if args.oos_cutoff is not None else cfg_cutoff
+        effective_oos_split = args.oos_split if args.oos_split is not None else cfg_ratio
+        print(f"\n[OOS] Time-based train/test split "
+              f"(cutoff={effective_cutoff}, ratio={effective_oos_split})...")
+        df_train, df_test, cutoff_date = time_split(df, effective_oos_split, effective_cutoff)
 
     # Fix-14: Document initial values
     initial_mode = "academic_defaults" if args.reset_initial else "current_calibrated"
@@ -1056,7 +1107,7 @@ def main():
             "test_records": int(len(df_test)) if len(df_test) > 0 else 0,
             "train_period": f"{df_train['date'].min()} ~ {df_train['date'].max()}" if len(df_train) > 0 else None,
             "test_period": f"{df_test['date'].min()} ~ {df_test['date'].max()}" if len(df_test) > 0 else None,
-            "oos_split": args.oos_split if not args.no_oos else None,
+            "oos_split": effective_oos_split,
             "cutoff_date": cutoff_date,
             "circular_check": args.reset_initial,
         },

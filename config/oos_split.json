@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "cutoff_date": "2025-11-01",
+  "oos_ratio": 0.5,
+  "rationale": "Canonical OOS split for V22-V25 Gap B unification. Chosen over 2025-12-19 + 70/30 because (1) morningStar n_test 178 -> 277 crosses RELIABLE tier floor, (2) Dec-19 cutoff places all 2026-Q1 high-volatility regime in test set (unbalanced), (3) Lo 2002 50/50 principle for regime stability. See results/v22_v25_measuring_report.md + Wave 0 financial-systems-architect review Q-FA1.",
+  "references": [
+    "Lo, A. W. (2002). The statistics of Sharpe ratios. Financial Analysts Journal.",
+    "docs/anatomy_v8/CheeseStock_Anatomy_V8_KO_MASTER.md V22-V25 section",
+    "results/v22_v25_measuring_report.md"
+  ],
+  "canonical_since": "2026-04-10",
+  "consumers": [
+    "scripts/calibrate_constants.py",
+    "scripts/compute_oos_winrates.py"
+  ]
+}

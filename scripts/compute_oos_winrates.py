@@ -48,6 +48,45 @@ if hasattr(sys.stdout, 'reconfigure'):
 BASE_DIR = Path(__file__).resolve().parents[1]
 CSV_PATH = BASE_DIR / 'data' / 'backtest' / 'wc_return_pairs.csv'
 OUT_PATH = BASE_DIR / 'data' / 'backtest' / 'pattern_winrates_oos.json'
+OOS_CONFIG_PATH = BASE_DIR / 'config' / 'oos_split.json'
+
+
+def _load_oos_config():
+    """Load canonical OOS split config from config/oos_split.json.
+
+    Returns:
+        tuple[str, float]: (cutoff_date, oos_ratio).
+
+    Exits with code 1 if the config file is missing or malformed. Gap B's
+    purpose is to eliminate silent inconsistency between calibrate_constants.py
+    and compute_oos_winrates.py, so a missing config must FAIL LOUD instead of
+    silently falling back to the historical hardcoded default.
+    """
+    try:
+        with open(OOS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        print(f"[FATAL] OOS config not found: {OOS_CONFIG_PATH}", file=sys.stderr)
+        print("[FATAL] Gap B requires config/oos_split.json to exist.", file=sys.stderr)
+        print("[FATAL] Create the file or run from the repo root.", file=sys.stderr)
+        sys.exit(1)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[FATAL] OOS config unreadable: {OOS_CONFIG_PATH}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    cutoff = cfg.get('cutoff_date')
+    ratio = cfg.get('oos_ratio')
+    if cutoff is None or ratio is None:
+        print(f"[FATAL] OOS config missing required keys "
+              f"'cutoff_date' and/or 'oos_ratio': {OOS_CONFIG_PATH}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        ratio = float(ratio)
+    except (TypeError, ValueError):
+        print(f"[FATAL] OOS config 'oos_ratio' not a number: {ratio!r}", file=sys.stderr)
+        sys.exit(1)
+    return str(cutoff), ratio
+
 
 # 차트 패턴 집합 (patterns.js:306과 동일)
 CHART_PATTERNS = frozenset({
@@ -244,8 +283,8 @@ def compute_per_pattern(train: pd.DataFrame, test: pd.DataFrame, n0: int,
 
 def main():
     ap = argparse.ArgumentParser(description='V22-B time-based OOS winrates computation')
-    ap.add_argument('--cutoff', default='2025-11-01',
-                    help='Train/test split date (default: 2025-11-01 — chosen for data bias).')
+    ap.add_argument('--cutoff', default=None,
+                    help='Train/test split date YYYY-MM-DD (default: from config/oos_split.json).')
     ap.add_argument('--n0', type=int, default=35,
                     help='Beta-Binomial shrinkage prior sample size (default: 35, Efron-Morris EB).')
     ap.add_argument('--min-test-n', type=int, default=100,
@@ -253,12 +292,16 @@ def main():
     ap.add_argument('--output', default=None, help='Override output path.')
     args = ap.parse_args()
 
-    cutoff = pd.Timestamp(args.cutoff)
+    # Gap B: canonical cutoff loaded from config/oos_split.json; --cutoff overrides.
+    cfg_cutoff, cfg_ratio = _load_oos_config()
+    effective_cutoff_str = args.cutoff if args.cutoff is not None else cfg_cutoff
+    print(f"  [OOS config] cutoff_date={cfg_cutoff}, oos_ratio={cfg_ratio} (from {OOS_CONFIG_PATH})")
+    cutoff = pd.Timestamp(effective_cutoff_str)
 
     print("=" * 64)
     print("V22-B Phase 3 Step 2: Compute OOS Winrates")
     print("=" * 64)
-    print(f"Cutoff: {args.cutoff} (time-based split)")
+    print(f"Cutoff: {effective_cutoff_str} (time-based split)")
     print(f"Shrinkage N0: {args.n0}")
     print(f"Minimum test n: {args.min_test_n}")
     print()
@@ -266,7 +309,7 @@ def main():
     df = load_data(CSV_PATH)
     df = compute_win(df)
 
-    print(f"\n[2/6] Splitting by cutoff {args.cutoff}...")
+    print(f"\n[2/6] Splitting by cutoff {effective_cutoff_str}...")
     train, test = split_by_time(df, cutoff)
     print(f"  Train: {len(train):,} ({len(train)/(len(train)+len(test))*100:.1f}%)  "
           f"range {train['date'].min().date()} ~ {train['date'].max().date()}")
@@ -302,7 +345,7 @@ def main():
     output = {
         'schema_version': 1,
         'generated': datetime.now().strftime('%Y-%m-%d'),
-        'split_method': f'time_cutoff_{args.cutoff}',
+        'split_method': f'time_cutoff_{effective_cutoff_str}',
         'train_range': [str(train['date'].min().date()), str(train['date'].max().date())] if len(train) > 0 else None,
         'test_range': [str(test['date'].min().date()), str(test['date'].max().date())] if len(test) > 0 else None,
         'n_train_total': int(len(train)),
