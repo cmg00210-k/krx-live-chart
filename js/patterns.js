@@ -971,10 +971,24 @@ class PatternEngine {
         pred = Math.max(10, pred - PatternEngine.TRIANGLE_UNCONFIRMED_PRED_PENALTY);
       }
       // [RX-08] continuation 패턴은 "추세 확인"용 — 예측 신호가 아니므로 confidencePred 미부여
-      // [V23] ANTI_PREDICTOR: dirWr < 50 → confidencePred = null (Stat-Expert Option A)
-      //   direction_accuracy 메트릭에서 제외 — 방향 정보가 없는 패턴.
-      //   차트에는 낮은 confidence로 표시 유지. 별도 binomial test 후 contrarian graduation 검토.
-      if (patterns[pi]._continuationOnly || (wr != null && dirWr < 50)) {
+      if (patterns[pi]._continuationOnly) {
+        patterns[pi].confidencePred = null;
+      } else if (wr != null && dirWr < 50 && _oosEntry && _oosEntry.contrarian === true) {
+        // [V25] Contrarian graduation — Lo (2004) AMH + Jegadeesh (1990) short-term reversal
+        // Binomial test + BH-FDR q=0.10 confirmed: 역방향 예측력 통계적 유의
+        // confidencePred = 100 - dirWr (역방향 정확도), 동일 quality scaling + cap + penalty 적용
+        var cPred = Math.round((100 - dirWr) * qualityScaling);
+        cPred = Math.min(_capPred[1], Math.max(_capPred[0], cPred));
+        if (patterns[pi].necklineBreakConfirmed === false || patterns[pi]._breakUsedFutureData === true) {
+          cPred = Math.max(10, cPred - PatternEngine.NECKLINE_UNCONFIRMED_PRED_PENALTY);
+        }
+        if (patterns[pi].breakoutConfirmed === false) {
+          cPred = Math.max(10, cPred - PatternEngine.TRIANGLE_UNCONFIRMED_PRED_PENALTY);
+        }
+        patterns[pi].confidencePred = cPred;
+        patterns[pi]._contrarian = true;
+      } else if (wr != null && dirWr < 50) {
+        // ANTI_PREDICTOR but not BH-FDR significant → null 유지
         patterns[pi].confidencePred = null;
       } else {
         patterns[pi].confidencePred = pred;

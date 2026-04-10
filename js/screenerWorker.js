@@ -24,7 +24,7 @@ try {
   importScripts(
     'colors.js?v=14',
     'indicators.js?v=28',
-    'patterns.js?v=49',
+    'patterns.js?v=50',
     'signalEngine.js?v=46',
     'backtester.js?v=42'
   );

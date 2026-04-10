@@ -114,6 +114,21 @@ this.PatternEngine = PatternEngine;
     sandbox.backtester._marketIndex = indexed;
   }
 
+  // [V25 A2] Sync-inject OOS winrates so batch runner matches live browser behavior
+  // (backtester._loadOOSWinrates() uses fetch() which never resolves in synchronous VM)
+  try {
+    const oosPath = path.join(DATA_DIR, 'backtest', 'pattern_winrates_oos.json');
+    if (fs.existsSync(oosPath)) {
+      const oosData = JSON.parse(fs.readFileSync(oosPath, 'utf8'));
+      if (oosData && oosData.patterns) {
+        sandbox.PatternEngine.PATTERN_WIN_RATES_OOS = oosData.patterns;
+        console.log(`  [OOS] ${Object.keys(oosData.patterns).length} pattern OOS winrates injected`);
+      }
+    }
+  } catch (e) {
+    console.log('  [OOS] pattern_winrates_oos.json load skipped:', e.message);
+  }
+
   return sandbox;
 }
 

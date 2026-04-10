@@ -117,6 +117,55 @@ def shrinkage_toward_grand(wr: float, n: int, grand_mean: float, N0: int) -> flo
     return (n * wr + N0 * grand_mean) / (n + N0)
 
 
+def contrarian_graduation(patterns: dict, q: float = 0.10) -> None:
+    """V25: Benjamini-Hochberg FDR contrarian graduation for ANTI_PREDICTOR patterns.
+
+    1-sided binomial test H0: p >= 0.50, H1: p < 0.50 (direction worse than chance).
+    BH correction at FDR q (Benjamini & Hochberg 1995).
+    Theoretical basis: Lo (2004) AMH crowding + Jegadeesh (1990) short-term reversal.
+    """
+    anti = []
+    for ptype, data in patterns.items():
+        if data['tier'] != 'ANTI_PREDICTOR':
+            continue
+        n = data['oos_n']
+        wr_pct = data['oos_wr']
+        if n == 0 or wr_pct is None:
+            continue
+        k = round(wr_pct / 100 * n)
+        # 1-sided binomial: P(X <= k | n, p=0.5)
+        p_value = float(stats.binom.cdf(k, n, 0.5))
+        anti.append((ptype, p_value, k, n))
+
+    if not anti:
+        return
+
+    # Sort by p-value (ascending) for BH step-up procedure
+    anti.sort(key=lambda x: x[1])
+    m = len(anti)
+
+    # BH-FDR: find largest i where p(i) <= (i/m) * q, reject all up to that i
+    max_reject_idx = -1
+    for i, (_, p_val, _, _) in enumerate(anti):
+        bh_threshold = (i + 1) / m * q
+        if p_val <= bh_threshold:
+            max_reject_idx = i
+
+    significant = {anti[i][0] for i in range(max_reject_idx + 1)}
+
+    # Write contrarian fields into pattern dicts
+    for ptype, p_val, k, n in anti:
+        is_grad = ptype in significant
+        patterns[ptype]['contrarian'] = is_grad
+        patterns[ptype]['contrarian_p_value'] = round(p_val, 6)
+
+    print(f"  Contrarian graduation: {len(significant)}/{m} ANTI_PREDICTOR "
+          f"passed BH-FDR at q={q}")
+    for ptype, p_val, k, n in anti:
+        tag = "GRADUATE" if ptype in significant else "null"
+        print(f"    {ptype:30s} k={k:>4d}/{n:<5d} p={p_val:.2e}  -> {tag}")
+
+
 def classify_tier(oos_wr: float, oos_n: int, grand_mean: float,
                   p_value_vs_50: float, is_oos_delta_p: float) -> str:
     """Phase 2 §3.3 taxonomy"""
@@ -246,7 +295,10 @@ def main():
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     print(f"  Tier distribution: {tier_counts}")
 
-    print(f"\n[5/6] Building output JSON...")
+    print(f"\n[5/7] Contrarian graduation (BH-FDR q=0.10)...")
+    contrarian_graduation(patterns, q=0.10)
+
+    print(f"\n[6/7] Building output JSON...")
     output = {
         'schema_version': 1,
         'generated': datetime.now().strftime('%Y-%m-%d'),
@@ -265,7 +317,7 @@ def main():
     }
 
     out_path = Path(args.output) if args.output else OUT_PATH
-    print(f"\n[6/6] Writing {out_path.relative_to(BASE_DIR) if out_path.is_absolute() else out_path}...")
+    print(f"\n[7/7] Writing {out_path.relative_to(BASE_DIR) if out_path.is_absolute() else out_path}...")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(output, f, indent=2, ensure_ascii=False)

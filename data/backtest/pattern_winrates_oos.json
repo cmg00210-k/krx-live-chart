@@ -65,7 +65,9 @@
       "is_oos_delta": -61.44,
       "is_oos_delta_p_value": 0.2077,
       "wr_oos_shrunk": 39.42,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 3e-06
     },
     "bearishBeltHold": {
       "category": "candle",
@@ -177,7 +179,9 @@
       "is_oos_delta": 1.76,
       "is_oos_delta_p_value": 0.1498,
       "wr_oos_shrunk": 45.81,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 2e-06
     },
     "bullishHarami": {
       "category": "candle",
@@ -225,7 +229,9 @@
       "is_oos_delta": -2.04,
       "is_oos_delta_p_value": 0.1676,
       "wr_oos_shrunk": 44.16,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 0.0
     },
     "channel": {
       "category": "chart",
@@ -257,7 +263,9 @@
       "is_oos_delta": 4.86,
       "is_oos_delta_p_value": 0.025,
       "wr_oos_shrunk": 40.15,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 0.0
     },
     "darkCloud": {
       "category": "candle",
@@ -321,7 +329,9 @@
       "is_oos_delta": null,
       "is_oos_delta_p_value": 1.0,
       "wr_oos_shrunk": 35.61,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 1e-06
     },
     "doubleTop": {
       "category": "chart",
@@ -481,7 +491,9 @@
       "is_oos_delta": -14.4,
       "is_oos_delta_p_value": 0.5488,
       "wr_oos_shrunk": 36.21,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 0.0
     },
     "invertedHammer": {
       "category": "candle",
@@ -529,7 +541,9 @@
       "is_oos_delta": -2.32,
       "is_oos_delta_p_value": 0.5496,
       "wr_oos_shrunk": 42.33,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 0.001923
     },
     "piercingLine": {
       "category": "candle",
@@ -705,7 +719,9 @@
       "is_oos_delta": 0.01,
       "is_oos_delta_p_value": 0.9963,
       "wr_oos_shrunk": 43.51,
-      "tier": "ANTI_PREDICTOR"
+      "tier": "ANTI_PREDICTOR",
+      "contrarian": true,
+      "contrarian_p_value": 0.000291
     },
     "tweezerTop": {
       "category": "candle",
