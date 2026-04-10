@@ -389,15 +389,18 @@ var _activeParamInd = null;
 // ══════════════════════════════════════════════════════════════
 // [Phase 8] HMM 레짐별 신뢰도 승수 + MCS 임계값
 // ══════════════════════════════════════════════════════════════
-// compute_hmm_regimes.py → hmm_regimes.json → flow_signals.json 경유
+// compute_hmm_regimes.py fit_hmm_2state() → hmm_regimes.json → flow_signals.json 경유
+// 2-state Gaussian HMM (Hamilton 1989): Bull / Bear만 사용
 // 레짐 분류에 따라 매수/매도 패턴 신뢰도를 차등 조정
+// V21: 이전 버전의 'sideways' 분기는 2-state HMM에서 생성되지 않으므로 제거.
+// 모르는 레짐 라벨(예: 'sideways'를 가진 레거시 JSON)은 appWorker.js:596의
+// `|| REGIME_CONFIDENCE_MULT[null]` fallback을 통해 항등 승수로 처리된다.
 var REGIME_CONFIDENCE_MULT = {
   // [V6-FIX] Ang & Bekaert (2002), Lunde & Timmermann (2004): Bayesian shrinkage calibration
   // Old: bull buy 1.10/sell 0.85, bear buy 0.85/sell 1.10 — ~2x too large for IC 0.02-0.04
   bull:     { buy: 1.06, sell: 0.92 },   // 강세 레짐: 매수 +6%, 매도 -8%
   bear:     { buy: 0.90, sell: 1.06 },   // 약세 레짐: 매수 -10%, 매도 +6%
-  sideways: { buy: 1.00, sell: 1.00 },   // 횡보: 중립
-  null:     { buy: 1.00, sell: 1.00 }    // 데이터 없음: 중립
+  null:     { buy: 1.00, sell: 1.00 }    // 데이터 없음 또는 미지의 레짐: 항등
 };
 
 // MCS (Macro Composite Score) 임계값 — macro_composite.json의 mcsV2 참조
