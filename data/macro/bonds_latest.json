@@ -16,16 +16,27 @@
     "bbb_spread": 6.45
   },
   "nss_params": {
-    "beta1": 3.3027,
-    "beta2": -217.0974,
-    "beta3": 214.8867,
-    "beta4": 1.583,
-    "lambda1": 0.134,
-    "lambda2": 6.5934
+    "beta1": 3.4154,
+    "beta2": -4.8251,
+    "beta3": -3.5151,
+    "beta4": 1.2489,
+    "lambda1": 0.0616,
+    "lambda2": 5.7542
   },
   "slope_10y3y": 0.3,
   "slope_10y2y": 0.38,
   "curve_inverted": false,
+  "yield_curve": {
+    "status": "partially_inverted",
+    "inversions": [
+      "slope_30y10y"
+    ],
+    "spreads": {
+      "slope_10y3y": 0.299,
+      "slope_10y2y": 0.385,
+      "slope_30y10y": -0.117
+    }
+  },
   "credit_regime": "normal",
   "metrics": {
     "duration": {
