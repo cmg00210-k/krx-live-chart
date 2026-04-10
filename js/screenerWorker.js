@@ -22,11 +22,11 @@ var _workerReady = false;
 // importScripts 경로는 Worker 파일(js/) 기준 상대 경로
 try {
   importScripts(
-    'colors.js?v=13',
-    'indicators.js?v=27',
-    'patterns.js?v=46',
-    'signalEngine.js?v=43',
-    'backtester.js?v=41'
+    'colors.js?v=14',
+    'indicators.js?v=28',
+    'patterns.js?v=48',
+    'signalEngine.js?v=45',
+    'backtester.js?v=42'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });

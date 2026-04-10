@@ -57,7 +57,8 @@ class PatternEngine {
 
   /** 샛별/석별형 별(2봉) body 상한, 양끝 봉 body 하한
    *  [T-6] STAR_END_BODY_MIN 0.3→0.5: 양끝 봉은 "long body" 필수 (Nison 1991) */
-  static STAR_BODY_MAX = 0.2; // [A] Nison (1991) star body ratio
+  // [RX-03] 0.20→0.12: Nison 원전 closer — 도지급 별만 허용. n 30K→~12K, WR +2-3pp 기대
+  static STAR_BODY_MAX = 0.12; // [A] Nison (1991) star body ratio (tightened)
   static STAR_END_BODY_MIN = 0.5; // [B] Nison (1991) "long body"
 
   /** 관통형/먹구름형 봉 body 하한 */
@@ -338,6 +339,14 @@ class PatternEngine {
    *  Phase G-2: conjugate prior → posterior mean = alpha/(alpha+beta) */
   static PATTERN_WIN_RATES_LIVE = null;
 
+  /** [V22-B Phase 3-Step 6] OOS 승률 (time-based train/test 분할 기반)
+   *  scripts/compute_oos_winrates.py가 pattern_winrates_oos.json 생성.
+   *  backtester._loadOOSWinrates()가 fetch하여 이 필드에 주입.
+   *  구조: { patterns: { hammer: { wr_oos_shrunk: 44.8, tier: 'BORDERLINE', ... }, ... } }
+   *  우선순위: PATTERN_WIN_RATES_OOS > PATTERN_WIN_RATES_LIVE > PATTERN_WIN_RATES_SHRUNK
+   *  null이면 기존 LIVE/SHRUNK 폴백. */
+  static PATTERN_WIN_RATES_OOS = null;
+
   /** 전역 학습 가중치 (Worker에서 주입) */
   static _globalLearnedWeights = null;
 
@@ -360,6 +369,16 @@ class PatternEngine {
   /** 밸류에이션 S/R 기본 강도 — 기술적 S/R(최대 1.0) 대비 보수적
    *  단일 접촉(touches=1)이므로 기술적 S/R의 다중 접촉 강도를 초과할 수 없음 */
   static VALUATION_SR_STRENGTH = 0.6; // [D]
+
+  /** 52주 고가/저가 앵커 S/R 기본 강도
+   *  George & Hwang (2004) "The 52-Week High and Momentum Investing":
+   *  52주 고가 근접도가 모멘텀 수익의 70%를 설명 — 심리적 앵커링 효과.
+   *  touchCount=3 가상 접촉 부여: 최소 2회 이상 클러스터에 준하는 강도.
+   *  strength=0.8: 기술적 S/R(max 1.0) 대비 높지만, 다중 접촉 클러스터를 초과하지 않음. */
+  static SR_52W_STRENGTH = 0.8;   // [C] George & Hwang (2004)
+  static SR_52W_TOUCHES = 3;      // [C] 가상 접촉 수 (강한 앵커)
+  static SR_52W_MIN_BARS = 60;    // [C] 최소 60거래일(≈3개월) 필요
+  static SR_52W_WINDOW = 252;     // [B] 연간 거래일 수
 
   /** [C] AMH lambda 시장별 상수 — core_data/20 §10 KRX 패턴 반감기 실증 */
   static AMH_LAMBDA = Object.freeze({
@@ -661,6 +680,18 @@ class PatternEngine {
     const atr14 = calcATR(candles, 14);
     const atr50 = calcATR(candles, 50);
     const lastATR14 = atr14[atr14.length - 1] || 1;
+
+    // [V22-B Phase 3-Step 5] ATR 동적 cap 캐시 — analyze() 1회 계산 후 내부 재사용
+    // 모든 하드코딩 cap(90/95/100)을 PatternEngine._currentDynamicCaps 참조로 교체.
+    // classifyAtrVolRegime/getDynamicCap는 indicators.js에 전역 정의 (Worker scope 호환).
+    // ⚠ 기존 classifyVolRegime(ewmaVol)과 별개 함수 (ATR 기반 이름 구분).
+    PatternEngine._currentVolRegime = classifyAtrVolRegime(atr14);
+    PatternEngine._currentDynamicCaps = {
+      confidence:     getDynamicCap('confidence',     PatternEngine._currentVolRegime),
+      confidencePred: getDynamicCap('confidencePred', PatternEngine._currentVolRegime),
+      signalBoost:    getDynamicCap('signalBoost',    PatternEngine._currentVolRegime),
+      macroMult:      getDynamicCap('macroMult',      PatternEngine._currentVolRegime),
+    };
     // [Note] 50봉 미만 데이터에서 atr50[last]는 null → lastATR50=lastATR14 → ratio=1.0
     //        → volWeight=1.0 (보정 없음). 데이터 부족 시 레짐 보정 비활성화는 의도된 폴백.
     //        충분한 데이터가 없으면 ATR14/ATR50 비율 자체가 무의미하기 때문.
@@ -898,9 +929,17 @@ class PatternEngine {
       patterns[pi].wc = +(hurstWeight * meanRevWeight * regimeWeight).toFixed(4);
       // Dual Confidence: confidencePred = Beta-Binomial 사후 승률 (모델 입력용)
       // confidence(형태점수)는 UI 표시용으로 불변 유지
-      var wr = (PatternEngine.PATTERN_WIN_RATES_LIVE && PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type] != null)
-        ? PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type]
-        : PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
+      // [V22-B Phase 3-Step 6] 우선순위 재정렬: OOS (time-based split) → LIVE (rl_policy) → SHRUNK (full-sample)
+      //   OOS가 우선 — Lo (2002) full-sample inflation 30-50% 완화. ANTI_PREDICTOR 패턴은 직접 반영.
+      var _oosEntry = (PatternEngine.PATTERN_WIN_RATES_OOS && PatternEngine.PATTERN_WIN_RATES_OOS[patterns[pi].type]) || null;
+      var wr;
+      if (_oosEntry && _oosEntry.wr_oos_shrunk != null) {
+        wr = _oosEntry.wr_oos_shrunk;
+      } else if (PatternEngine.PATTERN_WIN_RATES_LIVE && PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type] != null) {
+        wr = PatternEngine.PATTERN_WIN_RATES_LIVE[patterns[pi].type];
+      } else {
+        wr = PatternEngine.PATTERN_WIN_RATES_SHRUNK[patterns[pi].type];
+      }
       // [CRITICAL FIX] Direction-aware confidencePred — Lo (2004) AMH
       // WR = P(price UP). Buy: confidencePred = WR. Sell: confidencePred = 100 - WR.
       // 5년 실증: sell 16종 WR=58.6% (상승 예측) — 레이블 역전 수정
@@ -919,7 +958,10 @@ class PatternEngine {
       //             현재 범위(WR 43~65%)에서 실용 오차 <2%p 이내로 허용 수준 판단.
       var qualityScaling = Math.min(1.12, Math.max(0.88, patterns[pi].confidence / 50));
       pred = Math.round(pred * qualityScaling);
-      pred = Math.min(95, Math.max(10, pred));
+      // [V22-B Phase 3-Step 5] 하드코딩 [10, 95] → ATR 동적 cap (vol regime별)
+      var _capPred = PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.confidencePred
+                     ? PatternEngine._currentDynamicCaps.confidencePred : [10, 95];
+      pred = Math.min(_capPred[1], Math.max(_capPred[0], pred));
       // 미확인 패턴 confidencePred 감산 (모델 입력에도 반영)
       // [C-2 FIX] _breakUsedFutureData도 미확인과 동일 감산 — look-ahead bias 방지
       if (patterns[pi].necklineBreakConfirmed === false || patterns[pi]._breakUsedFutureData === true) {
@@ -928,7 +970,12 @@ class PatternEngine {
       if (patterns[pi].breakoutConfirmed === false) {
         pred = Math.max(10, pred - PatternEngine.TRIANGLE_UNCONFIRMED_PRED_PENALTY);
       }
-      patterns[pi].confidencePred = pred;
+      // [RX-08] continuation 패턴은 "추세 확인"용 — 예측 신호가 아니므로 confidencePred 미부여
+      if (patterns[pi]._continuationOnly) {
+        patterns[pi].confidencePred = null;
+      } else {
+        patterns[pi].confidencePred = pred;
+      }
     }
 
     // R:R 검증 게이트 — KRX calibration 기반 (calibrated_constants.json C1+D3)
@@ -1525,11 +1572,23 @@ class PatternEngine {
       const a = this._atr(atr, i, candles);
       if (range < a * PatternEngine.MIN_RANGE_ATR) continue;
 
-      // 추세 맥락으로 신호 방향 결정 (ATR 기반 정규화)
+      // [RX-07] 도지 = alert 패턴 (Nison 1991: "도지 자체는 신호가 아닌 전환 경고")
+      // 기본 signal='neutral'. BB proxy (20-bar high/low) + 강한 추세(≥0.5) 충족 시에만 방향 부여
       const trend = this._detectTrend(candles, i, 10, a);
-      const signal = trend.direction === 'up' ? 'sell' : trend.direction === 'down' ? 'buy' : 'neutral';
+      let signal = 'neutral';
+      if (trend.direction !== 'neutral' && trend.strength >= 0.5) {
+        const lb = Math.min(20, i);
+        let hi20 = -Infinity, lo20 = Infinity;
+        for (let k = i - lb; k < i; k++) {
+          if (candles[k].high > hi20) hi20 = candles[k].high;
+          if (candles[k].low < lo20) lo20 = candles[k].low;
+        }
+        // 가격 극단 + 강한 추세 = confluence → 방향 부여
+        if (trend.direction === 'up' && c.high >= hi20 - a * 0.5) signal = 'sell';
+        else if (trend.direction === 'down' && c.low <= lo20 + a * 0.5) signal = 'buy';
+      }
       const volumeScore = Math.min(this._volRatio(candles, i, vma) / 2, 1);
-      const trendScore = trend.direction !== 'neutral' ? Math.min(trend.strength, 1) : 0.3;
+      const trendScore = signal !== 'neutral' ? Math.min(trend.strength, 1) : 0.3;
       const shadowScore = Math.min(range / a, 1);
       // [FIX] Doji 품질: 저변동성 도지 패널티 제거 — 도지 품질은 꼬리/추세 점수가 결정
       // 천장/바닥의 작은 range 도지가 유효한 반전 신호이므로 감산하면 안됨
@@ -1588,8 +1647,10 @@ class PatternEngine {
           const shadowScore = currRange > 0 ? Math.max(0, Math.min(1 - upperShadow / currRange, 1)) : 0.5;
           let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: shadowScore, extra: engulfExtra });
           // [Audit Fix-5] 거래량 보너스/패널티: Nison "above-average volume strengthens"
-          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, 90);
-          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, 10);
+          // [V22-B Phase 3-Step 5] 하드코딩 cap 90/10 → ATR 동적 confidence cap
+          var _capEng = (PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.confidence) || [10, 90];
+          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, _capEng[1]);
+          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, _capEng[0]);
           results.push({
             type: 'bullishEngulfing', name: '상승장악형 (Bullish Engulfing)', nameShort: '상승장악',
             signal: 'buy', strength: 'strong', confidence,
@@ -1617,8 +1678,10 @@ class PatternEngine {
           const shadowScore = currRange > 0 ? Math.max(0, Math.min(1 - lowerShadow / currRange, 1)) : 0.5;
           let confidence = this._quality({ body: bodyScore, volume: volumeScore, trend: trendScore, shadow: shadowScore, extra: engulfExtra });
           // [Audit Fix-5] 거래량 보너스/패널티: Nison "above-average volume strengthens"
-          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, 90);
-          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, 10);
+          // [V22-B Phase 3-Step 5] 하드코딩 cap 90/10 → ATR 동적 confidence cap
+          var _capEng = (PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.confidence) || [10, 90];
+          if (curr.volume > prev.volume * 1.5) confidence = Math.min(confidence + 10, _capEng[1]);
+          else if (curr.volume < prev.volume * 0.8) confidence = Math.max(confidence - 8, _capEng[0]);
           results.push({
             type: 'bearishEngulfing', name: '하락장악형 (Bearish Engulfing)', nameShort: '하락장악',
             signal: 'sell', strength: 'strong', confidence,
@@ -1721,6 +1784,9 @@ class PatternEngine {
       // [T-2] 갭 조건 강화 OR→AND — Nison (1991): 2봉 body 전체가 1봉 close 이하
       // KRX 5년 실증: 과관대 갭으로 WR 40.5%, AND 적용 시 46-48% 기대
       if (c1.close > c0.close || c1.open > c0.close) continue;  // 2봉 갭다운 확인 (AND)
+      // [RX-03] 2-3봉 갭업: 3봉 시가 ≥ 2봉 종가 (Nison: 이상적 morningStar는 양쪽 갭)
+      // KRX에서 정확한 갭은 드물므로 ≥ 조건 (동일가 시가 허용)
+      if (c2.open < c1.close) continue;
 
       // Nison: "3봉 종가가 1봉 몸통의 50% 이상 회복해야"
       const c0Mid = c0.close + body0 * 0.5;
@@ -1772,6 +1838,8 @@ class PatternEngine {
       if (body2 < a * PatternEngine.STAR_END_BODY_MIN) continue; // 3봉: 유의미한 크기
       // [T-3] 갭 조건 강화 OR→AND — Nison (1991): 2봉 body 전체가 1봉 close 이상
       if (c1.close < c0.close || c1.open < c0.close) continue;  // 2봉 갭업 확인 (AND)
+      // [RX-03 symmetric] 2-3봉 갭다운: 3봉 시가 ≤ 2봉 종가 (morningStar 갭업과 대칭)
+      if (c2.open > c1.close) continue;
 
       // Nison: "3봉 종가가 1봉 몸통의 50% 이하로 하락해야"
       const c0Mid = c0.open + body0 * 0.5;
@@ -2218,8 +2286,13 @@ class PatternEngine {
       const purity = Math.min((body / range - PatternEngine.MARUBOZU_BODY_RATIO) / Math.max(1 - PatternEngine.MARUBOZU_BODY_RATIO, 0.001), 1);
       let confidence = this._quality({ body: bodyScore, shadow: shadowScore, volume: volumeScore, trend: trendScore, extra: purity });
       // [ACC] 거래량 확인: 전일 대비 1.2배 이상이면 +10% (Nison 거래량 원칙)
-      // Cap at 90: system-wide confidence ceiling (Taleb 2007 — overconfidence bias)
-      if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, 90);
+      // [V22-B Phase 3-Step 5] 하드코딩 cap 90 → ATR 동적 cap (Taleb overconfidence bias는 high-vol에서 자동 narrow)
+      var _capMarubozu = (PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.confidence) || [10, 90];
+      if (i > 0 && c.volume > candles[i - 1].volume * 1.2) confidence = Math.min(confidence + 10, _capMarubozu[1]);
+
+      // [RX-08] 추세 맥락 구분: 약한 순방향(0.3-0.5) = continuation (확인용, WR 제외)
+      // 역방향/neutral = reversal (예측 대상)
+      const isContinuation = (isBullish && trend.direction === 'up') || (!isBullish && trend.direction === 'down');
 
       // [Phase1-FIX] 손절가: _stopLoss() 통일 (기존 하드코딩 1.5 ATR → PROSPECT_STOP_WIDEN 적용)
       const stopLoss = this._stopLoss(candles, i, signal, atr);
@@ -2228,7 +2301,8 @@ class PatternEngine {
       results.push({
         type, name: isBullish ? '양봉 마루보주 (Bullish Marubozu)' : '음봉 마루보주 (Bearish Marubozu)',
         nameShort: isBullish ? '양봉마루보주' : '음봉마루보주',
-        signal, strength: 'strong', confidence, stopLoss, priceTarget,
+        signal, strength: isContinuation ? 'medium' : 'strong', confidence, stopLoss, priceTarget,
+        _continuationOnly: isContinuation || undefined,
         description: isBullish
           ? `시가=저가, 종가=고가 — 매수 압력 극대화. 형태 점수 ${confidence}%`
           : `시가=고가, 종가=저가 — 매도 압력 극대화. 형태 점수 ${confidence}%`,
@@ -2852,7 +2926,9 @@ class PatternEngine {
       // [C-5] Edwards & Magee: 삼각형 수렴 중 거래량 수축 확인
       const volContraction = this._volumeContraction(candles, startIdx, endIdx);
       let confidence = this._adaptiveQuality('descendingTriangle', { body: 0.7, volume: volumeScore, trend: 0.6, extra: volContraction });
-      confidence = Math.min(90, confidence);  // [M-8] Taleb-motivated ceiling
+      // [V22-B Phase 3-Step 5] 하드코딩 cap 90 → ATR 동적 cap (Taleb ceiling은 high-vol에서 자동 narrow)
+      var _capDesc = (PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.confidence) || [10, 90];
+      confidence = Math.min(_capDesc[1], confidence);
       const stopLoss = +(relevantHighs[0].price + a).toFixed(0);
       const raw = relevantHighs[0].price - supportLevel;
       const patternHeight = Math.min(raw * hw * mw, raw * PatternEngine.CHART_TARGET_RAW_CAP, a * (ctx.dynamicATRCap || PatternEngine.CHART_TARGET_ATR_CAP));
@@ -2997,10 +3073,16 @@ class PatternEngine {
         if (startHeight <= 0 || endHeight >= startHeight * 0.9) continue;
 
         const span = Math.max(h2.index, l2.index) - Math.min(h1.index, l1.index);
-        if (span < 8) continue;
+        // [RX-05] span 8→15: Bulkowski median 29d, CHANNEL_MIN_SPAN과 정합
+        if (span < 15) continue;
 
         const endIdx = Math.max(h2.index, l2.index);
         if (endIdx >= candles.length) continue;
+
+        // [RX-05] 선행 하락 추세 필수 — Bulkowski: fallingWedge는 "하락 추세 내 수렴→상방 돌파"
+        // doubleBottom/invH&S와 동일 패턴 (gap_analysis.md FIX-1)
+        const preTrend = this._detectTrend(candles, Math.min(h1.index, l1.index), 15, a);
+        if (preTrend.direction !== 'down') continue;
 
         const volumeScore = Math.min(this._volRatio(candles, endIdx, vma) / 2, 1);
         // [C-5] Edwards & Magee: 쐐기 수렴 중 거래량 수축 확인
@@ -3431,7 +3513,64 @@ class PatternEngine {
         });
       }
     }
-    // TODO: 52-week high/low as anchor S/R levels — George & Hwang (2004) momentum-anchoring effect
+    // ── 52주 고가/저가 앵커 S/R — George & Hwang (2004) ──
+    // 52주 고가 근접도가 모멘텀 수익의 ~70%를 설명하는 심리적 앵커링 효과.
+    // 투자자들이 52주 고가/저가를 기준점(reference point)으로 사용하여
+    // 과소반응(underreaction) → 지지/저항 형성. Prospect Theory와도 부합.
+    var _52wWindow = Math.min(candles.length, PatternEngine.SR_52W_WINDOW);
+    if (_52wWindow >= PatternEngine.SR_52W_MIN_BARS) {
+      var _52wStart = candles.length - _52wWindow;
+      var _52wHigh = -Infinity, _52wLow = Infinity;
+      for (var _52i = _52wStart; _52i < candles.length; _52i++) {
+        if (candles[_52i].high > _52wHigh) _52wHigh = candles[_52i].high;
+        if (candles[_52i].low < _52wLow) _52wLow = candles[_52i].low;
+      }
+
+      var _lastClose = candles[candles.length - 1].close;
+      var _52wTouches = PatternEngine.SR_52W_TOUCHES;
+      var _52wStrength = PatternEngine.SR_52W_STRENGTH;
+
+      // 컨플루언스 병합: 기존 클러스터와 ATR*0.5 이내이면 접촉 수 보강만 수행
+      // 별도 레벨 추가 대신 기존 레벨을 강화하여 과밀(overcrowding) 방지
+      var _52wHighMerged = false, _52wLowMerged = false;
+      for (var _52j = 0; _52j < levels.length; _52j++) {
+        if (!_52wHighMerged && Math.abs(levels[_52j].price - _52wHigh) < tol) {
+          levels[_52j].touches += _52wTouches;
+          levels[_52j].strength = Math.min(1, Math.max(levels[_52j].strength, _52wStrength));
+          levels[_52j].source = '52w_merged';
+          _52wHighMerged = true;
+        }
+        if (!_52wLowMerged && Math.abs(levels[_52j].price - _52wLow) < tol) {
+          levels[_52j].touches += _52wTouches;
+          levels[_52j].strength = Math.min(1, Math.max(levels[_52j].strength, _52wStrength));
+          levels[_52j].source = '52w_merged';
+          _52wLowMerged = true;
+        }
+      }
+
+      // 52주 고가: 현재가 위이면 저항, 아래이면 지지 (돌파 후 지지 전환)
+      if (!_52wHighMerged) {
+        levels.push({
+          price: +_52wHigh.toFixed(0),
+          type: _52wHigh > _lastClose * 1.001 ? 'resistance' : 'support',
+          touches: _52wTouches,
+          strength: _52wStrength,
+          source: '52w',
+        });
+      }
+
+      // 52주 저가: 현재가 아래이면 지지, 위이면 저항 (이탈 후 저항 전환)
+      if (!_52wLowMerged) {
+        levels.push({
+          price: +_52wLow.toFixed(0),
+          type: _52wLow < _lastClose * 0.999 ? 'support' : 'resistance',
+          touches: _52wTouches,
+          strength: _52wStrength,
+          source: '52w',
+        });
+      }
+    }
+
     return levels.sort((a, b) => b.touches - a.touches).slice(0, 10);
   }
 

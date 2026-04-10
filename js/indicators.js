@@ -2215,3 +2215,89 @@ function calcHAR_RV(candles) {
   const cache = new IndicatorCache(candles);
   return candles.map((_, i) => cache.harRV(i));
 }
+
+// ══════════════════════════════════════════════════════
+// [V22-B Phase 3-Step 3] ATR 기반 동적 Confidence Cap
+//
+// 12개 하드코딩 cap(90/95/100/0.70/1.25)을 변동성 국면 기반 동적 범위로 교체.
+// Direction: high-vol → NARROW [25, 75] (Bayesian shrinkage toward prior ≈50%).
+//            low-vol  → WIDE [5, 95] (high SNR).
+// 이론: Lo-Mamaysky-Wang (2000), Ang-Bekaert (2002) — 고변동 σ↑ but μ동일 → SNR↓
+//       → confidence Bayesian posterior는 prior(≈50%)로 수축되어야 함.
+//
+// Classifier: 252-day rolling ATR p25/p75 (distribution-free, robust).
+//   - 대안 거부: HMM 2-state (binary conflates regime+vol), 63-day z-score (reactive)
+//
+// Phase 2 statistical-validation-expert 권고.
+// 이 코드는 Worker 스코프(analysisWorker.js importScripts)에서도 호출되므로
+// indicators.js에 배치 — DOM 의존 없는 순수 수학 유틸리티.
+// ══════════════════════════════════════════════════════
+
+var ATR_DYNAMIC_CAPS = Object.freeze({
+  // confidence (패턴 신뢰도 0~100) — Phase 8 terminal clamp
+  confidence:     { low: [5, 95],    mid: [10, 90],   high: [25, 75] },
+  // confidencePred (예측 승률 10~95) — Beta-Binomial 사후
+  confidencePred: { low: [5, 95],    mid: [10, 95],   high: [25, 85] },
+  // macroMult (매크로 승수 clamp) — 각 layer adj 변동폭
+  macroMult:      { low: [0.70, 1.30], mid: [0.80, 1.20], high: [0.90, 1.10] },
+  // signalBoost (signalEngine OLS/ADX/CCI 스택 상한)
+  signalBoost:    { low: [5, 95],    mid: [10, 90],   high: [25, 75] },
+});
+
+// 252-day rolling window — ATR 변동성 국면 분류용 기간
+var ATR_REGIME_WINDOW = 252;
+
+/**
+ * [V22-B] 현재 ATR 값이 최근 252일 rolling 분포에서 p25/p75 기준 어느 국면인지 분류.
+ *
+ * ⚠ Name disambiguation: 기존 `classifyVolRegime(ewmaVol)` (L1385)은 EWMA 변동성 배열을
+ *    입력 받아 각 bar별 ['low'|'mid'|'high'|null] 배열을 반환한다 (IndicatorCache 전용).
+ *    이 함수는 ATR 단일 값을 기준으로 단일 문자열을 반환하는 다른 목적의 함수이므로
+ *    `classifyAtrVolRegime`로 명명하여 JS function hoisting 충돌을 방지한다.
+ *
+ * @param {number[]} atr14Series - calcATR(candles, 14) 결과 배열 (시간순)
+ * @returns {'low'|'mid'|'high'} - 변동성 국면. 샘플 부족 시 'mid' 폴백.
+ */
+function classifyAtrVolRegime(atr14Series) {
+  if (!atr14Series || !Array.isArray(atr14Series)) return 'mid';
+  // 최소 252 샘플 요구 (1년치) — 부족 시 분포 추정 불안정
+  if (atr14Series.length < ATR_REGIME_WINDOW) return 'mid';
+
+  var window = atr14Series.slice(-ATR_REGIME_WINDOW);
+  var current = window[window.length - 1];
+  if (current == null || !isFinite(current)) return 'mid';
+
+  // finite 값만 사용 (null/NaN 제거)
+  var valid = [];
+  for (var i = 0; i < window.length; i++) {
+    if (window[i] != null && isFinite(window[i])) valid.push(window[i]);
+  }
+  if (valid.length < 60) return 'mid';  // 60 미만이면 quartile 불안정
+
+  valid.sort(function(a, b) { return a - b; });
+  var p25 = valid[Math.floor(valid.length * 0.25)];
+  var p75 = valid[Math.floor(valid.length * 0.75)];
+
+  if (current < p25) return 'low';
+  if (current > p75) return 'high';
+  return 'mid';
+}
+
+/**
+ * [V22-B] target 이름과 ATR 시리즈로 동적 cap [lower, upper] 반환.
+ *
+ * @param {string} target - 'confidence' | 'confidencePred' | 'macroMult' | 'signalBoost'
+ * @param {number[]|string} atrOrRegime - ATR 시리즈 또는 이미 분류된 regime 문자열
+ * @returns {number[]} - [lower, upper]. 알 수 없는 target/regime 시 mid 폴백.
+ */
+function getDynamicCap(target, atrOrRegime) {
+  var table = ATR_DYNAMIC_CAPS[target];
+  if (!table) return [10, 90];  // 기존 default cap 폴백 (safe mode)
+  var regime;
+  if (typeof atrOrRegime === 'string') {
+    regime = atrOrRegime;
+  } else {
+    regime = classifyAtrVolRegime(atrOrRegime);
+  }
+  return table[regime] || table.mid;
+}

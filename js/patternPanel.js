@@ -515,7 +515,7 @@ function renderPatternPanel(patterns) {
   // [FIX-TRUST] 데모/시뮬레이션 데이터 패턴 경고
   var _demoWarningHtml = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    _demoWarningHtml = '<div style="padding:4px 8px;margin:0 0 6px 0;background:rgba(255,152,0,0.10);border:1px solid rgba(255,152,0,0.25);border-radius:4px;font-size:10px;color:rgba(255,152,0,0.75);text-align:center;">' +
+    _demoWarningHtml = '<div style="padding:4px 8px;margin:0 0 6px 0;background:' + KRX_COLORS.DEMO_AMBER_FILL(0.10) + ';border:1px solid ' + KRX_COLORS.DEMO_AMBER_FILL(0.25) + ';border-radius:4px;font-size:10px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.75) + ';text-align:center;">' +
       '\u26A0 시뮬레이션 데이터의 패턴 \u2014 실제 시장 신호 아님</div>';
   }
 
@@ -580,7 +580,7 @@ function updatePatternSummaryBar(patterns) {
   // [FIX-TRUST] 데모 모드 시 패턴 요약에 경고 뱃지 추가
   var _demoTag = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    _demoTag = ' <span style="font-size:9px;color:rgba(255,152,0,0.65);font-weight:400;">(시뮬레이션)</span>';
+    _demoTag = ' <span style="font-size:9px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.65) + ';font-weight:400;">(시뮬레이션)</span>';
   }
 
   textEl.innerHTML =
@@ -688,7 +688,7 @@ function updatePatternHistoryBar(patterns) {
   // [FIX-TRUST] 데모 데이터 백테스트 경고 — 히스토리 바에도 표시
   var _phDemoWarn = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    _phDemoWarn = '<span class="ph-item" style="font-size:9px;color:rgba(255,152,0,0.6);white-space:nowrap;">\u26A0 시뮬레이션</span>';
+    _phDemoWarn = '<span class="ph-item" style="font-size:9px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.6) + ';white-space:nowrap;">\u26A0 시뮬레이션</span>';
   }
 
   bar.innerHTML = _phDemoWarn + items.join('');
@@ -842,11 +842,11 @@ function updatePatternHistoryTable(patterns) {
   // [FIX-TRUST] 데모 데이터 백테스트 경고 행
   var _demoRowWarn = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    _demoRowWarn = '<tr><td colspan="10" style="text-align:center;font-size:9px;color:rgba(255,152,0,0.65);padding:3px 6px;background:rgba(255,152,0,0.06);">\u26A0 시뮬레이션 데이터 기반 통계 \u2014 실제 시장 수익률이 아닙니다</td></tr>';
+    _demoRowWarn = '<tr><td colspan="10" style="text-align:center;font-size:9px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.65) + ';padding:3px 6px;background:' + KRX_COLORS.DEMO_AMBER_FILL(0.06) + ';">\u26A0 시뮬레이션 데이터 기반 통계 \u2014 실제 시장 수익률이 아닙니다</td></tr>';
   }
 
   // BH-FDR 다중비교 보정 안내 행 (Phase G-1: Holm→BH 전환)
-  var _holmNote = '<tr><td colspan="10" style="text-align:right;font-size:9px;color:var(--text-muted);padding:2px 6px;border-top:1px solid rgba(255,255,255,0.05);">\u203B Benjamini-Hochberg FDR \uB2E4\uC911\uBE44\uAD50 \uBCF4\uC815 \uC801\uC6A9</td></tr>';
+  var _holmNote = '<tr><td colspan="10" style="text-align:right;font-size:9px;color:var(--text-muted);padding:2px 6px;border-top:1px solid ' + KRX_COLORS.WHITE_FILL(0.05) + ';">\u203B Benjamini-Hochberg FDR \uB2E4\uC911\uBE44\uAD50 \uBCF4\uC815 \uC801\uC6A9</td></tr>';
 
   tbody.innerHTML = _demoRowWarn + rows.join('') + _holmNote;
 
@@ -914,7 +914,7 @@ function drawReturnCurve(curvesData) {
 
   // 0선
   const zeroY = toY(0);
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.strokeStyle = KRX_COLORS.WHITE_FILL(0.12);
   ctx.lineWidth = 0.5;
   ctx.setLineDash([5, 3]);
   ctx.beginPath();
@@ -968,7 +968,7 @@ function drawReturnCurve(curvesData) {
 
   // x축 라벨 (일수)
   ctx.font = "9px 'Pretendard', sans-serif";
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.35);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   const labelDays = [1, 5, 10, 15, 20];
@@ -995,7 +995,7 @@ function drawReturnCurve(curvesData) {
   for (const cd of curvesData) {
     ctx.fillStyle = cd.color;
     ctx.fillRect(legendX, legendY, 8, 8);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.5);
     ctx.fillText(cd.name, legendX + 11, legendY - 1);
     legendX += ctx.measureText(cd.name).width + 20;
   }
@@ -1097,7 +1097,7 @@ function updateReturnStatsGrid(patterns) {
   // [FIX-TRUST] 데모 데이터 백테스트 경고 — 통계가 가짜 데이터 기반임을 명시
   var demoBacktestWarn = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    demoBacktestWarn = '<div style="padding:3px 6px;margin:0 0 4px 0;background:rgba(255,152,0,0.08);border-radius:3px;font-size:9px;color:rgba(255,152,0,0.65);text-align:center;">' +
+    demoBacktestWarn = '<div style="padding:3px 6px;margin:0 0 4px 0;background:' + KRX_COLORS.DEMO_AMBER_FILL(0.08) + ';border-radius:3px;font-size:9px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.65) + ';text-align:center;">' +
       '\u26A0 참고용 \u2014 시뮬레이션 데이터 기반 통계</div>';
   }
 
@@ -1173,7 +1173,7 @@ function renderPatternCards(patterns) {
   // [FIX-TRUST] 데모 데이터 패턴 카드 경고 헤더
   var _demoCardWarn = '';
   if (typeof isRealData === 'function' && !isRealData()) {
-    _demoCardWarn = '<div style="padding:4px 8px;margin:0 0 8px 0;background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.20);border-radius:4px;font-size:10px;color:rgba(255,152,0,0.65);text-align:center;line-height:1.4;">' +
+    _demoCardWarn = '<div style="padding:4px 8px;margin:0 0 8px 0;background:' + KRX_COLORS.DEMO_AMBER_FILL(0.08) + ';border:1px solid ' + KRX_COLORS.DEMO_AMBER_FILL(0.20) + ';border-radius:4px;font-size:10px;color:' + KRX_COLORS.DEMO_AMBER_FILL(0.65) + ';text-align:center;line-height:1.4;">' +
       '\u26A0 시뮬레이션 데이터 기반 분석<br>실제 시장 데이터가 아닙니다</div>';
   }
 
@@ -1320,46 +1320,46 @@ function renderPatternCards(patterns) {
           const gc = _gcMap[grade] || _gcMap.F;
 
           // 소표본 경고
-          const nWarning = h5.n < 30 ? ' <span style="font-size:9px;color:rgba(255,255,255,0.4);">(데이터 부족 주의)</span>' : '';
+          const nWarning = h5.n < 30 ? ' <span style="font-size:9px;color:' + KRX_COLORS.WHITE_FILL(0.4) + ';">(데이터 부족 주의)</span>' : '';
 
           // D/F 등급 투자자 경고 — 7-agent 학술 검증 consensus
           var _dfWarning = '';
           if (grade === 'F') {
-            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:rgba(224,80,80,0.08);border:1px solid rgba(224,80,80,0.2);border-radius:3px;font-size:9px;color:rgba(224,80,80,0.8);line-height:1.3;">통계적 유의성 미달 — 독립 매매 근거로 부적합</div>';
+            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:' + KRX_COLORS.UP_FILL(0.08) + ';border:1px solid ' + KRX_COLORS.UP_FILL(0.2) + ';border-radius:3px;font-size:9px;color:' + KRX_COLORS.UP_FILL(0.8) + ';line-height:1.3;">통계적 유의성 미달 — 독립 매매 근거로 부적합</div>';
           } else if (grade === 'D') {
-            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:rgba(255,180,50,0.06);border:1px solid rgba(255,180,50,0.15);border-radius:3px;font-size:9px;color:rgba(255,180,50,0.7);line-height:1.3;">예측력 제한 — 다른 지표와 함께 참고</div>';
+            _dfWarning = '<div style="margin-top:4px;padding:3px 6px;background:' + KRX_COLORS.WARNING_ORANGE_FILL(0.06) + ';border:1px solid ' + KRX_COLORS.WARNING_ORANGE_FILL(0.15) + ';border-radius:3px;font-size:9px;color:' + KRX_COLORS.WARNING_ORANGE_FILL(0.7) + ';line-height:1.3;">예측력 제한 — 다른 지표와 함께 참고</div>';
           }
 
           // CONTEXT_ONLY 패턴 추가 경고
           var _ctxWarning = '';
           if (p._contextOnly) {
-            _ctxWarning = '<div style="margin-top:3px;font-size:9px;color:rgba(255,255,255,0.35);font-style:italic;">표본 부족 또는 KRX 시장 구조 부적합 — 맥락 참고용</div>';
+            _ctxWarning = '<div style="margin-top:3px;font-size:9px;color:' + KRX_COLORS.WHITE_FILL(0.35) + ';font-style:italic;">표본 부족 또는 KRX 시장 구조 부적합 — 맥락 참고용</div>';
           }
 
           scorecardHtml = `
-            <div class="pp-scorecard" style="margin:6px 0;padding:6px 8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:4px;">
+            <div class="pp-scorecard" style="margin:6px 0;padding:6px 8px;background:${KRX_COLORS.WHITE_FILL(0.03)};border:1px solid ${KRX_COLORS.WHITE_FILL(0.08)};border-radius:4px;">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
                 <span style="background:${gc}25;color:${gc};border:1px solid ${gc}50;border-radius:4px;padding:1px 6px;font-weight:700;font-size:14px;line-height:1.4;">${grade}</span>
-                <span style="color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;">\uC608\uCE21 \uC815\uD655\uB3C4 ${Math.round(score)}\uC810</span>
+                <span style="color:${KRX_COLORS.WHITE_FILL(0.7)};font-size:11px;font-weight:600;">\uC608\uCE21 \uC815\uD655\uB3C4 ${Math.round(score)}\uC810</span>
               </div>
-              <div style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:rgba(255,255,255,0.55);">
+              <div style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:${KRX_COLORS.WHITE_FILL(0.55)};">
                 <div style="display:flex;justify-content:space-between;">
                   <span>\uBC29\uD5A5 \uC801\uC911</span>
-                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">${da.toFixed(0)}%</span>
+                  <span style="color:${KRX_COLORS.WHITE_FILL(0.8)};font-weight:500;">${da.toFixed(0)}%</span>
                 </div>` +
                 (hitRate != null ? `
                 <div style="display:flex;justify-content:space-between;">
                   <span>\uBAA9\uD45C \uB3C4\uB2EC</span>
-                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">${hitRate.toFixed(0)}%</span>
+                  <span style="color:${KRX_COLORS.WHITE_FILL(0.8)};font-weight:500;">${hitRate.toFixed(0)}%</span>
                 </div>` : '') +
                 (mae != null ? `
                 <div style="display:flex;justify-content:space-between;">
                   <span>\uD3C9\uADE0 \uC624\uCC28</span>
-                  <span style="color:rgba(255,255,255,0.8);font-weight:500;">\u00B1${mae.toFixed(1)}%</span>
+                  <span style="color:${KRX_COLORS.WHITE_FILL(0.8)};font-weight:500;">\u00B1${mae.toFixed(1)}%</span>
                 </div>` : '') + `
                 <div style="display:flex;justify-content:space-between;">
                   <span>5\uC77C \uAE30\uC900</span>
-                  <span style="color:rgba(255,255,255,0.5);">${h5.n}\uD68C${nWarning}</span>
+                  <span style="color:${KRX_COLORS.WHITE_FILL(0.5)};">${h5.n}\uD68C${nWarning}</span>
                 </div>
               </div>` +
               // [Phase 3] MZ 회귀 + Calibration 요약 (n>=20 시 표시)
@@ -1367,11 +1367,11 @@ function renderPatternCards(patterns) {
                 var mz = h5.mzRegression;
                 var slopeOk = Math.abs(mz.slope - 1) < 0.5;
                 var biasOk = Math.abs(mz.bias) < 3;
-                var slopeColor = slopeOk ? 'rgba(255,255,255,0.8)' : KRX_COLORS.DOWN;
-                var biasColor = biasOk ? 'rgba(255,255,255,0.8)' : KRX_COLORS.DOWN;
+                var slopeColor = slopeOk ? KRX_COLORS.WHITE_FILL(0.8) : KRX_COLORS.DOWN;
+                var biasColor = biasOk ? KRX_COLORS.WHITE_FILL(0.8) : KRX_COLORS.DOWN;
                 var calText = h5.calibrationCoverage != null ? h5.calibrationCoverage.toFixed(0) + '%' : '--';
-                return '<div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:rgba(255,255,255,0.45);">' +
-                  '<div style="margin-bottom:2px;font-weight:600;color:rgba(255,255,255,0.55);">예측 진단 (Mincer-Zarnowitz)</div>' +
+                return '<div style="margin-top:4px;padding-top:4px;border-top:1px solid ' + KRX_COLORS.WHITE_FILL(0.06) + ';font-size:9px;color:' + KRX_COLORS.WHITE_FILL(0.45) + ';">' +
+                  '<div style="margin-bottom:2px;font-weight:600;color:' + KRX_COLORS.WHITE_FILL(0.55) + ';">예측 진단 (Mincer-Zarnowitz)</div>' +
                   '<div style="display:flex;justify-content:space-between;"><span>기울기 (\u03B2)</span><span style="color:' + slopeColor + ';">' + mz.slope + (slopeOk ? '' : ' \u26A0') + '</span></div>' +
                   '<div style="display:flex;justify-content:space-between;"><span>편향 (bias)</span><span style="color:' + biasColor + ';">' + (mz.bias >= 0 ? '+' : '') + mz.bias + '%' + (biasOk ? '' : ' \u26A0') + '</span></div>' +
                   '<div style="display:flex;justify-content:space-between;"><span>R\u00B2</span><span>' + mz.rSquared + '</span></div>' +
@@ -1428,7 +1428,7 @@ function renderPatternCards(patterns) {
       const _tc = { A:KRX_COLORS.TIER_A, B:KRX_COLORS.TIER_B, C:KRX_COLORS.TIER_C, D:KRX_COLORS.TIER_D }[_tier] || KRX_COLORS.TIER_D;
       badgeHtml = '<div style="display:flex;align-items:center;gap:4px;margin:2px 0;font-size:10px;">' +
         '<span style="background:' + _tc + '30;color:' + _tc + ';border:1px solid ' + _tc + '50;border-radius:3px;padding:0 4px;font-weight:700;">' + _tier + '</span>' +
-        '<span style="color:rgba(255,255,255,0.6);">WR ' + _wr.toFixed(0) + '% (n=' + _n + ')</span></div>';
+        '<span style="color:' + KRX_COLORS.WHITE_FILL(0.6) + ';">WR ' + _wr.toFixed(0) + '% (n=' + _n + ')</span></div>';
     }
 
     // 손절/목표

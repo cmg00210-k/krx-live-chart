@@ -87,4 +87,38 @@ const KRX_COLORS = Object.freeze({
   // ── Visible 고/저점 색상 ──
   VIS_HIGH_FILL: (a) => `rgba(224,80,80,${a})`,      // 고점 (빨강 계열)
   VIS_LOW_FILL:  (a) => `rgba(100,200,255,${a})`,    // 저점 (하늘색 — 볼륨 파랑과 구분)
+
+  // ══════════════════════════════════════════════════
+  //  V22-B 추가 — rgba 하드코딩 제거용 중앙 상수
+  // ══════════════════════════════════════════════════
+
+  // ── 투명 & 박스 그림자 ──
+  TRANSPARENT:      'rgba(0,0,0,0)',          // 완전 투명 (chart.js priceLine invisible)
+  BOX_SHADOW_DARK:  'rgba(0,0,0,0.5)',        // realtimeProvider 박스 그림자
+
+  // ── White/Silver 오버레이 (UI 텍스트·배경) ──
+  WHITE_FILL:  (a) => `rgba(255,255,255,${a})`,    // 흰색 반투명 (financials/patternPanel UI)
+  SILVER_FILL: (a) => `rgba(232,232,232,${a})`,    // 실버 그라데이션 (financials 스파크라인 배경)
+
+  // ── MA_LONG (#6BCB77) fill — financials PER tier 색상 ──
+  MA_LONG_FILL: (a) => `rgba(107,203,119,${a})`,
+
+  // ── Warning/Danger/Demo (금융 경고 시각 계층) ──
+  WARNING_ORANGE:      '#FFB432',                            // 경고 오렌지 (255,180,50)
+  WARNING_ORANGE_FILL: (a) => `rgba(255,180,50,${a})`,       // financials/patternPanel 경고 배지
+  DANGER_RED:          '#F44336',                            // 위험 빨강 (244,67,54)
+  DANGER_RED_FILL:     (a) => `rgba(244,67,54,${a})`,        // financials 위험 배지
+  DEMO_AMBER:          '#FF9800',                            // 데모 앰버 (255,152,0)
+  DEMO_AMBER_FILL:     (a) => `rgba(255,152,0,${a})`,        // sidebar/patternPanel 데모 태그
+
+  // ── Draw Blue Fill (drawingTools rect/fib 배경) ──
+  DRAW_BLUE_FILL: (a) => `rgba(41,98,255,${a})`,             // #2962FF 반투명
+
+  // ── 유틸: hex → rgba 동적 변환 (drawingTools 사용자 지정 색상) ──
+  hexToRgba: function(hex, a) {
+    var r = parseInt(hex.slice(1, 3), 16),
+        g = parseInt(hex.slice(3, 5), 16),
+        b = parseInt(hex.slice(5, 7), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  },
 });

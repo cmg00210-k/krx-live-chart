@@ -109,7 +109,10 @@ class PatternBacktester {
     this._currentMarket = '';  // set by Worker message or main thread
     this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
     this._rlTier3 = new Set(['fallingWedge']);
+    // [V22-B Phase 3-Step 6] OOS winrates 로드 가드
+    this._oosWinratesAttempted = false;
     this._loadRLPolicy();
+    this._loadOOSWinrates();
     this._loadBehavioralData();
     this._loadCalibratedConstants();
     this._loadSurvivorshipCorrection();
@@ -298,6 +301,44 @@ class PatternBacktester {
         }
       })
       .catch(function() { /* silent fallback */ });
+  }
+
+  /** [V22-B Phase 3-Step 6] Load time-based OOS winrates
+   *
+   *  pattern_winrates_oos.json (scripts/compute_oos_winrates.py 생성)을 fetch하여
+   *  PatternEngine.PATTERN_WIN_RATES_OOS에 주입.
+   *
+   *  런타임 우선순위 (patterns.js L923-):
+   *    PATTERN_WIN_RATES_OOS (time-based train/test split)     ← PRIMARY
+   *    PATTERN_WIN_RATES_LIVE (rl_policy.json Beta-Binomial)    ← fallback 1
+   *    PATTERN_WIN_RATES_SHRUNK (full-sample shrinkage)         ← fallback 2
+   *
+   *  이유: Lo (2002) full-sample IS inflation 30-50% 완화, KRX 시장
+   *  bullish 패턴 anti-predictor 현상 정직 반영 (ANTI_PREDICTOR 11/44).
+   */
+  _loadOOSWinrates() {
+    if (this._oosWinratesAttempted) return;
+    this._oosWinratesAttempted = true;
+    fetch('data/backtest/pattern_winrates_oos.json')
+      .then(function(r) {
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(function(data) {
+        if (data && data.patterns && typeof PatternEngine !== 'undefined') {
+          PatternEngine.PATTERN_WIN_RATES_OOS = data.patterns;
+          if (typeof console !== 'undefined') {
+            var tierCounts = {};
+            for (var p in data.patterns) {
+              var t = data.patterns[p].tier || 'UNKNOWN';
+              tierCounts[t] = (tierCounts[t] || 0) + 1;
+            }
+            console.log('[OOS] pattern_winrates_oos.json loaded — tiers:', tierCounts,
+                        'split:', data.split_method, 'n_test:', data.n_test_total);
+          }
+        }
+      })
+      .catch(function() { /* silent fallback — LIVE/SHRUNK 유지 */ });
   }
 
   /** Load calibrated constants JSON (graceful: missing file = no-op).

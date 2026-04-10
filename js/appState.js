@@ -499,3 +499,8 @@ function _getStovallSector(industryName) {
   }
   return null;  // 매핑 실패 → 기본 cycle_phase 적용 (차등 없음)
 }
+
+// [V22-B Phase 3] ATR_DYNAMIC_CAPS / classifyVolRegime / getDynamicCap는
+// Worker 스코프(analysisWorker.js importScripts)에서도 접근 가능해야 하므로
+// js/indicators.js 파일 끝에 정의되어 있다. appState.js는 main-thread 전용이라
+// 이 위치에 두면 Worker가 ReferenceError로 실패함.

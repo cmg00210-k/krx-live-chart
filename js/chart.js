@@ -1613,7 +1613,7 @@ class ChartManager {
     if (visHigh !== lastClose) {
       this._visHighLine = this.candleSeries.createPriceLine({
         price: visHigh,
-        color: 'rgba(0,0,0,0)',             // 투명 — 실선 안 보이게
+        color: KRX_COLORS.TRANSPARENT,      // 투명 — 실선 안 보이게
         lineWidth: 1,
         lineStyle: 2,
         lineVisible: false,
@@ -1630,7 +1630,7 @@ class ChartManager {
     if (visLow !== lastClose) {
       this._visLowLine = this.candleSeries.createPriceLine({
         price: visLow,
-        color: 'rgba(0,0,0,0)',             // 투명 — 실선 안 보이게
+        color: KRX_COLORS.TRANSPARENT,      // 투명 — 실선 안 보이게
         lineWidth: 1,
         lineStyle: 2,
         lineVisible: false,

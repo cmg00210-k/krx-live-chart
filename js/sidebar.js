@@ -1001,7 +1001,7 @@ const sidebarManager = (() => {
     // [FIX-TRUST] 데모 모드일 때 가격 옆에 데모 뱃지 표시
     var _demoBadge = '';
     if (typeof KRX_API_CONFIG !== 'undefined' && KRX_API_CONFIG.mode === 'demo') {
-      _demoBadge = '<span style="font-size:8px;color:#ff9800;background:rgba(255,152,0,0.12);padding:0 3px;border-radius:2px;margin-left:3px;vertical-align:middle;font-weight:700;letter-spacing:.3px;">DEMO</span>';
+      _demoBadge = '<span style="font-size:8px;color:' + KRX_COLORS.DEMO_AMBER + ';background:' + KRX_COLORS.DEMO_AMBER_FILL(0.12) + ';padding:0 3px;border-radius:2px;margin-left:3px;vertical-align:middle;font-weight:700;letter-spacing:.3px;">DEMO</span>';
     }
 
     return '<div class="sb-item' + (isPatternMode && pillsHtml ? ' has-pattern' : '') + '" data-code="' + s.code + '"' + patternAttr + ' draggable="true">' +

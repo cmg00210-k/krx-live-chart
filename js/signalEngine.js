@@ -418,6 +418,35 @@ const COMPOSITE_SIGNAL_DEFS = [
   },
 ];
 
+// ── Anti-predictor WR gate (Brock-Lakonishok-LeBaron 1992) ────────────
+// Source: data/backtest/wr_5year.json — KRX 5-year empirical directional win rates
+// For buy patterns: WR = P(price up after pattern)
+// For sell patterns: WR = P(price down after pattern)
+// Patterns with WR < 48% are anti-predictors that degrade composite confidence.
+// Only candle/chart patterns included — indicator signals are not pattern-based.
+var PATTERN_WR_KRX = {
+  // Candle patterns (single)
+  hammer: 45.2, shootingStar: 59.2, invertedHammer: 48.9,
+  hangingMan: 59.4, dragonflyDoji: 45.0, gravestoneDoji: 62.0,
+  bullishMarubozu: 41.8, bearishMarubozu: 57.7,
+  // Candle patterns (double)
+  bullishEngulfing: 41.3, bearishEngulfing: 57.2,
+  bullishHarami: 44.1, bearishHarami: 58.7,
+  piercingLine: 50.2, darkCloud: 58.5,
+  tweezerBottom: 46.5, tweezerTop: 56.8,
+  // Candle patterns (triple)
+  morningStar: 40.5, eveningStar: 56.7,
+  threeWhiteSoldiers: 47.6, threeBlackCrows: 57.5,
+  // Chart patterns
+  doubleBottom: 62.1, doubleTop: 74.7,
+  headAndShoulders: 56.9, inverseHeadAndShoulders: 44.0,
+  ascendingTriangle: 39.5, descendingTriangle: 54.3,
+  risingWedge: 59.8, fallingWedge: 39.1,
+};
+// [B-1] Threshold: 48% = 2pp below coin flip. BLL (1992) uses 50% null;
+// 2pp buffer accounts for bid-ask spread + transaction cost drag on KRX.
+var ANTI_PREDICTOR_THRESHOLD = 48;
+
 
 class SignalEngine {
 
@@ -552,16 +581,19 @@ class SignalEngine {
 
     // OLS 추세 확인 → 순방향 confidence boost — Lo & MacKinlay (1999)
     // R² > 0.50 = 강한 추세: 추세 방향 시그널에 +5 boost
-    // [Phase0-B] OLS 상한 95→90 통일: ADX/CCI와 동일 상한 적용
+    // [V22-B Phase 3-Step 5] 하드코딩 90 → ATR 동적 signalBoost cap
+    //   patterns.js에서 analyze() 호출 시 PatternEngine._currentDynamicCaps가 세팅됨.
+    //   signalEngine은 같은 Worker scope에서 실행되므로 접근 가능.
+    const _sigBoost = (typeof PatternEngine !== 'undefined' && PatternEngine._currentDynamicCaps && PatternEngine._currentDynamicCaps.signalBoost) || [10, 90];
     const olsTrend = cache.olsTrend(20); // [B] 20-bar OLS window
     if (olsTrend && olsTrend.r2 > 0.50) { // [D] R² threshold for strong trend
       const trendDir = olsTrend.direction; // 'up', 'down', 'flat'
       for (let si = 0; si < signals.length; si++) {
         const s = signals[si];
         if (trendDir === 'up' && s.signal === 'buy') {
-          s.confidence = Math.min(90, (s.confidence || 50) + 5); // [D] +5 OLS boost, 90 cap
+          s.confidence = Math.min(_sigBoost[1], (s.confidence || 50) + 5); // [V22-B] dynamic cap
         } else if (trendDir === 'down' && s.signal === 'sell') {
-          s.confidence = Math.min(90, (s.confidence || 50) + 5); // [D] +5 OLS boost, 90 cap
+          s.confidence = Math.min(_sigBoost[1], (s.confidence || 50) + 5); // [V22-B] dynamic cap
         }
       }
     }
@@ -569,6 +601,8 @@ class SignalEngine {
     // [Phase0-B] 누적 조정 상한 ±15 — ADX+CCI+OLS 스택 인플레이션 방지
     // [D-Heuristic] ADX(Wilder 1978)/CCI(Lambert 1980)/OLS는 부분 상관 추세 지표.
     // 가산 boost는 독립성을 가정하나 이론적 정당화 부족. 15pt cap → 최대 ~15% 신뢰도 이동.
+    // [V22-B Phase 3-Step 5] 최종 clamp [10, 90] → ATR 동적 signalBoost range
+    //   MAX_CUMULATIVE_ADJ=15 per-layer throttle는 유지 (delta 제한) + 최종 range만 동적.
     const MAX_CUMULATIVE_ADJ = 15;
     for (let si = 0; si < signals.length; si++) {
       const s = signals[si];
@@ -579,7 +613,7 @@ class SignalEngine {
         } else if (delta < -MAX_CUMULATIVE_ADJ) {
           s.confidence = s._baseConf - MAX_CUMULATIVE_ADJ;
         }
-        s.confidence = Math.max(10, Math.min(90, s.confidence));
+        s.confidence = Math.max(_sigBoost[0], Math.min(_sigBoost[1], s.confidence));
         delete s._baseConf;
       }
     }
@@ -2318,10 +2352,26 @@ class SignalEngine {
         // cannot access backtester results at this stage. The quality gate must be applied
         // downstream (e.g., in patternRenderer or app.js when displaying composite signals).
         // TODO: Pass backtestResults into analyze() or apply D-tier discount post-hoc.
-        const confidence = Math.min(
+        var confidence = Math.min(
           95,
           def.baseConfidence + optionalCount * def.optionalBonus
         );
+        // ── Anti-predictor WR gate (BLL 1992) ──
+        // If any required pattern has KRX 5-year WR < 48%, cap confidence
+        // to the weakest anti-predictor's WR. Prevents anti-predictive patterns
+        // from inflating composite confidence beyond their empirical ceiling.
+        var _wrCap = 100;
+        var _wrCapped = false;
+        for (var _ri = 0; _ri < def.required.length; _ri++) {
+          var _reqPat = def.required[_ri];
+          if (PATTERN_WR_KRX[_reqPat] != null && PATTERN_WR_KRX[_reqPat] < ANTI_PREDICTOR_THRESHOLD) {
+            _wrCap = Math.min(_wrCap, PATTERN_WR_KRX[_reqPat]);
+            _wrCapped = true;
+          }
+        }
+        if (_wrCapped) {
+          confidence = Math.min(confidence, Math.round(_wrCap));
+        }
         // Dual Confidence: calibration 기반 예측 승률
         var confidencePred = _predMap[def.id] != null
           ? Math.min(90, _predMap[def.id] + optionalCount * Math.round(def.optionalBonus * 0.6))
@@ -2329,12 +2379,21 @@ class SignalEngine {
         // [H-2 FIX] _predMap values are already directional win rates
         // (e.g. shootingStar WR=56% = P(decline)). No inversion needed.
         confidencePred = Math.max(10, Math.min(90, confidencePred));
+        // Anti-predictor gate also caps confidencePred
+        if (_wrCapped) {
+          confidencePred = Math.min(confidencePred, Math.round(_wrCap));
+        }
         // G-3: Platt calibration — Platt (1999), P = 1/(1+exp(-(a*x+b)))
         var _plattP = (typeof backtester !== 'undefined' && backtester._rlPolicy && backtester._rlPolicy.platt_params)
           ? backtester._rlPolicy.platt_params[def.id] : null;
         if (_plattP) {
           var _pz = _plattP[0] * (confidencePred / 100) + _plattP[1];
           confidencePred = Math.max(10, Math.min(90, Math.round(100 / (1 + Math.exp(-_pz)))));
+        }
+        // Final WR cap after Platt: prevent Platt sigmoid from re-inflating
+        // confidencePred above the anti-predictor empirical ceiling
+        if (_wrCapped) {
+          confidencePred = Math.min(confidencePred, Math.round(_wrCap));
         }
 
         // [M-2 fix] 기준 인덱스 = 윈도우 내 required 시그널 중 실제 가장 마지막 위치
@@ -2362,14 +2421,16 @@ class SignalEngine {
           source: 'composite',
           nameShort: def.nameShort,
           signal: def.signal,
-          strength: def.strength,
+          strength: _wrCapped && def.strength === 'strong' ? 'medium' : def.strength,
           confidence,
           confidencePred,
+          wrCapped: _wrCapped,  // anti-predictor gate fired
           tier: def.tier,
           index: actualIdx,
           time: candles[actualIdx].time,
           description: def.description +
-            (optionalCount > 0 ? ` (보조 ${optionalCount}개 확인)` : ''),
+            (optionalCount > 0 ? ` (보조 ${optionalCount}개 확인)` : '') +
+            (_wrCapped ? ' [WR<48% 안티프레딕터 포함]' : ''),
           matchedRequired: [...def.required],
           matchedOptional: (def.optional || []).filter(optType => {
             const arr = allMap.get(optType) || [];

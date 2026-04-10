@@ -73,6 +73,32 @@ def _to_native(obj):
     return obj
 
 
+def _extract_runtime_n_scale():
+    """[V22-B] js/analysisWorker.js의 conf_L 수식에서 N_scale 값을 추출.
+
+    기존 버그: current_formula가 'R_sq * min(n/100, 1)'로 하드코딩되어 있어 runtime
+    (analysisWorker.js:107)의 실제 N_scale 값과 달라도 'changed:false'로 판정되었다.
+    이 함수는 runtime 소스에서 정규식으로 실제 N_scale을 파싱하여 calibrator가
+    runtime과 동기화된 비교를 수행할 수 있게 한다.
+
+    Returns:
+        int: runtime N_scale 값. 추출 실패 시 300 (현재 runtime 값) 폴백.
+    """
+    import re
+    aw_path = os.path.join(BASE_DIR, 'js', 'analysisWorker.js')
+    try:
+        with open(aw_path, 'r', encoding='utf-8') as f:
+            src = f.read()
+        # 패턴: rSquared * Math.min(h5.n / NNN, 1)
+        m = re.search(r'rSquared\s*\*\s*Math\.min\(\s*h5\.n\s*/\s*(\d+)\s*,\s*1\s*\)', src)
+        if m:
+            return int(m.group(1))
+        print(f"  WARN: analysisWorker.js에서 N_scale 패턴 미발견, fallback 300 사용")
+    except Exception as e:
+        print(f"  WARN: runtime N_scale 추출 실패: {e}, fallback 300 사용")
+    return 300
+
+
 # ──────────────────────────────────────────────
 # 패턴 분류
 # ──────────────────────────────────────────────
@@ -351,7 +377,12 @@ def calibrate_conf_L(df, pattern_perf):
     N_scale 최적화 (min(n/N_scale, 1)의 N_scale).
     """
     print("\n[3/7] C-2: Calibrating conf_L formula...")
-    current_formula = "R_sq * min(n/100, 1)"
+    # [V22-B] Fix changed:false bug — read runtime N_scale from js/analysisWorker.js:107
+    # instead of hardcoding 100. Previously calibrator compared against stale "100"
+    # while runtime actually used 300 → 3-way scale mismatch (300 / 100 / 50) undetected.
+    runtime_n_scale = _extract_runtime_n_scale()
+    current_formula = f"R_sq * min(n/{runtime_n_scale}, 1)"
+    print(f"  -> runtime N_scale = {runtime_n_scale} (from analysisWorker.js)")
 
     df_valid = df.dropna(subset=['ret_5']).copy()
 
@@ -461,7 +492,8 @@ def calibrate_conf_L(df, pattern_perf):
         # N_scale 선택: min(n/N_scale, 1) 가중치로 accuracy를 예측할 때
         # 큰 표본 패턴은 weight=1, 작은 표본 패턴은 weight<1
         # 최적 N_scale = accuracy와 weighted accuracy의 차이가 가장 의미있는 값
-        best_n_scale = 100
+        # [V22-B] default를 runtime_n_scale로 변경 — 기존 100은 runtime과 무관한 magic number
+        best_n_scale = runtime_n_scale
         if len(pat_acc) >= 5:
             accuracies = pat_acc['accuracy'].values
             n_vals = pat_acc['count'].values
@@ -481,7 +513,11 @@ def calibrate_conf_L(df, pattern_perf):
 
             print(f"  -> 최적 N_scale: {best_n_scale} (var_ratio={best_var_ratio:.2f})")
 
-        formula_changed = significant and (b_conf_opt > 0.1 or best_n_scale != 100)
+        # [V22-B] Fix changed-detection bug:
+        #   (1) 기존 `best_n_scale != 100` 비교는 runtime(300)과 무관 — runtime_n_scale 기준으로 교체
+        #   (2) 기존 `b_conf_opt > 0.1`는 양의 효과만 인정 — abs()로 음수 효과(-0.278)도 포착
+        #   (3) OR 조건 유지: N_scale 변경만 있어도 changed=True (significance 독립)
+        formula_changed = (best_n_scale != runtime_n_scale) or (significant and abs(b_conf_opt) > 0.1)
         if formula_changed:
             new_formula = f"R_sq * min(n/{best_n_scale}, 1)"
         else:
@@ -503,7 +539,8 @@ def calibrate_conf_L(df, pattern_perf):
         significant = False
         a_opt = b_conf_opt = b_wc_opt = 0.0
         ci_low = ci_high = 0.0
-        best_n_scale = 100
+        # [V22-B] 예외 경로도 runtime_n_scale 사용 (기존 하드코딩 100)
+        best_n_scale = runtime_n_scale
 
     print(f"  -> 결과: {new_formula} (changed={formula_changed})")
 

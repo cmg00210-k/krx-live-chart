@@ -3,7 +3,7 @@
   "total_records": 253829,
   "valid_ret5_records": 249962,
   "calibration_metadata": {
-    "initial_values": "academic_defaults",
+    "initial_values": "current_calibrated",
     "academic_defaults": {
       "candle_target_atr": {
         "strong": 2.0,
@@ -23,7 +23,7 @@
     "test_period": "2024-09-10 ~ 2026-04-02",
     "oos_split": 0.3,
     "cutoff_date": "2024-09-10",
-    "circular_check": true
+    "circular_check": false
   },
   "oos_validation": {
     "status": "rejected",
@@ -61,10 +61,10 @@
     "evidence": "best_pair=[2.25, 2.5], score=-0.4088%, F/t=-0.31, p=7.5963e-01, p_low=7.5963e-01, p_high=1.0000e+00, n_below=4848, n_mid=0, n_above=48"
   },
   "C2_conf_L": {
-    "current_formula": "R_sq * min(n/100, 1)",
-    "calibrated_formula": "R_sq * min(n/100, 1)",
+    "current_formula": "R_sq * min(n/300, 1)",
+    "calibrated_formula": "R_sq * min(n/50, 1)",
     "calibrated_n_scale": 50,
-    "changed": false,
+    "changed": true,
     "logistic_coeffs": {
       "intercept": 0.3862,
       "b_confidence": -0.2778,

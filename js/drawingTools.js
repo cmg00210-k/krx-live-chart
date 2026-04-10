@@ -79,10 +79,10 @@ const drawingTools = (() => {
     trendline: KRX_COLORS.ACCENT,
     hline:     KRX_COLORS.DRAW_GRAY,
     vline:     KRX_COLORS.DRAW_GRAY,
-    rect:      'rgba(41,98,255,0.25)',
+    rect:      KRX_COLORS.DRAW_BLUE_FILL(0.25),
     rectBorder: KRX_COLORS.DRAW_BLUE,
     fib:       KRX_COLORS.DRAW_GRAY,
-    fibFill:   'rgba(41,98,255,0.06)',
+    fibFill:   KRX_COLORS.DRAW_BLUE_FILL(0.06),
     eraser:    KRX_COLORS.UP,
     preview:   KRX_COLORS.ACCENT_FILL(0.5),
     select:    KRX_COLORS.DRAW_CYAN,
@@ -135,13 +135,10 @@ const drawingTools = (() => {
 
   /**
    * 색상으로부터 반투명 채우기 생성 (rect, fib 용)
+   * KRX_COLORS.hexToRgba 위임 — colors.js 중앙 관리
    */
   function _colorToFill(hexColor, alpha) {
-    // hex → rgba 변환
-    const r = parseInt(hexColor.slice(1, 3), 16);
-    const g = parseInt(hexColor.slice(3, 5), 16);
-    const b = parseInt(hexColor.slice(5, 7), 16);
-    return `rgba(${r},${g},${b},${alpha})`;
+    return KRX_COLORS.hexToRgba(hexColor, alpha);
   }
 
 

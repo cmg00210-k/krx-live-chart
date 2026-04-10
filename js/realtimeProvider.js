@@ -342,7 +342,7 @@ class RealtimeProvider {
       'font-weight: 600',
       'max-width: 600px',
       'text-align: center',
-      'box-shadow: 0 4px 20px rgba(0,0,0,0.5)',
+      'box-shadow: 0 4px 20px ' + KRX_COLORS.BOX_SHADOW_DARK,
       isFatal
         ? 'background: #B71C1C; color: #fff; border: 2px solid #E53935'
         : 'background: #E65100; color: #fff; border: 2px solid #FF6D00',

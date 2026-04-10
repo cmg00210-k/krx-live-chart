@@ -406,6 +406,12 @@ function _renderCyclePhase() {
     if (cp.months_in_phase) parts.push(cp.months_in_phase + '개월째');
     if (cp.cli) parts.push('CLI ' + cp.cli);
     if (!cp.confirmed) parts.push('(미확인)');
+    // Stovall(1996) sector rotation: US S&P-based, unvalidated for KRX
+    // Show [미검증] badge when current stock has a Stovall sector mapping
+    if (typeof _getStovallSector === 'function' && typeof currentStock !== 'undefined' && currentStock) {
+      var _stovSector = _getStovallSector(currentStock.industry || currentStock.sector || '');
+      if (_stovSector) parts.push('섹터순환 [미검증]');
+    }
     detailEl.textContent = parts.join(' · ');
   }
 }
@@ -587,16 +593,16 @@ function _showDartWarning(source) {
     // 하드코딩 데이터 (삼성전자/SK하이닉스) — 일부 추정치 포함 가능
     el.style.display = 'block';
     el.textContent = '참고용 데이터 (DART 미연동 \u2014 일부 추정치 포함)';
-    el.style.background = 'rgba(255,180,50,0.10)';
-    el.style.borderColor = 'rgba(255,180,50,0.20)';
-    el.style.color = 'rgba(255,180,50,0.65)';
+    el.style.background = KRX_COLORS.WARNING_ORANGE_FILL(0.10);
+    el.style.borderColor = KRX_COLORS.WARNING_ORANGE_FILL(0.20);
+    el.style.color = KRX_COLORS.WARNING_ORANGE_FILL(0.65);
   } else {
     // seed 생성 또는 알 수 없는 출처 — DART 연동 안내
     el.style.display = 'block';
     el.textContent = 'DART 데이터 미연동 \u2014 download_financials.py를 실행하세요';
-    el.style.background = 'rgba(244,67,54,0.10)';
-    el.style.borderColor = 'rgba(244,67,54,0.25)';
-    el.style.color = 'rgba(244,67,54,0.75)';
+    el.style.background = KRX_COLORS.DANGER_RED_FILL(0.10);
+    el.style.borderColor = KRX_COLORS.DANGER_RED_FILL(0.25);
+    el.style.color = KRX_COLORS.DANGER_RED_FILL(0.75);
   }
 }
 
@@ -1220,15 +1226,15 @@ function drawOPMSparkline(data) {
   ctx.lineTo(points[0].x, hasZeroLine ? zeroY : baseY);
   ctx.closePath();
   var gradient = ctx.createLinearGradient(0, chartTop, 0, chartTop + chartH);
-  gradient.addColorStop(0, 'rgba(160,136,48,0.20)');
-  gradient.addColorStop(1, 'rgba(160,136,48,0.02)');
+  gradient.addColorStop(0, KRX_COLORS.ACCENT_FILL(0.20));
+  gradient.addColorStop(1, KRX_COLORS.ACCENT_FILL(0.02));
   ctx.fillStyle = gradient;
   ctx.fill();
 
   // ── 2) 0% 기준선 (양수/음수 혼재 시) ──
   if (hasZeroLine) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.strokeStyle = KRX_COLORS.WHITE_FILL(0.25);
     ctx.lineWidth = 0.8;
     ctx.setLineDash([5, 3]);
     ctx.beginPath();
@@ -1239,7 +1245,7 @@ function drawOPMSparkline(data) {
     ctx.restore();
 
     // "0%" 라벨
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.35);
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -1273,14 +1279,14 @@ function drawOPMSparkline(data) {
   for (i = 0; i < points.length; i++) {
     if (!showAll && i % 2 !== 0 && i !== points.length - 1) continue;
     ctx.fillStyle = values[i] >= 0
-      ? KRX_COLORS.CHART_TEXT || 'rgba(255,255,255,0.7)'
+      ? KRX_COLORS.CHART_TEXT || KRX_COLORS.WHITE_FILL(0.7)
       : KRX_COLORS.DOWN;
     ctx.fillText(values[i].toFixed(1) + '%', points[i].x, points[i].y - 6);
   }
 
   // ── 6) X축 분기 라벨 (하단) ──
   ctx.font = "10px 'Pretendard', sans-serif";
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.55);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   var maxLabels = 6;
@@ -1373,7 +1379,7 @@ function drawFinTrendChart(data, metric) {
     ctx.lineTo(w, chartH);
     ctx.lineTo(0, chartH);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(160,136,48,0.08)';
+    ctx.fillStyle = KRX_COLORS.ACCENT_FILL(0.08);
     ctx.fill();
 
     // 라인
@@ -1410,8 +1416,8 @@ function drawFinTrendChart(data, metric) {
       const barH = (Math.abs(v) / absMax) * (hasNeg ? maxH : chartH - 2);
 
       ctx.fillStyle = v >= 0
-        ? 'rgba(224, 80, 80, 0.65)'   // 양수: 빨강
-        : 'rgba(80, 134, 220, 0.65)'; // 음수: 파랑
+        ? KRX_COLORS.UP_FILL(0.65)    // 양수: 빨강
+        : KRX_COLORS.DOWN_FILL(0.65); // 음수: 파랑
 
       if (v >= 0) {
         ctx.fillRect(x, zeroY - barH, barW, barH);
@@ -1422,7 +1428,7 @@ function drawFinTrendChart(data, metric) {
 
     // 0선 (음수가 있을 때만)
     if (hasNeg) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.strokeStyle = KRX_COLORS.WHITE_FILL(0.15);
       ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.moveTo(0, zeroY);
@@ -1431,7 +1437,7 @@ function drawFinTrendChart(data, metric) {
     }
 
     // 바 위에 값 표시 (억원 → 조/억 단위) — 겹침 방지 thinning
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.7);
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = 'center';
     var prevLabelX = null;
@@ -1466,7 +1472,7 @@ function drawFinTrendChart(data, metric) {
 
   // ── 분기 라벨 (x축 하단) ──
   ctx.font = "10px 'Pretendard', sans-serif";
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.55);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
 
@@ -2081,10 +2087,10 @@ function _drawPERBandChart() {
 
   // PER 배수 라인 정의 (저평가→고평가)
   var bands = [
-    { per: 8,  color: 'rgba(80,134,220,0.75)',  label: '8x' },   // 파랑 (저평가)
-    { per: 12, color: 'rgba(107,203,119,0.75)', label: '12x' },  // 초록
-    { per: 16, color: 'rgba(160,136,48,0.75)',  label: '16x' },  // 금색
-    { per: 20, color: 'rgba(224,80,80,0.75)',   label: '20x' },  // 빨강 (고평가)
+    { per: 8,  color: KRX_COLORS.DOWN_FILL(0.75),    label: '8x' },   // 파랑 (저평가)
+    { per: 12, color: KRX_COLORS.MA_LONG_FILL(0.75), label: '12x' },  // 초록
+    { per: 16, color: KRX_COLORS.ACCENT_FILL(0.75),  label: '16x' },  // 금색
+    { per: 20, color: KRX_COLORS.UP_FILL(0.75),      label: '20x' },  // 빨강 (고평가)
   ];
 
   // ── Step C: 가격 범위 계산 (주가 + 모든 밴드 포함) ──
@@ -2173,7 +2179,7 @@ function _drawPERBandChart() {
       if (hasNeg && bi === 0) {
         ctx.save();
         ctx.globalAlpha = 0.3;
-        ctx.fillStyle = 'rgba(224,80,80,0.15)';
+        ctx.fillStyle = KRX_COLORS.UP_FILL(0.15);
         ctx.fillRect(padL, toY(0), chartW, (padT + chartH) - toY(0));
         ctx.restore();
       }
@@ -2232,7 +2238,7 @@ function _drawPERBandChart() {
       if (epsPerCandle[nci] !== null && epsPerCandle[nci] < 0) { hasNegEps = true; break; }
     }
     if (hasNegEps) {
-      ctx.fillStyle = 'rgba(224,80,80,0.7)';
+      ctx.fillStyle = KRX_COLORS.UP_FILL(0.7);
       ctx.font = "700 10px 'Pretendard', sans-serif";
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -2294,8 +2300,8 @@ function _drawPERBandChart() {
   ctx.lineTo(toX(0), padT + chartH);
   ctx.closePath();
   var grad = ctx.createLinearGradient(0, padT, 0, padT + chartH);
-  grad.addColorStop(0, 'rgba(232,232,232,0.12)');
-  grad.addColorStop(1, 'rgba(232,232,232,0.01)');
+  grad.addColorStop(0, KRX_COLORS.SILVER_FILL(0.12));
+  grad.addColorStop(1, KRX_COLORS.SILVER_FILL(0.01));
   ctx.fillStyle = grad;
   ctx.fill();
 
@@ -2323,7 +2329,7 @@ function _drawPERBandChart() {
   var labelCount = Math.min(5, candles_data.length);
   var labelStep = Math.max(1, Math.floor((candles_data.length - 1) / (labelCount - 1)));
   ctx.font = "10px 'JetBrains Mono', monospace";
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillStyle = KRX_COLORS.WHITE_FILL(0.5);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (var li = 0; li < candles_data.length; li += labelStep) {
@@ -2370,7 +2376,7 @@ function _drawPERBandChart() {
     // 적자 상태 — PER 대신 "적자" 표시
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(224,80,80,0.9)';
+    ctx.fillStyle = KRX_COLORS.UP_FILL(0.9);
     ctx.font = "700 10px 'Pretendard', sans-serif";
     ctx.fillText('적자 (EPS<0)', padL + chartW - 2, padT + 2);
   }

@@ -1,0 +1,727 @@
+{
+  "schema_version": 1,
+  "generated": "2026-04-10",
+  "split_method": "time_cutoff_2025-11-01",
+  "train_range": [
+    "2021-03-30",
+    "2025-10-31"
+  ],
+  "test_range": [
+    "2025-11-03",
+    "2026-03-27"
+  ],
+  "n_train_total": 47282,
+  "n_test_total": 39842,
+  "shrinkage_n0": 35,
+  "min_test_n": 100,
+  "grand_mean_candle_is": 50.14,
+  "grand_mean_candle_oos": 51.52,
+  "grand_mean_chart_is": 37.62,
+  "grand_mean_chart_oos": 49.03,
+  "patterns": {
+    "abandonedBabyBearish": {
+      "category": "candle",
+      "is_wr": 40.0,
+      "is_n": 5,
+      "oos_wr": 66.67,
+      "oos_n": 3,
+      "oos_wr_95ci": [
+        20.77,
+        93.85
+      ],
+      "oos_wr_p_value_vs_50": 1.0,
+      "is_oos_delta": 26.67,
+      "is_oos_delta_p_value": 0.4652,
+      "wr_oos_shrunk": 52.71,
+      "tier": "INSUFFICIENT"
+    },
+    "abandonedBabyBullish": {
+      "category": "candle",
+      "is_wr": 37.5,
+      "is_n": 16,
+      "oos_wr": 60.66,
+      "oos_n": 61,
+      "oos_wr_95ci": [
+        48.12,
+        71.93
+      ],
+      "oos_wr_p_value_vs_50": 0.1237,
+      "is_oos_delta": 23.16,
+      "is_oos_delta_p_value": 0.0969,
+      "wr_oos_shrunk": 57.32,
+      "tier": "INSUFFICIENT"
+    },
+    "ascendingTriangle": {
+      "category": "chart",
+      "is_wr": 20.0,
+      "is_n": 5,
+      "oos_wr": 38.99,
+      "oos_n": 395,
+      "oos_wr_95ci": [
+        34.31,
+        43.88
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 18.99,
+      "is_oos_delta_p_value": 0.3865,
+      "wr_oos_shrunk": 39.8,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "bearishBeltHold": {
+      "category": "candle",
+      "is_wr": 51.76,
+      "is_n": 655,
+      "oos_wr": 62.4,
+      "oos_n": 359,
+      "oos_wr_95ci": [
+        57.28,
+        67.25
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 10.64,
+      "is_oos_delta_p_value": 0.0011,
+      "wr_oos_shrunk": 61.43,
+      "tier": "BORDERLINE"
+    },
+    "bearishEngulfing": {
+      "category": "candle",
+      "is_wr": 52.75,
+      "is_n": 5081,
+      "oos_wr": 52.84,
+      "oos_n": 2816,
+      "oos_wr_95ci": [
+        50.99,
+        54.68
+      ],
+      "oos_wr_p_value_vs_50": 0.0027,
+      "is_oos_delta": 0.1,
+      "is_oos_delta_p_value": 0.9352,
+      "wr_oos_shrunk": 52.82,
+      "tier": "BORDERLINE"
+    },
+    "bearishHarami": {
+      "category": "candle",
+      "is_wr": 54.69,
+      "is_n": 5482,
+      "oos_wr": 52.03,
+      "oos_n": 3963,
+      "oos_wr_95ci": [
+        50.47,
+        53.58
+      ],
+      "oos_wr_p_value_vs_50": 0.011,
+      "is_oos_delta": -2.66,
+      "is_oos_delta_p_value": 0.0106,
+      "wr_oos_shrunk": 52.03,
+      "tier": "BORDERLINE"
+    },
+    "bearishHaramiCross": {
+      "category": "candle",
+      "is_wr": 50.0,
+      "is_n": 44,
+      "oos_wr": 61.54,
+      "oos_n": 13,
+      "oos_wr_95ci": [
+        35.52,
+        82.29
+      ],
+      "oos_wr_p_value_vs_50": 0.5811,
+      "is_oos_delta": 11.54,
+      "is_oos_delta_p_value": 0.4641,
+      "wr_oos_shrunk": 54.23,
+      "tier": "INSUFFICIENT"
+    },
+    "bearishMarubozu": {
+      "category": "candle",
+      "is_wr": 55.68,
+      "is_n": 4838,
+      "oos_wr": 57.86,
+      "oos_n": 3256,
+      "oos_wr_95ci": [
+        56.16,
+        59.55
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 2.18,
+      "is_oos_delta_p_value": 0.0525,
+      "wr_oos_shrunk": 57.79,
+      "tier": "RELIABLE"
+    },
+    "bullishBeltHold": {
+      "category": "candle",
+      "is_wr": 64.8,
+      "is_n": 321,
+      "oos_wr": 57.14,
+      "oos_n": 217,
+      "oos_wr_95ci": [
+        50.49,
+        63.55
+      ],
+      "oos_wr_p_value_vs_50": 0.0414,
+      "is_oos_delta": -7.65,
+      "is_oos_delta_p_value": 0.0732,
+      "wr_oos_shrunk": 56.36,
+      "tier": "RELIABLE"
+    },
+    "bullishEngulfing": {
+      "category": "candle",
+      "is_wr": 45.78,
+      "is_n": 4758,
+      "oos_wr": 45.96,
+      "oos_n": 2970,
+      "oos_wr_95ci": [
+        44.17,
+        47.76
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 0.18,
+      "is_oos_delta_p_value": 0.8745,
+      "wr_oos_shrunk": 46.02,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "bullishHarami": {
+      "category": "candle",
+      "is_wr": 44.01,
+      "is_n": 7468,
+      "oos_wr": 48.49,
+      "oos_n": 5979,
+      "oos_wr_95ci": [
+        47.22,
+        49.75
+      ],
+      "oos_wr_p_value_vs_50": 0.0199,
+      "is_oos_delta": 4.47,
+      "is_oos_delta_p_value": 0.0,
+      "wr_oos_shrunk": 48.5,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "bullishHaramiCross": {
+      "category": "candle",
+      "is_wr": 59.57,
+      "is_n": 47,
+      "oos_wr": 53.12,
+      "oos_n": 32,
+      "oos_wr_95ci": [
+        36.45,
+        69.13
+      ],
+      "oos_wr_p_value_vs_50": 0.8601,
+      "is_oos_delta": -6.45,
+      "is_oos_delta_p_value": 0.5698,
+      "wr_oos_shrunk": 52.29,
+      "tier": "INSUFFICIENT"
+    },
+    "bullishMarubozu": {
+      "category": "candle",
+      "is_wr": 47.69,
+      "is_n": 3009,
+      "oos_wr": 44.35,
+      "oos_n": 1849,
+      "oos_wr_95ci": [
+        42.1,
+        46.62
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": -3.34,
+      "is_oos_delta_p_value": 0.0233,
+      "wr_oos_shrunk": 44.48,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "channel": {
+      "category": "chart",
+      "is_wr": null,
+      "is_n": 0,
+      "oos_wr": 53.45,
+      "oos_n": 58,
+      "oos_wr_95ci": [
+        40.8,
+        65.67
+      ],
+      "oos_wr_p_value_vs_50": 0.694,
+      "is_oos_delta": null,
+      "is_oos_delta_p_value": 1.0,
+      "wr_oos_shrunk": 51.78,
+      "tier": "INSUFFICIENT"
+    },
+    "cupAndHandle": {
+      "category": "chart",
+      "is_wr": 34.93,
+      "is_n": 813,
+      "oos_wr": 39.86,
+      "oos_n": 1528,
+      "oos_wr_95ci": [
+        37.43,
+        42.33
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 4.92,
+      "is_oos_delta_p_value": 0.0195,
+      "wr_oos_shrunk": 40.06,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "darkCloud": {
+      "category": "candle",
+      "is_wr": 52.98,
+      "is_n": 587,
+      "oos_wr": 66.45,
+      "oos_n": 313,
+      "oos_wr_95ci": [
+        61.05,
+        71.46
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 13.47,
+      "is_oos_delta_p_value": 0.0001,
+      "wr_oos_shrunk": 64.95,
+      "tier": "BORDERLINE"
+    },
+    "descendingTriangle": {
+      "category": "chart",
+      "is_wr": 83.33,
+      "is_n": 12,
+      "oos_wr": 55.29,
+      "oos_n": 501,
+      "oos_wr_95ci": [
+        50.91,
+        59.59
+      ],
+      "oos_wr_p_value_vs_50": 0.0201,
+      "is_oos_delta": -28.04,
+      "is_oos_delta_p_value": 0.0531,
+      "wr_oos_shrunk": 54.88,
+      "tier": "RELIABLE"
+    },
+    "doji": {
+      "category": "candle",
+      "is_wr": 50.62,
+      "is_n": 2112,
+      "oos_wr": 55.75,
+      "oos_n": 1313,
+      "oos_wr_95ci": [
+        53.05,
+        58.42
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 5.13,
+      "is_oos_delta_p_value": 0.0034,
+      "wr_oos_shrunk": 55.64,
+      "tier": "BORDERLINE"
+    },
+    "doubleBottom": {
+      "category": "chart",
+      "is_wr": 28.57,
+      "is_n": 7,
+      "oos_wr": 39.81,
+      "oos_n": 103,
+      "oos_wr_95ci": [
+        30.88,
+        49.46
+      ],
+      "oos_wr_p_value_vs_50": 0.0482,
+      "is_oos_delta": 11.23,
+      "is_oos_delta_p_value": 0.5556,
+      "wr_oos_shrunk": 42.14,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "doubleTop": {
+      "category": "chart",
+      "is_wr": null,
+      "is_n": 0,
+      "oos_wr": 49.02,
+      "oos_n": 51,
+      "oos_wr_95ci": [
+        35.86,
+        62.32
+      ],
+      "oos_wr_p_value_vs_50": 1.0,
+      "is_oos_delta": null,
+      "is_oos_delta_p_value": 1.0,
+      "wr_oos_shrunk": 49.02,
+      "tier": "INSUFFICIENT"
+    },
+    "dragonflyDoji": {
+      "category": "candle",
+      "is_wr": 55.56,
+      "is_n": 135,
+      "oos_wr": 57.52,
+      "oos_n": 113,
+      "oos_wr_95ci": [
+        48.31,
+        66.24
+      ],
+      "oos_wr_p_value_vs_50": 0.1319,
+      "is_oos_delta": 1.97,
+      "is_oos_delta_p_value": 0.7557,
+      "wr_oos_shrunk": 56.1,
+      "tier": "BORDERLINE"
+    },
+    "eveningStar": {
+      "category": "candle",
+      "is_wr": 47.25,
+      "is_n": 709,
+      "oos_wr": 51.82,
+      "oos_n": 494,
+      "oos_wr_95ci": [
+        47.42,
+        56.2
+      ],
+      "oos_wr_p_value_vs_50": 0.4444,
+      "is_oos_delta": 4.57,
+      "is_oos_delta_p_value": 0.1186,
+      "wr_oos_shrunk": 51.8,
+      "tier": "BORDERLINE"
+    },
+    "fallingThreeMethods": {
+      "category": "candle",
+      "is_wr": 44.44,
+      "is_n": 9,
+      "oos_wr": 75.0,
+      "oos_n": 4,
+      "oos_wr_95ci": [
+        30.06,
+        95.44
+      ],
+      "oos_wr_p_value_vs_50": 0.625,
+      "is_oos_delta": 30.56,
+      "is_oos_delta_p_value": 0.3077,
+      "wr_oos_shrunk": 53.93,
+      "tier": "INSUFFICIENT"
+    },
+    "fallingWedge": {
+      "category": "chart",
+      "is_wr": 17.14,
+      "is_n": 35,
+      "oos_wr": 41.86,
+      "oos_n": 1395,
+      "oos_wr_95ci": [
+        39.3,
+        44.47
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 24.72,
+      "is_oos_delta_p_value": 0.0033,
+      "wr_oos_shrunk": 42.04,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "gravestoneDoji": {
+      "category": "candle",
+      "is_wr": 55.63,
+      "is_n": 142,
+      "oos_wr": 67.5,
+      "oos_n": 80,
+      "oos_wr_95ci": [
+        56.64,
+        76.76
+      ],
+      "oos_wr_p_value_vs_50": 0.0023,
+      "is_oos_delta": 11.87,
+      "is_oos_delta_p_value": 0.0833,
+      "wr_oos_shrunk": 62.64,
+      "tier": "INSUFFICIENT"
+    },
+    "hammer": {
+      "category": "candle",
+      "is_wr": 51.29,
+      "is_n": 505,
+      "oos_wr": 55.94,
+      "oos_n": 429,
+      "oos_wr_95ci": [
+        51.21,
+        60.57
+      ],
+      "oos_wr_p_value_vs_50": 0.0157,
+      "is_oos_delta": 4.66,
+      "is_oos_delta_p_value": 0.1551,
+      "wr_oos_shrunk": 55.61,
+      "tier": "RELIABLE"
+    },
+    "hangingMan": {
+      "category": "candle",
+      "is_wr": 50.0,
+      "is_n": 732,
+      "oos_wr": 62.68,
+      "oos_n": 351,
+      "oos_wr_95ci": [
+        57.51,
+        67.58
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 12.68,
+      "is_oos_delta_p_value": 0.0001,
+      "wr_oos_shrunk": 61.67,
+      "tier": "BORDERLINE"
+    },
+    "headAndShoulders": {
+      "category": "chart",
+      "is_wr": 75.0,
+      "is_n": 16,
+      "oos_wr": 54.53,
+      "oos_n": 640,
+      "oos_wr_95ci": [
+        50.66,
+        58.35
+      ],
+      "oos_wr_p_value_vs_50": 0.0242,
+      "is_oos_delta": -20.47,
+      "is_oos_delta_p_value": 0.104,
+      "wr_oos_shrunk": 54.25,
+      "tier": "RELIABLE"
+    },
+    "inverseHeadAndShoulders": {
+      "category": "chart",
+      "is_wr": 54.55,
+      "is_n": 11,
+      "oos_wr": 36.46,
+      "oos_n": 768,
+      "oos_wr_95ci": [
+        33.13,
+        39.92
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": -18.09,
+      "is_oos_delta_p_value": 0.2166,
+      "wr_oos_shrunk": 37.01,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "invertedHammer": {
+      "category": "candle",
+      "is_wr": 50.62,
+      "is_n": 561,
+      "oos_wr": 52.27,
+      "oos_n": 419,
+      "oos_wr_95ci": [
+        47.49,
+        57.01
+      ],
+      "oos_wr_p_value_vs_50": 0.3792,
+      "is_oos_delta": 1.64,
+      "is_oos_delta_p_value": 0.6106,
+      "wr_oos_shrunk": 52.21,
+      "tier": "BORDERLINE"
+    },
+    "longLeggedDoji": {
+      "category": "candle",
+      "is_wr": 56.44,
+      "is_n": 1010,
+      "oos_wr": 59.44,
+      "oos_n": 540,
+      "oos_wr_95ci": [
+        55.25,
+        63.5
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 3.01,
+      "is_oos_delta_p_value": 0.2536,
+      "wr_oos_shrunk": 58.96,
+      "tier": "RELIABLE"
+    },
+    "morningStar": {
+      "category": "candle",
+      "is_wr": 46.2,
+      "is_n": 855,
+      "oos_wr": 43.68,
+      "oos_n": 506,
+      "oos_wr_95ci": [
+        39.42,
+        48.03
+      ],
+      "oos_wr_p_value_vs_50": 0.005,
+      "is_oos_delta": -2.52,
+      "is_oos_delta_p_value": 0.3662,
+      "wr_oos_shrunk": 44.18,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "piercingLine": {
+      "category": "candle",
+      "is_wr": 47.62,
+      "is_n": 315,
+      "oos_wr": 46.33,
+      "oos_n": 177,
+      "oos_wr_95ci": [
+        39.14,
+        53.67
+      ],
+      "oos_wr_p_value_vs_50": 0.3671,
+      "is_oos_delta": -1.29,
+      "is_oos_delta_p_value": 0.783,
+      "wr_oos_shrunk": 47.18,
+      "tier": "BORDERLINE"
+    },
+    "risingThreeMethods": {
+      "category": "candle",
+      "is_wr": 40.0,
+      "is_n": 15,
+      "oos_wr": 50.0,
+      "oos_n": 8,
+      "oos_wr_95ci": [
+        21.52,
+        78.48
+      ],
+      "oos_wr_p_value_vs_50": 1.0,
+      "is_oos_delta": 10.0,
+      "is_oos_delta_p_value": 0.645,
+      "wr_oos_shrunk": 51.24,
+      "tier": "INSUFFICIENT"
+    },
+    "risingWedge": {
+      "category": "chart",
+      "is_wr": 50.0,
+      "is_n": 4,
+      "oos_wr": 66.24,
+      "oos_n": 628,
+      "oos_wr_95ci": [
+        62.45,
+        69.83
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": 16.24,
+      "is_oos_delta_p_value": 0.4938,
+      "wr_oos_shrunk": 65.33,
+      "tier": "RELIABLE"
+    },
+    "shootingStar": {
+      "category": "candle",
+      "is_wr": 56.66,
+      "is_n": 616,
+      "oos_wr": 59.24,
+      "oos_n": 341,
+      "oos_wr_95ci": [
+        53.95,
+        64.32
+      ],
+      "oos_wr_p_value_vs_50": 0.0008,
+      "is_oos_delta": 2.58,
+      "is_oos_delta_p_value": 0.439,
+      "wr_oos_shrunk": 58.52,
+      "tier": "RELIABLE"
+    },
+    "stickSandwich": {
+      "category": "candle",
+      "is_wr": 42.59,
+      "is_n": 904,
+      "oos_wr": 44.22,
+      "oos_n": 640,
+      "oos_wr_95ci": [
+        40.42,
+        48.09
+      ],
+      "oos_wr_p_value_vs_50": 0.0039,
+      "is_oos_delta": 1.63,
+      "is_oos_delta_p_value": 0.5242,
+      "wr_oos_shrunk": 44.6,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "symmetricTriangle": {
+      "category": "chart",
+      "is_wr": 73.91,
+      "is_n": 46,
+      "oos_wr": 57.7,
+      "oos_n": 2402,
+      "oos_wr_95ci": [
+        55.72,
+        59.66
+      ],
+      "oos_wr_p_value_vs_50": 0.0,
+      "is_oos_delta": -16.21,
+      "is_oos_delta_p_value": 0.0273,
+      "wr_oos_shrunk": 57.58,
+      "tier": "BORDERLINE"
+    },
+    "threeBlackCrows": {
+      "category": "candle",
+      "is_wr": 57.53,
+      "is_n": 518,
+      "oos_wr": 56.59,
+      "oos_n": 440,
+      "oos_wr_95ci": [
+        51.92,
+        61.15
+      ],
+      "oos_wr_p_value_vs_50": 0.0065,
+      "is_oos_delta": -0.94,
+      "is_oos_delta_p_value": 0.77,
+      "wr_oos_shrunk": 56.22,
+      "tier": "RELIABLE"
+    },
+    "threeInsideDown": {
+      "category": "candle",
+      "is_wr": 50.41,
+      "is_n": 1587,
+      "oos_wr": 51.92,
+      "oos_n": 1146,
+      "oos_wr_95ci": [
+        49.03,
+        54.8
+      ],
+      "oos_wr_p_value_vs_50": 0.204,
+      "is_oos_delta": 1.51,
+      "is_oos_delta_p_value": 0.4358,
+      "wr_oos_shrunk": 51.91,
+      "tier": "BORDERLINE"
+    },
+    "threeInsideUp": {
+      "category": "candle",
+      "is_wr": 46.6,
+      "is_n": 1766,
+      "oos_wr": 50.21,
+      "oos_n": 1637,
+      "oos_wr_95ci": [
+        47.79,
+        52.63
+      ],
+      "oos_wr_p_value_vs_50": 0.8821,
+      "is_oos_delta": 3.61,
+      "is_oos_delta_p_value": 0.0352,
+      "wr_oos_shrunk": 50.24,
+      "tier": "BORDERLINE"
+    },
+    "threeWhiteSoldiers": {
+      "category": "candle",
+      "is_wr": 57.49,
+      "is_n": 334,
+      "oos_wr": 54.02,
+      "oos_n": 174,
+      "oos_wr_95ci": [
+        46.61,
+        61.26
+      ],
+      "oos_wr_p_value_vs_50": 0.3244,
+      "is_oos_delta": -3.46,
+      "is_oos_delta_p_value": 0.4553,
+      "wr_oos_shrunk": 53.6,
+      "tier": "BORDERLINE"
+    },
+    "tweezerBottom": {
+      "category": "candle",
+      "is_wr": 51.33,
+      "is_n": 526,
+      "oos_wr": 40.7,
+      "oos_n": 371,
+      "oos_wr_95ci": [
+        35.82,
+        45.77
+      ],
+      "oos_wr_p_value_vs_50": 0.0004,
+      "is_oos_delta": -10.63,
+      "is_oos_delta_p_value": 0.0017,
+      "wr_oos_shrunk": 41.63,
+      "tier": "ANTI_PREDICTOR"
+    },
+    "tweezerTop": {
+      "category": "candle",
+      "is_wr": 49.78,
+      "is_n": 671,
+      "oos_wr": 59.05,
+      "oos_n": 359,
+      "oos_wr_95ci": [
+        53.9,
+        64.02
+      ],
+      "oos_wr_p_value_vs_50": 0.0007,
+      "is_oos_delta": 9.28,
+      "is_oos_delta_p_value": 0.0045,
+      "wr_oos_shrunk": 58.38,
+      "tier": "BORDERLINE"
+    }
+  }
+}

@@ -22,6 +22,74 @@ var _stalenessChecked = false;       // 1회만 실행
 var _fetchFailToasts = new Set();
 
 // ══════════════════════════════════════════════════════
+// [V22-B Phase 3-Step 4] Factor Independence Guard
+//
+// 9-Layer confidence cascade에서 동일 데이터 소스(VIX, credit, taylor_gap,
+// MCS, HMM, usdkrw, foreignMomentum, options IV 등)의 이중 승수화를
+// 런타임에 차단하는 literal de-duplication Set.
+//
+// 10 keys (경제적 개념 단위, 변수명 단위 아님):
+//   RISK_VOL_EQUITY           - VIX / VKOSPI / _marketContext.vkospi
+//   RISK_CREDIT               - aa_spread / credit_regime / us_hy_spread
+//   MACRO_TAYLOR_GAP          - taylor_gap (Factor 7 + Factor 10 공유)
+//   MACRO_COMPOSITE           - mcs (0-1) / mcsV2 (0-100) 통합
+//   REGIME_HMM                - hmmRegimeLabel / hmm_regimes.json
+//   RISK_FX                   - usdkrw
+//   RISK_LIQUIDITY            - Amihud ILLIQ / HHI (Micro layer)
+//   FLOW_FOREIGN              - foreignMomentum / investor alignment
+//   FLOW_OPTIONS              - atmIV / IV/HV ratio / straddleImpliedMove
+//   CREDIT_DISTANCE_DEFAULT   - Merton DD (Bharath-Shumway)
+//
+// 전문가 권고 (statistical-validation-expert, Phase 2): literal dedup은
+// necessary but insufficient (VIX/credit/FX가 latent 'risk' factor에
+// ρ≈0.6-0.85 공동 적재). Tier-2 PCA budget 접근은 V23으로 연기.
+//
+// 사용법: 진입점에서 _appliedFactors.clear() → 각 _apply* 함수 내부에서
+//   if (!_appliedFactors.has('KEY')) { ...apply...; }
+//   → layer 종료 후 _markFactorsAfterLayer() helper로 add 처리
+// ══════════════════════════════════════════════════════
+var _appliedFactors = new Set();
+
+// [V22-B Phase 3-Step 5] Main-thread vol regime cache
+// 각 분석 진입점에서 classifyVolRegime(calcATR(candles, 14))를 호출하여 세팅.
+// Phase 8/Macro의 cap 지점에서 getDynamicCap(target, _currentVolRegime) 호출용.
+var _currentVolRegime = 'mid';
+
+/**
+ * [V22-B] RORO layer 완료 후 팩터 add 처리.
+ * RORO가 neutral이 아닌 경우에만 각 데이터 소스의 factor key를 등록하여
+ * 이후 Macro/Phase 8 layer가 동일 소스를 재사용하지 않게 한다.
+ */
+function _markFactorsAfterRORO() {
+  if (typeof _currentRORORegime === 'undefined' || _currentRORORegime === 'neutral') return;
+  if (typeof _macroLatest !== 'undefined' && _macroLatest &&
+      (_macroLatest.vkospi != null || _macroLatest.vix != null)) {
+    _appliedFactors.add('RISK_VOL_EQUITY');
+  }
+  if (typeof _bondsLatest !== 'undefined' && _bondsLatest &&
+      _bondsLatest.credit_spreads && _bondsLatest.credit_spreads.aa_spread != null) {
+    _appliedFactors.add('RISK_CREDIT');
+  }
+  if (typeof _macroLatest !== 'undefined' && _macroLatest && _macroLatest.usdkrw != null) {
+    _appliedFactors.add('RISK_FX');
+  }
+  if (typeof _investorData !== 'undefined' && _investorData && _investorData.alignment != null) {
+    _appliedFactors.add('FLOW_FOREIGN');
+  }
+}
+
+/**
+ * [V22-B] Macro layer 완료 후 팩터 add 처리.
+ * Macro가 MCS/taylor_gap를 실제로 적용했을 때 Phase 8이 동일 소스를 재사용하지 않게 한다.
+ * (credit/vix는 RORO에서 이미 처리되거나 Macro 내부 has() guard로 스킵됨.)
+ */
+function _markFactorsAfterMacro() {
+  if (typeof _macroLatest === 'undefined' || !_macroLatest) return;
+  if (_macroLatest.mcs != null) _appliedFactors.add('MACRO_COMPOSITE');
+  if (_macroLatest.taylor_gap != null) _appliedFactors.add('MACRO_TAYLOR_GAP');
+}
+
+// ══════════════════════════════════════════════════════
 //  Web Worker 초기화 (Phase 9)
 //
 //  패턴 분석 + 시그널 분석 + 백테스트를 별도 스레드에서 수행.
@@ -35,7 +103,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=62');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=63');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
@@ -102,13 +170,23 @@ function _initAnalysisWorker() {
         // [M-1] _srLevels 복원 — structured clone으로 소실된 배열 속성
         if (msg.srLevels) detectedPatterns._srLevels = msg.srLevels;
         detectedSignals = msg.signals;
+        // [V22-B] factor guard Set 초기화 — 각 분석마다 처음부터 시작
+        _appliedFactors.clear();
+        // [V22-B] main-thread ATR vol regime 캐시 업데이트
+        try {
+          if (typeof classifyAtrVolRegime === 'function' && typeof calcATR === 'function') {
+            _currentVolRegime = classifyAtrVolRegime(calcATR(candles, 14));
+          }
+        } catch (_e) { _currentVolRegime = 'mid'; }
         // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
         _applyMarketContextToPatterns(detectedPatterns);
         // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
         _classifyRORORegime();
         _applyRORORegimeToPatterns(detectedPatterns);
+        _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
         // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
         _applyMacroConfidenceToPatterns(detectedPatterns);
+        _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
         // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
         _updateMicroContext(candles);
         _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
@@ -566,7 +644,8 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   var code = currentStock ? currentStock.code : null;
 
   // MCS 조정 (거시경제 복합점수)
-  if (_macroComposite && _macroComposite.mcsV2 != null) {
+  // [V22-B] factor guard: MACRO_COMPOSITE 이미 적용되었으면 스킵
+  if (!_appliedFactors.has('MACRO_COMPOSITE') && _macroComposite && _macroComposite.mcsV2 != null) {
     var mcs = _macroComposite.mcsV2;
     // [V6-FIX] B-4 FND-MAC-6: Scale guard — mcsV2 is 0-100 (macro_composite.json).
     // If accidentally 0-1 (from macro_latest.json mcs), normalize.
@@ -583,6 +662,7 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
         p.confidence *= 1.05;
       }
     }
+    _appliedFactors.add('MACRO_COMPOSITE');
   }
 
   // HMM 레짐 + 수급 조정 (종목별)
@@ -590,6 +670,7 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // Without real data, hmmRegimeLabel is unreliable (e.g., "bear" applied to ALL 2,651 stocks
   // when investor_daily is empty). Skip regime multiplier entirely when data quality is insufficient.
   // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
+  // [V22-B] factor guards: REGIME_HMM (시장 전체 multiplier) + FLOW_FOREIGN (per-stock bonus) 분리
   if (code && _flowSignals && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
     var flow = _flowSignals.stocks[code];
     var regime = flow.hmmRegimeLabel || null;
@@ -605,16 +686,20 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
       console.warn('[Phase8] ' + code + ': no per-stock flow data — foreignMomentum bonus skipped');
     }
 
+    var applyHMM = !_appliedFactors.has('REGIME_HMM');
+    var applyForeign = hasFlowData && !_appliedFactors.has('FLOW_FOREIGN');
     for (var j = 0; j < patterns.length; j++) {
       var pt = patterns[j];
       if (pt.confidence == null) continue;
 
       // HMM 레짐 승수 (시장 전체 적용 — per-stock data 유무 무관)
-      var dir = pt.signal === 'buy' ? 'buy' : 'sell';
-      pt.confidence *= mult[dir];
+      if (applyHMM) {
+        var dir = pt.signal === 'buy' ? 'buy' : 'sell';
+        pt.confidence *= mult[dir];
+      }
 
       // 외국인 방향 일치 보너스 — per-stock data 있을 때만 적용 (null 시 false confidence 방지)
-      if (hasFlowData) {
+      if (applyForeign) {
         if (flow.foreignMomentum === 'buy' && pt.signal === 'buy') {
           pt.confidence *= 1.03;
         } else if (flow.foreignMomentum === 'sell' && pt.signal === 'sell') {
@@ -622,32 +707,54 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
         }
       }
     }
+    if (applyHMM) _appliedFactors.add('REGIME_HMM');
+    if (applyForeign) _appliedFactors.add('FLOW_FOREIGN');
   }
 
-  // 옵션 Implied Move 조정 (이벤트 기간 감지)
-  // JSON structure: { "analytics": { "straddleImpliedMove": ... } }
-  if (_optionsAnalytics && _optionsAnalytics.analytics && _optionsAnalytics.analytics.straddleImpliedMove != null) {
-    var impliedMove = _optionsAnalytics.analytics.straddleImpliedMove;
-    // [V6-FIX] B-6: threshold 3.0→3.5 (old fired in normal markets for near-expiry options),
-    // discount 0.95→0.93 (Simon & Wiggins 2001: accuracy drops ~15-20% when IV/HV > 2.0)
-    if (impliedMove > 3.5) {
-      for (var k = 0; k < patterns.length; k++) {
-        if (patterns[k].confidence == null) continue;
-        patterns[k].confidence *= 0.93;  // 불확실성 증가 → 전반적 감산
+  // Options implied volatility adjustment (event period / uncertainty detection)
+  // Simon & Wiggins (2001): IV/HV > 1.5 → pattern accuracy drops 15-20%
+  // [V22-B] factor guard: FLOW_OPTIONS 이미 적용되었으면 스킵
+  if (!_appliedFactors.has('FLOW_OPTIONS') && _optionsAnalytics && _optionsAnalytics.analytics) {
+    var _oa = _optionsAnalytics.analytics;
+    var _ivHvFired = false;
+    var _optionsApplied = false;
+    // Prefer IV/HV ratio (expiry-independent) over absolute impliedMove
+    if (_oa.atmIV != null && _oa.historicalVol != null && _oa.historicalVol > 0) {
+      var _ivHvRatio = _oa.atmIV / _oa.historicalVol;
+      if (_ivHvRatio > 1.5) {
+        _ivHvFired = true;
+        _optionsApplied = true;
+        var _ivDiscount = _ivHvRatio > 2.0 ? 0.90 : 0.93;
+        for (var k = 0; k < patterns.length; k++) {
+          if (patterns[k].confidence == null) continue;
+          patterns[k].confidence *= _ivDiscount;
+        }
       }
     }
+    // Fallback: absolute impliedMove (backward compat when IV/HV not available)
+    if (!_ivHvFired && _oa.straddleImpliedMove != null && _oa.straddleImpliedMove > 3.5) {
+      _optionsApplied = true;
+      for (var k = 0; k < patterns.length; k++) {
+        if (patterns[k].confidence == null) continue;
+        patterns[k].confidence *= 0.93;
+      }
+    }
+    if (_optionsApplied) _appliedFactors.add('FLOW_OPTIONS');
   }
 
   // DD 페널티는 _applyMertonDDToPatterns()에서 이미 적용됨 — 이중 적용 방지를 위해 여기서 제거
   // (Phase8 DD: 0.90x + MertonDD: 0.82x = 0.738x 이중 감산 버그 수정)
 
-  // [P0-C7] confidence clamp [10, 100] — 다른 adjust 함수와 동일
+  // [P0-C7] confidence clamp — 다른 adjust 함수와 동일
+  // [V22-B Phase 3-Step 5] 하드코딩 [10, 100], [10, 95] → ATR 동적 cap
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
   for (var c = 0; c < patterns.length; c++) {
     if (patterns[c].confidence != null) {
-      patterns[c].confidence = Math.max(10, Math.min(100, patterns[c].confidence));
+      patterns[c].confidence = Math.max(_capConf[0], Math.min(_capConf[1], patterns[c].confidence));
     }
     if (patterns[c].confidencePred != null) {
-      patterns[c].confidencePred = Math.max(10, Math.min(95, patterns[c].confidencePred));
+      patterns[c].confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], patterns[c].confidencePred));
     }
   }
 }
@@ -757,8 +864,8 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
 
     // ── 1. 선물 베이시스 (Doc27 §5.1 + §6.2, Bessembinder & Seguin 1993) ──
     // basisPct 정규화 사용: ±0.5% normal (±5%), ±2.0% extreme (±8%)
-    if (deriv && (deriv.basisPct != null || deriv.basis != null)) {
-      var _bPct = deriv.basisPct;
+    if (deriv && (deriv.excessBasisPct != null || deriv.basisPct != null || deriv.basis != null)) {
+      var _bPct = deriv.excessBasisPct != null ? deriv.excessBasisPct : deriv.basisPct;
       var _bAbs = _bPct != null ? Math.abs(_bPct) : Math.abs(deriv.basis);
       var _bThr = _bPct != null ? 0.5 : 0.5;
       var _bExt = _bPct != null ? 2.0 : 5.0;
@@ -1179,10 +1286,12 @@ function _applyMacroConfidenceToPatterns(patterns) {
 
     // ── 3. 크레딧 레짐 (Doc35 §4, AA- 스프레드) ──
     // 스트레스: 신용위험 확대 → 모든 패턴 신뢰도 감소
-    if (aaSpread != null) {
+    // [V22-B] factor guard: RISK_CREDIT 이미 RORO에서 적용되었으면 스킵
+    if (aaSpread != null && !_appliedFactors.has('RISK_CREDIT')) {
       if (aaSpread > 1.5 || creditRegime === 'stress') {
-        // [V6-FIX] B-1: 0.85→0.88 (symmetric application; sell should ideally be boosted)
-        adj *= 0.88;                  // 스트레스: -12% (전체)
+        // [V6-FIX→V7] Credit stress asymmetry (Gilchrist & Zakrajsek 2012):
+        // Buy patterns less reliable in stress (-18%), sell patterns confirmed (+6%)
+        adj *= isBuy ? 0.82 : 1.06;
       } else if (aaSpread > 1.0 || creditRegime === 'elevated') {
         adj *= isBuy ? 0.93 : 1.04;  // 주의: 매수 -7%, 매도 +4%
       }
@@ -1242,9 +1351,10 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, 매도 패턴 감쇄
     // MCS < 0.4: 거시 약세 → 매도 패턴 부스트, 매수 패턴 감쇄
     // 0.4~0.6: 중립 → 조정 없음
-    // [FIX] _applyPhase8에서 mcsV2가 적용되면 여기서 스킵 (이중 적용 방지)
+    // [V22-B] 기존 L1258 MCS skip guard 제거: _appliedFactors.has('MACRO_COMPOSITE')로 통합.
+    // (이전에는 _macroComposite.mcsV2 존재 여부만 체크 → 새 guard는 Phase 8 전체 통합)
     var mcs = macro ? macro.mcs : null;
-    if (mcs != null && !(_macroComposite && _macroComposite.mcsV2 != null)) {
+    if (mcs != null && !_appliedFactors.has('MACRO_COMPOSITE')) {
       if (mcs > 0.6) {
         var mcsAdj = 1.0 + (mcs - 0.6) * 0.25;  // 0.6→1.0, 1.0→1.10
         adj *= isBuy ? mcsAdj : (2.0 - mcsAdj);
@@ -1267,7 +1377,8 @@ function _applyMacroConfidenceToPatterns(patterns) {
     //   gap > 0 → overtly tight (hawkish) → negative for equities → sell boost
     //   gap < 0 → overtly loose (dovish) → positive for equities → buy boost
     // taylorGap: for-루프 밖에서 선언됨 (line 571)
-    if (taylorGap != null) {
+    // [V22-B] factor guard: MACRO_TAYLOR_GAP 이미 적용되면 스킵 (Factor 10 Rate Beta와 intra-func dedup)
+    if (taylorGap != null && !_appliedFactors.has('MACRO_TAYLOR_GAP')) {
       // tgNorm: gap을 [-2, +2] 범위에서 [-1, +1]로 정규화
       var tgNorm = Math.max(-1, Math.min(1, taylorGap / 2));
       if (tgNorm < -0.25) {
@@ -1286,8 +1397,9 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // VIX > 30: risk-off, 모든 패턴 신뢰도 감소 (변동성 확대 → 패턴 노이즈)
     // VIX < 15: risk-on, 매수 패턴 소폭 부스트
     // 20~30: 정상 범위 → 조정 없음
+    // [V22-B] factor guard: RISK_VOL_EQUITY 이미 RORO Factor 1에서 적용되면 스킵
     var vix = macro ? macro.vix : null;
-    if (vix != null) {
+    if (vix != null && !_appliedFactors.has('RISK_VOL_EQUITY')) {
       if (vix > 30) {
         adj *= 0.93;                    // high VIX: -7% (모든 패턴)
       } else if (vix > 25) {
@@ -1315,6 +1427,9 @@ function _applyMacroConfidenceToPatterns(patterns) {
     // Taylor gap + ktb10y 수준 → 섹터별 금리 민감도 차등 적용
     // hawkish(gap>0): rate_beta<0 섹터 매수 할인, rate_beta>0 섹터 매수 부스트
     // dovish(gap<0): 역방향 (금리 하락 → Utility/REIT 수혜)
+    // [V22-B] factor guard: Factor 7에서 taylorGap이 이미 adj에 반영되었으면
+    // Factor 10의 섹터 차등만 추가 적용 (has() 체크 생략 — Rate Beta는 섹터 의존이라
+    // Factor 7과 독립 효과. intra-function dedup는 Factor 7에서만 수행.)
     if (taylorGap != null && _macroSector) {
       var rBeta = _RATE_BETA[_macroSector];
       if (rBeta != null && rBeta !== 0) {
@@ -1344,13 +1459,19 @@ function _applyMacroConfidenceToPatterns(patterns) {
       }
     }
 
-    // ── clamp [0.70, 1.25] ──
-    adj = Math.max(0.70, Math.min(1.25, adj));
+    // ── [V22-B Phase 3-Step 5] ATR 동적 macro multiplier clamp ──
+    //   기존 하드코딩 [0.70, 1.25] → vol regime별 dynamic:
+    //     low [0.70, 1.30], mid [0.80, 1.20], high [0.90, 1.10]
+    //   고변동 시 narrow → 매크로 과도 영향 차단 (SNR↓ 대응)
+    var _capMult = getDynamicCap('macroMult', _currentVolRegime);
+    var _capConfMacro = getDynamicCap('confidence', _currentVolRegime);
+    var _capPredMacro = getDynamicCap('confidencePred', _currentVolRegime);
+    adj = Math.max(_capMult[0], Math.min(_capMult[1], adj));
 
     if (adj !== 1.0) {
-      p.confidence = Math.max(10, Math.min(100, Math.round(p.confidence * adj)));
+      p.confidence = Math.max(_capConfMacro[0], Math.min(_capConfMacro[1], Math.round(p.confidence * adj)));
       if (p.confidencePred != null) {
-        p.confidencePred = Math.max(10, Math.min(95, Math.round(p.confidencePred * adj)));
+        p.confidencePred = Math.max(_capPredMacro[0], Math.min(_capPredMacro[1], Math.round(p.confidencePred * adj)));
       }
     }
   }
@@ -1399,6 +1520,9 @@ function _classifyRORORegime() {
     else if (aaSpread > 1.0) csScore = -0.5;  // elevated
     else if (aaSpread < 0.5) csScore = 0.3;   // tight (risk-on)
     else csScore = 0.0;                        // normal
+    // [V22-B] AA- credit weight 0.10 복원: _appliedFactors.has('RISK_CREDIT') guard가
+    // Macro Factor 3와의 이중 반영을 명시적으로 차단하므로 weight 완화 불필요.
+    // (기존 [RX-06] 0.10→0.05 완화는 guard 없던 시절의 heuristic. V22-B guard로 대체.)
     score += csScore * 0.10;
     count++;
   }
@@ -1731,13 +1855,23 @@ function _analyzeOnMainThread() {
   if (detectedPatterns._srLevels && typeof signalEngine.applySRProximityBoost === 'function') {
     signalEngine.applySRProximityBoost(detectedSignals, analyzeCandles, detectedPatterns._srLevels, result.cache);
   }
+  // [V22-B] factor guard Set 초기화 — 메인 스레드 폴백 경로
+  _appliedFactors.clear();
+  // [V22-B] main-thread ATR vol regime 캐시 업데이트
+  try {
+    if (typeof classifyAtrVolRegime === 'function' && typeof calcATR === 'function') {
+      _currentVolRegime = classifyAtrVolRegime(calcATR(candles, 14));
+    }
+  } catch (_e) { _currentVolRegime = 'mid'; }
   // [Phase I-L2] 외부 시장 맥락 신뢰도 조정 (market_context.json 로드 시)
   _applyMarketContextToPatterns(detectedPatterns);
   // [D-2] RORO 3-체제 분류 + 패턴 방향 편향 (매크로 조정 전 상위 레이어)
   _classifyRORORegime();
   _applyRORORegimeToPatterns(detectedPatterns);
+  _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
   // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
   _applyMacroConfidenceToPatterns(detectedPatterns);
+  _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
   // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
   _updateMicroContext(candles);
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
@@ -1798,9 +1932,14 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   detectedPatterns = _mergeChartPatternStructLines(visiblePatterns);
 
   // 드래그 시 신뢰도 조정 — 캐시된 전역 컨텍스트 값 활용, 재계산 없음
+  // [V22-B] factor guard Set 초기화 — 드래그 경로
+  _appliedFactors.clear();
+  // [V22-B] drag 경로: 기존 _currentVolRegime 재사용 (드래그는 재계산 비활성)
   _applyMarketContextToPatterns(detectedPatterns);
   _applyRORORegimeToPatterns(detectedPatterns);
+  _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
   _applyMacroConfidenceToPatterns(detectedPatterns);
+  _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   _applyMertonDDToPatterns(detectedPatterns);
