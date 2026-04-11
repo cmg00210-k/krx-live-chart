@@ -127,7 +127,7 @@ def _extract_runtime_n_scale():
     runtime과 동기화된 비교를 수행할 수 있게 한다.
 
     Returns:
-        int: runtime N_scale 값. 추출 실패 시 300 (현재 runtime 값) 폴백.
+        int: runtime N_scale 값. 추출 실패 시 1500 (현재 runtime 값) 폴백.
     """
     import re
     aw_path = os.path.join(BASE_DIR, 'js', 'analysisWorker.js')
@@ -138,10 +138,10 @@ def _extract_runtime_n_scale():
         m = re.search(r'rSquared\s*\*\s*Math\.min\(\s*h5\.n\s*/\s*(\d+)\s*,\s*1\s*\)', src)
         if m:
             return int(m.group(1))
-        print(f"  WARN: analysisWorker.js에서 N_scale 패턴 미발견, fallback 300 사용")
+        print(f"  WARN: analysisWorker.js에서 N_scale 패턴 미발견, fallback 1500 사용")
     except Exception as e:
-        print(f"  WARN: runtime N_scale 추출 실패: {e}, fallback 300 사용")
-    return 300
+        print(f"  WARN: runtime N_scale 추출 실패: {e}, fallback 1500 사용")
+    return 1500
 
 
 # ──────────────────────────────────────────────
@@ -702,7 +702,11 @@ def calibrate_conf_L(df, pattern_perf):
             and (best_var_ratio is not None)
             and (best_var_ratio > 1.5)
         )
-        formula_changed = n_scale_changed or (significant and abs(b_conf_opt) > 0.1)
+        # [V26] Decouple b_conf significance from changed flag.
+        # changed = n_scale mismatch only (runtime needs code update).
+        # b_conf significance is informational — stored as b_conf_significant.
+        formula_changed = n_scale_changed
+        b_conf_significant = significant and abs(b_conf_opt) > 0.1
         if formula_changed:
             new_formula = f"R_sq * min(n/{best_n_scale}, 1)"
         else:
@@ -719,6 +723,7 @@ def calibrate_conf_L(df, pattern_perf):
         import traceback
         traceback.print_exc()
         formula_changed = False
+        b_conf_significant = False
         new_formula = current_formula
         evidence = f"회귀 실패: {str(e)}"
         significant = False
@@ -734,6 +739,7 @@ def calibrate_conf_L(df, pattern_perf):
         "calibrated_formula": new_formula,
         "calibrated_n_scale": int(best_n_scale),
         "changed": bool(formula_changed),
+        "b_conf_significant": bool(b_conf_significant) if 'b_conf_significant' in dir() else False,
         "logistic_coeffs": {
             "intercept": round(float(a_opt), 4),
             "b_confidence": round(float(b_conf_opt), 4),

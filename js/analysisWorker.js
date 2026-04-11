@@ -92,7 +92,7 @@ try {
 // ── 백테스트 WLS 계수 → 적응형 가중치 추출 ──────────
 // h5(5일 수익률) 회귀 결과가 충분히 신뢰할 때만 저장.
 // rSquared > 0.01 + n >= 30: 통계적 의미 최소 기준.
-// confidence = rSquared × clamp(n/300, 0, 1): 샘플 수 패널티 포함 (C-2 교정: 100→200→300). [P0-C4] R⁴→R² fix.
+// confidence = rSquared × clamp(n/1500, 0, 1): 샘플 수 패널티 포함 (C-2 교정: 100→200→300→1500). [Gap C] Cox-Snell floor.
 function _extractLearnedWeights(backtestResults) {
   for (var pType in backtestResults) {
     var bt = backtestResults[pType];
@@ -104,7 +104,7 @@ function _extractLearnedWeights(backtestResults) {
         beta: h5.regression.coeffs,
         rSquared: h5.regression.rSquared,
         n: h5.n,
-        confidence: h5.regression.rSquared * Math.min(h5.n / 300, 1),
+        confidence: h5.regression.rSquared * Math.min(h5.n / 1500, 1),
       };
     }
   }

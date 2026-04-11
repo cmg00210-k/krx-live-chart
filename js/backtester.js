@@ -371,7 +371,7 @@ class PatternBacktester {
             };
           }
         }
-        // C2: conf_L N_scale (currently hardcoded as n/300)
+        // C2: conf_L N_scale (currently hardcoded as n/1500)
         // D3: rr_penalty thresholds
         // These are embedded in function logic, not easily injectable.
         // For now, D1 injection is the highest-impact automation.

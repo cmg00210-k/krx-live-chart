@@ -809,6 +809,8 @@ PIPELINE_CONTRACT = [
     ("data/macro/ff3_factors.json",                 ["daily", "rf_daily"],                   None,      False),
     ("data/macro/bond_metrics.json",                ["benchmarks"],                          None,      False),
     ("data/sector_fundamentals.json",               ["sectors", "date"],                     None,      False),
+    # ── Gap B: canonical OOS split config ──
+    ("config/oos_split.json",                       ["cutoff_date", "oos_ratio"],             None,      False),
 ]
 
 # Staleness threshold: WARN if data file not updated within this many days

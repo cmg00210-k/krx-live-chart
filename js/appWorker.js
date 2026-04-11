@@ -172,7 +172,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=63');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=64');
 
     _analysisWorker.onmessage = function (e) {
       const msg = e.data;
