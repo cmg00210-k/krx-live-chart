@@ -193,16 +193,46 @@ def contrarian_graduation(patterns: dict, q: float = 0.10) -> None:
     significant = {anti[i][0] for i in range(max_reject_idx + 1)}
 
     # Write contrarian fields into pattern dicts
+    # [Gap E] Emit effect-size metadata (Cohen's g) and precarious flag
+    # (small-n OR trivial-g) for graduated patterns so future sessions can
+    # defend exclusion decisions on power or effect-size grounds rather than
+    # on an ad-hoc cutoff. See results/gap_e_recommendation.md for rationale.
+    G_TRIVIAL = 0.05      # Cohen (1988) trivial-effect cutoff for single prop
+    N_PRECARIOUS = 400    # Wilson CI half-width ~0.05 at p=0.4 requires n>=400
     for ptype, p_val, k, n in anti:
         is_grad = ptype in significant
         patterns[ptype]['contrarian'] = is_grad
         patterns[ptype]['contrarian_p_value'] = round(p_val, 6)
+        # [Gap E] effect-size audit fields
+        wr_pct = patterns[ptype].get('oos_wr')
+        if wr_pct is not None and n > 0:
+            g = abs(wr_pct / 100.0 - 0.5)
+            patterns[ptype]['contrarian_effect_size'] = round(g, 4)
+            patterns[ptype]['contrarian_precarious'] = bool(
+                is_grad and (g < G_TRIVIAL or n < N_PRECARIOUS)
+            )
+        else:
+            patterns[ptype]['contrarian_effect_size'] = None
+            patterns[ptype]['contrarian_precarious'] = False
 
     print(f"  Contrarian graduation: {len(significant)}/{m} ANTI_PREDICTOR "
           f"passed BH-FDR at q={q}")
+    _n_precarious = sum(
+        1 for pt in significant
+        if patterns[pt].get('contrarian_precarious')
+    )
+    if _n_precarious > 0:
+        print(f"  [Gap E] {_n_precarious}/{len(significant)} graduated patterns "
+              f"flagged precarious (g<{G_TRIVIAL} or n<{N_PRECARIOUS})")
     for ptype, p_val, k, n in anti:
         tag = "GRADUATE" if ptype in significant else "null"
-        print(f"    {ptype:30s} k={k:>4d}/{n:<5d} p={p_val:.2e}  -> {tag}")
+        g_str = ""
+        if ptype in significant:
+            _g = patterns[ptype].get('contrarian_effect_size')
+            _prec = patterns[ptype].get('contrarian_precarious')
+            if _g is not None:
+                g_str = f"  g={_g:.3f}{' [PRECARIOUS]' if _prec else ''}"
+        print(f"    {ptype:30s} k={k:>4d}/{n:<5d} p={p_val:.2e}  -> {tag}{g_str}")
 
 
 def classify_tier(oos_wr: float, oos_n: int, grand_mean: float,

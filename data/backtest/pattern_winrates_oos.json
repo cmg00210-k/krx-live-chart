@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated": "2026-04-10",
+  "generated": "2026-04-11",
   "split_method": "time_cutoff_2025-11-01",
   "train_range": [
     "2025-04-11",
@@ -67,7 +67,9 @@
       "wr_oos_shrunk": 39.42,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 3e-06
+      "contrarian_p_value": 3e-06,
+      "contrarian_effect_size": 0.1144,
+      "contrarian_precarious": false
     },
     "bearishBeltHold": {
       "category": "candle",
@@ -181,7 +183,9 @@
       "wr_oos_shrunk": 45.81,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 2e-06
+      "contrarian_p_value": 2e-06,
+      "contrarian_effect_size": 0.0426,
+      "contrarian_precarious": true
     },
     "bullishHarami": {
       "category": "candle",
@@ -231,7 +235,9 @@
       "wr_oos_shrunk": 44.16,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 0.0
+      "contrarian_p_value": 0.0,
+      "contrarian_effect_size": 0.0597,
+      "contrarian_precarious": false
     },
     "channel": {
       "category": "chart",
@@ -265,7 +271,9 @@
       "wr_oos_shrunk": 40.15,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 0.0
+      "contrarian_p_value": 0.0,
+      "contrarian_effect_size": 0.1005,
+      "contrarian_precarious": false
     },
     "darkCloud": {
       "category": "candle",
@@ -331,7 +339,9 @@
       "wr_oos_shrunk": 35.61,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 1e-06
+      "contrarian_p_value": 1e-06,
+      "contrarian_effect_size": 0.1684,
+      "contrarian_precarious": true
     },
     "doubleTop": {
       "category": "chart",
@@ -493,7 +503,9 @@
       "wr_oos_shrunk": 36.21,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 0.0
+      "contrarian_p_value": 0.0,
+      "contrarian_effect_size": 0.144,
+      "contrarian_precarious": false
     },
     "invertedHammer": {
       "category": "candle",
@@ -543,7 +555,9 @@
       "wr_oos_shrunk": 42.33,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 0.001923
+      "contrarian_p_value": 0.001923,
+      "contrarian_effect_size": 0.0884,
+      "contrarian_precarious": true
     },
     "piercingLine": {
       "category": "candle",
@@ -721,7 +735,9 @@
       "wr_oos_shrunk": 43.51,
       "tier": "ANTI_PREDICTOR",
       "contrarian": true,
-      "contrarian_p_value": 0.000291
+      "contrarian_p_value": 0.000291,
+      "contrarian_effect_size": 0.0694,
+      "contrarian_precarious": false
     },
     "tweezerTop": {
       "category": "candle",
