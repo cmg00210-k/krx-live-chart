@@ -61,10 +61,11 @@
     "evidence": "best_pair=[1.0, 1.25], score=-0.8529%, F/t=6.92, p=9.9029e-04, p_low=9.7147e-01, p_high=9.1724e-06, n_below=60373, n_mid=1666, n_above=749"
   },
   "C2_conf_L": {
-    "current_formula": "R_sq * min(n/300, 1)",
+    "current_formula": "R_sq * min(n/1500, 1)",
     "calibrated_formula": "R_sq * min(n/1500, 1)",
     "calibrated_n_scale": 1500,
-    "changed": true,
+    "changed": false,
+    "b_conf_significant": true,
     "logistic_coeffs": {
       "intercept": 0.3173,
       "b_confidence": 0.5442,
