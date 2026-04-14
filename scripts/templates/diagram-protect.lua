@@ -92,15 +92,17 @@ function Header(el)
         "\\clearpage\n\\stageoverviewflow\n")
     end
 
-    -- "부록" appendix titles: muted banner with subtle rule
+    -- "부록" appendix titles: muted banner + TOC registration + running header update
     if text:match("^부록") then
       return pandoc.RawBlock("latex",
         "\\clearpage\n"
+        .. "\\renewcommand{\\currentstage}{부록}\n"
         .. "\\vspace{8pt}\n"
         .. "\\noindent\\colorbox{tableodd}{\\parbox{\\dimexpr\\linewidth-2\\fboxsep\\relax}"
         .. "{\\centering\\vspace{6pt}\n"
         .. "{\\Large\\bfseries\\sffamily\\color{muted} " .. text .. "}\\vspace{6pt}\n"
         .. "}}\\par\n"
+        .. "\\addcontentsline{toc}{section}{" .. text .. "}\n"
         .. "\\vspace{4pt}\\noindent{\\color{muted!40}\\rule{\\linewidth}{0.4pt}}\\vspace{8pt}\n")
     end
   end
@@ -133,6 +135,32 @@ end
 -- ============================================================
 function CodeBlock(el)
   local text = el.text or ""
+
+  -- Tree diagrams: hierarchical data taxonomy (API→Discipline→Theory)
+  -- Indentation: 2 spaces per level. Level 1=root, 2=branch, 3=leaf, 4+=detail
+  local lang = el.classes[1] or ""
+  if lang == "tree" then
+    local latex = "\\begin{datatree}\n"
+    for line in text:gmatch("[^\n]+") do
+      local spaces = #(line:match("^( *)") or "")
+      local content = line:gsub("^%s+", "")
+      if content ~= "" then
+        local level = math.floor(spaces / 2) + 1
+        if level <= 1 then
+          latex = latex .. "\\treeroot{" .. content .. "}\n"
+        elseif level == 2 then
+          latex = latex .. "\\treebranch{" .. content .. "}\n"
+        elseif level == 3 then
+          latex = latex .. "\\treeleaf{" .. content .. "}\n"
+        else
+          latex = latex .. "\\treedetail{" .. content .. "}\n"
+        end
+      end
+    end
+    latex = latex .. "\\end{datatree}\n"
+    return pandoc.RawBlock("latex", latex)
+  end
+
   local lines = 0
   for _ in text:gmatch("\n") do lines = lines + 1 end
   lines = lines + 1
@@ -414,11 +442,18 @@ function Table(el)
 
   -- Expand bare-column tables to full textwidth (fixes right margin waste)
   -- Bare columns: {llll}, {lrl}, {rll} etc. → equal-width p{} columns
+  -- 2-column special case: 25% left (labels/symbols), 75% right (descriptions)
   latex = latex:gsub(
     "\\begin{longtable}%[l%]{@{}([lrc]+)@{}}",
     function(cols)
       local n = #cols
-      local width = string.format("%.4f", (1.0 - n * 0.01) / n)
+      local col_widths = {}
+      if n == 2 then
+        col_widths = {0.25, 0.75}
+      else
+        local w = (1.0 - n * 0.01) / n
+        for i = 1, n do col_widths[i] = w end
+      end
       local new_cols = ""
       for i = 1, n do
         local a = cols:sub(i, i)
@@ -426,7 +461,7 @@ function Table(el)
                  or (a == "c") and "\\centering\\arraybackslash"
                  or "\\raggedright\\arraybackslash"
         new_cols = new_cols .. ">{" .. cmd .. "}p{(\\linewidth - "
-          .. (2 * n) .. "\\tabcolsep) * \\real{" .. width .. "}}"
+          .. (2 * n) .. "\\tabcolsep) * \\real{" .. string.format("%.4f", col_widths[i]) .. "}}"
       end
       return "\\begin{longtable}[l]{@{}" .. new_cols .. "@{}}"
     end
@@ -444,7 +479,24 @@ function Table(el)
       for w in colspec:gmatch("\\real{([%d%.]+)}") do
         table.insert(widths, tonumber(w))
       end
-      if #widths < 3 then return pre .. colspec .. post end
+      if #widths < 2 then return pre .. colspec .. post end
+
+      -- 2-column tables: rebalance near-equal splits to 25:75 (label:description)
+      -- Only triggers when both columns are within 15% of each other (default equal split)
+      -- Pandoc-intentional unequal splits (e.g., 30:70) are left unchanged
+      if #widths == 2 then
+        if math.abs(widths[1] - widths[2]) < 0.15 then
+          widths[1] = 0.25
+          widths[2] = 0.75
+          local idx = 0
+          local new_colspec = colspec:gsub("\\real{[%d%.]+}", function()
+            idx = idx + 1
+            return "\\real{" .. string.format("%.4f", widths[idx]) .. "}"
+          end)
+          return pre .. new_colspec .. post
+        end
+        return pre .. colspec .. post
+      end
 
       -- Check if any column is below minimum
       local needs_fix = false
@@ -541,7 +593,7 @@ function Table(el)
   local result = pre .. "\\vspace{4pt}\n"
     .. "{\\setlength{\\tabcolsep}{" .. tabcolsep .. "}\n"
     .. "\\rowcolors{2}{tableodd}{white}\n"
-    .. fontcmd .. "\\sloppy\n"
+    .. "\\notolight " .. fontcmd .. "\\sloppy\n"
     .. latex
     .. "\\rowcolors{0}{}{}\n"
     .. "}\\vspace{4pt}\n"

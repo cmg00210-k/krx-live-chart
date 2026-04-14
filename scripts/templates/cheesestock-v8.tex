@@ -26,26 +26,35 @@
 \setsansfont{Calibri}[Numbers={Lining,Monospaced}]
 \setmonofont{Consolas}[Scale=0.92]
 
-% Korean font: Pretendard (static OTF, 9 weights installed in C:/Windows/Fonts/)
-% V21 note: V20 attempted Noto Sans KR VF variable font with wght axis (400/700)
-% but TeXLive 2024 fontspec only embedded the default Thin instance, losing
-% Regular/Bold hierarchy. V21 switches to Pretendard static OTF files with
-% explicit file-name specification (NOT variable axis, NOT family-name lookup).
-\setCJKmainfont{Pretendard-Regular.otf}[
-  Path = C:/Windows/Fonts/,
-  BoldFont = Pretendard-Bold.otf,
-  ItalicFont = Pretendard-Regular.otf,
-  BoldItalicFont = Pretendard-Bold.otf
+% Korean font: Noto Sans KR (static OTF, 7 weights in scripts/fonts/)
+% Available weights: Thin(100), Light(300), DemiLight(350), Regular(400),
+%                    Medium(500), Bold(700), Black(900)
+% V22 note: V20 failed with NotoSansKR-VF.ttf (TeXLive 2024 fontspec embedded
+% Thin only). V21 used Pretendard static OTF. V22 switches to Noto Sans KR
+% static OTF from noto-cjk Sans2.004 release — multi-weight design hierarchy.
+\setCJKmainfont{NotoSansKR-Regular.otf}[
+  Path = scripts/fonts/,
+  BoldFont = NotoSansKR-Bold.otf,
+  ItalicFont = NotoSansKR-Regular.otf,
+  BoldItalicFont = NotoSansKR-Bold.otf
 ]
-\setCJKsansfont{Pretendard-Regular.otf}[
-  Path = C:/Windows/Fonts/,
-  BoldFont = Pretendard-Bold.otf
+\setCJKsansfont{NotoSansKR-Medium.otf}[
+  Path = scripts/fonts/,
+  BoldFont = NotoSansKR-Bold.otf
 ]
-\setCJKmonofont{Pretendard-Regular.otf}[
-  Path = C:/Windows/Fonts/,
-  BoldFont = Pretendard-Bold.otf,
+\setCJKmonofont{NotoSansKR-Regular.otf}[
+  Path = scripts/fonts/,
+  BoldFont = NotoSansKR-Bold.otf,
   Scale = 0.88
 ]
+
+% Weight-specific CJK font families for sheet design hierarchy
+% Usage: {\notolight 표 내용}, {\notomedium 소제목}, etc.
+\newCJKfontfamily\notothin{NotoSansKR-Thin.otf}[Path = scripts/fonts/]
+\newCJKfontfamily\notolight{NotoSansKR-Light.otf}[Path = scripts/fonts/, BoldFont = NotoSansKR-Bold.otf]
+\newCJKfontfamily\notodemilight{NotoSansKR-DemiLight.otf}[Path = scripts/fonts/, BoldFont = NotoSansKR-Bold.otf]
+\newCJKfontfamily\notomedium{NotoSansKR-Medium.otf}[Path = scripts/fonts/, BoldFont = NotoSansKR-Bold.otf]
+\newCJKfontfamily\notoblack{NotoSansKR-Black.otf}[Path = scripts/fonts/]
 
 \xeCJKsetup{
   CJKspace=true,
@@ -144,27 +153,28 @@
 \usepackage[defaultlines=3,all]{nowidow}
 
 % H1 (Stage titles): handled by Lua filter with navigator
-% Fallback for non-Stage H1 (appendices etc)
+% Lua emits color switch BEFORE heading, so curStageDark is correct per chapter
 \titleformat{\section}
-  {\needspace{4\baselineskip}\Large\bfseries\sffamily\color{dark}}
+  {\needspace{4\baselineskip}\Large\bfseries\sffamily\color{curStageDark}}
   {}{0pt}{}
 \titlespacing*{\section}{0pt}{14pt}{4pt}[0pt]
 
 % H2: Stage-colored, clear separation from H1
 % needspace 12 = ~162pt (23% of page) -- pushes headings at 85%+ to next page
-% 12pt (not 13pt): widens gap from H1(14.3pt) -- ratio 1.19x vs 1.10x
+% 14pt before (up from 10pt): visually distinct from H3's 8pt
+% curStageDark: darkest stage variant, switched by Lua filter per chapter
 \titleformat{\subsection}
-  {\needspace{12\baselineskip}\fontsize{12pt}{15pt}\selectfont\bfseries\sffamily\color{curStageMarker}}
+  {\needspace{12\baselineskip}\fontsize{12pt}{15pt}\selectfont\bfseries\sffamily\color{curStageDark}}
   {}{0pt}{}
-\titlespacing*{\subsection}{0pt}{10pt}{3pt}[0pt]
+\titlespacing*{\subsection}{0pt}{14pt}{4pt}[0pt]
 
 % H3: Stage-tinted, subordinate -- 10pt matches body size, color differentiates
 % needspace 10 = ~135pt (20% of page) -- pushes headings at 85%+ to next page
-% (increased from 8 so concept-introducing H3s naturally push to next page near bottom)
+% 8pt before (down from 10pt): clearly subordinate to H2's 14pt
 \titleformat{\subsubsection}
   {\needspace{10\baselineskip}\fontsize{10pt}{12.5pt}\selectfont\bfseries\sffamily\color{curStageMarker!65!black}}
   {}{0pt}{}
-\titlespacing*{\subsubsection}{0pt}{10pt}{2pt}[0pt]
+\titlespacing*{\subsubsection}{0pt}{8pt}{2pt}[0pt]
 
 % H4: inline, small -- needspace prevents orphan at very bottom
 \titleformat{\paragraph}[runin]
@@ -246,7 +256,7 @@
     innerbottommargin=4pt,
     skipabove=4pt,
     skipbelow=4pt
-  ]\small\sffamily
+  ]\small\notolight\sffamily
 }{%
   \end{mdframed}%
 }
@@ -257,7 +267,7 @@
 % sourcecite: \hfill avoids trivlist topsep; 3pt lead prevents flush-to-table
 \newenvironment{sourcecite}{%
   \par\vspace{3pt}\noindent\hfill%
-  \fontsize{7.5pt}{9.5pt}\selectfont\sffamily\color{muted}\itshape%
+  \fontsize{7.5pt}{9.5pt}\selectfont\notolight\sffamily\color{muted}\itshape%
 }{%
   \par\vspace{2pt}%
 }
@@ -276,7 +286,7 @@
     innerbottommargin=3pt,
     skipabove=2pt,
     skipbelow=4pt
-  ]\fontsize{7pt}{9pt}\selectfont\sffamily\color{muted}\sloppy%
+  ]\fontsize{7pt}{9pt}\selectfont\notolight\sffamily\color{muted}\sloppy%
 }{%
   \end{mdframed}%
 }
@@ -308,7 +318,55 @@
 }
 
 % ============================================================
-% 8e. FOOTNOTES -- academic reference style
+% 8e. DATA TREE -- hierarchical API→Discipline→Theory taxonomy
+% ============================================================
+% Usage: \begin{datatree} \treeroot{API} \treebranch{학문} \treeleaf{이론→산출} \end{datatree}
+% Rendered from ```tree code fences via diagram-protect.lua
+
+\newenvironment{datatree}{%
+  \vspace{4pt}%
+  \begin{mdframed}[
+    linewidth=1.5pt,
+    linecolor=curStageMarker!25,
+    leftline=true, topline=false, rightline=false, bottomline=false,
+    backgroundcolor=white,
+    innerleftmargin=10pt,
+    innerrightmargin=6pt,
+    innertopmargin=6pt,
+    innerbottommargin=6pt,
+    skipabove=4pt,
+    skipbelow=6pt
+  ]%
+  \fontsize{9pt}{12.5pt}\selectfont%
+}{%
+  \end{mdframed}%
+  \vspace{2pt}%
+}
+
+% Level 1: Root (API name) -- bold, indented 0em, stage-colored text
+\newcommand{\treeroot}[1]{%
+  \noindent{\bfseries\sffamily\color{curStageDark}#1}\par\vspace{2pt}%
+}
+% Level 2: Branch (discipline) -- medium weight, indented 1.2em
+\newcommand{\treebranch}[1]{%
+  \noindent\hspace*{1.2em}%
+  {\notomedium\sffamily\color{bodytext}#1}\par\vspace{1pt}%
+}
+% Level 3: Leaf (theory → output) -- light weight, indented 2.8em, dash prefix
+\newcommand{\treeleaf}[1]{%
+  \noindent\hspace*{2.8em}%
+  {\color{muted}--\enspace}%
+  {\notolight\color{bodytext}#1}\par\vspace{0.5pt}%
+}
+% Level 4: Sub-leaf (detail) -- smaller, indented 4.2em
+\newcommand{\treedetail}[1]{%
+  \noindent\hspace*{4.2em}%
+  {\color{muted!60}--\enspace}%
+  {\notolight\fontsize{8.5pt}{11pt}\selectfont\color{muted}#1}\par\vspace{0.5pt}%
+}
+
+% ============================================================
+% 8f. FOOTNOTES -- academic reference style
 % ============================================================
 \renewcommand{\footnotelayout}{\fontsize{7.5pt}{9.5pt}\selectfont}
 \renewcommand{\footnoterule}{%
@@ -460,9 +518,9 @@
     #5\par}%
   \end{minipage}%
 }
-% Arrow between cards: thin colored arrow, vertically centered at card top-band height
+% Arrow between cards: aligned to card top-band center (9mm banner, baseline at first text)
 \newcommand{\stageflowsep}{%
-  \raisebox{24mm}{\fontsize{10pt}{10pt}\selectfont\color{muted!55}\textrightarrow}%
+  \raisebox{2mm}{\fontsize{10pt}{10pt}\selectfont\color{muted!55}\textrightarrow}%
 }
 \newcommand{\stageoverviewflow}{%
   \vspace{8pt}%
@@ -470,15 +528,15 @@
   \vspace{10pt}\par%
   \noindent%
   \begin{tabularx}{\textwidth}{@{}X@{\hspace{3pt}}c@{\hspace{3pt}}X@{\hspace{3pt}}c@{\hspace{3pt}}X@{\hspace{3pt}}c@{\hspace{3pt}}X@{\hspace{3pt}}c@{\hspace{3pt}}X@{}}
-      \stagecard{1}{stageOneMarker}{데이터와 API}{원천 자료}{8개 API, OHLCV + 거시경제 + 파생상품} &
+      \stagecard{1}{stageOneMarker}{데이터와 API}{원천 자료}{} &
     \stageflowsep &
-      \stagecard{2}{stageTwoMarker}{학술적 기반}{이론적 토대}{47개 문서, 6개 학문 분야, 200건 이상 인용} &
+      \stagecard{2}{stageTwoMarker}{학술적 기반}{이론적 토대}{} &
     \stageflowsep &
-      \stagecard{3}{stageThreeMarker}{기술적 분석}{이론의 적용}{25개 이상 지표, 31개 패턴, IC 계보} &
+      \stagecard{3}{stageThreeMarker}{기술적 분석}{이론의 적용}{} &
     \stageflowsep &
-      \stagecard{4}{stageFourMarker}{차트}{시각적 변환}{9개 드로우 레이어, 색채 이론, 밀도 제어} &
+      \stagecard{4}{stageFourMarker}{시각적 변환}{렌더링과 인지 설계}{} &
     \stageflowsep &
-      \stagecard{5}{stageFiveMarker}{최종 전달}{cheesestock.co.kr}{4열 그리드, 5개 종단간 추적} \\
+      \stagecard{5}{stageFiveMarker}{서비스 전달}{아키텍처에서 화면으로}{} \\
   \end{tabularx}%
   \vspace{8pt}\par%
 }
@@ -491,10 +549,10 @@
 \setlength{\cftbeforesubsecskip}{0.5pt}
 \setlength{\cftbeforetoctitleskip}{0pt}
 \setlength{\cftaftertoctitleskip}{8pt}
-\renewcommand{\cftsecfont}{\sffamily\bfseries\color{dark}}
-\renewcommand{\cftsecpagefont}{\sffamily\bfseries\color{dark}}
-\renewcommand{\cftsubsecfont}{\sffamily\color{muted}}
-\renewcommand{\cftsubsecpagefont}{\sffamily\color{muted}}
+\renewcommand{\cftsecfont}{\sffamily\bfseries\color{navy}}
+\renewcommand{\cftsecpagefont}{\sffamily\bfseries\color{navy}}
+\renewcommand{\cftsubsecfont}{\sffamily\color{dark}}
+\renewcommand{\cftsubsecpagefont}{\sffamily\color{dark}}
 \renewcommand{\cftsecleader}{\cftdotfill{\cftdotsep}}
 \renewcommand{\cfttoctitlefont}{\large\bfseries\sffamily\color{dark}}
 
@@ -517,41 +575,20 @@ $endif$
 % --- Title Page ---
 \thispagestyle{empty}
 \begin{center}
-\vspace*{50mm}
+\vspace*{80mm}
 
-{\fontsize{34pt}{40pt}\selectfont\bfseries\sffamily\color{dark}
+{\fontsize{48pt}{56pt}\selectfont\bfseries\sffamily\color{dark}
 CheeseStock}
 
-\vspace{6mm}
+\vspace{10mm}
 
-{\fontsize{22pt}{28pt}\selectfont\sffamily\color{navy}
-ANATOMY V8}
-
-\vspace{8mm}
-
-{\fontsize{13pt}{16pt}\selectfont\sffamily\color{muted}
-이론적 정합성 흐름}
-
-\vspace{20mm}
-
-{\normalsize\sffamily\color{bodytext}
-\begin{tabular}{rl}
-\textbf{저자} & 이선호 \enspace\textperiodcentered\enspace 최민규 \\[4pt]
-\textbf{소속} & CheeseStock 공동 창업자 \\[4pt]
-\textbf{판본} & V8 \enspace|\enspace 2026년 4월 \\
-\end{tabular}
-}
+{\fontsize{32pt}{38pt}\selectfont\sffamily\color{navy}
+ANATOMY}
 
 \vspace{25mm}
 
-{\normalsize\sffamily
-\begin{tabular}{cl}
-\textcolor{stageOneMarker}{\rule{8pt}{8pt}} & \textbf{제1장}\enspace 데이터와 API --- 원천 자료 \\[6pt]
-\textcolor{stageTwoMarker}{\rule{8pt}{8pt}} & \textbf{제2장}\enspace 학술적 기반 --- 이론적 토대 \\[6pt]
-\textcolor{stageThreeMarker}{\rule{8pt}{8pt}} & \textbf{제3장}\enspace 기술적 분석 --- 이론의 적용 \\[6pt]
-\textcolor{stageFourMarker}{\rule{8pt}{8pt}} & \textbf{제4장}\enspace 차트 --- 시각적 변환 \\[6pt]
-\textcolor{stageFiveMarker}{\rule{8pt}{8pt}} & \textbf{제5장}\enspace www.cheesestock.co.kr --- 최종 전달 \\
-\end{tabular}
+{\fontsize{14pt}{18pt}\selectfont\sffamily\color{muted}
+이선호 \enspace\textperiodcentered\enspace 최민규
 }
 
 \end{center}
@@ -560,6 +597,7 @@ ANATOMY V8}
 % --- Table of Contents ---
 \thispagestyle{plain}
 \setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{0}   % Disable auto-numbering — headings use manual numbers
 {%
   \setlength{\parskip}{0pt}%
   \small%
