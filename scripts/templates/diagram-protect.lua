@@ -440,9 +440,19 @@ function Table(el)
   -- Left-align all tables (pandoc default [] = centered)
   latex = latex:gsub("\\begin{longtable}%[%]", "\\begin{longtable}[l]")
 
+  -- Collapse multi-line longtable colspec to single line.
+  -- Pandoc 3.x emits p{} column specs across multiple indented lines;
+  -- Lua's (.-) pattern does not cross newlines, breaking downstream regexes.
+  latex = latex:gsub("(\\begin{longtable}%[[^%]]*%])(%b{})", function(pre, braces)
+    return pre .. braces:gsub("%s+", "")
+  end)
+
   -- Expand bare-column tables to full textwidth (fixes right margin waste)
   -- Bare columns: {llll}, {lrl}, {rll} etc. → equal-width p{} columns
   -- 2-column special case: 25% left (labels/symbols), 75% right (descriptions)
+  -- 3-column special case: 12% id, 25% label, 63% description
+  -- tabcolsep deduction: 2*(n-1) because @{} removes outer separators,
+  -- leaving only (n-1) inter-column gaps of 2*tabcolsep each.
   latex = latex:gsub(
     "\\begin{longtable}%[l%]{@{}([lrc]+)@{}}",
     function(cols)
@@ -450,18 +460,21 @@ function Table(el)
       local col_widths = {}
       if n == 2 then
         col_widths = {0.25, 0.75}
+      elseif n == 3 then
+        col_widths = {0.12, 0.25, 0.63}
       else
-        local w = (1.0 - n * 0.01) / n
+        local w = 1.0 / n
         for i = 1, n do col_widths[i] = w end
       end
+      local sep_count = 2 * (n - 1)  -- inner separators only (outer removed by @{})
       local new_cols = ""
       for i = 1, n do
         local a = cols:sub(i, i)
         local cmd = (a == "r") and "\\raggedleft\\arraybackslash"
                  or (a == "c") and "\\centering\\arraybackslash"
                  or "\\raggedright\\arraybackslash"
-        new_cols = new_cols .. ">{" .. cmd .. "}p{(\\linewidth - "
-          .. (2 * n) .. "\\tabcolsep) * \\real{" .. string.format("%.4f", col_widths[i]) .. "}}"
+        new_cols = new_cols .. ">{" .. cmd .. "}p{(\\textwidth - "
+          .. sep_count .. "\\tabcolsep) * \\real{" .. string.format("%.4f", col_widths[i]) .. "}}"
       end
       return "\\begin{longtable}[l]{@{}" .. new_cols .. "@{}}"
     end
@@ -470,6 +483,7 @@ function Table(el)
   -- Rebalance narrow columns: any column < MIN_COL_PCT gets expanded,
   -- deficit taken proportionally from wider columns.
   -- Fixes pandoc's tendency to give ID/code columns <10% width.
+  -- Also normalizes \linewidth→\textwidth and tabcolsep deduction for @{} tables.
   local MIN_COL_PCT = 0.14  -- 14% minimum (~24mm at A4/22mm margins)
   latex = latex:gsub(
     "(\\begin{longtable}%[l%]{@{})(.-)(@{}})",
@@ -481,56 +495,77 @@ function Table(el)
       end
       if #widths < 2 then return pre .. colspec .. post end
 
+      local n = #widths
+      local modified = false
+
       -- 2-column tables: rebalance near-equal splits to 25:75 (label:description)
-      -- Only triggers when both columns are within 15% of each other (default equal split)
-      -- Pandoc-intentional unequal splits (e.g., 30:70) are left unchanged
-      if #widths == 2 then
+      if n == 2 then
         if math.abs(widths[1] - widths[2]) < 0.15 then
           widths[1] = 0.25
           widths[2] = 0.75
-          local idx = 0
-          local new_colspec = colspec:gsub("\\real{[%d%.]+}", function()
-            idx = idx + 1
-            return "\\real{" .. string.format("%.4f", widths[idx]) .. "}"
-          end)
-          return pre .. new_colspec .. post
+          modified = true
         end
-        return pre .. colspec .. post
-      end
 
-      -- Check if any column is below minimum
-      local needs_fix = false
-      for _, w in ipairs(widths) do
-        if w < MIN_COL_PCT then needs_fix = true; break end
-      end
-      if not needs_fix then return pre .. colspec .. post end
+      -- 3-column tables: rebalance to 12:25:63 (id:label:description)
+      elseif n == 3 then
+        widths[1] = 0.12
+        widths[2] = 0.25
+        widths[3] = 0.63
+        modified = true
 
-      -- Calculate deficit and redistribute
-      local deficit = 0
-      local donor_total = 0
-      for i, w in ipairs(widths) do
-        if w < MIN_COL_PCT then
-          deficit = deficit + (MIN_COL_PCT - w)
-          widths[i] = MIN_COL_PCT
-        else
-          donor_total = donor_total + w
+      -- 4+ columns: expand any column below MIN_COL_PCT
+      else
+        for _, w in ipairs(widths) do
+          if w < MIN_COL_PCT then modified = true; break end
         end
-      end
-      -- Shrink donors proportionally
-      if donor_total > 0 then
-        for i, w in ipairs(widths) do
-          if w > MIN_COL_PCT then
-            widths[i] = w - (w / donor_total) * deficit
+        if modified then
+          local deficit = 0
+          local donor_total = 0
+          for i, w in ipairs(widths) do
+            if w < MIN_COL_PCT then
+              deficit = deficit + (MIN_COL_PCT - w)
+              widths[i] = MIN_COL_PCT
+            else
+              donor_total = donor_total + w
+            end
+          end
+          if donor_total > 0 then
+            for i, w in ipairs(widths) do
+              if w > MIN_COL_PCT then
+                widths[i] = w - (w / donor_total) * deficit
+              end
+            end
           end
         end
       end
 
-      -- Rebuild colspec with new widths
-      local idx = 0
-      local new_colspec = colspec:gsub("\\real{[%d%.]+}", function()
-        idx = idx + 1
-        return "\\real{" .. string.format("%.4f", widths[idx]) .. "}"
+      -- Apply ratio changes
+      local new_colspec = colspec
+      if modified then
+        local idx = 0
+        new_colspec = colspec:gsub("\\real{[%d%.]+}", function()
+          idx = idx + 1
+          return "\\real{" .. string.format("%.4f", widths[idx]) .. "}"
+        end)
+      end
+
+      -- Normalize width base: \linewidth → \textwidth (longtable \linewidth
+      -- can differ from \textwidth; \textwidth is the fixed body text width)
+      new_colspec = new_colspec:gsub("\\linewidth", "\\textwidth")
+      new_colspec = new_colspec:gsub("\\columnwidth", "\\textwidth")
+
+      -- Fix tabcolsep deduction for @{} tables: with @{} on both sides,
+      -- only inner separators remain: (n-1) gaps × 2\tabcolsep = 2(n-1)\tabcolsep.
+      -- Pandoc may emit 2n\tabcolsep (correct without @{}) but our tables use @{}.
+      local correct_sep = 2 * (n - 1)
+      new_colspec = new_colspec:gsub("(%d+)(\\tabcolsep)", function(num, ts)
+        local current = tonumber(num)
+        if current ~= correct_sep then
+          return tostring(correct_sep) .. ts
+        end
+        return num .. ts
       end)
+
       return pre .. new_colspec .. post
     end
   )
