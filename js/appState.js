@@ -297,6 +297,62 @@ function _getPipelineHealth() {
   return counts;
 }
 
+// ── [V47-B2] 교차-API cascade failure 가드 ──
+// 12개 소스는 3대 상위 API에서 파생된다. 한 API 전체가 실패하면
+// 해당 API 의존 신뢰도 조정을 일괄 비활성화하여 부분 데이터 기반의
+// 가짜 정밀도(spurious precision) 생성을 차단한다.
+//
+// 그룹 매핑:
+//   ECOS (한국은행): macro_latest, bonds_latest, macro_composite(파생)
+//   KOSIS (통계청):  kosis_latest
+//   KRX  (거래소):   vkospi, derivatives, investor, etf, shortselling,
+//                    basis(파생), flow_signals(파생), options_analytics
+var _API_GROUPS = {
+  ECOS: ['macro_latest', 'bonds_latest', 'macro_composite'],
+  KOSIS: ['kosis_latest'],
+  KRX: ['vkospi', 'derivatives', 'investor', 'etf', 'shortselling',
+        'basis', 'flow_signals', 'options_analytics']
+};
+
+// API 그룹 건강도 반환: 'healthy' | 'degraded' | 'down'
+// healthy: 모든 필수 소스 'ok'
+// degraded: 1~2개 소스 missing/sample이지만 과반 'ok'
+// down: 과반 소스 missing — 해당 API 의존 조정 전면 비활성화
+function _getApiGroupHealth(apiName) {
+  var sources = _API_GROUPS[apiName];
+  if (!sources) return 'unknown';
+  var ok = 0, degraded = 0, down = 0;
+  for (var i = 0; i < sources.length; i++) {
+    var status = _pipelineStatus[sources[i]];
+    if (status === 'ok' || status === 'aging' || status === 'naver') ok++;
+    else if (status === 'stale' || status === 'sample') degraded++;
+    else down++;  // 'missing', 'rejected', 'empty', 'error'
+  }
+  var total = sources.length;
+  if (down > total / 2) return 'down';
+  if (down + degraded > total / 2) return 'degraded';
+  return 'healthy';
+}
+
+// 교차-API cascade 실패 감지: 한 API가 'down' 상태면 콘솔 경고 출력
+// _applyMacroConfidenceToPatterns 등에서 이 값을 참조하여 전면 스킵 결정
+function _reportCrossApiStatus() {
+  var statuses = {
+    ECOS: _getApiGroupHealth('ECOS'),
+    KOSIS: _getApiGroupHealth('KOSIS'),
+    KRX: _getApiGroupHealth('KRX')
+  };
+  var downApis = [];
+  Object.keys(statuses).forEach(function(api) {
+    if (statuses[api] === 'down') downApis.push(api);
+  });
+  if (downApis.length > 0) {
+    console.warn('[CROSS-API] ' + downApis.join(', ') +
+      ' API 그룹 다운 — 관련 신뢰도 조정 전면 비활성화');
+  }
+  return statuses;
+}
+
 let _chartPatternStructLines = [];  // 전체 분석에서 감지된 차트 패턴의 구조선 보존 (드래그 시 소실 방지)
 let _lastActivePattern = null;     // [Fix-1] 전체 분석의 active 패턴 보존 (드래그 시 HUD 소실 방지)
 

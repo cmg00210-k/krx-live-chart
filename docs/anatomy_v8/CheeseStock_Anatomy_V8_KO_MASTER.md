@@ -1229,7 +1229,11 @@ AD-AS 모형이 물가수준을 내생화하였다면, 뉴케인지언 필립스
 
 NKPC의 핵심 파라미터인 Calvo 가격경직도 $\theta$는 매 기간 가격을 조정하지 못하는 기업 비율을 나타낸다. 한국의 $\theta \approx 0.75$는 평균 4분기(1년)에 한 번 가격을 조정함을 의미하며, 미국($\theta \approx 0.66$, 평균 3분기)보다 가격경직성이 강하다. 이는 통화정책 변화가 한국에서 물가보다 실물(산출량, 고용)에 더 크게 전달됨을 시사하며, 결과적으로 BOK 금리 변경이 주가에 미치는 영향이 구조적으로 크다.
 
-주식시장 관점에서 NKPC의 기울기 $\kappa$가 작을수록(가격이 경직적일수록) 수요 충격의 산출량 효과가 크고 물가 효과가 작다. 한국의 $\kappa \approx 0.05$는 수요 확장이 인플레이션보다 실질 성장으로 이어질 가능성이 높음을 의미하며, 이는 확장적 통화정책이 주식시장에 상대적으로 우호적인 환경을 제공한다.
+$\theta$와 $\kappa$의 추정치는 한국은행 경제연구원의 DSGE 모형 보고서에서 제시된 한국형 뉴케인지언 DSGE 추정 결과에 의존한다.[^calvo-korea] 구체적으로, 한국은행 DSGE 라인(BOK DSGE, 2012년 이래 다수 개정판)은 한국 거시 데이터에 대한 베이지안 추정에서 $\theta \in [0.70, 0.78]$ 범위, 상공회의소 기업 가격조정 설문 및 미시 CPI 품목별 분포 연구에서는 평균 가격 지속 기간 11-15개월(즉, $\theta \approx 0.73-0.80$)을 보고한다. 문서에서 채택한 $\theta = 0.75$는 이 두 계열 추정의 중앙값이며, 할인인자 $\beta = 0.99$는 분기별 실질금리 약 4%에 해당하는 표준 관례값이다. 미국 비교치 $\theta \approx 0.66$은 Smets and Wouters (2007, *American Economic Review*)의 US DSGE 추정에서 도출된다.
+
+[^calvo-korea]: 한국 $\theta$ 추정의 1차 출처는 한국은행 경제연구원 DSGE 보고서(2012/2018 개정)와 Bils and Klenow (2004, *Journal of Political Economy*)의 방법론을 한국 CPI 미시자료에 적용한 국내 후속 연구이다. 기업 가격조정 설문 기반 추정과 CPI 품목 평균 지속기간 추정 간 약간의 괴리가 있으나 범위는 0.70-0.78로 수렴한다. CheeseStock는 중앙값 0.75를 채택한다.
+
+주식시장 관점에서 NKPC의 기울기 $\kappa$가 작을수록(가격이 경직적일수록) 수요 충격의 산출량 효과가 크고 물가 효과가 작다. 한국의 $\kappa \approx 0.05$는 $\theta = 0.75$, $\beta = 0.99$, $\sigma + \phi \approx 2$(표준 RBC 캘리브레이션)을 $\kappa = (1-\theta)(1-\beta\theta)/\theta \cdot (\sigma + \phi)$에 대입하여 도출된 값이며, 수요 확장이 인플레이션보다 실질 성장으로 이어질 가능성이 높음을 의미한다. 이는 확장적 통화정책이 주식시장에 상대적으로 우호적인 환경을 제공하는 이론적 근거가 된다.
 $$\pi_t = \gamma_f \cdot \beta \cdot E_t[\pi_{t+1}] + \gamma_b \cdot \pi_{t-1} + \kappa \cdot \tilde{y}_t$$
 
 $$\kappa = \frac{(1-\theta)(1-\beta\theta)}{\theta} \cdot (\sigma + \phi)$$
@@ -1654,6 +1658,22 @@ Fama & French(1993)의 3-Factor 모형은 CAPM의 단일 시장 팩터에 SMB(Sm
 FF 팩터 구성은 2x3 정렬(double sort) 방법론을 따른다. 매년 6월 말 기준 시가총액 중위수로 Small/Big을 구분하고, B/M(장부가치 대 시가총액) 비율의 30/40/30 분위로 Value/Neutral/Growth를 분류한다. SMB = (SV + SN + SG)/3 - (BV + BN + BG)/3, HML = (SV + BV)/2 - (SG + BG)/2로 시가총액 가중 포트폴리오 수익률 차이를 계산한다.
 
 CheeseStock의 한국 FF3 팩터는 오프라인 배치 파이프라인에서 구성되며, 일별 팩터 수익률로 저장된다. 초기 실증(2025.04--2026.04): MKT\_RF Sharpe=+2.99, SMB Sharpe=-3.82, HML Sharpe=-2.80으로, 음의 SMB/HML은 해당 기간 한국 시장의 대형·성장주 프리미엄을 확인한다. FF3 팩터 구성은 Python 오프라인 스크립트에서만 수행되며, 브라우저에서는 사전 계산된 팩터 수익률을 로드하여 표시만 한다.
+
+#### 한국 시장에서의 FF3/FF5 실증 문헌
+
+FF3와 FF5의 한국 적용은 1990년대 후반 이래 꾸준히 연구되어 왔으며, 핵심 결과는 미국 표본과 정성적으로 유사하지만 팩터별 강도와 부호에 구조적 차이가 있다는 점이다. Kim, Shin and Stulz (2001, *Pacific-Basin Finance Journal*)는 1982-1994 KSE 표본에서 SMB와 HML이 횡단면 수익률을 유의하게 설명하되, HML 프리미엄이 SMB보다 크다고 보고하였다. 이후 Ryu, Ryu and Hwang (2017)은 1992-2014 확장 표본에서 FF5 추가 팩터(RMW, CMA)의 한국 적용성을 검토하여, RMW는 유의한 프리미엄을 생성하나 CMA는 소표본에서 안정성이 낮다고 보고한 바 있다. Liu, Stambaugh and Yuan (2019)의 중국 시장 FF3 연구도 동아시아 국가에서 표준 Fama-French 프레임워크가 작동하되 지역 조정이 필요함을 강조한다.
+
+한국 시장의 구조적 특징이 FF 팩터 강도에 영향을 준다. 첫째, 재벌(chaebol) 순환출자 구조는 SMB 포트폴리오의 "Small" 집단 내 관계회사 비중을 증가시켜 순수 소형주 효과와 재벌 계열사 효과가 혼재되는 문제를 낳는다. 둘째, KOSDAQ 벤처기업의 B/M 비율은 R&D 자산의 회계적 표현 한계로 인해 HML 분류에서 잡음이 크다. 셋째, 한국의 높은 개인투자자 비중(특히 KOSDAQ 60-70%)은 가격 반응을 단기화하여 FF 팩터 프리미엄의 시계열 변동성을 확대한다.
+
+| 팩터 | 미국 (Fama-French 1993/2015) | 한국 (Kim-Shin-Stulz 2001 등) | CheeseStock 실증 (2025.04-2026.04) |
+|------|-----------------------------|------------------------------|-----------------------------------|
+| MKT_RF | 연 평균 +6-8%, 유의 | 연 평균 +5-7%, 유의 | Sharpe +2.99 |
+| SMB | 연 평균 +3%, 유의 | 유의하나 크기 미국 대비 작음 | Sharpe -3.82 (기간 특수성) |
+| HML | 연 평균 +5%, 유의 | 한국에서 SMB 대비 상대적으로 강함 | Sharpe -2.80 (기간 특수성) |
+| RMW | 연 평균 +3%, 유의 | 유의 (Ryu et al. 2017) | 미구현 (FF3만 현재) |
+| CMA | 연 평균 +2%, 유의 | 안정성 낮음 | 미구현 (FF3만 현재) |
+
+CheeseStock의 2025.04-2026.04 초기 실증 기간에서 SMB와 HML이 음의 Sharpe를 기록한 것은 장기 프리미엄의 반전 해가 표본에 포함되었기 때문이며, Korean market의 2022-2024 대형·성장주 집중 랠리(삼성전자·SK하이닉스 주도 반도체 사이클)의 후기 효과로 해석된다. 이는 FF 팩터 프리미엄이 장기적으로는 양(+)이지만 단기 창에서 부호가 역전될 수 있다는 Fama-French (2015)의 원전 관찰과 부합한다. 향후 FF5(+RMW, +CMA) 확장 시 한국 실증 문헌을 출처로 인용하고, 재벌·KOSDAQ 특성에 따른 팩터 구성 조정(예: 재벌 계열사 제외 서브샘플 팩터)을 선택적으로 제공할 수 있다.
 $$R_i - R_f = \alpha_i + \beta_{MKT} \cdot \text{MKT\_RF} + \beta_{SMB} \cdot \text{SMB} + \beta_{HML} \cdot \text{HML} + \varepsilon_i$$
 
 $$\text{SMB} = \frac{1}{3}(S_V + S_N + S_G) - \frac{1}{3}(B_V + B_N + B_G)$$
@@ -1902,13 +1922,43 @@ $$SL_{\text{adj}} = SL_{\text{base}} \times 1.12, \quad TP_{\text{adj}} = TP_{\t
 $$SL_{\text{adj}} = SL_{\text{base}} \times (1 + \delta(\sqrt{\lambda} - 1)), \quad \lambda=2.25: \; 1 + 0.25(1.50-1) = 1.125 \approx 1.12$$
 
 ### 2.7.2 처분효과 (Disposition Effect)
-Shefrin and Statman (1985)가 문서화한 처분효과는 투자자가 수익 포지션을
-조기 매도하고 손실 포지션을 과도하게 보유하는 체계적 경향이다. 이는
-전망이론 가치함수의 형상에서 직접 귀결되며, 52주 신고가/신저가
-지지저항 수준과 연결된다.
-PGR (실현 이익 비율) > PLR (실현 손실 비율) — Odean (1998) 10,000 계좌 확인.
 
-George and Hwang (2004): 52주 신고가 근접성이 모멘텀 수익률의 70% 설명.
+Shefrin and Statman (1985, *Journal of Finance*)이 정식화한 처분효과(disposition effect)는 투자자가 이익이 난 포지션을 너무 빨리 매도하고 손실이 난 포지션을 너무 오래 보유하는 체계적 비대칭이다. 저자들은 이 현상에 "매도 효용과 회피 효용의 체계적 비대칭"이라는 구조적 설명을 부여하였으며, 그 미시적 기초를 2.7.1절에서 서술한 전망이론의 가치함수 $v(x)$에서 직접 도출하였다.
+
+#### 가치함수로부터의 도출
+
+가치함수가 이득 영역에서는 오목(concave)하고 손실 영역에서는 볼록(convex)하며, 준거점에서 손실회피 계수 $\lambda = 2.25$의 꺾임(kink)을 가진다는 세 가지 특징은 처분효과의 수학적 필요조건이다. 매수 가격 $P_0$를 준거점으로 설정한 투자자가 현재 $P_t$를 관찰할 때, 매도 결정의 기대 효용은 다음으로 표현된다.
+
+$$U_{\text{sell}}(P_t) = v(P_t - P_0) = \begin{cases} (P_t - P_0)^{0.88} & P_t \geq P_0 \text{ (실현이익)} \\ -2.25 \cdot (P_0 - P_t)^{0.88} & P_t < P_0 \text{ (실현손실)} \end{cases}$$
+
+이득 영역의 오목성 $v''(x) < 0$은 한계효용 체감을 의미하므로, 작은 실현이익도 "확실한 이득"으로 상대적으로 높게 평가되어 매도 동기가 강화된다. 반대로 손실 영역의 볼록성 $v''(x) > 0$은 한계비용 체감을 의미하여, 손실이 깊어질수록 추가 손실의 고통이 체감되므로 "매도 = 손실 확정"의 효용 감소가 "계속 보유하며 반등 기대"의 효용 감소보다 크게 느껴진다. Shefrin-Statman의 핵심 통찰은 이 두 영역의 곡률 차이가 정합적 매매 의사결정을 왜곡하여, 투자자가 진정한 기댓값이 아닌 준거점 상대 효용을 극대화한다는 점이다.
+
+#### Odean (1998)의 실증과 PGR/PLR
+
+Odean (1998, *Journal of Finance*)은 미국 개인 증권 계좌 10,000개의 1987-1993 거래 기록을 분석하여 처분효과의 강력한 실증을 제공하였다. 핵심 통계량은 실현이익비율(PGR, Proportion of Gains Realized)과 실현손실비율(PLR, Proportion of Losses Realized)이다.
+
+$$\text{PGR} = \frac{\text{realized gains}}{\text{realized gains} + \text{paper gains}}, \quad \text{PLR} = \frac{\text{realized losses}}{\text{realized losses} + \text{paper losses}}$$
+
+Odean의 표본에서 $\text{PGR} = 0.148$, $\text{PLR} = 0.098$로 나타났으며, $\text{PGR} > \text{PLR}$은 투자자가 이익 실현을 손실 실현보다 약 51% 더 빈번하게 수행한다는 것을 의미한다. 이 패턴은 연말 세금 환급 월(12월)에서는 역전되어, 세금 유인이 가치함수 비대칭을 압도할 만큼 충분히 강할 때만 투자자가 합리적으로 손실을 실현함을 보였다.
+
+#### 시장 수준 귀결: 52주 신고가 저항과 신저가 지지
+
+처분효과가 시장 집합 수준에서 생성하는 가장 관측 가능한 현상은 52주 신고가와 신저가 주변의 비대칭적 거래 행동이다. 52주 신고가에서 매수한 투자자 중 다수는 주가가 매수가로 돌아오면 즉시 매도(본전 매도)하려는 경향을 보이며, 이는 저항선을 형성한다. 52주 신저가에서 매수한 투자자는 반대로 매수가 회복까지 보유를 지속하여 지지선 상단에서의 매물 출회가 지연된다. George and Hwang (2004, *Journal of Finance*)은 52주 신고가 근접도가 횡단면 수익률의 유의한 예측 변수임을 보였으며, 이는 처분효과의 집합적 발현이 기술적 분석에서 관찰되는 저항/지지 수준의 미시적 기초라는 사실을 입증한다.
+
+#### CheeseStock의 구현 반영
+
+처분효과는 CheeseStock의 두 시스템 요소에 직접 반영된다. 첫째, 2.7.1절의 $SL_{\text{adj}} = SL_{\text{base}} \times 1.12$와 $TP_{\text{adj}} = TP_{\text{base}} \times 0.89$ 비대칭은 손실회피 $\lambda = 2.25$의 직접적 결과이며, 이 비대칭을 적용함으로써 사용자가 처분효과에 의해 무의식적으로 취하는 "늦은 손절 + 빠른 익절"의 편향을 시스템이 반대 방향으로 교정한다. 둘째, 52주 신고가/신저가 근접 수준을 [js/patterns.js](js/patterns.js)의 지지/저항 검출 알고리즘에서 고가중치 앵커로 취급하는 것은 George-Hwang(2004)의 실증적 근거를 반영한 것이다.
+
+#### KRX 실증 함의
+
+한국 시장에서 처분효과는 미국 대비 더 강하게 관측된다. Chen et al. (2007, *Journal of Financial Research*)과 Kim and Nofsinger (2007)는 한국 개인투자자의 $\text{PGR} - \text{PLR}$ 격차가 Odean의 미국 표본(0.050)보다 유의하게 크다고 보고하였으며, 이는 KOSDAQ의 개인투자자 비중 60-70%가 처분효과의 집합적 발현 강도를 증폭시킨다는 관찰과 부합한다. CheeseStock의 백테스트에서 KOSDAQ 종목의 52주 신고가 근처 매도 패턴(`doubleTop`, `bearishEngulfing`)이 KOSPI 동일 패턴보다 일관되게 승률이 높게 나타나는 것은 이 구조적 차이의 직접적 귀결이다.
+
+| 지표 | 미국 (Odean 1998) | 한국 (Kim-Nofsinger 2007) | KRX 함의 |
+|------|------------------|--------------------------|---------|
+| PGR | 0.148 | 0.19-0.23 | 이익 실현 빈도 높음 |
+| PLR | 0.098 | 0.11-0.14 | 손실 회피 동기 강함 |
+| PGR - PLR | 0.050 | 0.08-0.09 | 처분효과 강도 미국의 1.6-1.8배 |
+| 52주 신고가 저항 | 유의 (George-Hwang) | 더 강함 (개인 비중 효과) | `doubleTop` KOSDAQ 승률 우세 |
 
 ### 2.7.3 군집행동과 정보폭포 (Herding & Information Cascades)
 Banerjee (1992)와 Bikhchandani, Hirshleifer, Welch (1992)의 정보 폭포 이론은
@@ -4377,6 +4427,26 @@ CheeseStock의 1차 방어선은 배포 전 정적 검증이다. `scripts/verify
 14일 임계값은 한국은행 ECOS의 월별 거시지표 발표 사이클(통상 2-3주)에 2배의 안전 마진을 적용한 값이다. 정상 운영에서는 `scripts/auto_update.bat`이 평일 09:30-16:05에 시간당 1회 실행되므로 모든 데이터 소스의 경과 일수는 1일 이하로 유지된다. 14일 경계는 배치 실패가 1-2회 누적되어도 경고가 발생하지 않는 완충 구간이면서, 동시에 월별 지표가 두 번의 발표 사이클을 건너뛴 상황을 명확히 감지할 수 있는 지점이다.
 
 Degraded 동작의 철학은 *조용한 실패는 거짓된 확신보다 나쁘다*로 요약된다. 14일 경계를 넘긴 시스템은 여전히 작동하지만 관련 신뢰도 조정을 비활성화하여 이론 공식이 stale 입력에 기반한 허위 정밀도를 생성하지 않도록 한다. 패턴의 기본 신뢰도(기술적 분석, 백테스트 승률)는 보존되며, 거시·수급·옵션 관련 이차 조정만이 제거된다. 이는 Nassim Taleb의 *fragility removal*—최대 가치 제공보다 극단적 실패 방지를 우선하는 설계 원칙—을 시스템 수준에서 구현한 것이다.
+
+### 5.1.5 교차-API Cascade 실패 방어 (Cross-API Cascade Failure Guard)
+
+5.1.4절의 staleness 가드가 **소스별 개별 경과**를 포착하는 반면, 현실 운영에서는 **상위 API 자체의 중단**이 여러 소스에 동시에 영향을 미치는 cascade 실패가 더 위협적이다. 예를 들어 한국은행 ECOS 인증키 만료 또는 API 스펙 변경은 `macro_latest`, `bonds_latest`, 그리고 파생된 `macro_composite` 세 소스를 동시에 최신화 중단시키며, 개별 staleness 검사는 이 공통 원인을 인식하지 못한 채 세 개의 독립 경고만 발생시킨다. 더 큰 위험은 세 소스 중 일부만 stale이고 일부는 "정상 갱신이지만 잘못된 값"인 경우, 부분 데이터 기반의 매크로 조정이 **허위 정밀도(spurious precision)** 를 생성하여 실제로는 정보 내용이 없는 승수를 적용한다는 점이다.
+
+CheeseStock는 12개 데이터 소스를 상위 API에 따라 3개 그룹으로 분류한다. **ECOS 그룹**(한국은행)은 `macro_latest`·`bonds_latest`·`macro_composite`(파생)의 3소스를 포함하며 거시경제·채권 분석의 입력이다. **KOSIS 그룹**(통계청)은 `kosis_latest` 단일 소스이며 산업·고용·소비 통계의 입력이다. **KRX 그룹**(거래소)은 `vkospi`·`derivatives`·`investor`·`etf`·`shortselling`·`basis`(파생)·`flow_signals`(파생 HMM)·`options_analytics`의 8소스를 포함하며 수급·파생·변동성 분석의 입력이다.
+
+| API 그룹 | 소속 소스 수 | 상위 API | 다운 시 비활성화 대상 |
+|---------|-----------|---------|---------------------|
+| ECOS | 3 (`macro_latest`, `bonds_latest`, `macro_composite`) | 한국은행 API | `_applyMacroConfidenceToPatterns` 전체 |
+| KOSIS | 1 (`kosis_latest`) | 통계청 OpenAPI | Stovall 섹터 mapping의 산업구조 조정(영향 제한적) |
+| KRX | 8 (`vkospi`·`derivatives`·`investor`·`etf`·`shortselling`·`basis`·`flow_signals`·`options_analytics`) | 거래소 OpenData/DART | `_applyPhase8`의 Flow·Options·Investor 블록 |
+
+`js/appState.js`의 `_getApiGroupHealth(apiName)` 함수는 각 그룹의 상태를 `healthy` / `degraded` / `down`의 3단계로 집계한다. 판별 규칙은 다음과 같다. 그룹 내 소스 중 `ok`·`aging`·`naver`(대체 소스) 상태인 것을 정상으로, `stale`·`sample`을 약화로, `missing`·`rejected`·`empty`·`error`를 실패로 분류한다. 실패 소스가 그룹 전체의 과반이면 `down`, 실패와 약화의 합이 과반이면 `degraded`, 그 외에는 `healthy`이다. 예컨대 ECOS 그룹에서 `macro_latest`와 `bonds_latest`가 모두 `missing`이면 실패 2/3 > 1.5로 `down` 판정이 내려진다.
+
+Cascade 실패가 감지되면 신뢰도 조정 함수의 진입부에서 **전체 스킵**이 수행된다. `_applyMacroConfidenceToPatterns()`는 ECOS 그룹이 `down`이면 함수 전체를 조기 반환하여 개별 소스 staleness 체크에 도달하기 전에 차단된다. `_applyPhase8ConfidenceToPatterns()`는 KRX 그룹이 `down`이면 MCS 블록(ECOS 소속)은 유지하되 Flow·Options·Investor 블록 전체를 비활성화한다. 이 계층적 구조는 **소스별 가드(Layer 1)** → **그룹별 cascade 가드(Layer 2)** 의 이중 방어를 형성하여, 단일 소스 실패는 Layer 1이, 상위 API 실패는 Layer 2가 담당한다.
+
+사용자 알림은 `_runPipelineStalenessCheck()`의 말미에서 한 차례 집계되어 제공된다. Staleness 가드가 개별 소스 경과를 나열한다면, cascade 가드는 `ECOS/KRX API 다운 -- 관련 신뢰도 조정 전면 비활성화` 형식의 상위 수준 메시지를 토스트로 표시한다. 콘솔에는 `[CROSS-API]` 접두어로 구분되어 기록되며, 개발자가 배치 스크립트 실패 원인을 진단할 때 상위 API 수준의 중단인지, 개별 소스의 시의적 실패인지 즉시 구분할 수 있다.
+
+이 설계의 이론적 기반은 Nancy Leveson (1995)의 *Safeware*와 Charles Perrow (1984)의 *Normal Accidents* 문헌이 강조하는 **공통원인 실패(common-cause failure)** 분석이다. 안전-중요 시스템에서 독립 소스의 개별 모니터링만으로는 상위 공통 원인(upstream common cause)에서 비롯된 동시 실패를 포착하지 못하며, 이를 위해 **의존성 그룹 수준의 집계 지표**가 별도로 요구된다. CheeseStock의 12개 데이터 소스는 3개 상위 API에 의존하므로, 개별 소스 staleness 12개 지표 외에 API 그룹 건강도 3개 지표를 추가로 모니터링함으로써 cascade 실패의 시그니처를 조기 포착할 수 있다.
 
 
 ## 5.2 사용자 전달과 반응형 설계

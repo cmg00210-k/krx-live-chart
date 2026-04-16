@@ -489,6 +489,18 @@ function _runPipelineStalenessCheck() {
     showToast(names.length + '개 데이터 소스 14일+ 경과 -- 관련 신뢰도 조정 비활성화', 'warning');
     console.warn('[STALE] 경과 데이터 소스 (' + names.length + '):', names.join(', '));
   }
+
+  // [V47-B2] 교차-API 그룹별 상태 보고 + down 그룹 1회 알림
+  if (typeof _reportCrossApiStatus === 'function') {
+    var _apiStatuses = _reportCrossApiStatus();
+    var _downApis = [];
+    Object.keys(_apiStatuses).forEach(function(api) {
+      if (_apiStatuses[api] === 'down') _downApis.push(api);
+    });
+    if (_downApis.length > 0) {
+      showToast(_downApis.join('/') + ' API 다운 -- 관련 신뢰도 조정 전면 비활성화', 'warning');
+    }
+  }
 }
 
 /**
@@ -757,7 +769,17 @@ async function _loadPhase8Data() {
 function _applyPhase8ConfidenceToPatterns(patterns) {
   if (!patterns || !patterns.length) return;
 
+  // V47-B2: 교차-API cascade 실패 가드. KRX 그룹 전체 down이면
+  // flow_signals/options/investor/etf/shortselling 모두 신뢰 불가 →
+  // Phase8 내부의 HMM·옵션·수급 블록 전체 스킵. MCS 블록은 ECOS 소속이라
+  // 블록별 개별 guard 유지(아래 각 if문의 _staleDataSources 체크).
+  if (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('KRX') === 'down') {
+    console.warn('[CROSS-API] KRX down → _applyPhase8ConfidenceToPatterns Flow/Options 블록 전면 스킵');
+    // MCS 블록(ECOS 소속)만 아래에서 정상 진행
+  }
+
   var code = currentStock ? currentStock.code : null;
+  var _krxGroupDown = (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('KRX') === 'down');
 
   // MCS 조정 (거시경제 복합점수)
   // [V22-B] factor guard: MACRO_COMPOSITE 이미 적용되었으면 스킵
@@ -788,7 +810,8 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
   // [V22-B] factor guards: REGIME_HMM (시장 전체 multiplier) + FLOW_FOREIGN (per-stock bonus) 분리
   // [V47-B1] flow_signals staleness → skip (승수 1.0 클램프)
-  if (code && _flowSignals && !_staleDataSources.has('flow_signals') && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
+  // [V47-B2] KRX 그룹 cascade down → skip
+  if (code && !_krxGroupDown && _flowSignals && !_staleDataSources.has('flow_signals') && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
     var flow = _flowSignals.stocks[code];
     var regime = flow.hmmRegimeLabel || null;
     var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
@@ -832,7 +855,8 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // Simon & Wiggins (2001): IV/HV > 1.5 → pattern accuracy drops 15-20%
   // [V22-B] factor guard: FLOW_OPTIONS 이미 적용되었으면 스킵
   // [V47-B1] options_analytics staleness → skip (승수 1.0 클램프)
-  if (!_appliedFactors.has('FLOW_OPTIONS') && !_staleDataSources.has('options_analytics') && _optionsAnalytics && _optionsAnalytics.analytics) {
+  // [V47-B2] KRX 그룹 cascade down → skip
+  if (!_appliedFactors.has('FLOW_OPTIONS') && !_krxGroupDown && !_staleDataSources.has('options_analytics') && _optionsAnalytics && _optionsAnalytics.analytics) {
     var _oa = _optionsAnalytics.analytics;
     var _ivHvFired = false;
     var _optionsApplied = false;
@@ -1335,6 +1359,13 @@ function _applyMarketContextToPatterns(patterns) {
 // ══════════════════════════════════════════════════════════════
 function _applyMacroConfidenceToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
+  // V47-B2: 교차-API cascade 실패 가드. ECOS 그룹 전체가 down이면
+  // macro_latest/bonds_latest/macro_composite 모두 신뢰 불가 → 매크로 조정 전면 스킵.
+  // 개별 소스 stale 가드(V47-B1)를 상위 레벨에서 보강.
+  if (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('ECOS') === 'down') {
+    console.warn('[CROSS-API] ECOS down → _applyMacroConfidenceToPatterns 전체 스킵');
+    return;
+  }
   // V47-B1: stale 소스는 null로 간주 → 이 함수 내 파생 승수(phase/slope/aaSpread/fSignal 등)가
   // 모두 조건 미충족으로 건너뛰어 macroMult 1.0 클램프와 동일한 효과를 달성.
   var macro = _staleDataSources.has('macro_latest') ? null : _macroLatest;
