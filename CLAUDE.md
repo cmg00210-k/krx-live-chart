@@ -95,6 +95,51 @@ Start: `server\start_server.bat`. Full setup in `docs/developer-setup.md`.
 - Wrangler `--commit-message` and `.bat` files: ASCII-only (Korean breaks both)
 - Adding/removing JS files → update `sw.js` `STATIC_ASSETS` array too (cache miss = broken offline)
 
+## Deploy + Commit + Push Checklist (V48-SEC Phase 1 active)
+
+**Always walk through these gates before `wrangler pages deploy` OR `git commit`.** Claude must surface these to the user and wait for confirmation on each, not auto-proceed.
+
+### Pre-deploy gates (in order)
+
+1. **Verify secrets**: `python scripts/verify.py --check ip` must pass (no IP JSON leaks)
+2. **Bundle freshness**: if deploying `--bundled`, confirm `node scripts/build.mjs --minify --obfuscate` was run since last JS edit (check `deploy.bundled/manifest.json` timestamp)
+3. **Source functions/_data/**: `stage_deploy.py` now auto-populates this; if running `wrangler pages deploy` manually without stage, the deploy WILL FAIL with "Could not resolve ../_data/*.json" — always stage first
+4. **CACHE_NAME bump**: if any JS file changed, `sw.js` `CACHE_NAME` must be incremented or hash-bumped (`cheesestock-vN+1` or `cheesestock-v<hash>`)
+5. **Git scope**: stage specific files (`git add path/to/file`), never `git add -A` or `git add .` — uncommitted V38/V39/... work can sneak in
+
+### Cloudflare CDN cache: the stale-while-revalidate trap
+
+`_headers` sets `/data/* Cache-Control: public, max-age=3600, stale-while-revalidate=86400`. This means **when you REMOVE a file from deploy, the old cached content keeps serving for up to 24h** even after redeploy. This bit V48 Phase 1 (calibrated_constants.json leaked 17h after exclusion).
+
+**If a deploy removes or restricts any file under `/data/`, immediately after deploy:**
+
+- **Option A (fast, dashboard)**: dash.cloudflare.com → Websites → cheesestock.co.kr → Caching → Configuration → Custom Purge → paste exact URL(s) → Purge
+- **Option B (CLI-friendly, autonomous)**: deploy a placeholder file at the same URL with a `{"moved":"/api/..."}` body. CF caches the placeholder, evicting the stale real content. Works without dashboard access. `scripts/stage_deploy.py` can be extended to auto-generate placeholders for removed paths.
+- **Option C (hands-off)**: wait 6-8h for natural expiration. Acceptable only if content is non-sensitive.
+
+Verification after any of A/B/C:
+
+```bash
+curl -o /dev/null -w "%{size_download}\n" https://cheesestock.co.kr/data/backtest/<FILE>
+```
+
+Size should match the NEW deployed content (43397B HTML fallback = safe, or small placeholder = safe). If it still matches the OLD file size, cache purge did not propagate — retry.
+
+### Post-deploy gates (continued from above)
+
+- **Gate 6 — Production smoke**: open `https://cheesestock.co.kr` in incognito, check for `[KRX] index.json 로드 완료: N종목` with N > 2000 and zero red Console errors
+- **Gate 7 — IP endpoint check**: `curl -H "Origin: https://evil.com" https://cheesestock.co.kr/api/constants` must return 403; `curl -H "Origin: https://cheesestock.co.kr" ...` must return 200 with JSON
+- **Gate 8 — Git push**: the agent cannot push directly to `main` (safety policy). Either push to a feature branch (`security/*`, `feat/*`, etc.) for user to merge, or have the user run `git push origin main` locally
+
+### Claude behavior rule (for this project)
+
+When the user asks "deploy" or "commit and push", Claude must:
+
+- Show which files will be staged (run `git status --short`) and **pause for confirmation** if any file is outside the conversation's scope
+- Show the exact `wrangler pages deploy` command and **pause for confirmation** before running
+- After any `wrangler pages deploy` that excluded or modified `/data/backtest/*`, proactively run the CDN leak audit from Option C verification above
+- Never push to `main` — always to a feature branch, then instruct the user on merge path
+
 ## Reference
 
 - `.claude/rules/` — Detailed rules for architecture, colors, rendering, patterns, financial, scripts, UI layout
