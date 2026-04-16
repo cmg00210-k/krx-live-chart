@@ -3471,25 +3471,27 @@ $$\text{microMult} = \prod_{m \in \{M1,M2,M3\}} (1 + \delta_m)$$
 
 > 이전 Stage 데이터: $\textcolor{stageOneMarker}{\text{bok\_rate}}$, $\textcolor{stageOneMarker}{\text{vix}}$, $\textcolor{stageOneMarker}{\text{taylor\_gap}}$, $\textcolor{stageOneMarker}{\text{credit\_spread}}$ 등은 Stage 1에서 수집된다. Stage 2의 IS-LM, 테일러 준칙, 먼델-플레밍 이론이 각 요인의 조정 방향과 크기를 결정한다.
 
-#### CONF-계층1: 거시 신뢰도 (7개 요인)
+#### 거시 신뢰도 요인표 (7개 요인)
 
-| 요인 | 이론 | 논문 | 크기 | 등급 |
-|------|------|------|------|:----:|
-| F1 경기순환 | IS-LM 총수요 | Hicks (1937) | +/-6~10% | [B] |
-| F1a Stovall 섹터 | 섹터-순환 민감도 | Stovall (1996) | 섹터별 * 0.5x | [C] |
-| F2 수익률 곡선 | 기간구조 신호 | Harvey (1986) | +/-3~12% | [B] |
-| F3 신용 국면 | 신용 스프레드 긴장 | Gilchrist-Zakrajsek (2012) | -7~-18% 매수 | [B] |
-| F7 테일러 갭 | 통화정책 기조 | Taylor (1993) | +/-5% | [B] |
-| F8 VRP/VIX | 변동성 위험 프리미엄 | Carr-Wu (2009) | -3~-7% | [B] |
-| F9 금리차 | 먼델-플레밍 | Mundell (1963) | +/-5% | [B] |
+| 요인 | 이론 (논문) | 조정 크기 | 등급 |
+|------|-----------|:------:|:----:|
+| F1 경기순환 | IS-LM 총수요 (Hicks 1937) | ±6~10% | [B] |
+| F1a Stovall 섹터 | 섹터-순환 민감도 (Stovall 1996) | 섹터별 ×0.5 | [C] |
+| F2 수익률 곡선 | 기간구조 신호 (Harvey 1986) | ±3~12% | [B] |
+| F3 신용 국면 | 신용 스프레드 (Gilchrist-Zakrajsek 2012) | -7~-18% | [B] |
+| F7 테일러 갭 | 통화정책 기조 (Taylor 1993) | ±5% | [B] |
+| F8 VRP/VIX | 변동성 위험 프리미엄 (Carr-Wu 2009) | -3~-7% | [B] |
+| F9 금리차 | 먼델-플레밍 (Mundell 1963) | ±5% | [B] |
 
-#### CONF-계층2: 미시 신뢰도 (3개 요인)
+> F4--F6: 코드 내부 예약 인덱스, 현재 미사용.
 
-| 요인 | 이론 | 논문 | 크기 | 등급 |
-|------|------|------|------|:----:|
-| M1 Amihud ILLIQ | 유동성 할인 | Amihud (2002) | -15% 최대 | [A] |
-| M2 HHI 보강 | 집중도 평균회귀 | Jensen-Meckling (1976) | +10% * HHI | [C] |
-| M3 공매도 금지 | 가격발견 저해 | Miller (1977) | -10~-30% | [B] |
+#### 미시 신뢰도 요인표 (3개 요인)
+
+| 요인 | 이론 (논문) | 조정 크기 | 등급 |
+|------|-----------|:------:|:----:|
+| M1 Amihud ILLIQ | 유동성 할인 (Amihud 2002) | -15% 최대 | [A] |
+| M2 HHI 보강 | 집중도 평균회귀 (Jensen-Meckling 1976) | +10% ×HHI | [C] |
+| M3 공매도 금지 | 가격발견 저해 (Miller 1977) | -10~-30% | [B] |
 
 #### 10-계층 파이프라인 참조표
 
@@ -3497,16 +3499,16 @@ $$\text{microMult} = \prod_{m \in \{M1,M2,M3\}} (1 + \delta_m)$$
 
 | 계층 | 학문 기반 | 데이터 출처 | 조정 범위 |
 |:----:|----------|-----------|:-----:|
-| 0 시장맥락 | 행동재무학 | CCSI, 외국인 순매수, 어닝시즌 | 개별 조정 |
+| 0 시장맥락 | 행동재무학 | CCSI, 외국인 순매수, 어닝시즌 | 가변 |
 | 1--2 RORO | 국제금융 | VKOSPI/VIX, 신용, USD/KRW, MCS, 수급 | [0.92, 1.08] |
 | 3 거시 | 경제학 | 거시 지표, 채권, 통계청 (7팩터) | [0.70, 1.30] |
 | 4 미시 | 미시경제학 | OHLCV 비유동성, HHI 집중도 | [0.55, 1.15] |
 | 5 파생 | 금융공학 | 파생상품, 투자자 수급, 옵션, ETF, 공매도 | [0.70, 1.30] |
 | 6 Merton | 신용위험 | 재무제표 + OHLCV 변동성 (Bharath-Shumway) | [0.75, 1.15] |
-| 7 Phase8 | 통계학/거시 | MCS v2, HMM 레짐, 외국인, IV/HV | MCS/HMM |
+| 7 Phase8 | 통계학/거시 | MCS v2, HMM 레짐, 외국인, IV/HV | 가변 |
 | 8 생존편향 | 통계학 | 매수 패턴 Winsorized 할인 | [0.92, 1.0] |
-| 9 PCA예산 | 다변량통계 | Kish $N_{\text{eff}}$ + Longin-Solnik | 동적 예산 |
-| Floor | --- | 복합 하한 (Tukey 1977) | 하한 25 |
+| 9 PCA예산 | 다변량통계 | Kish $N_{\text{eff}}$ + Longin-Solnik | 가변 |
+| Floor | 통계학 (Tukey 1977) | 복합 하한 | 하한 25 |
 
 #### 전체 신뢰도 체인 의사코드
 
@@ -3608,20 +3610,20 @@ $$DD = \frac{\ln(V/D) + (\mu - \tfrac{1}{2}\sigma_V^2)\,T}{\sigma_V \sqrt{T}}, \
 
 > 이전 Stage 데이터: $\textcolor{stageOneMarker}{\text{basis}}$, $\textcolor{stageOneMarker}{\text{pcr}}$, $\textcolor{stageOneMarker}{\text{alignment}}$ 등은 Stage 1 KRX 파생상품/투자자/ETF/공매도 데이터에서 수집된다. $\textcolor{stageTwoMarker}{DD}$ 산출은 Stage 2의 BSM(2.6.10절)과 Merton 구조 모형(2.6.13절)에서 도출된다.
 
-#### CONF-계층3: 파생상품 신뢰도 요인표 (D1--D5, D7)
+#### 파생상품 신뢰도 요인표 (6개 요인)
 
-| 요인 | 이론 | 조건 | 매수 | 매도 |
-|------|------|------|:----:|:----:|
-| D1 베이시스 | Bessembinder-Seguin (1993) | contango $\geq 0.5$% | $+4$~$7$% | $-4$~$7$% |
-| D2 PCR | Pan-Poteshman (2006) | PCR $> 1.2$ (공포) | $+6$% | $-6$% |
-| D3 투자자 정렬 | Choe-Kho-Stulz (2005) | aligned\_buy | $+8$% | $-7$% |
-| D4 ETF 심리 | Cheng-Madhavan (2009) | 극단 낙관 | $-4$% | $+4$% |
-| D5 공매도 | Desai et al. (2002) | $> 10$% | $+6$% | $-6$% |
-| D7 환율 | Mundell-Fleming | KRW 약세, 수출주 | $+5$% | $-5$% |
+| 요인 | 이론 (논문) | 조건 | 매수 | 매도 | 등급 |
+|------|----------|------|:----:|:----:|:----:|
+| D1 베이시스 | Bessembinder-Seguin (1993) | contango $\geq 0.5$% | $+4$~$7$% | $-4$~$7$% | [B] |
+| D2 PCR | Pan-Poteshman (2006) | PCR $> 1.2$ (공포) | $+6$% | $-6$% | [B] |
+| D3 투자자 정렬 | Choe-Kho-Stulz (2005) | aligned\_buy | $+8$% | $-7$% | [C] |
+| D4 ETF 심리 | Cheng-Madhavan (2009) | 극단 낙관 | $-4$% | $+4$% | [C] |
+| D5 공매도 | Desai et al. (2002) | $> 10$% | $+6$% | $-6$% | [C] |
+| D7 환율 | Mundell-Fleming | KRW 약세, 수출주 | $+5$% | $-5$% | [B] |
 
-D3 투자자 수급은 KRX OTP 변경(2025.12) 이후 Naver Finance 스크래핑으로 대체 운용되며, 0.85 감쇠 계수(`_sourceDiscount`)가 적용된다. D5는 공매도 데이터 수집 중단으로 현재 비활성이다. D6(ERP)은 독립 시그널 처리로 CONF-계층3에서 제외되었다(의도적 결번).
+> D3: KRX OTP 변경(2025.12) 이후 Naver Finance 스크래핑 대체, 0.85 감쇠. D5: 공매도 데이터 수집 중단, 비활성. D6(ERP): 독립 시그널 처리로 제외(의도적 결번).
 
-#### CONF-계층4: 머튼 DD 범위별 조정표
+#### 머튼 DD 범위별 조정표
 
 | DD 범위 | 등급 | 매수 | 매도 |
 |---------|:----:|:----:|:----:|
