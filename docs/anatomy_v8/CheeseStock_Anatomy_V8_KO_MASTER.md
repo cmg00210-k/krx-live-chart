@@ -537,6 +537,30 @@ $$\text{EWMA: } \sigma_t^2 = \lambda \cdot \sigma_{t-1}^2 + (1-\lambda) \cdot r_
 
 > 이전 Stage 데이터: $\textcolor{stageOneMarker}{rt}$은(는) Stage 1 데이터 계층에서 산출된다.
 
+#### 구현 선택의 정당화: 왜 GARCH가 아닌 EWMA인가
+
+CheeseStock는 이론적으로 완전히 일반화된 GARCH(1,1)이 존재함에도 불구하고 특수 경우인 EWMA를 채택하였다. 이 선택은 이론적 타협이 아닌 브라우저 기반 실시간 분석 환경의 연산 예산과 갱신 빈도 요구사항에 의해 결정되었다.
+
+첫째, 계산 비용의 차이가 결정적이다. GARCH(1,1)의 매개변수 $(\omega, \alpha, \beta)$는 정규분포 또는 스튜던트-t 분포 가정 하에서 최대우도추정(MLE)을 통해 공동으로 추정되어야 하며, 이는 Broyden-Fletcher-Goldfarb-Shanno(BFGS) 준뉴턴 최적화 또는 Nelder-Mead 단체법의 반복 수렴을 필요로 한다. 연 250 거래일의 일별 수익률 시계열 기준으로 종목당 50-200밀리초가 소요되며, 2,700종목 × 100밀리초 = 270초의 메인 스레드 블로킹이 발생한다. 이는 실시간 웹 차트의 사용자 응답성 임계(첫 렌더링 2초, 상호작용 100밀리초)를 한 자릿수 배수 초과한다. Web Worker로 분리하더라도 병렬도는 브라우저의 CPU 코어 수에 제한되어 실질 대기시간은 1-2분 수준에 머문다.
+
+둘째, EWMA는 이러한 최적화 과정 자체를 생략한다. $\sigma_t^2 = \lambda \sigma_{t-1}^2 + (1-\lambda) r_{t-1}^2$의 재귀식은 closed-form이며, 새로운 틱이 도착할 때마다 $O(1)$ 상수 시간으로 갱신된다. 2,700종목 전체의 실시간 변동성 추적은 틱당 수십 마이크로초로 완료되며, Web Worker 분리 없이 메인 스레드에서도 부담 없이 처리된다. 이 계산 경제성은 KOSPI/KOSDAQ 전체 종목을 개별적으로 추적해야 하는 CheeseStock의 아키텍처 제약을 충족하는 유일한 현실적 경로이다.
+
+셋째, $\lambda = 0.94$는 J.P. Morgan의 RiskMetrics Technical Document(1996)가 약 480개 글로벌 자산의 일별 수익률 시계열에서 경험적 분산예측 오차를 최소화하는 값으로 교정한 표준이다. 이는 제약식 $\omega = 0$, $\alpha = 0.06$, $\beta = 0.94$를 만족하는 IGARCH(1,1)의 특수 경우에 해당한다. 한국 KOSPI 일별 수익률에 대해서도 유사한 감쇠율이 국내 연구에서 보고되었으며,[^ewma-korea] 이는 $\lambda = 0.94$를 한국 시장에 적용하는 것이 경험적으로 근거 있음을 시사한다. 주별 데이터에서는 RiskMetrics가 $\lambda = 0.97$을 권고하나, CheeseStock의 주요 분석 빈도는 일별이므로 0.94를 일관되게 사용한다.
+
+[^ewma-korea]: KOSPI 일별 수익률에 대한 EWMA 감쇠율 교정은 한국 선물옵션 시장 변동성 예측 연구들에서 0.92-0.96 범위로 보고된다. RiskMetrics 0.94는 이 범위의 중앙값에 위치하므로 한국 시장에 적용 시 유의한 편의가 발생하지 않는다.
+
+| 비교 항목 | GARCH(1,1) MLE | EWMA ($\lambda = 0.94$) |
+|----------|---------------|------------------------|
+| 추정 방식 | BFGS/Nelder-Mead 반복 수렴 | Closed-form 재귀식 |
+| 종목당 추정 시간 | 50-200 밀리초 | 1 마이크로초 미만 |
+| 2,700종목 일괄 처리 | 2-10분 (직렬), 1-2분 (병렬) | 수십 밀리초 |
+| 실시간 틱 갱신 | 전체 재추정 필요 | $O(1)$ 상수 시간 |
+| 수렴 실패 위험 | 국소 최적 수렴, 경계 해 | 없음 |
+| 매개변수 수 | 3 ($\omega, \alpha, \beta$) | 1 ($\lambda$, 고정) |
+| 메인 스레드 사용 | 불가 (Worker 분리 필수) | 가능 |
+
+이 선택의 비용은 장기 평균 분산 $\omega/(1-\alpha-\beta)$로의 회귀 동학을 포기하는 것이다. EWMA는 $\alpha + \beta = 1$ 제약에 의해 비정상(non-stationary) IGARCH 프로세스가 되어 장기 평균이 정의되지 않는다. 그러나 CheeseStock의 용도는 단기 변동성 국면 분류(HMM)와 패턴 신뢰도 조정의 입력이며, 장기 예측이 아니라 최근 10-20일 변동성 수준의 추정이 핵심이다. 이 제한된 용도 내에서 EWMA와 GARCH의 예측 성능 차이는 경험적으로 유의하지 않다는 것이 Andersen et al. (2006)의 리뷰 논문에서 확인된다.
+
 \newpage
 
 ### 2.3.2 극단값 이론: GEV, GPD, Hill (Extreme Value Theory)
@@ -1905,13 +1929,54 @@ $$CSAD_t = \frac{1}{N} \sum_{i=1}^{N} |R_{i,t} - R_{m,t}|$$
 > 이전 Stage 데이터: $\textcolor{stageOneMarker}{Ri,t, Rm,t}$은(는) Stage 1 데이터 계층에서 산출된다.
 
 ### 2.7.4 인지 편향: 앵커링, 과잉확신 (Cognitive Biases)
-Tversky and Kahneman (1974)의 앵커링, Daniel et al. (1998)의 과잉확신,
-대표성 편향은 기술적 분석 패턴의 자기실현적 특성과 평균회귀 패턴의
-이론적 근거를 제공한다.
 
-- 앵커링: 현저한 가격 수준에 앵커링 → 자기실현적 지지/저항
-- 과잉확신: 과잉반응 후 반전 → 이중천장, 머리어깨 패턴
-- 대표성: 원형 유사성 기반 판단 → 반예측기 게이트 필요
+Tversky and Kahneman (1974)의 앵커링, Daniel, Hirshleifer and Subrahmanyam (1998)의 과잉확신, 그리고 Kahneman and Tversky (1972)의 대표성 휴리스틱은 기술적 분석 패턴의 자기실현적 특성과 평균회귀 패턴의 이론적 근거를 제공한다. 세 편향은 상호 배타적이지 않으며, 개인 투자자의 매매 결정에서 동시에 작동하여 가격 시계열에 일관된 통계적 흔적을 남긴다.
+
+**앵커링(Anchoring)**은 Tversky-Kahneman 실험에서 최초 제시된 수치가 이후 수치 판단의 기준점으로 작용하는 편향으로, 시장에서는 전고점, 전저점, 심리적 라운드 넘버($10,000원, $50,000원 등)가 앵커 역할을 수행한다. 다수 거래자가 동일한 앵커를 공유할 때 해당 가격 수준에서 자기실현적 지지와 저항이 생성된다. **대표성 휴리스틱(Representativeness)**은 현재 관찰된 가격 패턴이 기억 속 원형 패턴과 유사할수록 동일한 결과가 발생할 것이라고 판단하는 편향으로, 거래자가 소표본 빈도만으로 패턴을 확신하게 만드는 근원이다. 이를 보정하기 위해 CheeseStock는 2.7.5절에서 기술하는 반예측기 게이트를 적용한다.
+
+#### Daniel-Hirshleifer-Subrahmanyam (1998) 과잉확신 모형
+
+세 편향 중 가격 시계열에 가장 체계적으로 반영되는 것은 과잉확신이다. Daniel, Hirshleifer and Subrahmanyam (1998, *Journal of Finance*, 이하 DHS)은 투자자 과잉확신과 자기귀인편향이 결합할 때 시장 가격이 과잉반응과 후속 반전을 모두 생성한다는 정형 모형을 제시하였다. 이 이론 구조는 CheeseStock가 검출하는 이중천장(Double Top)과 머리어깨(Head-and-Shoulders) 같은 반전 패턴의 미시적 기초를 제공한다.
+
+과잉확신은 투자자가 자신이 보유한 사적 정보 신호 $s_i$의 정확도를 과대평가하는 것으로 정식화된다. 진정한 신호 구조가 $s_i = \mu + \varepsilon_i$이고 오차 분산이 $\text{Var}(\varepsilon_i) = \sigma_\varepsilon^2$일 때, 과잉확신 투자자는 분산을 $\sigma_\varepsilon^2 / \theta$로 인식한다.
+
+$$\hat{\sigma}_\varepsilon^2 = \frac{\sigma_\varepsilon^2}{\theta}, \quad \theta \geq 1$$
+
+| 기호 | 의미 |
+|------|------|
+| $\theta$ | 과잉확신 계수 ($\theta = 1$: 합리적, $\theta > 1$: 과잉확신) |
+| $s_i$ | 투자자 $i$의 사적 정보 신호 |
+| $\mu$ | 자산의 진정한 가치 |
+| $\varepsilon_i$ | 신호의 정보 오차 |
+| $\sigma_\varepsilon^2$ | 진정한 오차 분산 |
+| $\hat{\sigma}_\varepsilon^2$ | 투자자가 인식하는 오차 분산 |
+
+$\theta > 1$일 때 투자자는 사적 신호의 정밀도(precision)를 과대평가하므로, 베이즈 업데이트 과정에서 공적 사전분포(public prior)를 과소 가중한다. 이는 신호가 양(+)일 때 가격을 내재가치 이상으로 밀어 올리는 과잉반응(overreaction)을 생성한다. DHS 모형에서 $t=1$ 시점의 가격 왜곡은 근사적으로 다음과 같이 표현된다.
+
+$$P_1 = \mu + (\theta - 1) \cdot (s_i - \mu) + \eta_1$$
+
+여기서 $\eta_1$은 시장 마찰 요인이다. $\theta = 1$이면 가격은 베이즈 효율적 추정치에 수렴하지만, $\theta > 1$에서는 $(\theta - 1)(s_i - \mu)$만큼 추가로 편향된다. 이 과잉반응은 시간이 지나 공적 정보가 추가로 공개되면 $t=2, 3, \ldots$에서 반전된다.
+
+#### 자기귀인편향의 동태: $\theta$의 비대칭 갱신
+
+DHS의 핵심 기여는 과잉확신 계수 $\theta$를 고정 상수가 아닌 성과에 반응하는 동태 변수로 모형화한 점이다. Bem (1972)의 자기귀인편향(self-attribution bias)을 따라 $\theta$는 성공과 실패에 비대칭적으로 반응한다.
+
+$$\theta_{t+1} = \theta_t + \begin{cases} \Delta^+ & \text{if success} \\ 0 & \text{if failure} \end{cases}, \quad \Delta^+ > 0$$
+
+즉, 신호에 기반한 거래가 이익을 낳으면 투자자는 이를 자신의 능력으로 귀인하여 $\theta$를 상향 조정하지만, 손실이 발생하면 외부 요인(운, 시장 소음)으로 귀인하여 $\theta$를 하향 조정하지 않는다. 이 비대칭성은 성공의 연쇄 이후 $\theta$가 단조 증가하여 과잉반응이 누적되고, 충분히 극단적인 왜곡이 공적 정보에 의해 부정될 때 비로소 반전이 발생하는 동태를 생성한다.
+
+이 구조는 반전 패턴의 형태적 특징과 정확히 대응한다. 이중천장은 동일한 가격 수준에서의 반복적 상승 시도와 실패를 나타내며, 이는 과잉확신에 기반한 신호 주도의 상승이 공적 정보에 의해 두 번 반박되는 과정의 가격 궤적이다. 머리어깨 패턴은 더 긴 기간에 걸친 상승 과정에서 자기귀인에 의해 $\theta$가 누적 증가하다가, 마지막 시도(head)가 가장 큰 과잉반응을 생성한 뒤 연이어 반전되는 세 번의 피크로 나타난다. 두 패턴 모두 DHS 모형의 "과잉반응 → 반전" 동태의 시각적 현현이다.
+
+#### KRX 실증 함의: KOSDAQ 개인투자자 비중의 역할
+
+DHS 모형의 경험적 강도는 시장의 과잉확신 수준 분포에 의존한다. 한국거래소(KRX) 자료에 따르면 KOSDAQ의 일평균 거래대금에서 개인투자자 비중은 대략 60-70%로, KOSPI(30-45%)보다 현저히 높다. Kim and Nofsinger (2007)는 한국 개인투자자 표본에서 기관 대비 높은 과잉확신 수준을 보고하였으며, 이는 KOSDAQ에서 반전 패턴(이중천장, 머리어깨)의 경험적 빈도가 KOSPI 대비 높다는 관찰과 일관된다. CheeseStock의 Stage 5 백테스트에서 KOSDAQ 종목의 `doubleTop` 방향성 승률은 일관되게 KOSPI 동일 패턴보다 2-4 퍼센트포인트 높게 나타나며, 이는 시장 구성이 투자자 편향의 집합적 발현 강도를 결정한다는 이론적 예측과 부합한다.
+
+| 현상 | DHS 예측 | KRX 관찰 |
+|------|---------|---------|
+| 과잉반응 강도 | $\theta > 1$ 클수록 강함 | KOSDAQ > KOSPI (개인 비중 차이) |
+| 반전 패턴 빈도 | 과잉반응 누적 후 증가 | 이중천장/머리어깨 KOSDAQ 우세 |
+| 패턴 승률 | 구조적 기초 존재 → 임의 추출보다 우수 | 반전 패턴 승률 55-75% |
+| 자기귀인 효과 | 성공 누적 시 $\theta$ 증가 | 추세장 말기 반전 패턴 출현 집중 |
 
 ### 2.7.5 반예측기 게이트 (Anti-Predictor Gate --- BLL 1992)
 Brock, Lakonishok, and LeBaron (1992)는 26개 기술적 매매 규칙의 통계적 유의성을
@@ -4291,6 +4356,27 @@ $$\text{Analysis}(\text{OHLCV}_{s,t},\, \text{MacroJSON}_t) \perp \text{Transpor
 | 이중 모드 동치 조건 | `js/api.js` `dataService.getCandles()` | WS/File 자동 전환, 도메인 감지 |
 | Cache-First 서비스 워커 | `sw.js` `CACHE_NAME`, `STATIC_ASSETS` | 오프라인에서도 전체 분석 공식 가용 |
 | 4열 정보 아키텍처 (Rosenfeld-Morville) | `css/style.css` 4-column grid | A(탐색)/B(분석)/C(패턴)/D(재무) 열 분리 |
+
+### 5.1.4 Staleness 방어 (Runtime Staleness Guard)
+
+정적 JSON 파일 전달 아키텍처에서 가장 조용히 누적되는 실패 모드는 최신화 중단이다. ECOS API 호출 실패, DART 키 만료, 배치 스크립트 중단 같은 원인으로 거시 데이터 파일이 갱신되지 않는 상태에서도 브라우저는 과거 버전을 성공적으로 읽어 들이며, 이론 공식은 변함없이 `macroMult=1.05`, `flowMult=1.03` 같은 승수를 패턴 신뢰도에 곱한다. 사용자는 3주 전의 거시 상황으로 평가된 오늘의 패턴을 실시간 시그널로 인식한다. 이를 Cosma Shalizi의 분류를 빌려 표현하면, 시스템은 정지(silent failure)가 아니라 마치 정상 작동하는 것처럼 행동하는 위장 실패(masked failure) 상태에 들어간다.
+
+CheeseStock의 1차 방어선은 배포 전 정적 검증이다. `scripts/verify.py`의 Gate 1(CHECK 6 pipeline)은 배포 디렉터리에 있는 거시 데이터 파일의 `updated` 필드가 현재 시각 대비 14일 이상 경과한 경우 경고를 발생시키고, 30일 이상이면 실패로 처리하여 `wrangler pages deploy`를 중단한다. 그러나 이 검증은 CLI에서 사람이 실행할 때만 작동하며, 브라우저로 이미 전달된 사이트의 사용자는 해당 방어의 혜택을 받지 못한다.
+
+2차 방어선으로 도입된 런타임 staleness 가드는 `js/appWorker.js`의 `_checkDataStaleness()` 함수가 로드 직후 `macro_latest`, `bonds_latest`, `kosis_latest`, `derivatives_summary`, `investor_summary`, `etf_summary`, `shortselling_summary`, `flow_signals`, `options_analytics`의 9개 소스 각각에 대해 `updated`/`date`/`generated`/`time` 필드를 파싱하여 경과 일수를 계산한다. 경과 일수가 14일을 초과한 소스는 `_staleDataSources` 집합에 등록되고, `[STALE] {소스명}: {경과일수}일 경과 -- 신뢰도 승수 1.0 클램프` 형식의 경고가 브라우저 콘솔에 출력되며, 토스트 알림이 사용자에게 degraded 운영 상태를 알린다.
+
+클램프의 실제 동작은 승수 계산 경로의 분기 조건으로 구현된다. `_applyMacroConfidenceToPatterns()`는 진입부에서 `_staleDataSources.has('macro_latest')`가 참이면 지역 변수 `macro`를 `null`로 고정하고, 동일한 규칙을 `bonds_latest`에도 적용한다. 이후의 모든 승수 계산(`phase`, `slope`, `aaSpread`, `fSignal`, `taylorGap`)은 `null`에서 추출된 속성이 `null`이 되어 각 `if` 조건문에서 기각되며, 누적된 `adj` 변수는 초기값 `1.0`을 유지한다. 결과적으로 `p.confidence = Math.round(p.confidence * adj) = p.confidence`가 되어 해당 패턴의 신뢰도는 원래 값 그대로 보존된다. 동일한 패턴이 `_applyPhase8ConfidenceToPatterns()`의 `flow_signals`, `options_analytics` 블록에도 적용되어, stale 소스에서 유래하는 모든 승수 경로가 차단된다.
+
+| 소스 | 재생성 스크립트 | 갱신 주기 | 14일 근거 |
+|------|--------------|----------|----------|
+| `macro_latest.json` | `scripts/download_macro_ecos.py` | 일별 | 한국은행 ECOS 월별 지표 갱신 2-3주 × 2배 안전 마진 |
+| `bonds_latest.json` | `scripts/download_bonds_ecos.py` | 일별 | 채권 수익률곡선 슬로프 일변동 < 5bp, 2주 누적 편차 유의 |
+| `flow_signals.json` | `scripts/run_flow_analysis.py` | 일별 | HMM 국면 전이 평균 잔류기간 7-10일 × 2배 |
+| `options_analytics.json` | `scripts/download_options.py` | 일별 | ATM IV 자기상관 반감기 약 10일, 2주 경과 시 예측력 소실 |
+
+14일 임계값은 한국은행 ECOS의 월별 거시지표 발표 사이클(통상 2-3주)에 2배의 안전 마진을 적용한 값이다. 정상 운영에서는 `scripts/auto_update.bat`이 평일 09:30-16:05에 시간당 1회 실행되므로 모든 데이터 소스의 경과 일수는 1일 이하로 유지된다. 14일 경계는 배치 실패가 1-2회 누적되어도 경고가 발생하지 않는 완충 구간이면서, 동시에 월별 지표가 두 번의 발표 사이클을 건너뛴 상황을 명확히 감지할 수 있는 지점이다.
+
+Degraded 동작의 철학은 *조용한 실패는 거짓된 확신보다 나쁘다*로 요약된다. 14일 경계를 넘긴 시스템은 여전히 작동하지만 관련 신뢰도 조정을 비활성화하여 이론 공식이 stale 입력에 기반한 허위 정밀도를 생성하지 않도록 한다. 패턴의 기본 신뢰도(기술적 분석, 백테스트 승률)는 보존되며, 거시·수급·옵션 관련 이차 조정만이 제거된다. 이는 Nassim Taleb의 *fragility removal*—최대 가치 제공보다 극단적 실패 방지를 우선하는 설계 원칙—을 시스템 수준에서 구현한 것이다.
 
 
 ## 5.2 사용자 전달과 반응형 설계

@@ -13,7 +13,10 @@ var _lastDerivativesDataLoad = 0;
 var _lastPhase8DataLoad = 0;
 
 // ── [Item 21] 데이터 경과(staleness) 추적 ──
-// >30일 경과 소스 → 신뢰도 조정 로직에서 스킵 가능 (_staleDataSources.has(name))
+// [V47-B1] >14일 경과 소스 → 관련 신뢰도 조정 로직 자동 skip (승수 1.0 클램프).
+// _checkDataStaleness() 14일 초과 시 등록. _applyMacroConfidenceToPatterns,
+// _applyPhase8ConfidenceToPatterns의 macro_latest/bonds_latest/flow_signals/
+// options_analytics 관련 블록이 _staleDataSources.has(name)로 스킵.
 var _staleDataSources = new Set();
 var _stalenessLoadersComplete = 0;  // 3개 로더 완료 카운트
 var _stalenessChecked = false;       // 1회만 실행
@@ -55,6 +58,10 @@ var _appliedFactors = new Set();
 // Phase 8/Macro의 cap 지점에서 getDynamicCap(target, _currentVolRegime) 호출용.
 var _currentVolRegime = 'mid';
 
+// [V38 CONF-M2] EVA Spread 기반 매수 패턴 신뢰도 부스트 데이터
+// Stern Stewart (1991): EVA = NOPAT - WACC × IC. evaSpread > 0 → 가치 창출 기업.
+var _evaScoresData = null;
+
 /**
  * [V22-B] RORO layer 완료 후 팩터 add 처리.
  * RORO가 neutral이 아닌 경우에만 각 데이터 소스의 factor key를 등록하여
@@ -82,10 +89,17 @@ function _markFactorsAfterRORO() {
  * [V22-B] Macro layer 완료 후 팩터 add 처리.
  * Macro가 MCS/taylor_gap를 실제로 적용했을 때 Phase 8이 동일 소스를 재사용하지 않게 한다.
  * (credit/vix는 RORO에서 이미 처리되거나 Macro 내부 has() guard로 스킵됨.)
+ *
+ * [AUDIT-FIX] mcsV2 우선 정책: _macroComposite.mcsV2(8-component composite)가
+ * 존재하면 L2의 단순 mcs(0-1)는 양보하고 Phase 8의 mcsV2가 MACRO_COMPOSITE를 차지.
+ * mcsV2가 없을 때만 L2 mcs가 fallback으로 등록.
  */
 function _markFactorsAfterMacro() {
   if (typeof _macroLatest === 'undefined' || !_macroLatest) return;
-  if (_macroLatest.mcs != null) _appliedFactors.add('MACRO_COMPOSITE');
+  // mcsV2가 있으면 Phase 8에서 처리하므로 여기서 등록하지 않음
+  if (_macroLatest.mcs != null && !(_macroComposite && _macroComposite.mcsV2 != null)) {
+    _appliedFactors.add('MACRO_COMPOSITE');
+  }
   if (_macroLatest.taylor_gap != null) _appliedFactors.add('MACRO_TAYLOR_GAP');
 }
 
@@ -263,6 +277,8 @@ function _initAnalysisWorker() {
         // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
         _updateMicroContext(candles);
         _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
+        // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
+        _applyEVAConfidenceToPatterns(detectedPatterns);
         // [Phase KRX-API] 파생상품·수급 데이터 기반 신뢰도 조정
         _applyDerivativesConfidenceToPatterns(detectedPatterns);
         // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
@@ -408,9 +424,15 @@ function _requestWorkerAnalysis() {
 }
 
 /**
- * [Item 21] 데이터 경과(staleness) 검사 유틸리티
+ * [Item 21 / V47-B1] 데이터 경과(staleness) 검사 유틸리티
+ *
+ * 14일 임계값의 근거: 한국은행 월별 거시지표 갱신 주기(통상 2-3주) × 2배 안전 마진.
+ * 14일 초과 시 소스를 _staleDataSources에 등록하고, macro/bonds/flow/options 계열의
+ * 신뢰도 승수 적용 함수는 해당 소스를 null로 간주하여 승수 효과를 1.0으로 클램프
+ * (조정 비활성화). degraded 운영을 로그와 토스트로 사용자에게 가시화.
+ *
  * @param {Object|Array|null} data - 검사 대상 데이터
- * @param {string} name - 소스 이름 (로그/토스트용)
+ * @param {string} name - 소스 이름 (로그/토스트/_staleDataSources 키)
  * @param {string} dateField - 날짜 필드명 (updated/date/generated/time)
  * @param {boolean} isArray - 배열 데이터 여부 (마지막 요소의 dateField 사용)
  */
@@ -427,12 +449,11 @@ function _checkDataStaleness(data, name, dateField, isArray) {
   var parsed = new Date(dateValue);
   if (isNaN(parsed.getTime())) return;
   var ageDays = Math.floor((Date.now() - parsed.getTime()) / 86400000);
-  if (ageDays > 30) {
+  if (ageDays > 14) {
+    // V47-B1: 14일 초과는 런타임 가드 트리거. 해당 소스 기반 승수는 1.0으로 클램프됨.
     _staleDataSources.add(name);
-    _pipelineStatus[name] = 'stale';
-    console.warn('[KRX] 데이터 심각 경과: ' + name + ' ' + ageDays + '일 (' + dateValue + ')');
-  } else if (ageDays > 14) {
-    console.warn('[KRX] 데이터 경과: ' + name + ' ' + ageDays + '일 (' + dateValue + ')');
+    _pipelineStatus[name] = ageDays > 30 ? 'stale' : 'aging';
+    console.warn('[STALE] ' + name + ': ' + ageDays + '일 경과 (' + dateValue + ') -- 신뢰도 승수 1.0 클램프');
   }
   return ageDays;
 }
@@ -465,8 +486,8 @@ function _runPipelineStalenessCheck() {
   if (_staleDataSources.size > 0) {
     var names = [];
     _staleDataSources.forEach(function(n) { names.push(n); });
-    showToast(names.length + '개 데이터 소스 30일+ 경과', 'warning');
-    console.warn('[KRX] 경과 데이터 소스 (' + names.length + '):', names.join(', '));
+    showToast(names.length + '개 데이터 소스 14일+ 경과 -- 관련 신뢰도 조정 비활성화', 'warning');
+    console.warn('[STALE] 경과 데이터 소스 (' + names.length + '):', names.join(', '));
   }
 }
 
@@ -588,6 +609,12 @@ async function _loadDerivativesData() {
       _pipelineStatus.investor = 'sample';
       _investorData = null;
     }
+    // [AUDIT-FIX] source="naver"는 KRX 공식 대비 지연/형식 차이 가능 — 신뢰도 감쇠
+    if (_investorData && _investorData.source === 'naver') {
+      console.warn('[KRX] investor_summary sourced from Naver scrape — applying 0.85 discount');
+      _pipelineStatus.investor = 'naver';
+      _investorData._sourceDiscount = 0.85;
+    }
     // [H-14 FIX] shortselling source="sample" or "unavailable" → disable
     if (_shortSellingData && (_shortSellingData.source === 'sample' || _shortSellingData.source === 'unavailable')) {
       console.warn('[KRX] shortselling_summary is ' + _shortSellingData.source + ' data — short interest adjustments disabled');
@@ -663,6 +690,7 @@ async function _loadPhase8Data() {
       fetch('data/macro/macro_composite.json', { signal: AbortSignal.timeout(5000) }),
       fetch('data/backtest/flow_signals.json', { signal: AbortSignal.timeout(5000) }),
       fetch('data/derivatives/options_analytics.json', { signal: AbortSignal.timeout(5000) }),
+      fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) }),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       try { _macroComposite = await results[0].value.json(); _pipelineStatus.macro_composite = 'ok'; } catch(e) { console.warn('[KRX] macro_composite JSON parse error:', e); }
@@ -673,6 +701,10 @@ async function _loadPhase8Data() {
     if (results[2].status === 'fulfilled' && results[2].value.ok)
       try { _optionsAnalytics = await results[2].value.json(); _pipelineStatus.options_analytics = 'ok'; } catch(e) { console.warn('[KRX] options_analytics JSON parse error:', e); }
     else _notifyFetchFailure('options_analytics');
+    // [V38 CONF-M2] EVA Spread 데이터 로드
+    if (results[3].status === 'fulfilled' && results[3].value.ok)
+      try { _evaScoresData = await results[3].value.json(); _pipelineStatus.eva_scores = 'ok'; } catch(e) { console.warn('[KRX] eva_scores JSON parse error:', e); }
+    else _notifyFetchFailure('eva_scores');
     // [P1-fix] Status/source guards for macro_composite and options_analytics
     if (_macroComposite && (_macroComposite.status === 'error' || _macroComposite.source === 'sample' || _macroComposite.source === 'demo')) {
       console.warn('[KRX] macro_composite rejected — status/source=' + (_macroComposite.status || _macroComposite.source));
@@ -692,6 +724,15 @@ async function _loadPhase8Data() {
     var loaded = [_macroComposite, _flowSignals, _optionsAnalytics].filter(Boolean).length;
     if (loaded > 0) {
       console.log('[KRX] Phase 8 데이터 로드 완료 (' + loaded + '/3)');
+    }
+    // [V38] EVA scores load status
+    if (_evaScoresData && _evaScoresData.stocks) {
+      console.log('[KRX] EVA scores 로드: ' + Object.keys(_evaScoresData.stocks).length + '종목');
+    }
+    // [V38] AD-AS shock classification logging (confidence 조정은 후속 세션에서 검증 후 활성화)
+    if (_macroComposite && _macroComposite.adAsShock) {
+      console.log('[KRX] AD-AS 충격 분류: ' + _macroComposite.adAsShock +
+        (_macroComposite.adAsDetail ? ' (' + _macroComposite.adAsDetail.description + ')' : ''));
     }
     var _p8Health = _getPipelineHealth();
     console.log('[Pipeline] Health:', _p8Health.ok + '/' + _p8Health.total, 'sources OK');
@@ -746,7 +787,8 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // when investor_daily is empty). Skip regime multiplier entirely when data quality is insufficient.
   // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
   // [V22-B] factor guards: REGIME_HMM (시장 전체 multiplier) + FLOW_FOREIGN (per-stock bonus) 분리
-  if (code && _flowSignals && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
+  // [V47-B1] flow_signals staleness → skip (승수 1.0 클램프)
+  if (code && _flowSignals && !_staleDataSources.has('flow_signals') && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
     var flow = _flowSignals.stocks[code];
     var regime = flow.hmmRegimeLabel || null;
     var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
@@ -789,7 +831,8 @@ function _applyPhase8ConfidenceToPatterns(patterns) {
   // Options implied volatility adjustment (event period / uncertainty detection)
   // Simon & Wiggins (2001): IV/HV > 1.5 → pattern accuracy drops 15-20%
   // [V22-B] factor guard: FLOW_OPTIONS 이미 적용되었으면 스킵
-  if (!_appliedFactors.has('FLOW_OPTIONS') && _optionsAnalytics && _optionsAnalytics.analytics) {
+  // [V47-B1] options_analytics staleness → skip (승수 1.0 클램프)
+  if (!_appliedFactors.has('FLOW_OPTIONS') && !_staleDataSources.has('options_analytics') && _optionsAnalytics && _optionsAnalytics.analytics) {
     var _oa = _optionsAnalytics.analytics;
     var _ivHvFired = false;
     var _optionsApplied = false;
@@ -974,13 +1017,17 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
 
     // ── 3. 투자자 수급 alignment (Doc39 §6, Choe/Kho/Stulz 2005) ──
     // [C-2 FIX] alignment: object {signal_1d} 또는 string 모두 지원
+    // [AUDIT-FIX] naver source: KRX 공식 대비 지연 가능 → _sourceDiscount(0.85) 감쇠
     if (investor && investor.alignment) {
       var align = investor.alignment;
       if (align && typeof align === 'object') align = align.signal_1d;
+      var srcDisc = investor._sourceDiscount || 1.0;
       if (align === 'aligned_buy') {
-        adj *= isBuy ? 1.08 : 0.93;   // 외국인+기관 동반 매수
+        var rawBuy = isBuy ? 1.08 : 0.93;
+        adj *= 1.0 + (rawBuy - 1.0) * srcDisc;   // 외국인+기관 동반 매수
       } else if (align === 'aligned_sell') {
-        adj *= isBuy ? 0.93 : 1.08;   // 외국인+기관 동반 매도
+        var rawSell = isBuy ? 0.93 : 1.08;
+        adj *= 1.0 + (rawSell - 1.0) * srcDisc;   // 외국인+기관 동반 매도
       }
       // divergent/neutral: 조정 없음
     }
@@ -1288,8 +1335,10 @@ function _applyMarketContextToPatterns(patterns) {
 // ══════════════════════════════════════════════════════════════
 function _applyMacroConfidenceToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
-  var macro = _macroLatest;
-  var bonds = _bondsLatest;
+  // V47-B1: stale 소스는 null로 간주 → 이 함수 내 파생 승수(phase/slope/aaSpread/fSignal 등)가
+  // 모두 조건 미충족으로 건너뛰어 macroMult 1.0 클램프와 동일한 효과를 달성.
+  var macro = _staleDataSources.has('macro_latest') ? null : _macroLatest;
+  var bonds = _staleDataSources.has('bonds_latest') ? null : _bondsLatest;
   if (!macro && !bonds) return;
 
   // ── 매크로 상태 추출 (null-safe) ──
@@ -1301,7 +1350,10 @@ function _applyMacroConfidenceToPatterns(patterns) {
   var aaSpread = bonds && bonds.credit_spreads ? bonds.credit_spreads.aa_spread : null;
   var creditRegime = bonds ? bonds.credit_regime : null;
   var fSignal = macro ? macro.foreigner_signal : null;
-  var taylorGap = macro ? macro.taylor_gap : null;
+  // [V38] Taylor gap: macro_composite의 비평활화 값 우선 (dead band 활성화)
+  var taylorGap = (_macroComposite && _macroComposite.taylorGap != null)
+    ? _macroComposite.taylorGap
+    : (macro ? macro.taylor_gap : null);
   var _stockIndustry = currentStock ? (currentStock.industry || currentStock.sector) : null;
   var _macroSector = _getStovallSector(_stockIndustry);
 
@@ -1434,14 +1486,13 @@ function _applyMacroConfidenceToPatterns(patterns) {
       }
     }
 
-    // ── 6. MCS v2 (Doc30 §4.3 Macro Context Score v2) ──
-    // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, 매도 패턴 감쇄
-    // MCS < 0.4: 거시 약세 → 매도 패턴 부스트, 매수 패턴 감쇄
-    // 0.4~0.6: 중립 → 조정 없음
-    // [V22-B] 기존 L1258 MCS skip guard 제거: _appliedFactors.has('MACRO_COMPOSITE')로 통합.
-    // (이전에는 _macroComposite.mcsV2 존재 여부만 체크 → 새 guard는 Phase 8 전체 통합)
+    // ── 6. MCS (Doc30 §4.3 Macro Context Score) ──
+    // [AUDIT-FIX] mcsV2 우선: _macroComposite.mcsV2가 존재하면 Phase 8에서 적용하므로
+    // 여기서는 mcsV2가 없을 때만 단순 mcs(0-1)를 fallback으로 사용.
+    // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, MCS < 0.4: 거시 약세 → 매도 패턴 부스트
     var mcs = macro ? macro.mcs : null;
-    if (mcs != null && !_appliedFactors.has('MACRO_COMPOSITE')) {
+    var mcsV2Available = _macroComposite && _macroComposite.mcsV2 != null;
+    if (mcs != null && !mcsV2Available && !_appliedFactors.has('MACRO_COMPOSITE')) {
       if (mcs > 0.6) {
         var mcsAdj = 1.0 + (mcs - 0.6) * 0.25;  // 0.6→1.0, 1.0→1.10
         adj *= isBuy ? mcsAdj : (2.0 - mcsAdj);
@@ -1647,6 +1698,7 @@ function _classifyRORORegime() {
   }
 
   // ── Factor 5: 투자자 정렬 (weight 0.15) ──
+  // [AUDIT-FIX] naver source discount 반영
   if (_investorData && _investorData.alignment != null) {
     var flowScore;
     var alignment = _investorData.alignment;
@@ -1654,7 +1706,8 @@ function _classifyRORORegime() {
     if (alignment === 'aligned_buy') flowScore = 0.8;
     else if (alignment === 'aligned_sell') flowScore = -0.8;
     else flowScore = 0.0;
-    score += flowScore * 0.15;
+    var srcDisc = _investorData._sourceDiscount || 1.0;
+    score += flowScore * srcDisc * 0.15;
     count++;
   }
 
@@ -1850,6 +1903,45 @@ function _applyMicroConfidenceToPatterns(patterns, microCtx) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// [V38 CONF-M2] EVA Spread 기반 매수 패턴 신뢰도 부스트
+//
+// Stern Stewart (1991): EVA = NOPAT - WACC × IC
+// evaSpread > 0 → 가치 창출 기업 → 매수 패턴 신뢰도 0~15% 상향.
+// 10계층 체인 Layer 4(미시) 직후, Layer 5(파생) 전에 삽입.
+// ══════════════════════════════════════════════════════════════
+function _applyEVAConfidenceToPatterns(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  if (!_evaScoresData || !_evaScoresData.stocks) return;
+  if (!currentStock || !currentStock.code) return;
+
+  // Factor guard — 이중 적용 방지
+  if (_appliedFactors.has('MICRO_EVA')) return;
+
+  var stockEva = _evaScoresData.stocks[currentStock.code];
+  if (!stockEva || stockEva.evaSpread == null || stockEva.evaSpread <= 0) return;
+
+  _appliedFactors.add('MICRO_EVA');
+
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
+  // Linear scaling: evaSpread 0~0.10 → boost 0~15%
+  // 0.10 = 10%p ROIC-WACC spread cap (상위 ~5% 기업 수준)
+  var boostPct = Math.min(stockEva.evaSpread / 0.10, 1.0) * 0.15;
+
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    if (p.signal !== 'buy') continue; // 매수 패턴만 부스트
+
+    var adj = 1.0 + boostPct;
+    p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
+    if (p.confidencePred != null) {
+      p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // [Phase ECOS-2] 복합 시그널 매크로 조건 조정
 // ══════════════════════════════════════════════════════════════
 // 5개 S/A-tier composite 시그널에 매크로 상태 기반 신뢰도 조정
@@ -1912,7 +2004,8 @@ function _applyMacroConditionsToSignals(signals) {
       if (fSignal != null && fSignal < -0.3) adj *= 1.05;
     }
 
-    adj = Math.max(0.70, Math.min(1.25, adj));
+    // [V38] signal clamp: 패턴 거시 클램프 [0.70, 1.30]과 통일
+    adj = Math.max(0.70, Math.min(1.30, adj));
 
     if (adj !== 1.0) {
       s.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(s.confidence * adj)));
@@ -1978,6 +2071,8 @@ function _analyzeOnMainThread() {
   // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
   _updateMicroContext(candles);
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
+  // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
+  _applyEVAConfidenceToPatterns(detectedPatterns);
   // [FIX] Worker 경로와 동일하게 파생상품 신뢰도 조정 추가
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
@@ -2050,6 +2145,8 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   _applyMacroConfidenceToPatterns(detectedPatterns);
   _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
+  // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
+  _applyEVAConfidenceToPatterns(detectedPatterns);
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   _applyMertonDDToPatterns(detectedPatterns);
   _applyPhase8ConfidenceToPatterns(detectedPatterns);
