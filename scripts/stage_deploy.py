@@ -102,7 +102,26 @@ EXCLUDE_EXACT = {
     os.path.join("data", "delisted_index.json"),
     # Dead output -- compute_krx_anomalies.py writes it but no JS consumer fetches it
     os.path.join("data", "backtest", "krx_anomalies.json"),
+    # [V48-SEC Phase 1] Distilled IP JSONs -- excluded from static hosting.
+    # Four runtime-fetched files are relocated to deploy/functions/_data/ and
+    # served via Pages Functions /api/* with Origin gating.
+    # composite_calibration.json is offline-only (constants baked into signalEngine.js).
+    os.path.join("data", "backtest", "calibrated_constants.json"),
+    os.path.join("data", "backtest", "composite_calibration.json"),
+    os.path.join("data", "backtest", "flow_signals.json"),
+    os.path.join("data", "backtest", "hmm_regimes.json"),
+    os.path.join("data", "backtest", "eva_scores.json"),
 }
+
+# [V48-SEC Phase 1] IP-protected JSONs served via Pages Functions.
+# These are copied to deploy/functions/_data/ after staging so Pages Functions
+# can import them via ES module JSON import. They are NOT served as static assets.
+SEC_PROTECTED_JSONS = [
+    os.path.join("data", "backtest", "calibrated_constants.json"),
+    os.path.join("data", "backtest", "flow_signals.json"),
+    os.path.join("data", "backtest", "hmm_regimes.json"),
+    os.path.join("data", "backtest", "eva_scores.json"),
+]
 
 # ---------------------------------------------------------------------------
 
@@ -276,6 +295,15 @@ def main():
         "--breakdown", action="store_true",
         help="Print per-category file count breakdown (always on in --dry-run)"
     )
+    parser.add_argument(
+        "--bundled", action="store_true",
+        help=(
+            "Merge deploy.bundled/ (produced by scripts/build.mjs) into deploy/ "
+            "after staging: replaces index.html, sw.js, analysisWorker.js and "
+            "drops the 19 raw js/*.js files in favor of js/app.<hash>.js + "
+            "js/worker.<hash>.js. Requires 'npm run build:prod' to have run first."
+        )
+    )
     args = parser.parse_args()
 
     # Resolve extra timeframe exclusions: CLI flag > env var
@@ -300,6 +328,100 @@ def main():
         exclude_suffix_patterns=exclude_suffix_patterns,
     )
 
+    # [V48-SEC Phase 1] Copy IP-protected JSONs into deploy/functions/_data/
+    # AND into SOURCE functions/_data/. Wrangler (both pages dev and pages deploy)
+    # resolves `import ... from '../_data/*.json'` in Pages Functions relative to
+    # the SOURCE functions/ directory, NOT deploy/functions/. So source copies
+    # are required for wrangler to bundle the Functions successfully.
+    # .gitignore excludes functions/_data/*.json so these never enter git.
+    # Raw data/backtest/*.json paths stay excluded above (EXCLUDE_EXACT), so
+    # these files reach the edge only via the /api/* Origin-gated endpoints.
+    if not args.dry_run:
+        fn_data_dir = os.path.join(DEPLOY_DIR, "functions", "_data")
+        src_fn_data_dir = os.path.join(ROOT, "functions", "_data")
+        os.makedirs(fn_data_dir, exist_ok=True)
+        os.makedirs(src_fn_data_dir, exist_ok=True)
+        sec_copied = 0
+        sec_missing = []
+        for rel_src in SEC_PROTECTED_JSONS:
+            src = os.path.join(ROOT, rel_src)
+            dst = os.path.join(fn_data_dir, os.path.basename(rel_src))
+            src_dst = os.path.join(src_fn_data_dir, os.path.basename(rel_src))
+            if not os.path.exists(src):
+                sec_missing.append(rel_src)
+                continue
+            # Copy to deploy/functions/_data/ (hard link OK — served by bundler)
+            try:
+                os.link(src, dst)
+            except (OSError, NotImplementedError):
+                shutil.copy2(src, dst)
+            # Copy to source functions/_data/ (required by wrangler bundler)
+            if not os.path.exists(src_dst):
+                try:
+                    os.link(src, src_dst)
+                except (OSError, NotImplementedError):
+                    shutil.copy2(src, src_dst)
+            sec_copied += 1
+            linked += 1
+        if sec_missing:
+            print()
+            print("WARNING: {} IP-protected JSON(s) missing from source tree:".format(
+                len(sec_missing)))
+            for f in sec_missing:
+                print("  MISSING: {}".format(f))
+            print("  /api/* Pages Functions will 500 until these are generated.")
+        else:
+            print("IP-protected JSONs: {} copied to deploy/functions/_data/".format(sec_copied))
+
+    # [V48-SEC Phase 1] --bundled: merge deploy.bundled/ into deploy/.
+    # Replaces index.html, sw.js, analysisWorker.js; drops 19 raw JS files.
+    if args.bundled and not args.dry_run:
+        bundled_dir = os.path.join(ROOT, "deploy.bundled")
+        if not os.path.exists(bundled_dir):
+            print()
+            print("ERROR: --bundled requested but deploy.bundled/ is missing.")
+            print("Run 'node scripts/build.mjs --minify --obfuscate' first.")
+            sys.exit(1)
+
+        # Raw JS files to remove from deploy/js/ (superseded by bundle).
+        # Keep analysisWorker.js + screenerWorker.js (workers need them by name).
+        RAW_JS_REPLACED = [
+            "colors.js", "data.js", "api.js", "realtimeProvider.js",
+            "indicators.js", "patterns.js", "signalEngine.js", "chart.js",
+            "patternRenderer.js", "signalRenderer.js", "backtester.js",
+            "sidebar.js", "patternPanel.js", "financials.js",
+            "drawingTools.js", "appState.js", "appWorker.js", "appUI.js",
+            "app.js", "_entry.js",
+        ]
+        dropped = 0
+        for f in RAW_JS_REPLACED:
+            p = os.path.join(DEPLOY_DIR, "js", f)
+            if os.path.exists(p):
+                os.remove(p)
+                dropped += 1
+                linked -= 1
+
+        # Overlay deploy.bundled/ onto deploy/. For each file in bundled dir,
+        # overwrite (or create) the matching path in deploy/.
+        overlaid = 0
+        for dirpath, _, filenames in os.walk(bundled_dir):
+            for fn in filenames:
+                src = os.path.join(dirpath, fn)
+                rel = os.path.relpath(src, bundled_dir)
+                dst = os.path.join(DEPLOY_DIR, rel)
+                os.makedirs(os.path.dirname(dst) or DEPLOY_DIR, exist_ok=True)
+                if os.path.exists(dst):
+                    os.remove(dst)
+                else:
+                    linked += 1
+                try:
+                    os.link(src, dst)
+                except (OSError, NotImplementedError):
+                    shutil.copy2(src, dst)
+                overlaid += 1
+        print("Bundled merge: dropped {} raw JS files, overlaid {} bundle files".format(
+            dropped, overlaid))
+
     print("Files staged : {:,}".format(linked))
     print("Files skipped: {:,}".format(skipped))
     if errors:
@@ -308,35 +430,63 @@ def main():
     # Post-stage: verify critical files are present in deploy/
     if not args.dry_run:
         # [V6-FIX] P2-3: Complete list of all 19 load-order JS files + 2 Workers + assets
+        # [V48-SEC] In --bundled mode, the 19 raw JS are replaced by one bundle.
         CRITICAL_FILES = [
             "index.html", "sw.js", "_headers", "favicon.svg",
             os.path.join("css", "style.css"),
-            # All 19 JS files in load order (must match index.html <script> tags)
-            os.path.join("js", "colors.js"),
-            os.path.join("js", "data.js"),
-            os.path.join("js", "api.js"),
-            os.path.join("js", "realtimeProvider.js"),
-            os.path.join("js", "indicators.js"),
-            os.path.join("js", "patterns.js"),
-            os.path.join("js", "signalEngine.js"),
-            os.path.join("js", "chart.js"),
-            os.path.join("js", "patternRenderer.js"),
-            os.path.join("js", "signalRenderer.js"),
-            os.path.join("js", "backtester.js"),
-            os.path.join("js", "sidebar.js"),
-            os.path.join("js", "patternPanel.js"),
-            os.path.join("js", "financials.js"),
-            os.path.join("js", "drawingTools.js"),
-            os.path.join("js", "appState.js"),
-            os.path.join("js", "appWorker.js"),
-            os.path.join("js", "appUI.js"),
-            os.path.join("js", "app.js"),
-            # Web Workers (not in load order but fetched at runtime)
+            # Web Workers (always present — analysisWorker may be rewritten in bundled mode)
             os.path.join("js", "analysisWorker.js"),
             os.path.join("js", "screenerWorker.js"),
             # CDN fallback library
             os.path.join("lib", "lightweight-charts.standalone.production.js"),
+            # [V48-SEC Phase 1] Pages Functions + bundled IP JSONs
+            os.path.join("functions", "_shared", "origin.js"),
+            os.path.join("functions", "api", "constants.js"),
+            os.path.join("functions", "api", "flow.js"),
+            os.path.join("functions", "api", "hmm.js"),
+            os.path.join("functions", "api", "eva.js"),
+            os.path.join("functions", "_data", "calibrated_constants.json"),
+            os.path.join("functions", "_data", "flow_signals.json"),
+            os.path.join("functions", "_data", "hmm_regimes.json"),
+            os.path.join("functions", "_data", "eva_scores.json"),
         ]
+        if args.bundled:
+            # In bundled mode, require at least one app.*.js and worker.*.js
+            # hash-named bundle to exist. Exact hashes change per build.
+            bundled_js_dir = os.path.join(DEPLOY_DIR, "js")
+            if os.path.exists(bundled_js_dir):
+                js_files = os.listdir(bundled_js_dir)
+                has_app = any(f.startswith("app.") and f.endswith(".js") for f in js_files)
+                has_worker = any(f.startswith("worker.") and f.endswith(".js") for f in js_files)
+                if not has_app:
+                    print("CRITICAL: --bundled but deploy/js/app.<hash>.js missing")
+                    errors += 1
+                if not has_worker:
+                    print("CRITICAL: --bundled but deploy/js/worker.<hash>.js missing")
+                    errors += 1
+        else:
+            # Non-bundled mode — require all 19 raw JS files.
+            CRITICAL_FILES += [
+                os.path.join("js", "colors.js"),
+                os.path.join("js", "data.js"),
+                os.path.join("js", "api.js"),
+                os.path.join("js", "realtimeProvider.js"),
+                os.path.join("js", "indicators.js"),
+                os.path.join("js", "patterns.js"),
+                os.path.join("js", "signalEngine.js"),
+                os.path.join("js", "chart.js"),
+                os.path.join("js", "patternRenderer.js"),
+                os.path.join("js", "signalRenderer.js"),
+                os.path.join("js", "backtester.js"),
+                os.path.join("js", "sidebar.js"),
+                os.path.join("js", "patternPanel.js"),
+                os.path.join("js", "financials.js"),
+                os.path.join("js", "drawingTools.js"),
+                os.path.join("js", "appState.js"),
+                os.path.join("js", "appWorker.js"),
+                os.path.join("js", "appUI.js"),
+                os.path.join("js", "app.js"),
+            ]
         missing_critical = []
         for f in CRITICAL_FILES:
             if not os.path.exists(os.path.join(DEPLOY_DIR, f)):

@@ -79,7 +79,7 @@ try {
     'indicators.js?v=28',
     'patterns.js?v=50',
     'signalEngine.js?v=47',
-    'backtester.js?v=42'
+    'backtester.js?v=43'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });

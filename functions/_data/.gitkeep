@@ -1,0 +1,2 @@
+Populated by scripts/stage_deploy.py at deploy time (copies 4 distilled IP JSONs here from data/backtest/).
+These files are excluded from deploy/ static hosting and served only via Pages Functions under /api/*.

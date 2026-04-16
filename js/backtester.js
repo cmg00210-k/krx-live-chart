@@ -216,8 +216,19 @@ class PatternBacktester {
     var loaded = {};
     // [H-3 FIX] Promise.all replaces setTimeout(3000) race condition.
     // All fetches complete before storing _behavioralData.
+    // [V48-SEC] hmm_regimes served via /api/hmm (Origin-gated). Others unchanged.
+    var apiPrefix = isWorker ? '../api/' : '/api/';
+    var apiEndpoints = { 'hmm_regimes': 'hmm' };
     Promise.all(files.map(function(name) {
-      return fetch(prefix + name + '.json')
+      var rawUrl = prefix + name + '.json';
+      if (apiEndpoints[name]) {
+        var apiUrl = apiPrefix + apiEndpoints[name];
+        return fetch(apiUrl, { credentials: 'same-origin' })
+          .then(function(r) { return r.ok ? r : fetch(rawUrl); })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
+      }
+      return fetch(rawUrl)
         .then(function(r) { return r.ok ? r.json() : null; })
         .catch(function() { return null; });
     })).then(function(results) {
@@ -345,16 +356,20 @@ class PatternBacktester {
    *  calibrated_constants.json: 5 parameters from calibrate_constants.py
    *  Injects into PatternEngine static fields if available.
    *  [C][L:GS] calibrate_constants.py offline pipeline output.
+   *  [V48-SEC] Primary: /api/constants (Origin-gated Pages Function).
+   *           Fallback: data/backtest/calibrated_constants.json (dev/file-mode).
    */
   _calibratedAttempted = false;
   _loadCalibratedConstants() {
     if (this._calibratedAttempted) return;
     this._calibratedAttempted = true;
     var isWorker = (typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined');
-    var url = isWorker
+    var primaryUrl = isWorker ? '../api/constants' : '/api/constants';
+    var fallbackUrl = isWorker
       ? '../data/backtest/calibrated_constants.json'
       : 'data/backtest/calibrated_constants.json';
-    fetch(url)
+    fetch(primaryUrl, { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r : fetch(fallbackUrl); })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (!data) return;

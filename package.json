@@ -3,13 +3,21 @@
   "name": "krx-live-chart",
   "version": "1.0.0",
   "description": "KRX Live Chart (CheeseStock) - Korean stock market charting web app",
+  "type": "module",
   "scripts": {
     "serve": "npx serve -l 5500 -s",
     "stage": "python scripts/stage_deploy.py",
+    "build": "node scripts/build.mjs",
+    "build:prod": "node scripts/build.mjs --minify --obfuscate",
+    "verify": "python scripts/verify.py",
     "deploy": "python scripts/stage_deploy.py && wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message=\"deploy\"",
+    "deploy:bundled": "node scripts/build.mjs --minify --obfuscate && python scripts/stage_deploy.py --bundled && wrangler pages deploy deploy --project-name cheesestock --branch main --commit-dirty=true --commit-message=\"deploy bundled\"",
     "backtest": "node scripts/backtest_runner.js --batch"
   },
   "devDependencies": {
+    "esbuild": "^0.20.0",
+    "javascript-obfuscator": "^4.1.0",
+    "terser": "^5.27.0",
     "wrangler": "^4.78.0"
   },
   "engines": {

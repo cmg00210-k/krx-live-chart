@@ -1164,6 +1164,215 @@ def check_canvas(strict=False):
 
 
 # =============================================================================
+# CHECK 11 - Bundle integrity (V48-SEC Phase 1)
+# =============================================================================
+
+def check_bundle_integrity(strict=False):
+    section("CHECK 11 - Bundle Integrity (deploy.bundled/)")
+    errors = 0
+    warnings = 0
+
+    bundled = ROOT / "deploy.bundled"
+    if not bundled.exists():
+        warn("deploy.bundled/ not found — run 'node scripts/build.mjs --minify --obfuscate' first")
+        return errors, warnings + 1
+
+    # 11a. manifest.json exists and is parseable
+    manifest_path = bundled / "manifest.json"
+    if not manifest_path.exists():
+        fail("deploy.bundled/manifest.json missing")
+        return errors + 1, warnings
+    try:
+        manifest = json.loads(read(manifest_path))
+    except Exception as e:
+        fail(f"manifest.json parse error: {e}")
+        return errors + 1, warnings
+    ok(f"manifest.json loaded (minify={manifest.get('minify')}, obfuscate={manifest.get('obfuscate')})")
+
+    # 11b. Main and worker bundles referenced in manifest exist on disk
+    for key in ("main", "worker"):
+        entry = manifest.get(key) or {}
+        rel = entry.get("file")
+        if not rel:
+            fail(f"manifest.{key}.file is missing")
+            errors += 1
+            continue
+        path = bundled / rel
+        if not path.exists():
+            fail(f"manifest.{key} points at {rel} but that file is missing")
+            errors += 1
+        else:
+            ok(f"{key} bundle present: {rel} ({entry.get('bytes', '?')} bytes)")
+
+    # 11c. index.html references the main bundle (single script tag)
+    index_path = bundled / "index.html"
+    if index_path.exists():
+        html = read(index_path)
+        main_basename = (manifest.get("main") or {}).get("file", "")
+        if main_basename and main_basename in html:
+            ok(f"index.html references main bundle ({os.path.basename(main_basename)})")
+        else:
+            fail(f"index.html does NOT reference {main_basename}")
+            errors += 1
+        # No stale version-query references to raw js files.
+        stale = re.findall(r'src="js/\w+\.js\?v=\d+"', html)
+        if stale:
+            fail(f"index.html still contains {len(stale)} pre-bundle <script src='js/*.js?v=N'> tags")
+            errors += 1
+    else:
+        fail("deploy.bundled/index.html missing")
+        errors += 1
+
+    # 11d. sw.js STATIC_ASSETS references both bundles and CACHE_NAME is hash-bumped
+    sw_path = bundled / "sw.js"
+    if sw_path.exists():
+        sw = read(sw_path)
+        for key in ("main", "worker"):
+            entry = manifest.get(key) or {}
+            rel = entry.get("file", "")
+            if rel and f"'/{rel}'" in sw:
+                ok(f"sw.js STATIC_ASSETS contains /{rel}")
+            else:
+                fail(f"sw.js STATIC_ASSETS missing /{rel}")
+                errors += 1
+        cache_match = re.search(r"CACHE_NAME\s*=\s*['\"]cheesestock-v([a-f0-9]+)['\"]", sw)
+        main_hash = (manifest.get("main") or {}).get("hash", "")
+        if cache_match and main_hash and main_hash in cache_match.group(1):
+            ok(f"sw.js CACHE_NAME bumped to hash {cache_match.group(1)}")
+        else:
+            warn(f"sw.js CACHE_NAME may be stale (expected hash prefix {main_hash})")
+            warnings += 1
+    else:
+        fail("deploy.bundled/sw.js missing")
+        errors += 1
+
+    # 11e. analysisWorker.js importScripts -> worker bundle (rewritten version)
+    aw_path = bundled / "js" / "analysisWorker.js"
+    if aw_path.exists():
+        aw = read(aw_path)
+        worker_basename = os.path.basename((manifest.get("worker") or {}).get("file", ""))
+        if worker_basename and worker_basename in aw:
+            ok(f"analysisWorker.js importScripts references {worker_basename}")
+        else:
+            fail(f"analysisWorker.js does NOT reference worker bundle {worker_basename}")
+            errors += 1
+    else:
+        warn("deploy.bundled/js/analysisWorker.js missing (build.mjs should have copied it)")
+        warnings += 1
+
+    # 11f. No source map leakage in deploy.bundled/
+    for dirpath, _, filenames in os.walk(bundled):
+        for fn in filenames:
+            if fn.endswith(".map"):
+                fail(f"Source map leaked in deploy.bundled/: {os.path.relpath(os.path.join(dirpath, fn), bundled)}")
+                errors += 1
+
+    # 11g. No raw js/*.js (other than workers) in deploy.bundled/js/
+    js_dir = bundled / "js"
+    if js_dir.exists():
+        for fn in os.listdir(js_dir):
+            if fn in ("analysisWorker.js", "screenerWorker.js"):
+                continue
+            if fn.endswith(".js") and not re.match(r"^(app|worker)\.[a-f0-9]{10}\.js$", fn):
+                warn(f"Unexpected raw JS file in deploy.bundled/js/: {fn}")
+                warnings += 1
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 12 - V48-SEC Phase 1: IP JSON exclusion from deploy/
+# =============================================================================
+
+IP_PROTECTED_JSONS = [
+    "data/backtest/calibrated_constants.json",
+    "data/backtest/composite_calibration.json",
+    "data/backtest/flow_signals.json",
+    "data/backtest/hmm_regimes.json",
+    "data/backtest/eva_scores.json",
+]
+
+IP_PAGES_FUNCTIONS = [
+    "functions/_shared/origin.js",
+    "functions/api/constants.js",
+    "functions/api/flow.js",
+    "functions/api/hmm.js",
+    "functions/api/eva.js",
+]
+
+
+def check_ip_protection(strict=False):
+    section("CHECK 12 - IP JSON Protection (V48-SEC Phase 1)")
+    errors = 0
+    warnings = 0
+
+    # 12a. Source tree has the Pages Functions
+    for rel in IP_PAGES_FUNCTIONS:
+        p = ROOT / rel
+        if not p.exists():
+            fail(f"{rel} missing (Pages Function source)")
+            errors += 1
+        else:
+            ok(f"Pages Function present: {rel}")
+
+    # 12b. stage_deploy.py excludes all 5 IP JSONs from deploy/data/backtest/
+    stage_src = read(ROOT / "scripts" / "stage_deploy.py")
+    for rel in IP_PROTECTED_JSONS:
+        basename = os.path.basename(rel)
+        if basename not in stage_src:
+            fail(f"stage_deploy.py EXCLUDE_EXACT missing {basename}")
+            errors += 1
+        else:
+            ok(f"stage_deploy.py excludes {basename}")
+
+    # 12c. deploy/ (if staged) has the 4 runtime IP JSONs under functions/_data/
+    #      and does NOT have them under data/backtest/
+    deploy = ROOT / "deploy"
+    if deploy.exists():
+        for rel in IP_PROTECTED_JSONS:
+            p = deploy / rel
+            if p.exists():
+                fail(f"LEAK: deploy/{rel} present — IP file not excluded!")
+                errors += 1
+            else:
+                ok(f"deploy/{rel} correctly excluded")
+        # The 4 runtime files should be under functions/_data/
+        for rel in IP_PROTECTED_JSONS[:1] + IP_PROTECTED_JSONS[2:]:  # skip composite_calibration
+            basename = os.path.basename(rel)
+            p = deploy / "functions" / "_data" / basename
+            if not p.exists():
+                warn(f"deploy/functions/_data/{basename} missing (run stage_deploy.py)")
+                warnings += 1
+            else:
+                ok(f"deploy/functions/_data/{basename} present")
+    else:
+        warn("deploy/ not staged — run 'python scripts/stage_deploy.py' to verify exclusion")
+        warnings += 1
+
+    # 12d. Client fetch sites reference /api/* primary URL
+    client_checks = [
+        (JS / "backtester.js", "/api/constants"),
+        (JS / "backtester.js", "/api/hmm"),
+        (JS / "appWorker.js", "/api/flow"),
+        (JS / "appWorker.js", "/api/eva"),
+        (JS / "financials.js", "/api/eva"),
+    ]
+    for path, endpoint in client_checks:
+        if not path.exists():
+            fail(f"{path.name} missing")
+            errors += 1
+            continue
+        src = read(path)
+        if endpoint in src:
+            ok(f"{path.name} uses {endpoint}")
+        else:
+            fail(f"{path.name} does NOT use {endpoint}")
+            errors += 1
+
+    return errors, warnings
+
+
+# =============================================================================
 # CHECK 10 - Backtest Acceptance Criteria (7 criteria)
 # =============================================================================
 
@@ -1382,7 +1591,8 @@ def main():
     parser.add_argument(
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
-                 "collision", "dead_exports", "canvas", "criteria", "all"],
+                 "collision", "dead_exports", "canvas", "criteria",
+                 "bundle", "ip", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -1409,6 +1619,8 @@ def main():
         "dead_exports":  check_dead_exports,
         "canvas":        check_canvas,
         "criteria":      check_criteria,
+        "bundle":        check_bundle_integrity,
+        "ip":            check_ip_protection,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

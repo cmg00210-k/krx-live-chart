@@ -57,3 +57,8 @@ scripts/_install_tinytex.py
 # Cloudflare Pages staging directory (built by scripts/stage_deploy.py)
 # Hard-linked from project root -- never commit
 deploy/
+# V48 Phase 1: bundled deploy outputs (built by scripts/build.mjs)
+deploy.bundled/
+deploy.raw/
+# V48 Phase 1: stage-time generated functions/_data/ JSONs (copied from data/backtest/)
+functions/_data/*.json

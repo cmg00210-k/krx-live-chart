@@ -698,11 +698,20 @@ async function _loadPhase8Data() {
   if (_now - _lastPhase8DataLoad < _PIPELINE_LOAD_TTL) return;
   _lastPhase8DataLoad = _now;
   try {
+    // [V48-SEC] flow_signals and eva_scores served via Origin-gated /api/*.
+    // Dev fallback to raw data/backtest/*.json if the API returns non-OK.
+    async function _secFetch(apiPath, rawPath) {
+      try {
+        var r = await fetch(apiPath, { signal: AbortSignal.timeout(5000), credentials: 'same-origin' });
+        if (r.ok) return r;
+      } catch (_) {}
+      return fetch(rawPath, { signal: AbortSignal.timeout(5000) });
+    }
     var results = await Promise.allSettled([
       fetch('data/macro/macro_composite.json', { signal: AbortSignal.timeout(5000) }),
-      fetch('data/backtest/flow_signals.json', { signal: AbortSignal.timeout(5000) }),
+      _secFetch('/api/flow', 'data/backtest/flow_signals.json'),
       fetch('data/derivatives/options_analytics.json', { signal: AbortSignal.timeout(5000) }),
-      fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) }),
+      _secFetch('/api/eva', 'data/backtest/eva_scores.json'),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value.ok)
       try { _macroComposite = await results[0].value.json(); _pipelineStatus.macro_composite = 'ok'; } catch(e) { console.warn('[KRX] macro_composite JSON parse error:', e); }

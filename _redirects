@@ -1,0 +1,11 @@
+# V48-SEC Phase 1: explicit 404 on raw paths of distilled-IP JSONs.
+# These files are excluded from deploy/ but a bare 404 from a missing static
+# asset falls through to the SPA index.html (HTML body with status 200) by
+# default on Cloudflare Pages. Force a real 404 so scrapers get an unambiguous
+# signal that the path is dead; legitimate clients use /api/* via Origin-gated
+# Pages Functions defined in functions/api/*.js.
+/data/backtest/calibrated_constants.json  /404  404
+/data/backtest/composite_calibration.json /404  404
+/data/backtest/flow_signals.json          /404  404
+/data/backtest/hmm_regimes.json           /404  404
+/data/backtest/eva_scores.json            /404  404

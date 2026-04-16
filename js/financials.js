@@ -469,8 +469,12 @@ async function _renderEVA(stock) {
   if (!stock || !stock.code) { el.textContent = '\u2014'; return; }
   // 캐시된 EVA 스코어 로드
   if (!_evaScores) {
+    // [V48-SEC] Primary: /api/eva (Origin-gated). Fallback: raw JSON (dev/file mode).
     try {
-      var resp = await fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) });
+      var resp = await fetch('/api/eva', { signal: AbortSignal.timeout(5000), credentials: 'same-origin' });
+      if (!resp.ok) {
+        resp = await fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) });
+      }
       if (resp.ok) _evaScores = await resp.json();
     } catch (e) { /* EVA optional */ }
   }
@@ -985,61 +989,114 @@ function _calcCAGR(annualData, set, setClass) {
 }
 
 /**
- * 투자판단 점수 (0~100) 산출
+ * 업종 벤치마크 조회 (sector_fundamentals.json)
+ * @param {string} field - avgPer, avgPbr, avgRoe, avgOpm
+ * @returns {number|null}
+ */
+function _getSectorAvg(field) {
+  if (typeof _sectorData === 'undefined' || !_sectorData || !_sectorData.sectors ||
+      typeof currentStock === 'undefined' || !currentStock) return null;
+  var stockInfo = (typeof ALL_STOCKS !== 'undefined' && ALL_STOCKS)
+    ? ALL_STOCKS.find(function(s) { return s.code === currentStock.code; }) : null;
+  if (!stockInfo) return null;
+  var sectorName = stockInfo.industry || stockInfo.sector || '';
+  if (!sectorName || !_sectorData.sectors[sectorName]) {
+    sectorName = stockInfo.sector || '';
+  }
+  if (sectorName && _sectorData.sectors[sectorName]) {
+    var val = _sectorData.sectors[sectorName][field];
+    if (val != null && !isNaN(val)) return val;
+  }
+  // 업종 없으면 시장 평균 폴백
+  var marketAvg = (currentStock.market === 'KOSDAQ')
+    ? (_sectorData.kosdaqAvg || {})
+    : (_sectorData.kospiAvg || {});
+  var key = field.replace('avg', '').toLowerCase();
+  return (marketAvg[key] != null) ? marketAvg[key] : null;
+}
+
+/**
+ * 투자판단 점수 (0~100) — DuPont 3-Factor + 업종 상대평가
  *
- * 항목별 배점:
- *   수익성 (40점): ROE(15) + OPM(15) + ROA(5) + NPM(5)
- *   밸류에이션 (30점): PER(15) + PBR(15)
- *   성장성 (20점): 매출 CAGR 기반
- *   안정성 (20점): 부채비율 기반
+ * 항목별 배점 (V39 DuPont 재설계):
+ *   DuPont (50점): 순이익률(20) + 자산회전률(15) + 자본승수 적정성(15)
+ *   밸류에이션 업종 대비 (30점): PER(15) + PBR(15)
+ *   성장+안정 (20점): 매출 CAGR(10) + 부채비율(10)
  */
 function _calcInvestmentScore(params, set, setClass) {
   const { perVal, pbrVal, debtRatio, roe, opm, roaVal, npmVal, annualData } = params;
   let score = 0;
-  // [FIX-1] 활성화된 항목의 최대 배점을 동적 합산 (하드코딩 제거)
   let maxPossible = 0;
 
-  // ── 수익성 (40점): ROE 15점 + OPM 15점 + ROA 5점 + NPM 5점 ──
-  if (roe != null && !isNaN(roe)) {
-    maxPossible += 15;
-    if (roe >= 15) score += 15;
-    else if (roe >= 10) score += 12;
-    else if (roe >= 5) score += 8;
-    else if (roe >= 0) score += 4;
-  }
-  if (opm != null && !isNaN(opm)) {
-    maxPossible += 15;
-    if (opm >= 20) score += 15;
-    else if (opm >= 10) score += 12;
-    else if (opm >= 5) score += 8;
-    else if (opm >= 0) score += 4;
-  }
-  if (roaVal != null && !isNaN(roaVal) && roaVal > 0) {
-    maxPossible += 5;
-    score += Math.min(roaVal / 10, 1) * 5;  // max 5점 (ROA >= 10%)
-  }
-  if (npmVal != null && !isNaN(npmVal) && npmVal > 0) {
-    maxPossible += 5;
-    score += Math.min(npmVal / 15, 1) * 5;  // max 5점 (NPM >= 15%)
+  // ── DuPont 3-Factor (50점) ──
+  // ROE = Net Margin × Asset Turnover × Equity Multiplier
+
+  // 1. 순이익률 (NPM) 업종 대비 — 20점
+  if (npmVal != null && !isNaN(npmVal)) {
+    maxPossible += 20;
+    var sectorOpm = _getSectorAvg('avgOpm') || 8;
+    var npmRatio = npmVal / Math.max(sectorOpm, 0.1);
+    if (npmRatio >= 1.5) score += 20;
+    else if (npmRatio >= 1.0) score += 15;
+    else if (npmRatio >= 0.5) score += 10;
+    else if (npmVal > 0) score += 5;
   }
 
-  // ── 밸류에이션 (30점): PER 15점 + PBR 15점 ──
+  // 2. 자산회전률 (Asset Turnover = Revenue / Total Assets) — 15점
+  var assetTurnover = null;
+  if (annualData && annualData.length > 0) {
+    var latestAnn = annualData[0];
+    if (latestAnn.rev > 0 && latestAnn.total_assets > 0) {
+      assetTurnover = latestAnn.rev / latestAnn.total_assets;
+    }
+  }
+  if (assetTurnover != null) {
+    maxPossible += 15;
+    // 한국 상장사 중앙값 ~0.7, 업종별 편차 크지만 벤치마크 미보유 → 절대 임계값
+    if (assetTurnover >= 1.2) score += 15;
+    else if (assetTurnover >= 0.8) score += 12;
+    else if (assetTurnover >= 0.4) score += 8;
+    else if (assetTurnover > 0) score += 4;
+  }
+
+  // 3. 자본승수 적정성 (Equity Multiplier = Total Assets / Total Equity) — 15점
+  var equityMult = null;
+  if (annualData && annualData.length > 0) {
+    var latestAnn2 = annualData[0];
+    if (latestAnn2.total_assets > 0 && latestAnn2.total_equity > 0) {
+      equityMult = latestAnn2.total_assets / latestAnn2.total_equity;
+    }
+  }
+  if (equityMult != null) {
+    maxPossible += 15;
+    // 적정 레버리지 1.0~3.0 (업종 중앙값 ±1σ 근사), >5.0 과다
+    if (equityMult >= 1.0 && equityMult <= 3.0) score += 15;
+    else if (equityMult > 3.0 && equityMult <= 5.0) score += 8;
+    else score += 3;
+  }
+
+  // ── 밸류에이션 업종 상대평가 (30점): PER 15점 + PBR 15점 ──
   if (perVal != null && perVal > 0) {
     maxPossible += 15;
-    if (perVal < 10) score += 15;
-    else if (perVal <= 15) score += 12;
-    else if (perVal <= 25) score += 8;
-    else if (perVal <= 40) score += 4;
+    var sectorPer = _getSectorAvg('avgPer') || 15;
+    var perRatio = perVal / Math.max(sectorPer, 1);
+    // 업종 대비 저PER → 고점, 고PER → 저점
+    if (perRatio < 0.5) score += 15;
+    else if (perRatio < 0.8) score += 12;
+    else if (perRatio <= 1.2) score += 8;
+    else if (perRatio <= 2.0) score += 4;
   }
   if (pbrVal != null && pbrVal > 0) {
     maxPossible += 15;
-    if (pbrVal < 0.7) score += 15;
-    else if (pbrVal <= 1.0) score += 12;
-    else if (pbrVal <= 2.0) score += 8;
-    else if (pbrVal <= 3.0) score += 4;
+    var sectorPbr = _getSectorAvg('avgPbr') || 1.2;
+    var pbrRatio = pbrVal / Math.max(sectorPbr, 0.1);
+    if (pbrRatio < 0.5) score += 15;
+    else if (pbrRatio < 0.8) score += 12;
+    else if (pbrRatio <= 1.2) score += 8;
+    else if (pbrRatio <= 2.0) score += 4;
   }
 
-  // ── 성장성 (20점): 매출 CAGR ──
+  // ── 성장+안정 (20점): 매출 CAGR 10점 + 부채비율 10점 ──
   if (annualData && annualData.length >= 2) {
     const newest = annualData[0];
     const oldest = annualData.length >= 4 ? annualData[3] : annualData[annualData.length - 1];
@@ -1047,22 +1104,20 @@ function _calcInvestmentScore(params, set, setClass) {
     const rEnd = Number(newest.rev) || 0;
     const rStart = Number(oldest.rev) || 0;
     if (rStart > 0 && rEnd > 0 && yrs > 0) {
-      maxPossible += 20;
+      maxPossible += 10;
       const cagr = (Math.pow(rEnd / rStart, 1 / yrs) - 1) * 100;
-      if (cagr >= 20) score += 20;
-      else if (cagr >= 10) score += 16;
-      else if (cagr >= 5) score += 12;
-      else if (cagr >= 0) score += 6;
+      if (cagr >= 20) score += 10;
+      else if (cagr >= 10) score += 8;
+      else if (cagr >= 5) score += 6;
+      else if (cagr >= 0) score += 3;
     }
   }
-
-  // ── 안정성 (20점): 부채비율 ──
   if (debtRatio != null && !isNaN(debtRatio)) {
-    maxPossible += 20;
-    if (debtRatio < 50) score += 20;
-    else if (debtRatio <= 100) score += 16;
-    else if (debtRatio <= 200) score += 10;
-    else if (debtRatio <= 300) score += 4;
+    maxPossible += 10;
+    if (debtRatio < 50) score += 10;
+    else if (debtRatio <= 100) score += 8;
+    else if (debtRatio <= 200) score += 5;
+    else if (debtRatio <= 300) score += 2;
   }
 
   // 최소 2개 항목 활성 필요 (최소 maxPossible >= 30)
@@ -1072,7 +1127,6 @@ function _calcInvestmentScore(params, set, setClass) {
     return;
   }
 
-  // [FIX-1] 활성 항목의 실제 최대 배점 기준으로 정규화
   const normalizedScore = Math.round(score / maxPossible * 100);
   const finalScore = Math.min(100, Math.max(0, normalizedScore));
 
