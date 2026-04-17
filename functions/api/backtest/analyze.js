@@ -114,7 +114,9 @@ function computeStats({ candles, occurrences, horizons, segment }) {
     const { signal, occurrences: occIdx } = byType[type];
     const horizonsOut = {};
     for (const h of hList) {
-      const cost = horizonCost(h, costs, segSlippage) * 100; // back to %
+      // KRX_COMMISSION/TAX/SLIPPAGE are already expressed in percent
+      // (0.03 = 0.03%), matching pctReturn output scale. No unit conversion.
+      const cost = horizonCost(h, costs, segSlippage);
       const returns = [];
       for (const idx of occIdx) {
         if (idx + h >= candles.length) continue;
