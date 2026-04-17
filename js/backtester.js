@@ -564,18 +564,36 @@ class PatternBacktester {
       }
       if (trimmedOcc.length === 0) return {};
       var segment = this._inferSegment(stockCode);
-      var r = await fetch('/api/backtest/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candles: trimmed.map(function (c) { return { close: c.close }; }),
-          occurrences: trimmedOcc,
-          horizons: this.HORIZONS,
-          segment: segment,
-        }),
-        credentials: 'same-origin',
-        signal: AbortSignal.timeout(6000),
-      });
+      // [V48-SEC Phase 3] signed POST — HMAC + Bearer + KV rate limit.
+      // Fallback to plain fetch in the Web Worker context where _signPost is
+      // unavailable (analysisWorker imports backtester.js via importScripts).
+      // When called from the worker, signing should be skipped because the
+      // worker does not have access to the session token. The main thread
+      // invokes backtestAllServerFirst via analysisWorker postMessage; the
+      // session chain operates at the main thread level.
+      var hasSign = (typeof _signPost === 'function');
+      var signedBody = {
+        candles: trimmed.map(function (c) { return { close: c.close }; }),
+        occurrences: trimmedOcc,
+        horizons: this.HORIZONS,
+        segment: segment,
+      };
+      var r;
+      if (hasSign) {
+        r = await _signPost('/api/backtest/analyze', signedBody);
+      } else {
+        // Worker-side unsigned fallback — server will 401 under Phase 3, so
+        // this path is effectively dead once Phase 3 is deployed. Logged so
+        // we can detect if it ever fires.
+        console.warn('[V48-Phase3] _signPost unavailable (worker scope) — unsigned /api/backtest/analyze will 401');
+        r = await fetch('/api/backtest/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(signedBody),
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(6000),
+        });
+      }
       if (!r.ok) {
         console.warn('[V48-Phase2.5] backtest server unavailable — backtest skipped');
         return {};

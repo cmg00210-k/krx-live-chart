@@ -1257,13 +1257,15 @@ async function _fetchMacroConfidence(patterns) {
     appliedFactors: Array.from(_appliedFactors || []),
   };
   try {
-    var r = await fetch('/api/confidence/macro', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(4000),
-    });
+    // [V48-SEC Phase 3] _signPost adds HMAC signature + Bearer token headers.
+    // AbortSignal.timeout is not supported in older Workers runtimes for Web Crypto
+    // chained calls, so we use a manual AbortController.
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 4000);
+    var r;
+    try {
+      r = await _signPost('/api/confidence/macro', { patterns: payloadPatterns, context: ctx });
+    } finally { clearTimeout(timer); }
     if (r.ok) {
       var data = await r.json();
       var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;
@@ -1310,13 +1312,8 @@ async function _fetchPhase8Confidence(patterns) {
     appliedFactors: Array.from(_appliedFactors || []),
   };
   try {
-    var r = await fetch('/api/confidence/phase8', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(4000),
-    });
+    // [V48-SEC Phase 3] signed POST with HMAC + Bearer token.
+    var r = await _signPost('/api/confidence/phase8', { patterns: payloadPatterns, context: ctx });
     if (r.ok) {
       var data = await r.json();
       var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;

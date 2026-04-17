@@ -13,6 +13,19 @@ async function init() {
   // 로딩 상태 표시: 종목 데이터 초기화 단계
   _setLoadingText('CheeseStock 로딩 중...', '종목 데이터 초기화');
 
+  // [V48-SEC Phase 3] Provision session token in parallel with index load.
+  // sign.js exposes _initSession(); failure surfaces a toast but does not
+  // block file/demo mode (server-dependent features will 401 and warn).
+  // Phase 2.5 policy: no client-side fallback for server IP endpoints.
+  var _sessionInitPromise = (typeof _initSession === 'function')
+    ? _initSession().catch(function (err) {
+        try { console.warn('[session] init failed:', err && err.message); } catch (_) {}
+        if (typeof showToast === 'function') {
+          showToast('\uc138\uc158 \ucd08\uae30\ud654 \uc2e4\ud328 \u2014 \uc11c\ubc84 \uae30\ubc18 \uae30\ub2a5 \uc77c\ubd80 \ube44\ud65c\uc131\ud654', 'warn');
+        }
+      })
+    : Promise.resolve();
+
   // WS 모드 의도 여부 기록 (initFromIndex 내부에서 mode가 file로 변경될 수 있음)
   var _originalMode = KRX_API_CONFIG.mode;
 
@@ -21,6 +34,11 @@ async function init() {
   } catch (e) {
     showToast('종목 목록 로드 실패 — 기본 종목으로 시작합니다', 'error');
   }
+
+  // Wait for session provisioning before any downstream /api/* fetch fires.
+  // Session init typically completes within 100-300ms and runs in parallel
+  // with initFromIndex above, so this usually resolves instantly.
+  await _sessionInitPromise;
 
   // ── WS 모드 의도였으나 프로브 실패 → 연결 가이드 표시 ──
   // 로컬 개발 환경에서만 가이드 표시 (공개 서버에서는 file 모드로 자동 진입)

@@ -503,7 +503,11 @@ def _parse_script_order_from_html():
         return []
     html = read(html_path)
     srcs = re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']+\.js)(?:\?[^"\']*)?["\']', html)
-    return [s for s in srcs if not s.startswith("http")]
+    # [V48-SEC Phase 3] Exclude js/_shared/* from LOAD_ORDER comparison.
+    # sign.js and any future shared utilities live in _shared/ and are
+    # checked by CHECK 15 (security). The LOAD_ORDER check validates the
+    # 19 main-thread files only.
+    return [s for s in srcs if not s.startswith("http") and "/_shared/" not in s]
 
 
 def check_globals(strict=False):
@@ -1395,7 +1399,8 @@ def check_server_endpoints(strict=False):
     errors = 0
     warnings = 0
 
-    # 13a. Endpoint files exist and call guardRequest + return jsonResponse
+    # 13a. Endpoint files exist and are Origin-guarded (directly via
+    # guardRequest OR indirectly via Phase 3 guardPost/guardGet wrappers).
     for rel in PHASE2_ENDPOINTS:
         p = ROOT / rel
         if not p.exists():
@@ -1403,11 +1408,16 @@ def check_server_endpoints(strict=False):
             errors += 1
             continue
         src = read(p)
-        if "guardRequest(request)" not in src:
-            fail(f"{rel} does not call guardRequest(request)")
+        has_guard = (
+            "guardRequest(request)" in src
+            or "guardPost(" in src
+            or "guardGet(" in src
+        )
+        if not has_guard:
+            fail(f"{rel} does not call guardRequest / guardPost / guardGet")
             errors += 1
         else:
-            ok(f"{rel} calls guardRequest")
+            ok(f"{rel} is origin-guarded")
         if "jsonResponse(" not in src:
             fail(f"{rel} does not call jsonResponse()")
             errors += 1
@@ -1605,6 +1615,302 @@ def check_phase25_cleanup(strict=False):
             errors += 1
         else:
             ok(f"appState.js: no live '{tok}' definition")
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 15 - V48-SEC Phase 3 Security (HMAC + session + rate limit + CSP + SRI)
+# =============================================================================
+
+# Endpoints that must be guarded by hmac+token+rate_limit via guardPost/guardGet.
+PHASE3_GUARDED_ENDPOINTS = [
+    ("functions/api/constants.js",            "guardGet"),
+    ("functions/api/flow.js",                 "guardGet"),
+    ("functions/api/hmm.js",                  "guardGet"),
+    ("functions/api/eva.js",                  "guardGet"),
+    ("functions/api/confidence/macro.js",     "guardPost"),
+    ("functions/api/confidence/phase8.js",    "guardPost"),
+    ("functions/api/backtest/analyze.js",     "guardPost"),
+]
+
+# Shared libs and new files that must exist.
+PHASE3_REQUIRED_FILES = [
+    "functions/_shared/hmac.js",
+    "functions/_shared/session.js",
+    "functions/_shared/rate_limit.js",
+    "functions/_shared/guard.js",
+    "functions/api/session.js",
+    "js/_shared/sign.js",
+]
+
+
+def check_security(strict=False):
+    section("CHECK 15 - V48-SEC Phase 3 Security")
+    errors = 0
+    warnings = 0
+
+    # 15a. .dev.vars MUST NOT be tracked in git
+    dev_vars = ROOT / ".dev.vars"
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["git", "ls-files", ".dev.vars"],
+            cwd=str(ROOT), capture_output=True, text=True, timeout=5,
+        )
+        tracked = (res.stdout or "").strip()
+        if tracked:
+            fail(f".dev.vars is tracked by git ({tracked}) — SECRET LEAK RISK")
+            errors += 1
+        else:
+            ok(".dev.vars not tracked by git")
+    except Exception as e:
+        warn(f"Could not run git ls-files .dev.vars ({e})")
+        warnings += 1
+
+    # 15b. .gitignore contains .dev.vars entry
+    gi = ROOT / ".gitignore"
+    if gi.exists():
+        gi_text = read(gi)
+        if ".dev.vars" in gi_text:
+            ok(".gitignore includes .dev.vars")
+        else:
+            fail(".gitignore missing .dev.vars entry")
+            errors += 1
+    else:
+        fail(".gitignore not found")
+        errors += 1
+
+    # 15c. stage_deploy.py EXCLUDE_EXACT contains .dev.vars
+    sd = ROOT / "scripts" / "stage_deploy.py"
+    if sd.exists():
+        sd_text = read(sd)
+        if '".dev.vars"' in sd_text or "'.dev.vars'" in sd_text:
+            ok("stage_deploy.py EXCLUDE_EXACT includes .dev.vars")
+        else:
+            fail("stage_deploy.py EXCLUDE_EXACT missing .dev.vars")
+            errors += 1
+    else:
+        warn("scripts/stage_deploy.py not found")
+        warnings += 1
+
+    # 15d. Phase 3 required files present
+    for rel in PHASE3_REQUIRED_FILES:
+        p = ROOT / rel
+        if p.exists():
+            ok(f"{rel} present")
+        else:
+            fail(f"{rel} missing")
+            errors += 1
+
+    # 15e. 7 endpoints use guardPost or guardGet (not bare guardRequest only)
+    for rel, guard_fn in PHASE3_GUARDED_ENDPOINTS:
+        p = ROOT / rel
+        if not p.exists():
+            fail(f"{rel} missing")
+            errors += 1
+            continue
+        src = read(p)
+        if guard_fn + "(" in src:
+            ok(f"{rel} uses {guard_fn}()")
+        else:
+            fail(f"{rel} does NOT call {guard_fn}() — Phase 3 guard missing")
+            errors += 1
+
+    # 15f. hmac.js exports expected symbols
+    hmac_path = ROOT / "functions" / "_shared" / "hmac.js"
+    if hmac_path.exists():
+        h = read(hmac_path)
+        for sym in ("verifyHmacPost", "verifyHmacGet", "hmacFailResponse", "signPayload"):
+            if ("export async function " + sym) in h or ("export function " + sym) in h:
+                ok(f"hmac.js exports {sym}")
+            else:
+                fail(f"hmac.js missing export: {sym}")
+                errors += 1
+        # Timing-safe comparison must exist.
+        if "_timingSafeEqual" in h and "diff |=" in h:
+            ok("hmac.js uses XOR-accumulator constant-time compare")
+        else:
+            warn("hmac.js timing-safe comparison not detected")
+            warnings += 1
+        # Dual-key rotation support.
+        if "CHEESESTOCK_HMAC_SECRET_PREV" in h:
+            ok("hmac.js supports dual-key rotation (PREV)")
+        else:
+            fail("hmac.js missing CHEESESTOCK_HMAC_SECRET_PREV handling")
+            errors += 1
+
+    # 15g. session.js exports expected symbols
+    sess_path = ROOT / "functions" / "_shared" / "session.js"
+    if sess_path.exists():
+        s = read(sess_path)
+        for sym in ("verifyToken", "mintSession", "signSessionToken", "deriveSessionSecret"):
+            if ("export async function " + sym) in s or ("export function " + sym) in s:
+                ok(f"session.js exports {sym}")
+            else:
+                fail(f"session.js missing export: {sym}")
+                errors += 1
+
+    # 15h. rate_limit.js exports
+    rl_path = ROOT / "functions" / "_shared" / "rate_limit.js"
+    if rl_path.exists():
+        r = read(rl_path)
+        for sym in ("checkRateLimit", "combineChecks", "rateLimitFailResponse", "clientIp", "LIMITS"):
+            if sym in r:
+                ok(f"rate_limit.js defines {sym}")
+            else:
+                fail(f"rate_limit.js missing {sym}")
+                errors += 1
+        if "CF-Connecting-IP" in r:
+            ok("rate_limit.js uses CF-Connecting-IP (trusted)")
+        else:
+            warn("rate_limit.js should use CF-Connecting-IP, not X-Forwarded-For")
+            warnings += 1
+
+    # 15i. sign.js client
+    sign_path = ROOT / "js" / "_shared" / "sign.js"
+    if sign_path.exists():
+        sj = read(sign_path)
+        for sym in ("_initSession", "_signPost", "_signGet"):
+            if sym in sj:
+                ok(f"js/_shared/sign.js defines {sym}")
+            else:
+                fail(f"js/_shared/sign.js missing {sym}")
+                errors += 1
+        if "crypto.subtle" in sj:
+            ok("js/_shared/sign.js uses Web Crypto SubtleCrypto")
+        else:
+            fail("js/_shared/sign.js must use crypto.subtle for HMAC")
+            errors += 1
+
+    # 15j. app.js calls _initSession()
+    app_path = JS / "app.js"
+    if app_path.exists():
+        ap = read(app_path)
+        if "_initSession(" in ap:
+            ok("app.js calls _initSession()")
+        else:
+            fail("app.js must call _initSession() at start of init()")
+            errors += 1
+
+    # 15k. appWorker.js uses _signPost
+    aw_path = JS / "appWorker.js"
+    if aw_path.exists():
+        aw = read(aw_path)
+        if "_signPost(" in aw:
+            ok("appWorker.js uses _signPost()")
+        else:
+            fail("appWorker.js must use _signPost for /api/confidence/*")
+            errors += 1
+        # Should no longer have bare fetch('/api/confidence/
+        if re.search(r"fetch\s*\(\s*['\"]\/api\/confidence\/", aw):
+            fail("appWorker.js still has unsigned fetch('/api/confidence/...)")
+            errors += 1
+        else:
+            ok("appWorker.js: no unsigned /api/confidence/ fetch")
+
+    # 15l. backtester.js uses _signPost for /api/backtest/analyze
+    bt_path = JS / "backtester.js"
+    if bt_path.exists():
+        bt = read(bt_path)
+        if "_signPost(" in bt:
+            ok("backtester.js uses _signPost()")
+        else:
+            fail("backtester.js must use _signPost for /api/backtest/analyze")
+            errors += 1
+
+    # 15m. financials.js uses _signGet for /api/eva
+    fin_path = JS / "financials.js"
+    if fin_path.exists():
+        fn = read(fin_path)
+        if "_signGet(" in fn:
+            ok("financials.js uses _signGet() for /api/eva")
+        else:
+            warn("financials.js should use _signGet('/api/eva') as primary (falls back ok)")
+            warnings += 1
+
+    # 15n. sw.js STATIC_ASSETS includes /js/_shared/sign.js
+    sw_path = ROOT / "sw.js"
+    if sw_path.exists():
+        swc = read(sw_path)
+        if "/js/_shared/sign.js" in swc:
+            ok("sw.js STATIC_ASSETS includes /js/_shared/sign.js")
+        else:
+            fail("sw.js STATIC_ASSETS missing /js/_shared/sign.js")
+            errors += 1
+
+    # 15o. index.html includes sign.js before app.js/appWorker.js/backtester.js
+    ih_path = ROOT / "index.html"
+    if ih_path.exists():
+        ih = read(ih_path)
+        i_sign = ih.find("js/_shared/sign.js")
+        i_app = ih.find("js/app.js")
+        i_aw  = ih.find("js/appWorker.js")
+        i_bt  = ih.find("js/backtester.js")
+        if i_sign < 0:
+            fail("index.html missing <script src=\"js/_shared/sign.js\">")
+            errors += 1
+        else:
+            if i_sign < i_app and i_sign < i_aw and i_sign < i_bt:
+                ok("index.html: sign.js loads before app/appWorker/backtester")
+            else:
+                fail("index.html: sign.js must load BEFORE app.js/appWorker.js/backtester.js")
+                errors += 1
+
+    # 15p. CSP in _headers tightened (frame-ancestors, object-src 'none')
+    headers_path = ROOT / "_headers"
+    if headers_path.exists():
+        hdr = read(headers_path)
+        # Ensure CSP applies to /* (baseline), not just /index.html
+        m = re.search(r"^/\*\s*$", hdr, re.MULTILINE)
+        if m and "Content-Security-Policy:" in hdr[m.start():]:
+            ok("_headers has Content-Security-Policy on /* baseline")
+        else:
+            warn("_headers: CSP should apply to /* baseline (not just /index.html)")
+            warnings += 1
+        for directive in ("frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'"):
+            if directive in hdr:
+                ok(f"_headers CSP includes {directive}")
+            else:
+                warn(f"_headers CSP missing {directive}")
+                warnings += 1
+        if "Strict-Transport-Security" in hdr:
+            ok("_headers includes HSTS")
+        else:
+            warn("_headers missing Strict-Transport-Security (HSTS)")
+            warnings += 1
+
+    # 15q. index.html SRI pinning for external CDN (Pretendard, LWC)
+    if ih_path.exists():
+        ih = read(ih_path)
+        # LWC already has SRI from Phase 1; Phase 3 adds Pretendard SRI.
+        lwc_ok = bool(re.search(r'lightweight-charts[^>]*integrity="sha384-', ih))
+        pret_ok = bool(re.search(r'pretendard[^>]*integrity="sha384-', ih, re.IGNORECASE))
+        if lwc_ok:
+            ok("index.html: Lightweight Charts SRI pinned")
+        else:
+            warn("index.html: Lightweight Charts missing SRI integrity")
+            warnings += 1
+        if pret_ok:
+            ok("index.html: Pretendard CSS SRI pinned")
+        else:
+            warn("index.html: Pretendard CSS missing SRI integrity")
+            warnings += 1
+
+    # 15r. wrangler.toml exists (KV binding file)
+    wt_path = ROOT / "wrangler.toml"
+    if wt_path.exists():
+        wt = read(wt_path)
+        # binding may be commented during Phase 3 code phase (not yet deployed);
+        # file presence alone is sufficient for this check.
+        if "RATE_LIMIT_KV" in wt:
+            ok("wrangler.toml references RATE_LIMIT_KV binding")
+        else:
+            warn("wrangler.toml does not mention RATE_LIMIT_KV")
+            warnings += 1
+    else:
+        warn("wrangler.toml not found (needed for KV binding at deploy time)")
+        warnings += 1
 
     return errors, warnings
 
@@ -1829,7 +2135,7 @@ def main():
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
                  "collision", "dead_exports", "canvas", "criteria",
-                 "bundle", "ip", "server", "phase25", "all"],
+                 "bundle", "ip", "server", "phase25", "security", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -1860,6 +2166,7 @@ def main():
         "ip":            check_ip_protection,
         "server":        check_server_endpoints,
         "phase25":       check_phase25_cleanup,
+        "security":      check_security,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

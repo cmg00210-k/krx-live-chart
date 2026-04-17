@@ -469,9 +469,15 @@ async function _renderEVA(stock) {
   if (!stock || !stock.code) { el.textContent = '\u2014'; return; }
   // 캐시된 EVA 스코어 로드
   if (!_evaScores) {
-    // [V48-SEC] Primary: /api/eva (Origin-gated). Fallback: raw JSON (dev/file mode).
+    // [V48-SEC Phase 3] Primary: signed GET /api/eva (Origin + HMAC + Bearer + rate-limit).
+    // Fallback: raw JSON (dev/file mode) preserved for offline development.
     try {
-      var resp = await fetch('/api/eva', { signal: AbortSignal.timeout(5000), credentials: 'same-origin' });
+      var resp;
+      if (typeof _signGet === 'function') {
+        resp = await _signGet('/api/eva');
+      } else {
+        resp = await fetch('/api/eva', { signal: AbortSignal.timeout(5000), credentials: 'same-origin' });
+      }
       if (!resp.ok) {
         resp = await fetch('data/backtest/eva_scores.json', { signal: AbortSignal.timeout(5000) });
       }
