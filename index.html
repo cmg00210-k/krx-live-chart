@@ -699,19 +699,29 @@
   <!-- Service Worker 등록 (오프라인 캐싱) — defer 스크립트보다 먼저 실행되도록 load 이벤트 사용 -->
   <script>
   if ('serviceWorker' in navigator) {
+    // [V48-Phase2.5] 새 SW 활성화 알림용 헬퍼 (updatefound + sw-updated 메시지 공용)
+    function _showSWUpdateBar() {
+      if (document.getElementById('_swUpdateBar')) return;  // 중복 방지
+      var bar = document.createElement('div');
+      bar.id = '_swUpdateBar';
+      bar.textContent = '\uc0c8 \ubc84\uc804\uc774 \uc788\uc2b5\ub2c8\ub2e4 \u2014 \ud074\ub9ad\ud558\uc5ec \uc0c8\ub85c\uace0\uce68';
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:var(--accent,#A08830);color:#fff;text-align:center;padding:8px;cursor:pointer;font-size:13px';
+      bar.onclick = function() { location.reload(); };
+      document.body.appendChild(bar);
+    }
+    // [V48-Phase2.5] activate 핸들러가 보내는 sw-updated 메시지 처리
+    navigator.serviceWorker.addEventListener('message', function(ev) {
+      if (ev && ev.data && ev.data.type === 'sw-updated') {
+        _showSWUpdateBar();
+      }
+    });
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('/sw.js').then(function(reg) {
         // 새 SW 발견 시 즉시 활성화 (대기 상태 건너뜀)
         reg.addEventListener('updatefound', function() {
           var nw = reg.installing;
           if (nw) nw.addEventListener('statechange', function() {
-            if (nw.state === 'activated') {
-              var bar = document.createElement('div');
-              bar.textContent = '\uc0c8 \ubc84\uc804\uc774 \uc788\uc2b5\ub2c8\ub2e4 \u2014 \ud074\ub9ad\ud558\uc5ec \uc0c8\ub85c\uace0\uce68';
-              bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:var(--accent);color:#fff;text-align:center;padding:8px;cursor:pointer;font-size:13px';
-              bar.onclick = function() { location.reload(); };
-              document.body.appendChild(bar);
-            }
+            if (nw.state === 'activated') _showSWUpdateBar();
           });
         });
         // 주기적 업데이트 체크 (1시간)
@@ -733,14 +743,14 @@
   <script defer src="js/chart.js?v=13"></script>
   <script defer src="js/patternRenderer.js?v=25"></script>
   <script defer src="js/signalRenderer.js?v=12"></script>
-  <script defer src="js/backtester.js?v=44"></script>
+  <script defer src="js/backtester.js?v=45"></script>
   <script defer src="js/sidebar.js?v=13"></script>
   <script defer src="js/patternPanel.js?v=24"></script>
   <script defer src="js/financials.js?v=20"></script>
   <script defer src="js/drawingTools.js?v=12"></script>
-  <script defer src="js/appState.js?v=5"></script>
-  <script defer src="js/appWorker.js?v=16"></script>
-  <script defer src="js/appUI.js?v=1"></script>
-  <script defer src="js/app.js?v=35"></script>
+  <script defer src="js/appState.js?v=6"></script>
+  <script defer src="js/appWorker.js?v=17"></script>
+  <script defer src="js/appUI.js?v=2"></script>
+  <script defer src="js/app.js?v=36"></script>
 </body>
 </html>

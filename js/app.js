@@ -321,7 +321,7 @@ async function _continueInit() {
     // 150ms 디바운스 — 빠른 드래그 시 마지막 위치만 분석
     if (_dragDebounceTimer) clearTimeout(_dragDebounceTimer);
 
-    _dragDebounceTimer = setTimeout(() => {
+    _dragDebounceTimer = setTimeout(async () => {
       _dragDebounceTimer = null;
 
       // Worker가 준비되어 있으면 비동기 분석 요청
@@ -340,8 +340,8 @@ async function _continueInit() {
           financialData: _getFinancialDataForSR(),  // 밸류에이션 S/R용 bps/eps
         });
       } else {
-        // 폴백: 메인 스레드 동기 분석
-        _analyzeDragOnMainThread(visibleCandles, clampFrom);
+        // 폴백: 메인 스레드 분석 ([V48-Phase2.5] async)
+        await _analyzeDragOnMainThread(visibleCandles, clampFrom);
       }
     }, 150);
   });

@@ -186,7 +186,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=65');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=66');
 
     _analysisWorker.onmessage = async function (e) {
       const msg = e.data;
@@ -764,152 +764,8 @@ async function _loadPhase8Data() {
   } catch (e) { _notifyFetchFailure('Phase8 데이터'); }
 }
 
-/**
- * [Phase 8] 패턴 신뢰도에 MCS + HMM 레짐 + 수급 방향 + 옵션 Implied Move 조정 적용
- *
- * 호출 시점: _applyMacroConfidenceToPatterns() 이후 (기존 매크로 조정 완료 후 추가 레이어)
- * 중복 방지: patterns.js/signalEngine.js의 기존 HMM discount와 별개 — 여기서는 flow_signals.json 기반
- *
- * 조정 로직:
- * - MCS > 70: 매수 패턴 +5%, MCS < 30: 매도 패턴 +5%
- * - HMM regime: REGIME_CONFIDENCE_MULT 적용
- * - 외국인 방향 일치: +3% 보너스
- * - Implied Move > 3%: 이벤트 기간 패턴 신뢰도 ±5%
- * - DD < 2: 매수 패턴 -10% 페널티
- */
 function _applyPhase8ConfidenceToPatterns(patterns) {
-  if (!patterns || !patterns.length) return;
-
-  // V47-B2: 교차-API cascade 실패 가드. KRX 그룹 전체 down이면
-  // flow_signals/options/investor/etf/shortselling 모두 신뢰 불가 →
-  // Phase8 내부의 HMM·옵션·수급 블록 전체 스킵. MCS 블록은 ECOS 소속이라
-  // 블록별 개별 guard 유지(아래 각 if문의 _staleDataSources 체크).
-  if (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('KRX') === 'down') {
-    console.warn('[CROSS-API] KRX down → _applyPhase8ConfidenceToPatterns Flow/Options 블록 전면 스킵');
-    // MCS 블록(ECOS 소속)만 아래에서 정상 진행
-  }
-
-  var code = currentStock ? currentStock.code : null;
-  var _krxGroupDown = (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('KRX') === 'down');
-
-  // MCS 조정 (거시경제 복합점수)
-  // [V22-B] factor guard: MACRO_COMPOSITE 이미 적용되었으면 스킵
-  if (!_appliedFactors.has('MACRO_COMPOSITE') && _macroComposite && _macroComposite.mcsV2 != null) {
-    var mcs = _macroComposite.mcsV2;
-    // [V6-FIX] B-4 FND-MAC-6: Scale guard — mcsV2 is 0-100 (macro_composite.json).
-    // If accidentally 0-1 (from macro_latest.json mcs), normalize.
-    if (mcs > 0 && mcs <= 1.0) {
-      console.warn('[Phase8] MCS appears to be 0-1 scale, normalizing to 0-100');
-      mcs = mcs * 100;
-    }
-    for (var i = 0; i < patterns.length; i++) {
-      var p = patterns[i];
-      if (p.confidence == null) continue;
-      if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') {
-        p.confidence *= 1.05;
-      } else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') {
-        p.confidence *= 1.05;
-      }
-    }
-    _appliedFactors.add('MACRO_COMPOSITE');
-  }
-
-  // HMM 레짐 + 수급 조정 (종목별)
-  // [P0-fix] Quality gate: flowDataCount=0 → no real per-stock investor data exists.
-  // Without real data, hmmRegimeLabel is unreliable (e.g., "bear" applied to ALL 2,651 stocks
-  // when investor_daily is empty). Skip regime multiplier entirely when data quality is insufficient.
-  // JSON structure: { "stocks": { "005930": { hmmRegimeLabel, foreignMomentum, ... } } }
-  // [V22-B] factor guards: REGIME_HMM (시장 전체 multiplier) + FLOW_FOREIGN (per-stock bonus) 분리
-  // [V47-B1] flow_signals staleness → skip (승수 1.0 클램프)
-  // [V47-B2] KRX 그룹 cascade down → skip
-  if (code && !_krxGroupDown && _flowSignals && !_staleDataSources.has('flow_signals') && _flowSignals.flowDataCount > 0 && _flowSignals.stocks && _flowSignals.stocks[code]) {
-    var flow = _flowSignals.stocks[code];
-    var regime = flow.hmmRegimeLabel || null;
-    var mult = REGIME_CONFIDENCE_MULT[regime] || REGIME_CONFIDENCE_MULT[null];
-
-    // [C-5] Check whether per-stock flow signals are available.
-    // Stocks with no per-stock investor data have foreignMomentum/retailContrarian/
-    // institutionalAlignment set to null — HMM regime multiplier still applies
-    // (it is market-wide), but the per-stock bonus is skipped.
-    var hasFlowData = flow.foreignMomentum != null || flow.retailContrarian != null ||
-                      flow.institutionalAlignment != null;
-    if (!hasFlowData) {
-      console.warn('[Phase8] ' + code + ': no per-stock flow data — foreignMomentum bonus skipped');
-    }
-
-    var applyHMM = !_appliedFactors.has('REGIME_HMM');
-    var applyForeign = hasFlowData && !_appliedFactors.has('FLOW_FOREIGN');
-    for (var j = 0; j < patterns.length; j++) {
-      var pt = patterns[j];
-      if (pt.confidence == null) continue;
-
-      // HMM 레짐 승수 (시장 전체 적용 — per-stock data 유무 무관)
-      if (applyHMM) {
-        var dir = pt.signal === 'buy' ? 'buy' : 'sell';
-        pt.confidence *= mult[dir];
-      }
-
-      // 외국인 방향 일치 보너스 — per-stock data 있을 때만 적용 (null 시 false confidence 방지)
-      if (applyForeign) {
-        if (flow.foreignMomentum === 'buy' && pt.signal === 'buy') {
-          pt.confidence *= 1.03;
-        } else if (flow.foreignMomentum === 'sell' && pt.signal === 'sell') {
-          pt.confidence *= 1.03;
-        }
-      }
-    }
-    if (applyHMM) _appliedFactors.add('REGIME_HMM');
-    if (applyForeign) _appliedFactors.add('FLOW_FOREIGN');
-  }
-
-  // Options implied volatility adjustment (event period / uncertainty detection)
-  // Simon & Wiggins (2001): IV/HV > 1.5 → pattern accuracy drops 15-20%
-  // [V22-B] factor guard: FLOW_OPTIONS 이미 적용되었으면 스킵
-  // [V47-B1] options_analytics staleness → skip (승수 1.0 클램프)
-  // [V47-B2] KRX 그룹 cascade down → skip
-  if (!_appliedFactors.has('FLOW_OPTIONS') && !_krxGroupDown && !_staleDataSources.has('options_analytics') && _optionsAnalytics && _optionsAnalytics.analytics) {
-    var _oa = _optionsAnalytics.analytics;
-    var _ivHvFired = false;
-    var _optionsApplied = false;
-    // Prefer IV/HV ratio (expiry-independent) over absolute impliedMove
-    if (_oa.atmIV != null && _oa.historicalVol != null && _oa.historicalVol > 0) {
-      var _ivHvRatio = _oa.atmIV / _oa.historicalVol;
-      if (_ivHvRatio > 1.5) {
-        _ivHvFired = true;
-        _optionsApplied = true;
-        var _ivDiscount = _ivHvRatio > 2.0 ? 0.90 : 0.93;
-        for (var k = 0; k < patterns.length; k++) {
-          if (patterns[k].confidence == null) continue;
-          patterns[k].confidence *= _ivDiscount;
-        }
-      }
-    }
-    // Fallback: absolute impliedMove (backward compat when IV/HV not available)
-    if (!_ivHvFired && _oa.straddleImpliedMove != null && _oa.straddleImpliedMove > 3.5) {
-      _optionsApplied = true;
-      for (var k = 0; k < patterns.length; k++) {
-        if (patterns[k].confidence == null) continue;
-        patterns[k].confidence *= 0.93;
-      }
-    }
-    if (_optionsApplied) _appliedFactors.add('FLOW_OPTIONS');
-  }
-
-  // DD 페널티는 _applyMertonDDToPatterns()에서 이미 적용됨 — 이중 적용 방지를 위해 여기서 제거
-  // (Phase8 DD: 0.90x + MertonDD: 0.82x = 0.738x 이중 감산 버그 수정)
-
-  // [P0-C7] confidence clamp — 다른 adjust 함수와 동일
-  // [V22-B Phase 3-Step 5] 하드코딩 [10, 100], [10, 95] → ATR 동적 cap
-  var _capConf = getDynamicCap('confidence', _currentVolRegime);
-  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
-  for (var c = 0; c < patterns.length; c++) {
-    if (patterns[c].confidence != null) {
-      patterns[c].confidence = Math.max(_capConf[0], Math.min(_capConf[1], patterns[c].confidence));
-    }
-    if (patterns[c].confidencePred != null) {
-      patterns[c].confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], patterns[c].confidencePred));
-    }
-  }
+  throw new Error('[V48-Phase2.5] removed; see /api/confidence/phase8');
 }
 
 /**
@@ -1419,11 +1275,13 @@ async function _fetchMacroConfidence(patterns) {
         return;
       }
     }
-    console.warn('[V48-Phase2] macro confidence server unavailable — fallback to client-side');
+    console.warn('[V48-Phase2.5] macro confidence server unavailable — confidence adjustment skipped');
   } catch (_e) {
-    console.warn('[V48-Phase2] macro confidence server error — fallback to client-side');
+    console.warn('[V48-Phase2.5] macro confidence server error — confidence adjustment skipped');
   }
-  _applyMacroConfidenceToPatterns(patterns);
+  if (typeof showToast === 'function') {
+    showToast('신뢰도 조정 일시 불가 - 새로고침 후 재시도', 'warn');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1470,300 +1328,17 @@ async function _fetchPhase8Confidence(patterns) {
         return;
       }
     }
-    console.warn('[V48-Phase2] phase8 confidence server unavailable — fallback to client-side');
+    console.warn('[V48-Phase2.5] phase8 confidence server unavailable — confidence adjustment skipped');
   } catch (_e) {
-    console.warn('[V48-Phase2] phase8 confidence server error — fallback to client-side');
+    console.warn('[V48-Phase2.5] phase8 confidence server error — confidence adjustment skipped');
   }
-  _applyPhase8ConfidenceToPatterns(patterns);
+  if (typeof showToast === 'function') {
+    showToast('신뢰도 조정 일시 불가 - 새로고침 후 재시도', 'warn');
+  }
 }
 
 function _applyMacroConfidenceToPatterns(patterns) {
-  if (!patterns || patterns.length === 0) return;
-  // V47-B2: 교차-API cascade 실패 가드. ECOS 그룹 전체가 down이면
-  // macro_latest/bonds_latest/macro_composite 모두 신뢰 불가 → 매크로 조정 전면 스킵.
-  // 개별 소스 stale 가드(V47-B1)를 상위 레벨에서 보강.
-  if (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('ECOS') === 'down') {
-    console.warn('[CROSS-API] ECOS down → _applyMacroConfidenceToPatterns 전체 스킵');
-    return;
-  }
-  // V47-B1: stale 소스는 null로 간주 → 이 함수 내 파생 승수(phase/slope/aaSpread/fSignal 등)가
-  // 모두 조건 미충족으로 건너뛰어 macroMult 1.0 클램프와 동일한 효과를 달성.
-  var macro = _staleDataSources.has('macro_latest') ? null : _macroLatest;
-  var bonds = _staleDataSources.has('bonds_latest') ? null : _bondsLatest;
-  if (!macro && !bonds) return;
-
-  // ── 매크로 상태 추출 (null-safe) ──
-  var cp = macro && macro.cycle_phase;
-  var phase = cp ? cp.phase : null;          // expansion|peak|contraction|trough
-  var cliDelta = cp ? cp.delta : null;       // 월간 CLI 변화량
-  var slope = bonds ? bonds.slope_10y3y : (macro ? macro.term_spread : null);
-  var inverted = bonds ? bonds.curve_inverted : false;
-  var aaSpread = bonds && bonds.credit_spreads ? bonds.credit_spreads.aa_spread : null;
-  var creditRegime = bonds ? bonds.credit_regime : null;
-  var fSignal = macro ? macro.foreigner_signal : null;
-  // [V38] Taylor gap: macro_composite의 비평활화 값 우선 (dead band 활성화)
-  var taylorGap = (_macroComposite && _macroComposite.taylorGap != null)
-    ? _macroComposite.taylorGap
-    : (macro ? macro.taylor_gap : null);
-  var _stockIndustry = currentStock ? (currentStock.industry || currentStock.sector) : null;
-  var _macroSector = _getStovallSector(_stockIndustry);
-
-  for (var pi = 0; pi < patterns.length; pi++) {
-    var p = patterns[pi];
-    var isBuy = (p.signal === 'buy');
-    var adj = 1.0;
-
-    // ── 1. 경기국면 + Stovall(1996) 섹터 순환 (Doc30 §1, B-1) ──
-    // 기본: IS-LM 균형점 방향 (expansion→buy, contraction→sell)
-    // 섹터 차등: Stovall 매핑 (tech/semiconductor→trough 선도, utility→contraction 방어)
-    if (phase) {
-      var _sectorCycle = _macroSector ? _STOVALL_CYCLE[_macroSector] : null;
-      if (_sectorCycle && _sectorCycle[phase] != null) {
-        // Stovall 차등: 섹터별 buy_mult, sell_mult = 2.0 - buy_mult
-        var buyMult = _sectorCycle[phase];
-        // [V6-FIX] B-4 FND-MAC-5: KRX_UNVALIDATED dampening 0.5x
-        // Stovall (1996) designed for US S&P; Korean sector dynamics unvalidated.
-        // Halve deviation from 1.0 until KRX backtesting confirms mapping.
-        var dampened = 1.0 + (buyMult - 1.0) * 0.5;
-        adj *= isBuy ? dampened : (2.0 - dampened);
-      } else {
-        // 매핑 실패 시 기존 균일 조정 유지
-        if (phase === 'expansion') {
-          adj *= isBuy ? 1.06 : 0.94;
-        } else if (phase === 'peak') {
-          adj *= isBuy ? 0.95 : 1.08;
-        } else if (phase === 'contraction') {
-          adj *= isBuy ? 0.92 : 1.08;
-        } else if (phase === 'trough') {
-          adj *= isBuy ? 1.10 : 0.90;
-        }
-      }
-    }
-
-    // ── 2. 수익률곡선 4-체제 (B-2, Doc35 §3) ──
-    // Bull/Bear: taylor_gap 부호로 추론 (dovish<0=Bull, hawkish>0=Bear)
-    // Steepening/Flattening: slope 수준 (>0.2=Steep, <0.2=Flat)
-    // 역전(slope<0): 최강 bearish → 별도 처리
-    if (slope != null) {
-      if (inverted || slope < 0) {
-        // 역전: 12-18개월 경기침체 선행 → 최강 매수 억제
-        adj *= isBuy ? 0.88 : 1.12;
-      } else if (taylorGap != null) {
-        var isBull = taylorGap < 0;     // dovish = Bull (금리 하락 기대)
-        var isSteep = slope > 0.20;     // 정상 이상 → Steepening
-        if (isBull && isSteep) {
-          // Bull Steepening: 초기 완화 → 가장 위험선호적, 매수 강화
-          adj *= isBuy ? 1.06 : 0.95;
-        } else if (isBull && !isSteep) {
-          // Bull Flattening: 장기 금리 하락 주도 → 성장 둔화 우려
-          adj *= isBuy ? 0.97 : 1.03;
-        } else if (!isBull && isSteep) {
-          // Bear Steepening: 장기 금리 상승 → 인플레이션/공급 우려
-          adj *= isBuy ? 0.95 : 1.04;
-        } else {
-          // Bear Flattening: 단기 금리 상승 주도 → 긴축, 경기침체 전조
-          adj *= isBuy ? 0.90 : 1.10;
-        }
-      } else {
-        // taylor_gap 없을 때: 기존 slope 수준 기반 fallback
-        if (slope < 0.15) {
-          adj *= isBuy ? 0.96 : 1.04;
-        } else if (slope > 0.5) {
-          adj *= isBuy ? 1.04 : 0.97;
-        }
-      }
-    }
-
-    // ── 3. 크레딧 레짐 (Doc35 §4, AA- 스프레드) ──
-    // 스트레스: 신용위험 확대 → 모든 패턴 신뢰도 감소
-    // [V22-B] factor guard: RISK_CREDIT 이미 RORO에서 적용되었으면 스킵
-    if (aaSpread != null && !_appliedFactors.has('RISK_CREDIT')) {
-      if (aaSpread > 1.5 || creditRegime === 'stress') {
-        // [V6-FIX→V7] Credit stress asymmetry (Gilchrist & Zakrajsek 2012):
-        // Buy patterns less reliable in stress (-18%), sell patterns confirmed (+6%)
-        adj *= isBuy ? 0.82 : 1.06;
-      } else if (aaSpread > 1.0 || creditRegime === 'elevated') {
-        adj *= isBuy ? 0.93 : 1.04;  // 주의: 매수 -7%, 매도 +4%
-      }
-      // normal: 조정 없음
-    }
-
-    // ── 4. 외인 시그널 (UIP, Mundell-Fleming 자본유입, Doc28 §8) ──
-    // foreigner_signal > +0.3: 외인 순유입 → 매수 패턴 지지
-    // foreigner_signal < -0.3: 외인 순유출 → 매도 패턴 지지
-    if (fSignal != null) {
-      if (fSignal > 0.3) {
-        adj *= isBuy ? 1.05 : 0.96;  // 유입: 매수 +5%, 매도 -4%
-      } else if (fSignal < -0.3) {
-        adj *= isBuy ? 0.95 : 1.05;  // 유출: 매수 -5%, 매도 +5%
-      }
-    }
-
-    // ── 5. 패턴-특화 오버라이드 (S-tier 고WR 패턴 매크로 연동) ──
-    var pType = p.type || p.pattern || '';
-    // doubleTop (WR=74.7%): contraction/peak + 역전 시 강화 (Doc30 §2 negative demand shock)
-    if (pType === 'doubleTop' && !isBuy) {
-      if ((phase === 'contraction' || phase === 'peak') && (inverted || (slope != null && slope < 0.15))) {
-        adj *= 1.10;  // 경기하강+역전: 추가 +10%
-      }
-    }
-    // doubleBottom (WR=62.1%): trough + steep curve 시 강화 (Doc30 §2 positive demand shock)
-    if (pType === 'doubleBottom' && isBuy) {
-      if (phase === 'trough' && slope != null && slope > 0.3) {
-        adj *= 1.12;  // 회복기+정상곡선: 추가 +12%
-      }
-    }
-    // bearishEngulfing (n=113K): BSI/CLI 하락 구간에서 신뢰도 증가
-    if (pType === 'bearishEngulfing' && !isBuy && cliDelta != null && cliDelta < -0.1) {
-      adj *= 1.06;    // CLI 하락 모멘텀: 추가 +6%
-    }
-    // [B-4] hammer (WR=47.9%, n=4293): ECOS 경기 국면 필터
-    // Nison (1991): 해머는 하락 추세 반전 신호 → 경기 저점에서 강화, 확장기에서 약화
-    // trough/contraction → 바닥 근처: 매수 반전 패턴 신뢰도 증가
-    // expansion/peak → 상승 추세 중: 반전 신호 약화 (추세 지속 가능성 높음)
-    if (pType === 'hammer' && isBuy) {
-      if (phase === 'trough' || phase === 'contraction') {
-        adj *= 1.06;  // 경기 저점/수축: +6% (반전 신호 강화)
-      } else if (phase === 'expansion' || phase === 'peak') {
-        adj *= 0.96;  // 상승 추세/정점: -4% (반전 신호 약화)
-      }
-    }
-    // invertedHammer (WR=48.9%, n=6710): hammer와 동일 경기 국면 로직 적용
-    if (pType === 'invertedHammer' && isBuy) {
-      if (phase === 'trough' || phase === 'contraction') {
-        adj *= 1.05;  // 경기 저점/수축: +5%
-      } else if (phase === 'expansion' || phase === 'peak') {
-        adj *= 0.97;  // 상승 추세/정점: -3%
-      }
-    }
-
-    // ── 6. MCS (Doc30 §4.3 Macro Context Score) ──
-    // [AUDIT-FIX] mcsV2 우선: _macroComposite.mcsV2가 존재하면 Phase 8에서 적용하므로
-    // 여기서는 mcsV2가 없을 때만 단순 mcs(0-1)를 fallback으로 사용.
-    // MCS > 0.6: 거시 강세 → 매수 패턴 부스트, MCS < 0.4: 거시 약세 → 매도 패턴 부스트
-    var mcs = macro ? macro.mcs : null;
-    var mcsV2Available = _macroComposite && _macroComposite.mcsV2 != null;
-    if (mcs != null && !mcsV2Available && !_appliedFactors.has('MACRO_COMPOSITE')) {
-      if (mcs > 0.6) {
-        var mcsAdj = 1.0 + (mcs - 0.6) * 0.25;  // 0.6→1.0, 1.0→1.10
-        adj *= isBuy ? mcsAdj : (2.0 - mcsAdj);
-      } else if (mcs < 0.4) {
-        var mcsAdj = 1.0 + (0.4 - mcs) * 0.25;  // 0.4→1.0, 0.0→1.10
-        adj *= isBuy ? (2.0 - mcsAdj) : mcsAdj;
-      }
-    }
-
-    // ── 7. Taylor Rule Gap (Doc30 §4.1, 상수 #135-#141) ──
-    // [N-4] ECOS 금리 방향 시그널: taylor_gap 부호가 금리 방향 프록시 역할 수행
-    //   taylor_gap < 0 (dovish): 금리 인하 가능성 → 매수 부스트 (Factor 7이 자동 적용)
-    //   taylor_gap > 0 (hawkish): 금리 인상 가능성 → 매도 부스트 (Factor 7이 자동 적용)
-    //   → 별도 N-4 시그널 불필요: Factor 7에 의해 이미 완전 커버됨
-    // Taylor-implied rate: i* = r* + pi + a_pi*(pi-pi*) + a_y*(y-y*)
-    // taylor_gap > 0: 과도한 긴축 → 성장주 억압, 매도 지지
-    // taylor_gap < 0: 과도한 완화 → 성장주 부양, 매수 지지
-    // dead band: |gap| < 0.5%p → 조정 없음 (#141=0.25 normalized)
-    // Sign convention: taylor_gap = i_actual - i_Taylor (Doc30 §4.1)
-    //   gap > 0 → overtly tight (hawkish) → negative for equities → sell boost
-    //   gap < 0 → overtly loose (dovish) → positive for equities → buy boost
-    // taylorGap: for-루프 밖에서 선언됨 (line 571)
-    // [V22-B] factor guard: MACRO_TAYLOR_GAP 이미 적용되면 스킵 (Factor 10 Rate Beta와 intra-func dedup)
-    if (taylorGap != null && !_appliedFactors.has('MACRO_TAYLOR_GAP')) {
-      // tgNorm: gap을 [-2, +2] 범위에서 [-1, +1]로 정규화
-      var tgNorm = Math.max(-1, Math.min(1, taylorGap / 2));
-      if (tgNorm < -0.25) {
-        // 완화적 (dovish): 매수 부스트, 매도 감쇄
-        var tAdj = 1.0 + Math.abs(tgNorm) * 0.05;  // max ±5% (#140)
-        adj *= isBuy ? tAdj : (2.0 - tAdj);
-      } else if (tgNorm > 0.25) {
-        // 긴축적 (hawkish): 매도 부스트, 매수 감쇄
-        var tAdj = 1.0 + Math.abs(tgNorm) * 0.05;  // max ±5% (#140)
-        adj *= isBuy ? (2.0 - tAdj) : tAdj;
-      }
-      // |tgNorm| <= 0.25: 중립 (dead band) → 조정 없음
-    }
-
-    // ── 8. VRP — Volatility Risk Premium (Doc26 §3, Carr-Wu 2009) ──
-    // VIX > 30: risk-off, 모든 패턴 신뢰도 감소 (변동성 확대 → 패턴 노이즈)
-    // VIX < 15: risk-on, 매수 패턴 소폭 부스트
-    // 20~30: 정상 범위 → 조정 없음
-    // [V22-B] factor guard: RISK_VOL_EQUITY 이미 RORO Factor 1에서 적용되면 스킵
-    var vix = macro ? macro.vix : null;
-    if (vix != null && !_appliedFactors.has('RISK_VOL_EQUITY')) {
-      if (vix > 30) {
-        adj *= 0.93;                    // high VIX: -7% (모든 패턴)
-      } else if (vix > 25) {
-        adj *= isBuy ? 0.97 : 1.02;    // elevated: 매수 -3%, 매도 +2%
-      } else if (vix < 15) {
-        adj *= isBuy ? 1.03 : 0.98;    // low vol: 매수 +3%, 매도 -2%
-      }
-    }
-
-    // ── 9. 한미 금리차 (Mundell-Fleming, Doc30 §1.4 확장) ──
-    // rate_diff = bok_rate - fed_rate. 음수: 한국 금리 < 미국 → 자본유출 압력
-    // 현재 -1.14%p: 상당한 유출 압력
-    var rateDiff = macro ? macro.rate_diff : null;
-    if (rateDiff != null) {
-      if (rateDiff < -1.5) {
-        adj *= isBuy ? 0.95 : 1.04;    // 큰 역전: 매수 -5%, 매도 +4%
-      } else if (rateDiff < -0.5) {
-        adj *= isBuy ? 0.98 : 1.02;    // 소폭 역전: 매수 -2%, 매도 +2%
-      } else if (rateDiff > 1.0) {
-        adj *= isBuy ? 1.03 : 0.98;    // 한국 우위: 매수 +3%, 매도 -2%
-      }
-    }
-
-    // ── 10. Rate Beta × 금리 방향 (B-3, Damodaran 2012) ──
-    // Taylor gap + ktb10y 수준 → 섹터별 금리 민감도 차등 적용
-    // hawkish(gap>0): rate_beta<0 섹터 매수 할인, rate_beta>0 섹터 매수 부스트
-    // dovish(gap<0): 역방향 (금리 하락 → Utility/REIT 수혜)
-    // [V22-B] factor guard: Factor 7에서 taylorGap이 이미 adj에 반영되었으면
-    // Factor 10의 섹터 차등만 추가 적용 (has() 체크 생략 — Rate Beta는 섹터 의존이라
-    // Factor 7과 독립 효과. intra-function dedup는 Factor 7에서만 수행.)
-    if (taylorGap != null && _macroSector) {
-      var rBeta = _RATE_BETA[_macroSector];
-      if (rBeta != null && rBeta !== 0) {
-        // 금리 방향 정규화: taylor_gap을 [-2,+2] → [-1,+1]
-        var rateDir = Math.max(-1, Math.min(1, taylorGap / 2));
-        // 절대 금리 고수준 추가 압력: ktb10y > 4.0 → 민감도 1.5배 증폭
-        var ktb10y = macro ? macro.ktb10y : null;
-        var levelAmp = (ktb10y != null && ktb10y > 4.0) ? 1.5 : 1.0;
-        // adj 적용: rateDir * rBeta * levelAmp (hawkish + 양의 beta = 매수 부스트)
-        var rateAdj = rateDir * rBeta * levelAmp;
-        adj *= isBuy ? (1.0 + rateAdj) : (1.0 - rateAdj);
-      }
-    }
-
-    // ── 11. KOSIS 경기종합지수 (CLI/CCI) 갭 ──
-    // CLI(선행) vs CCI(동행) 갭: 양수면 경기 회복 신호, 음수면 둔화 신호
-    // cli_cci_gap = CLI - CCI. 기준: 장기평균 ~0. |gap|>5 유의미.
-    // 소스: kosis_latest.json (download_kosis.py)
-    if (_kosisLatest) {
-      var cliCciGap = _kosisLatest.cli_cci_gap;
-      if (cliCciGap != null) {
-        if (cliCciGap > 5) {
-          adj *= isBuy ? 1.04 : 0.97;  // 선행>동행: 경기 회복 → 매수 +4%
-        } else if (cliCciGap < -5) {
-          adj *= isBuy ? 0.97 : 1.04;  // 선행<동행: 경기 둔화 → 매도 +4%
-        }
-      }
-    }
-
-    // ── [V22-B Phase 3-Step 5] ATR 동적 macro multiplier clamp ──
-    //   기존 하드코딩 [0.70, 1.25] → vol regime별 dynamic:
-    //     low [0.70, 1.30], mid [0.80, 1.20], high [0.90, 1.10]
-    //   고변동 시 narrow → 매크로 과도 영향 차단 (SNR↓ 대응)
-    var _capMult = getDynamicCap('macroMult', _currentVolRegime);
-    var _capConfMacro = getDynamicCap('confidence', _currentVolRegime);
-    var _capPredMacro = getDynamicCap('confidencePred', _currentVolRegime);
-    adj = Math.max(_capMult[0], Math.min(_capMult[1], adj));
-
-    if (adj !== 1.0) {
-      p.confidence = Math.max(_capConfMacro[0], Math.min(_capConfMacro[1], Math.round(p.confidence * adj)));
-      if (p.confidencePred != null) {
-        p.confidencePred = Math.max(_capPredMacro[0], Math.min(_capPredMacro[1], Math.round(p.confidencePred * adj)));
-      }
-    }
-  }
+  throw new Error('[V48-Phase2.5] removed; see /api/confidence/macro');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2185,10 +1760,11 @@ function _injectWcToSignals(signals, patterns) {
 }
 
 /**
- * 메인 스레드 동기 분석 (Worker 미지원 / 에러 시 폴백)
- * 기존 로직과 동일
+ * 메인 스레드 분석 (Worker 미지원 / 에러 시 폴백)
+ * [V48-Phase2.5] async 전환: macro/phase8 신뢰도 조정을 서버 fetch wrapper로 위임.
+ * 캐시 히트 시 50-80ms / miss 시 100-200ms 추가 latency. Worker 경로와 일관성 확보.
  */
-function _analyzeOnMainThread() {
+async function _analyzeOnMainThread() {
   const analyzeCandles = (_realtimeMode && candles.length > 1) ? candles.slice(0, -1) : candles;
   // 캔들 패턴 + 복합 시그널 분석 (signalEngine이 IndicatorCache를 공유)
   detectedPatterns = patternEngine.analyze(analyzeCandles, { timeframe: currentTimeframe, market: currentStock && currentStock.market ? currentStock.market : '' });
@@ -2217,7 +1793,9 @@ function _analyzeOnMainThread() {
   _applyRORORegimeToPatterns(detectedPatterns);
   _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
   // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
-  _applyMacroConfidenceToPatterns(detectedPatterns);
+  // [V48-Phase2.5] 서버 위임 — 실패 시 신뢰도 조정 스킵 + toast 안내
+  try { await _fetchMacroConfidence(detectedPatterns); }
+  catch (_e) { console.warn('[V48-Phase2.5] macro fetch threw on main thread', _e); }
   _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
   // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
   _updateMicroContext(candles);
@@ -2230,7 +1808,9 @@ function _analyzeOnMainThread() {
   _calcNaiveDD(candles.map(function(c) { return c.close; }));
   _applyMertonDDToPatterns(detectedPatterns);
   // [P0-C9] Phase 8 MCS + HMM 레짐 + 수급 + 옵션 + DD 통합 조정 (Worker 경로와 동일)
-  _applyPhase8ConfidenceToPatterns(detectedPatterns);
+  // [V48-Phase2.5] 서버 위임
+  try { await _fetchPhase8Confidence(detectedPatterns); }
+  catch (_e) { console.warn('[V48-Phase2.5] phase8 fetch threw on main thread', _e); }
   // [D-1] Survivorship bias: mild confidence discount for buy patterns
   _applySurvivorshipAdjustment(detectedPatterns);
   // [V23] PCA effect budget — cap correlated factor cumulative adjustment
@@ -2267,10 +1847,11 @@ function _analyzeOnMainThread() {
 }
 
 /**
- * 드래그 시 메인 스레드 동기 분석 (Worker 미지원 / 에러 시 폴백)
+ * 드래그 시 메인 스레드 분석 (Worker 미지원 / 에러 시 폴백)
  * visibleCandles만 분석 후 인덱스 오프셋 보정
+ * [V48-Phase2.5] async 전환: macro/phase8 신뢰도 조정을 서버 fetch wrapper로 위임.
  */
-function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
+async function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   const visiblePatterns = patternEngine.analyze(visibleCandles, { timeframe: currentTimeframe, market: currentStock && currentStock.market ? currentStock.market : '' });
 
   // 인덱스 오프셋 보정: visibleCandles[0]이 candles[clampFrom]
@@ -2293,14 +1874,17 @@ function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   _applyMarketContextToPatterns(detectedPatterns);
   _applyRORORegimeToPatterns(detectedPatterns);
   _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
-  _applyMacroConfidenceToPatterns(detectedPatterns);
+  // [V48-Phase2.5] 서버 위임 — 드래그는 신뢰도 조정 누락 허용 (UX 우선)
+  try { await _fetchMacroConfidence(detectedPatterns); }
+  catch (_e) { console.warn('[V48-Phase2.5] drag macro fetch threw', _e); }
   _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
   _applyEVAConfidenceToPatterns(detectedPatterns);
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   _applyMertonDDToPatterns(detectedPatterns);
-  _applyPhase8ConfidenceToPatterns(detectedPatterns);
+  try { await _fetchPhase8Confidence(detectedPatterns); }
+  catch (_e) { console.warn('[V48-Phase2.5] drag phase8 fetch threw', _e); }
   _applySurvivorshipAdjustment(detectedPatterns);
   // [V23] PCA effect budget — cap correlated factor cumulative adjustment
   _applyPCABudgetCap(detectedPatterns);
