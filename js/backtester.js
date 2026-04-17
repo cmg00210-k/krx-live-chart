@@ -565,13 +565,14 @@ class PatternBacktester {
       if (trimmedOcc.length === 0) return {};
       var segment = this._inferSegment(stockCode);
       // [V48-SEC Phase 3] signed POST — HMAC + Bearer + KV rate limit.
-      // Fallback to plain fetch in the Web Worker context where _signPost is
-      // unavailable (analysisWorker imports backtester.js via importScripts).
-      // When called from the worker, signing should be skipped because the
-      // worker does not have access to the session token. The main thread
-      // invokes backtestAllServerFirst via analysisWorker postMessage; the
-      // session chain operates at the main thread level.
-      var hasSign = (typeof _signPost === 'function');
+      // Three code paths depending on scope:
+      //   (a) Main thread: _signPost() defined globally via js/_shared/sign.js.
+      //   (b) Web Worker:  _signPost is not in scope, but a postMessage RPC
+      //       bridge in analysisWorker.js forwards the request to the main
+      //       thread, which performs the signed fetch and returns the result.
+      //   (c) Standalone (neither main thread sign.js nor worker bridge):
+      //       unsigned fetch — server will 401 under Phase 3. This path
+      //       should never fire in production but remains as a diagnostic.
       var signedBody = {
         candles: trimmed.map(function (c) { return { close: c.close }; }),
         occurrences: trimmedOcc,
@@ -579,13 +580,15 @@ class PatternBacktester {
         segment: segment,
       };
       var r;
-      if (hasSign) {
+      if (typeof _signPost === 'function') {
+        // (a) Main thread
         r = await _signPost('/api/backtest/analyze', signedBody);
+      } else if (typeof _workerSignedFetchProxy === 'function') {
+        // (b) Worker via postMessage RPC
+        r = await _workerSignedFetchProxy('/api/backtest/analyze', signedBody);
       } else {
-        // Worker-side unsigned fallback — server will 401 under Phase 3, so
-        // this path is effectively dead once Phase 3 is deployed. Logged so
-        // we can detect if it ever fires.
-        console.warn('[V48-Phase3] _signPost unavailable (worker scope) — unsigned /api/backtest/analyze will 401');
+        // (c) Diagnostic fallback
+        console.warn('[V48-Phase3] Neither _signPost nor _workerSignedFetchProxy available — unsigned /api/backtest/analyze will 401');
         r = await fetch('/api/backtest/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

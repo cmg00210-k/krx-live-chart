@@ -186,7 +186,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=66');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=67');
 
     _analysisWorker.onmessage = async function (e) {
       const msg = e.data;
@@ -196,6 +196,45 @@ function _initAnalysisWorker() {
         _workerReady = true;
         _workerRestartCount = 0;  // [FIX] 성공 시 재시작 카운터 리셋
         console.log('[Worker] 분석 Worker 초기화 완료');
+        return;
+      }
+
+      // ── [V48-SEC Phase 3] Worker-initiated signed fetch proxy ──
+      // The worker cannot sign HTTP requests (no access to _HMAC_SECRET).
+      // When it needs to call /api/*, it posts a signedFetchRequest; we
+      // perform the signed fetch here and post back signedFetchResponse.
+      // Defense: URL must start with /api/ (whitelist — prevent XSS worker
+      // from requesting signatures on arbitrary URLs).
+      if (msg.type === 'signedFetchRequest') {
+        (async function () {
+          var resp = null;
+          var data = null;
+          var errMsg = null;
+          try {
+            if (typeof msg.url !== 'string' || msg.url.indexOf('/api/') !== 0) {
+              throw new Error('signedFetchRequest url must start with /api/');
+            }
+            if (typeof _signPost !== 'function') {
+              throw new Error('_signPost unavailable on main thread');
+            }
+            resp = await _signPost(msg.url, msg.body);
+            try { data = await resp.json(); } catch (_) { data = null; }
+          } catch (err) {
+            errMsg = err && err.message ? err.message : String(err);
+          }
+          try {
+            _analysisWorker.postMessage({
+              type: 'signedFetchResponse',
+              id: msg.id,
+              ok:     resp ? resp.ok : false,
+              status: resp ? resp.status : 0,
+              data:   data,
+              error:  errMsg,
+            });
+          } catch (postErr) {
+            try { console.warn('[V48-Phase3] signedFetchResponse postMessage failed:', postErr); } catch (_) {}
+          }
+        })();
         return;
       }
 
