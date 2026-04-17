@@ -1373,6 +1373,92 @@ def check_ip_protection(strict=False):
 
 
 # =============================================================================
+# CHECK 13 - Server Endpoints (V48-SEC Phase 2)
+# =============================================================================
+
+PHASE2_ENDPOINTS = [
+    "functions/api/confidence/macro.js",
+    "functions/api/confidence/phase8.js",
+    "functions/api/backtest/analyze.js",
+]
+
+PHASE2_CLIENT_FETCHES = [
+    (JS / "appWorker.js",  "/api/confidence/macro",  "_fetchMacroConfidence"),
+    (JS / "appWorker.js",  "/api/confidence/phase8", "_fetchPhase8Confidence"),
+    (JS / "backtester.js", "/api/backtest/analyze",  "backtestAllServerFirst"),
+    (JS / "analysisWorker.js", "backtestAllServerFirst", None),
+]
+
+
+def check_server_endpoints(strict=False):
+    section("CHECK 13 - Server Endpoints (V48-SEC Phase 2)")
+    errors = 0
+    warnings = 0
+
+    # 13a. Endpoint files exist and call guardRequest + return jsonResponse
+    for rel in PHASE2_ENDPOINTS:
+        p = ROOT / rel
+        if not p.exists():
+            fail(f"{rel} missing (Phase 2 endpoint)")
+            errors += 1
+            continue
+        src = read(p)
+        if "guardRequest(request)" not in src:
+            fail(f"{rel} does not call guardRequest(request)")
+            errors += 1
+        else:
+            ok(f"{rel} calls guardRequest")
+        if "jsonResponse(" not in src:
+            fail(f"{rel} does not call jsonResponse()")
+            errors += 1
+        else:
+            ok(f"{rel} returns jsonResponse")
+        if "Cache-Control" not in src or "no-store" not in src:
+            warn(f"{rel} does not set Cache-Control: no-store at function level")
+            warnings += 1
+
+    # 13b. macro_tables shared lib exists
+    lib = ROOT / "functions" / "_lib" / "macro_tables.mjs"
+    if not lib.exists():
+        fail("functions/_lib/macro_tables.mjs missing (server-side helpers)")
+        errors += 1
+    else:
+        ok("functions/_lib/macro_tables.mjs present")
+
+    # 13c. Client-side wrappers and fetch sites
+    for entry in PHASE2_CLIENT_FETCHES:
+        path, needle, alt = entry
+        if not path.exists():
+            fail(f"{path.name} missing")
+            errors += 1
+            continue
+        src = read(path)
+        if needle in src:
+            ok(f"{path.name} references {needle}")
+        else:
+            fail(f"{path.name} does NOT reference {needle}")
+            errors += 1
+        if alt and alt not in src:
+            fail(f"{path.name} missing wrapper {alt}")
+            errors += 1
+
+    # 13d. _headers has /api/* no-store
+    headers = ROOT / "_headers"
+    if headers.exists():
+        h = read(headers)
+        if "/api/*" in h and "no-store" in h:
+            ok("_headers sets /api/* no-store at edge")
+        else:
+            warn("_headers may be missing /api/* no-store directive")
+            warnings += 1
+    else:
+        warn("_headers file not found")
+        warnings += 1
+
+    return errors, warnings
+
+
+# =============================================================================
 # CHECK 10 - Backtest Acceptance Criteria (7 criteria)
 # =============================================================================
 
@@ -1592,7 +1678,7 @@ def main():
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
                  "collision", "dead_exports", "canvas", "criteria",
-                 "bundle", "ip", "all"],
+                 "bundle", "ip", "server", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -1621,6 +1707,7 @@ def main():
         "criteria":      check_criteria,
         "bundle":        check_bundle_integrity,
         "ip":            check_ip_protection,
+        "server":        check_server_endpoints,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

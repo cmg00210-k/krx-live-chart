@@ -186,9 +186,9 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=64');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=65');
 
-    _analysisWorker.onmessage = function (e) {
+    _analysisWorker.onmessage = async function (e) {
       const msg = e.data;
 
       // ── Worker 준비 완료 ──
@@ -272,7 +272,8 @@ function _initAnalysisWorker() {
         _applyRORORegimeToPatterns(detectedPatterns);
         _markFactorsAfterRORO();  // [V22-B] RORO가 consume한 factor 등록
         // [Phase ECOS] 매크로 경제지표 기반 신뢰도 조정 (macro_latest + bonds_latest)
-        _applyMacroConfidenceToPatterns(detectedPatterns);
+        // [V48-Phase2] server-side first; client-side fallback on error.
+        await _fetchMacroConfidence(detectedPatterns);
         _markFactorsAfterMacro();  // [V22-B] Macro가 consume한 factor 등록
         // [Phase 2-D] 미시경제 지표 기반 신뢰도 조정 (ILLIQ, HHI)
         _updateMicroContext(candles);
@@ -285,7 +286,8 @@ function _initAnalysisWorker() {
         _calcNaiveDD(candles.map(function(c) { return c.close; }));
         _applyMertonDDToPatterns(detectedPatterns);
         // [Phase 5+8] MCS + HMM 레짐 + 수급 + 옵션 Implied Move + DD 통합 조정
-        _applyPhase8ConfidenceToPatterns(detectedPatterns);
+        // [V48-Phase2] server-side first; client-side fallback on error.
+        await _fetchPhase8Confidence(detectedPatterns);
         // [D-1] Survivorship bias: mild confidence discount for buy patterns
         _applySurvivorshipAdjustment(detectedPatterns);
         // [V23] PCA effect budget — cap correlated factor cumulative adjustment
@@ -1366,6 +1368,115 @@ function _applyMarketContextToPatterns(patterns) {
 //   8. VRP (Volatility Risk Premium) — VIX > 30: risk-off, VIX < 15: risk-on
 //   9. 금리차 (rate_diff) — 한미 금리차 → 자본유출입 압력
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// [V48-Phase2] Server-side macro confidence wrapper.
+// POSTs patterns + minimal context to /api/confidence/macro and copies the
+// adjusted confidence values back. Falls back to the in-process client
+// function when the endpoint is unreachable so feature parity is preserved
+// during the Phase 2.5 rollout window.
+// ══════════════════════════════════════════════════════════════
+async function _fetchMacroConfidence(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  // Same cross-API cascade short-circuit applied client-side: skip both
+  // server fetch and fallback when ECOS group is down.
+  if (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('ECOS') === 'down') {
+    console.warn('[CROSS-API] ECOS down → macro 신뢰도 조정 전면 스킵');
+    return;
+  }
+  var payloadPatterns = patterns.map(function (p) {
+    return {
+      type: p.type || p.pattern || '',
+      signal: p.signal,
+      confidence: p.confidence,
+      confidencePred: p.confidencePred != null ? p.confidencePred : null,
+    };
+  });
+  var ctx = {
+    industry: currentStock ? (currentStock.industry || currentStock.sector || null) : null,
+    volRegime: _currentVolRegime || 'mid',
+    macro: _staleDataSources && _staleDataSources.has('macro_latest') ? null : _macroLatest,
+    bonds: _staleDataSources && _staleDataSources.has('bonds_latest') ? null : _bondsLatest,
+    kosis: _kosisLatest || null,
+    macroComposite: _macroComposite || null,
+    appliedFactors: Array.from(_appliedFactors || []),
+  };
+  try {
+    var r = await fetch('/api/confidence/macro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(4000),
+    });
+    if (r.ok) {
+      var data = await r.json();
+      var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;
+      if (adj && adj.length === patterns.length) {
+        for (var i = 0; i < patterns.length; i++) {
+          if (adj[i].confidence != null) patterns[i].confidence = adj[i].confidence;
+          if (adj[i].confidencePred != null) patterns[i].confidencePred = adj[i].confidencePred;
+        }
+        return;
+      }
+    }
+    console.warn('[V48-Phase2] macro confidence server unavailable — fallback to client-side');
+  } catch (_e) {
+    console.warn('[V48-Phase2] macro confidence server error — fallback to client-side');
+  }
+  _applyMacroConfidenceToPatterns(patterns);
+}
+
+// ══════════════════════════════════════════════════════════════
+// [V48-Phase2] Server-side Phase 8 confidence wrapper.
+// Mirrors _fetchMacroConfidence pattern; calls /api/confidence/phase8
+// which loads flow_signals.json server-side (Phase 1 protected).
+// ══════════════════════════════════════════════════════════════
+async function _fetchPhase8Confidence(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  var krxDown = (typeof _getApiGroupHealth === 'function' && _getApiGroupHealth('KRX') === 'down');
+  var payloadPatterns = patterns.map(function (p) {
+    return {
+      type: p.type || p.pattern || '',
+      signal: p.signal,
+      confidence: p.confidence,
+      confidencePred: p.confidencePred != null ? p.confidencePred : null,
+    };
+  });
+  var ctx = {
+    code: currentStock ? currentStock.code : null,
+    volRegime: _currentVolRegime || 'mid',
+    macroComposite: _macroComposite || null,
+    optionsAnalytics: _optionsAnalytics || null,
+    krxGroupDown: krxDown,
+    staleSources: _staleDataSources ? Array.from(_staleDataSources) : [],
+    appliedFactors: Array.from(_appliedFactors || []),
+  };
+  try {
+    var r = await fetch('/api/confidence/phase8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(4000),
+    });
+    if (r.ok) {
+      var data = await r.json();
+      var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;
+      if (adj && adj.length === patterns.length) {
+        for (var i = 0; i < patterns.length; i++) {
+          if (adj[i].confidence != null) patterns[i].confidence = adj[i].confidence;
+          if (adj[i].confidencePred != null) patterns[i].confidencePred = adj[i].confidencePred;
+        }
+        return;
+      }
+    }
+    console.warn('[V48-Phase2] phase8 confidence server unavailable — fallback to client-side');
+  } catch (_e) {
+    console.warn('[V48-Phase2] phase8 confidence server error — fallback to client-side');
+  }
+  _applyPhase8ConfidenceToPatterns(patterns);
+}
+
 function _applyMacroConfidenceToPatterns(patterns) {
   if (!patterns || patterns.length === 0) return;
   // V47-B2: 교차-API cascade 실패 가드. ECOS 그룹 전체가 down이면

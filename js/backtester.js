@@ -564,6 +564,120 @@ class PatternBacktester {
   // ══════════════════════════════════════════════════════
 
   /**
+   * [V48-Phase2] Server-first wrapper around backtestAll.
+   * Tries POST /api/backtest/analyze for cost-calibrated per-pattern stats; if
+   * the server stats arrive, they replace the cost-derived metrics inside the
+   * client `backtestAll` result while WFE / BH-FDR / Hansen SPA / reliability
+   * tier post-processing continues to run client-side.
+   * On any server failure (offline, non-OK, parse error, timeout), falls back
+   * fully to the in-process `backtestAll` so feature parity is preserved.
+   *
+   * @param {Array} candles — OHLCV array
+   * @param {string} [stockCode]
+   * @returns {Promise<{ [patternType]: backtestResult }>}
+   */
+  async backtestAllServerFirst(candles, stockCode) {
+    if (!candles || candles.length < 50) return {};
+    var clientResult = this.backtestAll(candles, stockCode);
+    try {
+      var occurrences = this._buildServerOccurrences(candles);
+      if (occurrences.length === 0) return clientResult;
+      var trimmed = candles.length > 500 ? candles.slice(-500) : candles;
+      var offset = candles.length - trimmed.length;
+      var trimmedOcc = [];
+      for (var i = 0; i < occurrences.length; i++) {
+        var o = occurrences[i];
+        var idx = o.barIndex - offset;
+        if (idx >= 0 && idx < trimmed.length) {
+          trimmedOcc.push({ type: o.type, signal: o.signal, barIndex: idx });
+        }
+      }
+      if (trimmedOcc.length === 0) return clientResult;
+      var segment = this._inferSegment(stockCode);
+      var r = await fetch('/api/backtest/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candles: trimmed.map(function (c) { return { close: c.close }; }),
+          occurrences: trimmedOcc,
+          horizons: this.HORIZONS,
+          segment: segment,
+        }),
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) {
+        console.warn('[V48-Phase2] backtest analyze server unavailable — fallback to client-side');
+        return clientResult;
+      }
+      var data = await r.json();
+      var serverStats = data && data.stats ? data.stats : null;
+      if (!serverStats) return clientResult;
+      // Merge cost-calibrated stats into client result horizons (preserve WFE,
+      // significance flags, reliabilityTier — those depend on inputs we don't
+      // recompute here). Only override the cost-driven metrics.
+      var COST_KEYS = ['n', 'winrate', 'avgReturn', 'stdReturn', 'expectancy', 'sharpe', 'profitFactor', 'cost'];
+      for (var pType in serverStats) {
+        if (!Object.prototype.hasOwnProperty.call(serverStats, pType)) continue;
+        var sHorizons = serverStats[pType] && serverStats[pType].horizons;
+        if (!sHorizons || !clientResult[pType] || !clientResult[pType].horizons) continue;
+        for (var h in sHorizons) {
+          if (!clientResult[pType].horizons[h]) continue;
+          var src = sHorizons[h], dst = clientResult[pType].horizons[h];
+          for (var k = 0; k < COST_KEYS.length; k++) {
+            var key = COST_KEYS[k];
+            if (src[key] != null) dst[key] = src[key];
+          }
+        }
+      }
+      return clientResult;
+    } catch (_e) {
+      console.warn('[V48-Phase2] backtest analyze server error — fallback to client-side');
+      return clientResult;
+    }
+  }
+
+  /**
+   * Build `[{type, signal, barIndex}]` occurrences from cached patternEngine
+   * analysis. Used only by backtestAllServerFirst — avoids re-running
+   * patternEngine.analyze when the cache is already warm.
+   */
+  _buildServerOccurrences(candles) {
+    if (!this._analyzeCache || this._analyzeCache._candles !== candles) {
+      this._analyzeCache = { _candles: candles, patterns: patternEngine.analyze(candles) };
+    }
+    var all = this._analyzeCache.patterns || [];
+    var meta = this._META;
+    var occ = [];
+    for (var i = 0; i < all.length; i++) {
+      var p = all[i];
+      var m = meta[p.type];
+      if (!m) continue;
+      if (m.signal !== 'buy' && m.signal !== 'sell') continue;
+      var idx = (p.endIndex !== undefined) ? p.endIndex : p.startIndex;
+      if (!Number.isInteger(idx)) continue;
+      occ.push({ type: p.type, signal: m.signal, barIndex: idx });
+    }
+    return occ;
+  }
+
+  /**
+   * Map current market + stock code to the segment key used by the server's
+   * adaptive-slippage table. Falls back to KOSPI large when unknown.
+   */
+  _inferSegment(stockCode) {
+    var market = (this._currentMarket || '').toLowerCase();
+    if (this._behavioralData && this._behavioralData['illiq_spread']) {
+      var stocks = this._behavioralData['illiq_spread'].stocks;
+      if (stocks && stockCode && stocks[stockCode] && stocks[stockCode].segment) {
+        return stocks[stockCode].segment;
+      }
+    }
+    if (market.indexOf('kosdaq') >= 0) return 'kosdaq_large';
+    return 'kospi_large';
+  }
+
+  /**
    * 전체 캔들에서 모든 패턴 타입별 백테스트 실행
    * + Holm-Bonferroni 다중비교 보정 (27 patterns × 5 horizons = 135 tests)
    * @param {Array} candles — OHLCV 배열
