@@ -79,7 +79,7 @@ try {
     'indicators.js?v=28',
     'patterns.js?v=50',
     'signalEngine.js?v=47',
-    'backtester.js?v=43'
+    'backtester.js?v=45'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -200,7 +200,7 @@ function _attachWinRates(patterns) {
 }
 
 // ── 메시지 핸들러 ────────────────────────────────────
-self.onmessage = function (e) {
+self.onmessage = async function (e) {
   const msg = e.data;
 
   // 초기화 실패 시 모든 요청에 에러 응답
@@ -369,7 +369,8 @@ self.onmessage = function (e) {
           backtester._currentMarket = msg.market || '';
           // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 '1d'로 리셋 방지
           var _savedTf = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
-          var autoResults = backtester.backtestAll(analyzeCandles);
+          // [V48-Phase2] server-first cost-calibrated stats; falls back to client backtestAll on error.
+          var autoResults = await backtester.backtestAllServerFirst(analyzeCandles, msg.stockCode);
           // [H-2] restore _currentTimeframe after backtester's internal analyze()
           if (_savedTf != null && typeof PatternEngine !== 'undefined') PatternEngine._currentTimeframe = _savedTf;
           // Extract learned weights for next analyze cycle
@@ -448,7 +449,8 @@ self.onmessage = function (e) {
       backtester._currentMarket = msg.market || '';
       // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 리셋 방지
       var _savedTf2 = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
-      const results = backtester.backtestAll(candles);
+      // [V48-Phase2] server-first cost-calibrated stats; falls back to client backtestAll on error.
+      const results = await backtester.backtestAllServerFirst(candles, msg.stockCode);
       if (_savedTf2 != null && typeof PatternEngine !== 'undefined') PatternEngine._currentTimeframe = _savedTf2;
       _extractLearnedWeights(results);
       // 승률 맵 갱신 (다음 analyze 호출 시 패턴에 자동 부착됨)

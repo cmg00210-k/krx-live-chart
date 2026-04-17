@@ -443,54 +443,11 @@ var indParams = _loadIndParams();
 var _activeParamInd = null;
 
 // ══════════════════════════════════════════════════════════════
-// [Phase 8] HMM 레짐별 신뢰도 승수 + MCS 임계값
+// [V48-Phase2.5] _STOVALL_CYCLE / _RATE_BETA / REGIME_CONFIDENCE_MULT /
+// MCS_THRESHOLDS removed — moved to functions/_lib/macro_tables.mjs.
+// _KSIC_MACRO_SECTOR_MAP + _getStovallSector() retained: still consumed by
+// _applyDerivativesConfidenceToPatterns / _classifyRORORegime / financials.js.
 // ══════════════════════════════════════════════════════════════
-// compute_hmm_regimes.py fit_hmm_2state() → hmm_regimes.json → flow_signals.json 경유
-// 2-state Gaussian HMM (Hamilton 1989): Bull / Bear만 사용
-// 레짐 분류에 따라 매수/매도 패턴 신뢰도를 차등 조정
-// V21: 이전 버전의 'sideways' 분기는 2-state HMM에서 생성되지 않으므로 제거.
-// 모르는 레짐 라벨(예: 'sideways'를 가진 레거시 JSON)은 appWorker.js:596의
-// `|| REGIME_CONFIDENCE_MULT[null]` fallback을 통해 항등 승수로 처리된다.
-var REGIME_CONFIDENCE_MULT = {
-  // [V6-FIX] Ang & Bekaert (2002), Lunde & Timmermann (2004): Bayesian shrinkage calibration
-  // Old: bull buy 1.10/sell 0.85, bear buy 0.85/sell 1.10 — ~2x too large for IC 0.02-0.04
-  bull:     { buy: 1.06, sell: 0.92 },   // 강세 레짐: 매수 +6%, 매도 -8%
-  bear:     { buy: 0.90, sell: 1.06 },   // 약세 레짐: 매수 -10%, 매도 +6%
-  null:     { buy: 1.00, sell: 1.00 }    // 데이터 없음 또는 미지의 레짐: 항등
-};
-
-// MCS (Macro Composite Score) 임계값 — macro_composite.json의 mcsV2 참조
-// MCS > strong_bull: 매수 패턴 +5%, MCS < strong_bear: 매도 패턴 +5%
-var MCS_THRESHOLDS = { strong_bull: 70, bull: 55, bear: 45, strong_bear: 30 };
-
-// ══════════════════════════════════════════════════════════════
-// [B-1] Stovall(1996) 섹터 순환 매핑 — KSIC → 대분류 → cycle sensitivity
-// ══════════════════════════════════════════════════════════════
-// Stovall, S. (1996) "Sector Investing" — 경기순환 4단계별 섹터 차등 수익률
-// KSIC 세분류 137개 → GICS-like 11개 대분류로 매핑 후 cycle multiplier 적용
-//
-// _STOVALL_CYCLE[macro_sector][phase] = buy_mult (매수 패턴 신뢰도 승수)
-//   > 1.0: 해당 국면에서 유리 (outperform 기대), < 1.0: 불리 (underperform)
-//   매도 패턴 승수 = 2.0 - buy_mult (대칭 역전)
-var _STOVALL_CYCLE = {
-  // Early Recovery(trough): Financials, ConsDisc, Tech 선도
-  // Mid Expansion: Tech, Industrials 지속
-  // Late Expansion(peak): Energy, Materials — 인플레이션 수혜
-  // Contraction: Utilities, Healthcare, Staples — 방어주
-  //                           trough  expansion  peak  contraction
-  'tech':         { trough: 1.12, expansion: 1.08, peak: 0.93, contraction: 0.90 },
-  'semiconductor': { trough: 1.14, expansion: 1.10, peak: 0.90, contraction: 0.88 },
-  'financial':    { trough: 1.12, expansion: 1.04, peak: 0.94, contraction: 0.92 },
-  'cons_disc':    { trough: 1.10, expansion: 1.06, peak: 0.95, contraction: 0.92 },
-  'industrial':   { trough: 1.06, expansion: 1.08, peak: 0.97, contraction: 0.93 },
-  'material':     { trough: 0.96, expansion: 1.04, peak: 1.08, contraction: 0.94 },
-  'energy':       { trough: 0.94, expansion: 1.02, peak: 1.10, contraction: 0.96 },
-  'healthcare':   { trough: 1.02, expansion: 1.00, peak: 1.02, contraction: 1.06 },
-  'cons_staple':  { trough: 0.98, expansion: 0.98, peak: 1.02, contraction: 1.08 },
-  'utility':      { trough: 0.96, expansion: 0.96, peak: 1.04, contraction: 1.10 },
-  'telecom':      { trough: 1.02, expansion: 1.00, peak: 1.00, contraction: 1.04 },
-  'realestate':   { trough: 1.08, expansion: 1.04, peak: 0.94, contraction: 0.94 },
-};
 
 // KSIC 세분류 → 대분류 매핑 (키워드 기반, 순서 중요: 먼저 매칭되면 확정)
 var _KSIC_MACRO_SECTOR_MAP = [
@@ -523,27 +480,6 @@ var _KSIC_MACRO_SECTOR_MAP = [
   // Telecom
   { keywords: ['통신', '전화'], sector: 'telecom' },
 ];
-
-// [B-3] Rate Beta 섹터 테이블 — 금리 방향에 대한 섹터별 민감도
-// Damodaran (2012): 금리 상승 → 듀레이션 긴 섹터(Utility, REIT, Growth) 타격
-//                   금리 상승 → 은행 NIM 확대 → Financial 소폭 수혜
-// rate_beta > 0: hawkish 환경에서 매수 패턴 부스트 (금리 상승 수혜)
-// rate_beta < 0: hawkish 환경에서 매수 패턴 할인 (금리 상승 타격)
-// 부호 반전: dovish 환경에서 역방향 적용
-var _RATE_BETA = {
-  'utility':      -0.08,   // 높은 배당 → 금리 상승 시 채권 대체 매력 하락
-  'realestate':   -0.07,   // 부동산: 차입 의존 → 금리 민감
-  'tech':         -0.05,   // Growth: DCF 할인율 상승 → 밸류에이션 하락
-  'semiconductor': -0.04,  // 반도체: 자본집약적이지만 사이클 성장주
-  'cons_disc':    -0.03,   // 소비재: 가계 차입 비용 증가
-  'healthcare':   -0.02,   // 중립에 가까움
-  'telecom':      -0.01,   // 방어적, 약한 금리 민감도
-  'cons_staple':   0.00,   // 비탄력적 수요 → 금리 중립
-  'industrial':    0.01,   // 경기순환 → 금리보다 경기에 민감
-  'material':      0.02,   // 인플레이션 헤지 가능
-  'energy':        0.03,   // 인플레이션 동행 → 금리 상승 환경에서 상대적 수혜
-  'financial':     0.05,   // NIM 확대 → 금리 상승 직접 수혜
-};
 
 function _getStovallSector(industryName) {
   if (!industryName) return null;

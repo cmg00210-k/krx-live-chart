@@ -1140,9 +1140,10 @@ function updateChartFull() {
       // 패턴 분석(50-200ms)이 차트 최초 렌더를 차단하지 않도록
       // 먼저 빈 패턴으로 차트를 그린 뒤, 다음 프레임에서 분석 + 재렌더
       var _deferredVersion = _workerVersion;
-      setTimeout(function() {
+      setTimeout(async function() {
         if (_deferredVersion !== _workerVersion) return;  // stale 방지
-        _analyzeOnMainThread();
+        await _analyzeOnMainThread();  // [V48-Phase2.5] async (서버 fetch wrapper 위임)
+        if (_deferredVersion !== _workerVersion) return;  // stale 재검증
         // 분석 완료 후 차트 + 오버레이 통합 렌더 (vizToggles 필터 적용)
         chartManager.updateMain(candles, chartType, activeIndicators, detectedPatterns, indParams);
         _renderOverlays();

@@ -5,7 +5,7 @@
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'cheesestock-v80';
+const CACHE_NAME = 'cheesestock-v82';
 
 // 오프라인 시에도 앱 실행에 필요한 정적 자산 목록
 const STATIC_ASSETS = [
@@ -37,37 +37,62 @@ const STATIC_ASSETS = [
   '/lib/lightweight-charts.standalone.production.js',
 ];
 
-// ── Install: 정적 자산 캐싱 ──
+// ── Install: 정적 자산 캐싱 + orphan 제거 (V48-Phase2.5) ──
+// 같은 CACHE_NAME 안에 STATIC_ASSETS 목록에 없는 옛 hashed 번들(예: Phase 1
+// bundled 시기의 worker.<hash>.js / app.<hash>.js)이 누적될 수 있어, install
+// 시점에 명시적으로 제거한다. data/* 파일은 별도 (network-first).
 self.addEventListener('install', function(event) {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      // 개별 fetch 실패 시에도 나머지는 캐싱 진행
-      return Promise.allSettled(
+    caches.open(CACHE_NAME).then(async function(cache) {
+      // 1) 새 STATIC_ASSETS 캐싱 (기존 동작)
+      await Promise.allSettled(
         STATIC_ASSETS.map(function(url) {
           return cache.add(url).catch(function(err) {
             console.warn('[SW] 캐싱 실패:', url, err.message);
           });
         })
       );
+      // 2) orphan 제거 — 현재 STATIC_ASSETS에 없고 /data/ 경로도 아닌 캐시 항목 삭제
+      try {
+        var requests = await cache.keys();
+        var validUrls = new Set(
+          STATIC_ASSETS.map(function(u) { return new URL(u, self.location.origin).href; })
+        );
+        for (var i = 0; i < requests.length; i++) {
+          var req = requests[i];
+          if (!validUrls.has(req.url) && req.url.indexOf('/data/') === -1) {
+            await cache.delete(req);
+            console.log('[SW] orphan 제거:', req.url);
+          }
+        }
+      } catch (e) {
+        console.warn('[SW] orphan 정리 실패:', e && e.message);
+      }
     })
   );
   // 대기 중인 이전 SW 즉시 교체
   self.skipWaiting();
 });
 
-// ── Activate: 이전 버전 캐시 정리 ──
+// ── Activate: 이전 버전 캐시 정리 + 클라이언트에 sw-updated 알림 ──
 self.addEventListener('activate', function(event) {
-  event.waitUntil(
-    caches.keys().then(function(keys) {
-      return Promise.all(
-        keys
-          .filter(function(k) { return k !== CACHE_NAME; })
-          .map(function(k) { return caches.delete(k); })
-      );
-    })
-  );
-  // 현재 열린 모든 탭에 즉시 적용
-  self.clients.claim();
+  event.waitUntil((async function() {
+    var keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter(function(k) { return k !== CACHE_NAME; })
+        .map(function(k) { return caches.delete(k); })
+    );
+    // 현재 열린 모든 탭에 즉시 적용
+    await self.clients.claim();
+    // [V48-Phase2.5] 활성 클라이언트에 신규 SW 활성화 알림 → toast 트리거
+    try {
+      var clients = await self.clients.matchAll({ includeUncontrolled: true });
+      for (var i = 0; i < clients.length; i++) {
+        clients[i].postMessage({ type: 'sw-updated', version: CACHE_NAME });
+      }
+    } catch (e) { /* ignore */ }
+  })());
 });
 
 // ── Fetch: 요청 유형별 캐싱 전략 ──

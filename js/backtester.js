@@ -15,38 +15,10 @@ class PatternBacktester {
     /** 기본 분석 기간(N일 후) */
     this.HORIZONS = [1, 3, 5, 10, 20]; // [B] standard holding period horizons
 
-    /** KRX 왕복 비용 구성 (%) — calibrated_constants.json 기준 */
-    this.KRX_COMMISSION = 0.03;   // [C] 수수료 편도 0.015% × 2
-    this.KRX_TAX = 0.18;           // [C] KOSPI 0.03%+농특세0.15% / KOSDAQ 0.18% (2025 동일)
-    this.KRX_SLIPPAGE = 0.10;     // [C] KRX large-cap bid-ask spread — 편도 0.05% × 2 (KOSPI 대형 기준, Amihud 2002)
-    this.KRX_COST = this.KRX_COMMISSION + this.KRX_TAX + this.KRX_SLIPPAGE; // 0.31%
-
-    /** [Phase I-L2] 적응형 슬리피지 — Amihud (2002), core_data/18 §3
-     *  ILLIQ 기반 종목별 슬리피지 조정. KOSDAQ 소형주 2-5x 상향.
-     *  _behavioralData.illiq_spread 로드 후 사용 가능 */
-    this._getAdaptiveSlippage = function(code) {
-      if (!this._behavioralData || !this._behavioralData['illiq_spread']) return this.KRX_SLIPPAGE;
-      var stockData = this._behavioralData['illiq_spread'].stocks;
-      if (!stockData || !stockData[code]) return this.KRX_SLIPPAGE;
-      var seg = stockData[code].segment;
-      // Segment-based slippage: doc 18 table validated by compute_illiq_spread.py
-      if (seg === 'kospi_large') return 0.04;  // [C] Amihud (2002) ILLIQ-calibrated
-      if (seg === 'kospi_mid') return 0.10;   // [C]
-      if (seg === 'kosdaq_large') return 0.15; // [C]
-      if (seg === 'kosdaq_small') return 0.25; // [C]
-      return this.KRX_SLIPPAGE;
-    };
-
-    /** [P0-fix] 보유기간별 거래비용 — 고정비(세금+수수료)와 변동비(슬리피지) 분리
-     *  고정비(tax+comm=0.21%): 왕복 1회 발생, horizon 비례 분할 (1/h)
-     *  변동비(slippage=0.10%): 시장미시구조 잡음 √h 스케일링 — Kyle (1985)
-     *  h=1: 0.31%, h=5: 0.087%, h=20: 0.033% (기존: 0.07% — 112% 과대계상 수정) */
-    this._horizonCost = function(h) {
-      var hSafe = Math.max(1, h);
-      var fixedCost = (this.KRX_COMMISSION + this.KRX_TAX) / hSafe;
-      var variableCost = this.KRX_SLIPPAGE / Math.sqrt(hSafe);
-      return fixedCost + variableCost;
-    };
+    // [V48-Phase2.5] KRX cost constants + _getAdaptiveSlippage + _horizonCost removed.
+    // Cost logic now lives server-side in functions/api/backtest/analyze.js
+    // (FALLBACK_COSTS + SEGMENT_SLIPPAGE). Client backtestAll() runs cost-free;
+    // backtestAllServerFirst() overlays server cost-driven metrics on top.
 
     /** 패턴 타입별 한국어 매핑 + 방향 정보 */
     this._META = {
@@ -562,6 +534,119 @@ class PatternBacktester {
   // ══════════════════════════════════════════════════════
   //  2. 전체 패턴 일괄 백테스트
   // ══════════════════════════════════════════════════════
+
+  /**
+   * [V48-Phase2] Server-first wrapper around backtestAll.
+   * Tries POST /api/backtest/analyze for cost-calibrated per-pattern stats.
+   * On server success: runs client `backtestAll` for WFE / BH-FDR / Hansen SPA
+   * / reliabilityTier (server doesn't recompute these), then overlays server
+   * cost-driven metrics. On any server failure (offline, non-OK, parse error,
+   * timeout): returns {} (backtest skipped). [V48-Phase2.5] no client cost fallback.
+   *
+   * @param {Array} candles — OHLCV array
+   * @param {string} [stockCode]
+   * @returns {Promise<{ [patternType]: backtestResult }>}
+   */
+  async backtestAllServerFirst(candles, stockCode) {
+    if (!candles || candles.length < 50) return {};
+    try {
+      var occurrences = this._buildServerOccurrences(candles);
+      if (occurrences.length === 0) return {};
+      var trimmed = candles.length > 500 ? candles.slice(-500) : candles;
+      var offset = candles.length - trimmed.length;
+      var trimmedOcc = [];
+      for (var i = 0; i < occurrences.length; i++) {
+        var o = occurrences[i];
+        var idx = o.barIndex - offset;
+        if (idx >= 0 && idx < trimmed.length) {
+          trimmedOcc.push({ type: o.type, signal: o.signal, barIndex: idx });
+        }
+      }
+      if (trimmedOcc.length === 0) return {};
+      var segment = this._inferSegment(stockCode);
+      var r = await fetch('/api/backtest/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candles: trimmed.map(function (c) { return { close: c.close }; }),
+          occurrences: trimmedOcc,
+          horizons: this.HORIZONS,
+          segment: segment,
+        }),
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) {
+        console.warn('[V48-Phase2.5] backtest server unavailable — backtest skipped');
+        return {};
+      }
+      var data = await r.json();
+      var serverStats = data && data.stats ? data.stats : null;
+      if (!serverStats) return {};
+      // [V48-Phase2.5] Server succeeded — compute client-side metrics now for
+      // WFE / BH-FDR / Hansen SPA / reliabilityTier (server doesn't recompute
+      // these), then overlay server cost-driven metrics on top.
+      var clientResult = this.backtestAll(candles, stockCode);
+      var COST_KEYS = ['n', 'winrate', 'avgReturn', 'stdReturn', 'expectancy', 'sharpe', 'profitFactor', 'cost'];
+      for (var pType in serverStats) {
+        if (!Object.prototype.hasOwnProperty.call(serverStats, pType)) continue;
+        var sHorizons = serverStats[pType] && serverStats[pType].horizons;
+        if (!sHorizons || !clientResult[pType] || !clientResult[pType].horizons) continue;
+        for (var h in sHorizons) {
+          if (!clientResult[pType].horizons[h]) continue;
+          var src = sHorizons[h], dst = clientResult[pType].horizons[h];
+          for (var k = 0; k < COST_KEYS.length; k++) {
+            var key = COST_KEYS[k];
+            if (src[key] != null) dst[key] = src[key];
+          }
+        }
+      }
+      return clientResult;
+    } catch (_e) {
+      console.warn('[V48-Phase2.5] backtest server error — backtest skipped');
+      return {};
+    }
+  }
+
+  /**
+   * Build `[{type, signal, barIndex}]` occurrences from cached patternEngine
+   * analysis. Used only by backtestAllServerFirst — avoids re-running
+   * patternEngine.analyze when the cache is already warm.
+   */
+  _buildServerOccurrences(candles) {
+    if (!this._analyzeCache || this._analyzeCache._candles !== candles) {
+      this._analyzeCache = { _candles: candles, patterns: patternEngine.analyze(candles) };
+    }
+    var all = this._analyzeCache.patterns || [];
+    var meta = this._META;
+    var occ = [];
+    for (var i = 0; i < all.length; i++) {
+      var p = all[i];
+      var m = meta[p.type];
+      if (!m) continue;
+      if (m.signal !== 'buy' && m.signal !== 'sell') continue;
+      var idx = (p.endIndex !== undefined) ? p.endIndex : p.startIndex;
+      if (!Number.isInteger(idx)) continue;
+      occ.push({ type: p.type, signal: m.signal, barIndex: idx });
+    }
+    return occ;
+  }
+
+  /**
+   * Map current market + stock code to the segment key used by the server's
+   * adaptive-slippage table. Falls back to KOSPI large when unknown.
+   */
+  _inferSegment(stockCode) {
+    var market = (this._currentMarket || '').toLowerCase();
+    if (this._behavioralData && this._behavioralData['illiq_spread']) {
+      var stocks = this._behavioralData['illiq_spread'].stocks;
+      if (stocks && stockCode && stocks[stockCode] && stocks[stockCode].segment) {
+        return stocks[stockCode].segment;
+      }
+    }
+    if (market.indexOf('kosdaq') >= 0) return 'kosdaq_large';
+    return 'kospi_large';
+  }
 
   /**
    * 전체 캔들에서 모든 패턴 타입별 백테스트 실행
@@ -1380,7 +1465,7 @@ class PatternBacktester {
         }
 
         const exitPrice = candles[exitIdx].close;
-        const ret = (exitPrice - entryPrice) / entryPrice * 100 - this._horizonCost(h); // [Phase0-E] horizon-scaled 거래비용
+        const ret = (exitPrice - entryPrice) / entryPrice * 100 - 0; // [V48-Phase2.5] cost moved server-side // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
         returnDates.push(candles[occ.idx].time || '');  // [Calendar Bootstrap] 패턴 발생 시점 날짜
         validOccs.push(occ);
@@ -2112,7 +2197,7 @@ class PatternBacktester {
     if (this._nullWRCache[cacheKey]) return this._nullWRCache[cacheKey];
 
     var buyWins = 0, sellWins = 0, total = 0;
-    var cost = this._horizonCost(h);
+    var cost = 0; // [V48-Phase2.5] cost moved server-side
     for (var i = 0; i < candles.length - h - 1; i++) {
       var entryPrice = candles[i + 1].open || candles[i].close;
       if (!entryPrice || entryPrice === 0) continue;
@@ -2153,7 +2238,7 @@ class PatternBacktester {
     if (this._nullMeanCache[cacheKey] !== undefined) return this._nullMeanCache[cacheKey];
 
     var sum = 0, total = 0;
-    var cost = this._horizonCost(h);
+    var cost = 0; // [V48-Phase2.5] cost moved server-side
     for (var i = 0; i < candles.length - h - 1; i++) {
       var entryPrice = candles[i + 1].open || candles[i].close;
       if (!entryPrice || entryPrice === 0) continue;
@@ -2179,7 +2264,7 @@ class PatternBacktester {
    */
   _computeRegimeWR(candles, occurrences, h, patternSignal) {
     if (!occurrences || occurrences.length < 30) return null; // CLT minimum for regime-split subgroups
-    var cost = this._horizonCost(h);
+    var cost = 0; // [V48-Phase2.5] cost moved server-side
     var buckets = { trending: { wins: 0, n: 0 }, reverting: { wins: 0, n: 0 }, neutral: { wins: 0, n: 0 } };
 
     for (var i = 0; i < occurrences.length; i++) {
@@ -2243,7 +2328,7 @@ class PatternBacktester {
         const entryPrice = candles[entryIdx2].open || candles[occ.idx].close;
         if (!entryPrice || entryPrice === 0) continue;
 
-        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100 - this._horizonCost(d); // [Phase0-E] horizon-scaled 거래비용
+        const ret = (candles[exitIdx].close - entryPrice) / entryPrice * 100 - 0; // [V48-Phase2.5] cost moved server-side // [Phase0-E] horizon-scaled 거래비용
         returns.push(ret);
       }
 

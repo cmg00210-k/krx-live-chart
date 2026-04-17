@@ -1373,6 +1373,243 @@ def check_ip_protection(strict=False):
 
 
 # =============================================================================
+# CHECK 13 - Server Endpoints (V48-SEC Phase 2)
+# =============================================================================
+
+PHASE2_ENDPOINTS = [
+    "functions/api/confidence/macro.js",
+    "functions/api/confidence/phase8.js",
+    "functions/api/backtest/analyze.js",
+]
+
+PHASE2_CLIENT_FETCHES = [
+    (JS / "appWorker.js",  "/api/confidence/macro",  "_fetchMacroConfidence"),
+    (JS / "appWorker.js",  "/api/confidence/phase8", "_fetchPhase8Confidence"),
+    (JS / "backtester.js", "/api/backtest/analyze",  "backtestAllServerFirst"),
+    (JS / "analysisWorker.js", "backtestAllServerFirst", None),
+]
+
+
+def check_server_endpoints(strict=False):
+    section("CHECK 13 - Server Endpoints (V48-SEC Phase 2)")
+    errors = 0
+    warnings = 0
+
+    # 13a. Endpoint files exist and call guardRequest + return jsonResponse
+    for rel in PHASE2_ENDPOINTS:
+        p = ROOT / rel
+        if not p.exists():
+            fail(f"{rel} missing (Phase 2 endpoint)")
+            errors += 1
+            continue
+        src = read(p)
+        if "guardRequest(request)" not in src:
+            fail(f"{rel} does not call guardRequest(request)")
+            errors += 1
+        else:
+            ok(f"{rel} calls guardRequest")
+        if "jsonResponse(" not in src:
+            fail(f"{rel} does not call jsonResponse()")
+            errors += 1
+        else:
+            ok(f"{rel} returns jsonResponse")
+        if "Cache-Control" not in src or "no-store" not in src:
+            warn(f"{rel} does not set Cache-Control: no-store at function level")
+            warnings += 1
+
+    # 13b. macro_tables shared lib exists
+    lib = ROOT / "functions" / "_lib" / "macro_tables.mjs"
+    if not lib.exists():
+        fail("functions/_lib/macro_tables.mjs missing (server-side helpers)")
+        errors += 1
+    else:
+        ok("functions/_lib/macro_tables.mjs present")
+
+    # 13c. Client-side wrappers and fetch sites
+    for entry in PHASE2_CLIENT_FETCHES:
+        path, needle, alt = entry
+        if not path.exists():
+            fail(f"{path.name} missing")
+            errors += 1
+            continue
+        src = read(path)
+        if needle in src:
+            ok(f"{path.name} references {needle}")
+        else:
+            fail(f"{path.name} does NOT reference {needle}")
+            errors += 1
+        if alt and alt not in src:
+            fail(f"{path.name} missing wrapper {alt}")
+            errors += 1
+
+    # 13d. _headers has /api/* no-store
+    headers = ROOT / "_headers"
+    if headers.exists():
+        h = read(headers)
+        if "/api/*" in h and "no-store" in h:
+            ok("_headers sets /api/* no-store at edge")
+        else:
+            warn("_headers may be missing /api/* no-store directive")
+            warnings += 1
+    else:
+        warn("_headers file not found")
+        warnings += 1
+
+    return errors, warnings
+
+
+# =============================================================================
+# CHECK 14 - V48-Phase2.5 Client Cleanup (fallback-body removal + SW orphan)
+# =============================================================================
+
+def check_phase25_cleanup(strict=False):
+    section("CHECK 14 - V48-Phase2.5 Client Cleanup")
+    errors = 0
+    warnings = 0
+
+    app_worker_path = JS / "appWorker.js"
+    backtester_path = JS / "backtester.js"
+    sw_path         = ROOT / "sw.js"
+
+    if not app_worker_path.exists() or not backtester_path.exists() or not sw_path.exists():
+        fail("required source files missing (appWorker.js / backtester.js / sw.js)")
+        return 1, 0
+
+    app_worker = read(app_worker_path)
+    backtester = read(backtester_path)
+    sw = read(sw_path)
+
+    # 14a. _applyMacroConfidenceToPatterns body must be throw-only
+    m = re.search(
+        r"function\s+_applyMacroConfidenceToPatterns\s*\([^)]*\)\s*\{([^}]*)\}",
+        app_worker, re.DOTALL
+    )
+    if not m:
+        fail("_applyMacroConfidenceToPatterns definition not found")
+        errors += 1
+    else:
+        body = m.group(1).strip()
+        non_empty = [ln for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("//")]
+        if len(non_empty) > 2:
+            fail(f"_applyMacroConfidenceToPatterns body has {len(non_empty)} non-comment lines (expected 1-2)")
+            errors += 1
+        elif "throw new Error('[V48-Phase2.5] removed" not in body:
+            fail("_applyMacroConfidenceToPatterns does not throw the V48-Phase2.5 stub")
+            errors += 1
+        else:
+            ok("_applyMacroConfidenceToPatterns body is throw-only")
+
+    # 14b. _applyPhase8ConfidenceToPatterns body must be throw-only
+    m = re.search(
+        r"function\s+_applyPhase8ConfidenceToPatterns\s*\([^)]*\)\s*\{([^}]*)\}",
+        app_worker, re.DOTALL
+    )
+    if not m:
+        fail("_applyPhase8ConfidenceToPatterns definition not found")
+        errors += 1
+    else:
+        body = m.group(1).strip()
+        non_empty = [ln for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("//")]
+        if len(non_empty) > 2:
+            fail(f"_applyPhase8ConfidenceToPatterns body has {len(non_empty)} non-comment lines (expected 1-2)")
+            errors += 1
+        elif "throw new Error('[V48-Phase2.5] removed" not in body:
+            fail("_applyPhase8ConfidenceToPatterns does not throw the V48-Phase2.5 stub")
+            errors += 1
+        else:
+            ok("_applyPhase8ConfidenceToPatterns body is throw-only")
+
+    # 14c. backtester.js must not contain KRX cost constants or cost helpers
+    # Allow comment-only mentions. Strip // line comments and /* block */ comments first.
+    bt_noblock = re.sub(r"/\*.*?\*/", "", backtester, flags=re.DOTALL)
+    bt_noline  = re.sub(r"//[^\n]*", "", bt_noblock)
+    forbidden  = ["KRX_COMMISSION", "KRX_TAX", "KRX_SLIPPAGE",
+                  "_horizonCost", "_getAdaptiveSlippage"]
+    for tok in forbidden:
+        hits = bt_noline.count(tok)
+        if hits > 0:
+            fail(f"backtester.js still contains '{tok}' ({hits} live refs)")
+            errors += 1
+        else:
+            ok(f"backtester.js: no live references to {tok}")
+
+    # 14d. fetch wrappers must not end with client fallback calls
+    # Look for any line that invokes _applyMacroConfidenceToPatterns(...) outside
+    # of the function definition itself. Same for phase8.
+    bad_macro = re.findall(
+        r"^\s*_applyMacroConfidenceToPatterns\s*\(",
+        app_worker, re.MULTILINE
+    )
+    # "bad_macro" includes both the definition and any callers. Subtract 0 for
+    # definition (it is matched as 'function _applyMacro...' not as call). If
+    # count > 0, we have direct callers.
+    direct_macro_calls = len(bad_macro)
+    if direct_macro_calls > 0:
+        fail(f"appWorker.js has {direct_macro_calls} direct _applyMacroConfidenceToPatterns(...) call(s) — should route through _fetchMacroConfidence")
+        errors += 1
+    else:
+        ok("appWorker.js: no direct _applyMacroConfidenceToPatterns calls remain")
+
+    bad_phase8 = re.findall(
+        r"^\s*_applyPhase8ConfidenceToPatterns\s*\(",
+        app_worker, re.MULTILINE
+    )
+    direct_phase8_calls = len(bad_phase8)
+    if direct_phase8_calls > 0:
+        fail(f"appWorker.js has {direct_phase8_calls} direct _applyPhase8ConfidenceToPatterns(...) call(s) — should route through _fetchPhase8Confidence")
+        errors += 1
+    else:
+        ok("appWorker.js: no direct _applyPhase8ConfidenceToPatterns calls remain")
+
+    # 14e. backtestAllServerFirst must not reference clientResult = this.backtestAll at top
+    if "var clientResult = this.backtestAll(candles, stockCode);\n    try {" in backtester:
+        fail("backtester.backtestAllServerFirst still pre-computes clientResult before server fetch")
+        errors += 1
+    else:
+        ok("backtester.backtestAllServerFirst: no unconditional client fallback pre-computation")
+
+    # 14f. SW install handler must contain orphan removal logic
+    if "validUrls" in sw and "cache.delete(req)" in sw:
+        ok("sw.js install handler performs orphan cleanup")
+    else:
+        fail("sw.js install handler missing orphan cleanup logic")
+        errors += 1
+
+    # 14g. SW activate handler must postMessage sw-updated
+    if "sw-updated" in sw:
+        ok("sw.js activate handler posts sw-updated message")
+    else:
+        warn("sw.js activate handler does not postMessage sw-updated")
+        warnings += 1
+
+    # 14h. CACHE_NAME must be cheesestock-v82 or higher
+    cm = re.search(r"CACHE_NAME\s*=\s*['\"]cheesestock-v(\d+)['\"]", sw)
+    if cm:
+        v = int(cm.group(1))
+        if v < 82:
+            fail(f"sw.js CACHE_NAME is cheesestock-v{v} (expected v82+ for Phase 2.5)")
+            errors += 1
+        else:
+            ok(f"sw.js CACHE_NAME = cheesestock-v{v} (Phase 2.5 compliant)")
+    else:
+        warn("sw.js CACHE_NAME pattern not detected")
+        warnings += 1
+
+    # 14i. appState.js dead constants removed
+    app_state = read(JS / "appState.js")
+    as_noblock = re.sub(r"/\*.*?\*/", "", app_state, flags=re.DOTALL)
+    as_noline  = re.sub(r"//[^\n]*", "", as_noblock)
+    for tok in ["_STOVALL_CYCLE", "_RATE_BETA", "MCS_THRESHOLDS", "REGIME_CONFIDENCE_MULT"]:
+        if tok in as_noline:
+            fail(f"appState.js still contains live '{tok}' definition")
+            errors += 1
+        else:
+            ok(f"appState.js: no live '{tok}' definition")
+
+    return errors, warnings
+
+
+# =============================================================================
 # CHECK 10 - Backtest Acceptance Criteria (7 criteria)
 # =============================================================================
 
@@ -1592,7 +1829,7 @@ def main():
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
                  "collision", "dead_exports", "canvas", "criteria",
-                 "bundle", "ip", "all"],
+                 "bundle", "ip", "server", "phase25", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -1621,6 +1858,8 @@ def main():
         "criteria":      check_criteria,
         "bundle":        check_bundle_integrity,
         "ip":            check_ip_protection,
+        "server":        check_server_endpoints,
+        "phase25":       check_phase25_cleanup,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]
