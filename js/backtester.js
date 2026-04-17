@@ -564,18 +564,39 @@ class PatternBacktester {
       }
       if (trimmedOcc.length === 0) return {};
       var segment = this._inferSegment(stockCode);
-      var r = await fetch('/api/backtest/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candles: trimmed.map(function (c) { return { close: c.close }; }),
-          occurrences: trimmedOcc,
-          horizons: this.HORIZONS,
-          segment: segment,
-        }),
-        credentials: 'same-origin',
-        signal: AbortSignal.timeout(6000),
-      });
+      // [V48-SEC Phase 3] signed POST — HMAC + Bearer + KV rate limit.
+      // Three code paths depending on scope:
+      //   (a) Main thread: _signPost() defined globally via js/_shared/sign.js.
+      //   (b) Web Worker:  _signPost is not in scope, but a postMessage RPC
+      //       bridge in analysisWorker.js forwards the request to the main
+      //       thread, which performs the signed fetch and returns the result.
+      //   (c) Standalone (neither main thread sign.js nor worker bridge):
+      //       unsigned fetch — server will 401 under Phase 3. This path
+      //       should never fire in production but remains as a diagnostic.
+      var signedBody = {
+        candles: trimmed.map(function (c) { return { close: c.close }; }),
+        occurrences: trimmedOcc,
+        horizons: this.HORIZONS,
+        segment: segment,
+      };
+      var r;
+      if (typeof _signPost === 'function') {
+        // (a) Main thread
+        r = await _signPost('/api/backtest/analyze', signedBody);
+      } else if (typeof _workerSignedFetchProxy === 'function') {
+        // (b) Worker via postMessage RPC
+        r = await _workerSignedFetchProxy('/api/backtest/analyze', signedBody);
+      } else {
+        // (c) Diagnostic fallback
+        console.warn('[V48-Phase3] Neither _signPost nor _workerSignedFetchProxy available — unsigned /api/backtest/analyze will 401');
+        r = await fetch('/api/backtest/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(signedBody),
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(6000),
+        });
+      }
       if (!r.ok) {
         console.warn('[V48-Phase2.5] backtest server unavailable — backtest skipped');
         return {};

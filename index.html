@@ -18,7 +18,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
   <link rel="prefetch" href="data/index.json">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
+  <!-- [V48-SEC Phase 3] SRI pinned for Pretendard v1.3.9. Google Fonts CSS
+       varies by User-Agent (font subsets) so SRI is intentionally omitted there. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css"
+    integrity="sha384-V6D6tclS+1ROe6W7mgqDzlz750VoLpzneK+eS5rMAgkReZxe5YZeA91NeDdV+Z8E"
+    crossorigin="anonymous">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="css/style.css?v=15">
   <script defer src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"
@@ -733,6 +737,9 @@
 
   <!-- JS: 순서 중요 — defer로 병렬 다운로드 + 순서 실행 보장 -->
   <!-- ?v= 캐시 버스팅: 코드 배포 시 숫자를 올리면 CDN/브라우저 캐시 즉시 무효화 -->
+  <!-- [V48-SEC Phase 3] js/_shared/sign.js: HMAC signing + session init.
+       Must load BEFORE appWorker/backtester/financials so they can call _signPost/_signGet. -->
+  <script defer src="js/_shared/sign.js?v=1"></script>
   <script defer src="js/colors.js?v=14"></script>
   <script defer src="js/data.js?v=13"></script>
   <script defer src="js/api.js?v=15"></script>
@@ -743,14 +750,14 @@
   <script defer src="js/chart.js?v=13"></script>
   <script defer src="js/patternRenderer.js?v=25"></script>
   <script defer src="js/signalRenderer.js?v=12"></script>
-  <script defer src="js/backtester.js?v=45"></script>
+  <script defer src="js/backtester.js?v=46"></script>
   <script defer src="js/sidebar.js?v=13"></script>
   <script defer src="js/patternPanel.js?v=24"></script>
-  <script defer src="js/financials.js?v=20"></script>
+  <script defer src="js/financials.js?v=21"></script>
   <script defer src="js/drawingTools.js?v=12"></script>
   <script defer src="js/appState.js?v=6"></script>
-  <script defer src="js/appWorker.js?v=17"></script>
+  <script defer src="js/appWorker.js?v=18"></script>
   <script defer src="js/appUI.js?v=2"></script>
-  <script defer src="js/app.js?v=36"></script>
+  <script defer src="js/app.js?v=37"></script>
 </body>
 </html>

@@ -79,7 +79,7 @@ try {
     'indicators.js?v=28',
     'patterns.js?v=50',
     'signalEngine.js?v=47',
-    'backtester.js?v=45'
+    'backtester.js?v=46'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -199,9 +199,70 @@ function _attachWinRates(patterns) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// [V48-SEC Phase 3] Worker -> Main thread signed-fetch RPC bridge.
+//
+// The worker has no access to _HMAC_SECRET or _SESSION_TOKEN (those live in
+// js/_shared/sign.js, main-thread scope only). Instead, it asks the main
+// thread to perform the signed fetch via postMessage and awaits the result.
+//
+// Protocol:
+//   Worker -> Main: { type: 'signedFetchRequest', id, method, url, body }
+//   Main -> Worker: { type: 'signedFetchResponse', id, ok, status, data, error }
+//
+// Call site (backtester.js): _workerSignedFetchProxy(url, bodyObj) returns a
+// Response-like object { ok, status, json() } so downstream code is unchanged.
+// ══════════════════════════════════════════════════════
+var _pendingSignedFetches = new Map();
+var _signedFetchIdCounter = 0;
+
+function _workerSignedFetchProxy(url, bodyObj) {
+  return new Promise(function (resolve, reject) {
+    var id = ++_signedFetchIdCounter;
+    var timeoutHandle = setTimeout(function () {
+      if (_pendingSignedFetches.has(id)) {
+        _pendingSignedFetches.delete(id);
+        reject(new Error('[V48-Phase3] signed fetch proxy timeout: ' + url));
+      }
+    }, 10000);
+    _pendingSignedFetches.set(id, {
+      resolve: function (v) { clearTimeout(timeoutHandle); resolve(v); },
+      reject:  function (e) { clearTimeout(timeoutHandle); reject(e); },
+    });
+    self.postMessage({
+      type: 'signedFetchRequest',
+      id: id,
+      method: 'POST',
+      url: url,
+      body: bodyObj,
+    });
+  });
+}
+
 // ── 메시지 핸들러 ────────────────────────────────────
 self.onmessage = async function (e) {
   const msg = e.data;
+
+  // [V48-SEC Phase 3] Main-thread response to a worker-initiated signed fetch.
+  // Route to the pending Promise created by _workerSignedFetchProxy.
+  if (msg && msg.type === 'signedFetchResponse') {
+    var pending = _pendingSignedFetches.get(msg.id);
+    if (pending) {
+      _pendingSignedFetches.delete(msg.id);
+      if (msg.error) {
+        pending.reject(new Error(msg.error));
+      } else {
+        // Response-shaped wrapper so backtester.js consumes it like a real Response.
+        pending.resolve({
+          ok: !!msg.ok,
+          status: msg.status || 0,
+          json: function () { return Promise.resolve(msg.data); },
+          text: function () { return Promise.resolve(JSON.stringify(msg.data || null)); },
+        });
+      }
+    }
+    return;
+  }
 
   // 초기화 실패 시 모든 요청에 에러 응답
   if (!_workerReady) {

@@ -186,7 +186,7 @@ function _initAnalysisWorker() {
   }
 
   try {
-    _analysisWorker = new Worker('js/analysisWorker.js?v=66');
+    _analysisWorker = new Worker('js/analysisWorker.js?v=67');
 
     _analysisWorker.onmessage = async function (e) {
       const msg = e.data;
@@ -196,6 +196,45 @@ function _initAnalysisWorker() {
         _workerReady = true;
         _workerRestartCount = 0;  // [FIX] 성공 시 재시작 카운터 리셋
         console.log('[Worker] 분석 Worker 초기화 완료');
+        return;
+      }
+
+      // ── [V48-SEC Phase 3] Worker-initiated signed fetch proxy ──
+      // The worker cannot sign HTTP requests (no access to _HMAC_SECRET).
+      // When it needs to call /api/*, it posts a signedFetchRequest; we
+      // perform the signed fetch here and post back signedFetchResponse.
+      // Defense: URL must start with /api/ (whitelist — prevent XSS worker
+      // from requesting signatures on arbitrary URLs).
+      if (msg.type === 'signedFetchRequest') {
+        (async function () {
+          var resp = null;
+          var data = null;
+          var errMsg = null;
+          try {
+            if (typeof msg.url !== 'string' || msg.url.indexOf('/api/') !== 0) {
+              throw new Error('signedFetchRequest url must start with /api/');
+            }
+            if (typeof _signPost !== 'function') {
+              throw new Error('_signPost unavailable on main thread');
+            }
+            resp = await _signPost(msg.url, msg.body);
+            try { data = await resp.json(); } catch (_) { data = null; }
+          } catch (err) {
+            errMsg = err && err.message ? err.message : String(err);
+          }
+          try {
+            _analysisWorker.postMessage({
+              type: 'signedFetchResponse',
+              id: msg.id,
+              ok:     resp ? resp.ok : false,
+              status: resp ? resp.status : 0,
+              data:   data,
+              error:  errMsg,
+            });
+          } catch (postErr) {
+            try { console.warn('[V48-Phase3] signedFetchResponse postMessage failed:', postErr); } catch (_) {}
+          }
+        })();
         return;
       }
 
@@ -1257,13 +1296,15 @@ async function _fetchMacroConfidence(patterns) {
     appliedFactors: Array.from(_appliedFactors || []),
   };
   try {
-    var r = await fetch('/api/confidence/macro', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(4000),
-    });
+    // [V48-SEC Phase 3] _signPost adds HMAC signature + Bearer token headers.
+    // AbortSignal.timeout is not supported in older Workers runtimes for Web Crypto
+    // chained calls, so we use a manual AbortController.
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 4000);
+    var r;
+    try {
+      r = await _signPost('/api/confidence/macro', { patterns: payloadPatterns, context: ctx });
+    } finally { clearTimeout(timer); }
     if (r.ok) {
       var data = await r.json();
       var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;
@@ -1310,13 +1351,8 @@ async function _fetchPhase8Confidence(patterns) {
     appliedFactors: Array.from(_appliedFactors || []),
   };
   try {
-    var r = await fetch('/api/confidence/phase8', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patterns: payloadPatterns, context: ctx }),
-      credentials: 'same-origin',
-      signal: AbortSignal.timeout(4000),
-    });
+    // [V48-SEC Phase 3] signed POST with HMAC + Bearer token.
+    var r = await _signPost('/api/confidence/phase8', { patterns: payloadPatterns, context: ctx });
     if (r.ok) {
       var data = await r.json();
       var adj = (data && Array.isArray(data.patterns)) ? data.patterns : null;

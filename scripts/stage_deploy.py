@@ -75,6 +75,11 @@ _BASE_EXCLUDE_SUFFIX_PATTERNS = [
 # Use OS-native sep so comparisons work on both Windows and Unix.
 EXCLUDE_EXACT = {
     ".env",                        # NEVER deploy -- contains DART_API_KEY
+    # [V48-SEC Phase 3] Wrangler local-dev secrets. CHEESESTOCK_HMAC_SECRET,
+    # session master key, KV dev bindings. Production secrets are set via
+    # `wrangler secret put` (Cloudflare-side, never in bundle) -- this entry
+    # ensures a local .dev.vars never hard-links into deploy/.
+    ".dev.vars",
     # .cfignore removed (wrangler ignores it; stage_deploy.py is the sole gatekeeper)
     ".vercelignore",               # leftover from old Vercel setup
     "vercel.json",                 # leftover from old Vercel setup

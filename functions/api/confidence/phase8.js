@@ -12,7 +12,8 @@ import flowSignals from '../../_data/flow_signals.json' with { type: 'json' };
 // HMM regime label inside flow_signals.stocks[code].hmmRegimeLabel. Loading
 // them anyway primes the bundle so future Phase 8 expansions can reference
 // without an extra import round.
-import { guardRequest, jsonResponse, forbiddenResponse } from '../../_shared/origin.js';
+import { jsonResponse } from '../../_shared/origin.js';
+import { guardPost, preflightResponse } from '../../_shared/guard.js';
 import { REGIME_CONFIDENCE_MULT, MCS_THRESHOLDS, getDynamicCap, clamp } from '../../_lib/macro_tables.mjs';
 
 function adjustPatterns(patterns, ctx) {
@@ -105,29 +106,24 @@ function adjustPatterns(patterns, ctx) {
   return { patterns: out, appliedFactors: Array.from(applied) };
 }
 
-export async function onRequestPost({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
+export async function onRequestPost({ request, env }) {
+  const g = await guardPost(request, env, 'heavy_post');
+  if (!g.ok) return g.response;
+
   let body;
-  try { body = await request.json(); }
-  catch (_) { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+  try { body = JSON.parse(g.body || '{}'); }
+  catch (_) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } },
+    );
+  }
   const patterns = Array.isArray(body && body.patterns) ? body.patterns : [];
   const ctx = (body && body.context) || {};
   const result = adjustPatterns(patterns, ctx);
-  return jsonResponse(result, guard.origin, { 'Cache-Control': 'no-store' });
+  return jsonResponse(result, g.origin, { 'Cache-Control': 'no-store' });
 }
 
 export async function onRequestOptions({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': guard.origin,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400',
-      'Vary': 'Origin',
-    },
-  });
+  return preflightResponse(request, 'POST, OPTIONS');
 }

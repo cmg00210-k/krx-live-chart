@@ -15,7 +15,8 @@
 //             stdReturn,expectancy,sharpe,profitFactor,cost} } } } }
 
 import calibrated from '../../_data/calibrated_constants.json' with { type: 'json' };
-import { guardRequest, jsonResponse, forbiddenResponse } from '../../_shared/origin.js';
+import { jsonResponse } from '../../_shared/origin.js';
+import { guardPost, preflightResponse } from '../../_shared/guard.js';
 
 // IP-protected fallback constants (used when calibrated_constants.json is incomplete).
 // These match js/backtester.js:KRX_COMMISSION/TAX/SLIPPAGE but are now server-only.
@@ -133,12 +134,18 @@ function computeStats({ candles, occurrences, horizons, segment }) {
   return stats;
 }
 
-export async function onRequestPost({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
+export async function onRequestPost({ request, env }) {
+  const g = await guardPost(request, env, 'heavy_post');
+  if (!g.ok) return g.response;
+
   let body;
-  try { body = await request.json(); }
-  catch (_) { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+  try { body = JSON.parse(g.body || '{}'); }
+  catch (_) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } },
+    );
+  }
 
   // Truncate excessive candle payloads (client-side cap is 500; mirror server-side guard).
   let candles = Array.isArray(body && body.candles) ? body.candles : [];
@@ -150,20 +157,9 @@ export async function onRequestPost({ request }) {
     horizons: (body && body.horizons) || [1, 3, 5, 10, 20],
     segment: (body && body.segment) || null,
   });
-  return jsonResponse({ stats }, guard.origin, { 'Cache-Control': 'no-store' });
+  return jsonResponse({ stats }, g.origin, { 'Cache-Control': 'no-store' });
 }
 
 export async function onRequestOptions({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': guard.origin,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400',
-      'Vary': 'Origin',
-    },
-  });
+  return preflightResponse(request, 'POST, OPTIONS');
 }

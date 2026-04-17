@@ -21,6 +21,15 @@ __pycache__/
 .env
 .env.local
 
+# [V48-SEC Phase 3] Wrangler local dev secrets — NEVER commit.
+# Contains CHEESESTOCK_HMAC_SECRET and other per-env secrets used only by
+# `wrangler pages dev`. Production secrets live in Cloudflare dashboard
+# (Settings -> Environment variables -> Encrypted) via `wrangler secret put`.
+# .dev.vars.example is the template (tracked); all other .dev.vars* are ignored.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
 # Stock data (large JSON files — downloaded via scripts/download_ohlcv.py)
 # Tracked subdirs: kospi/, kosdaq/, backtest/, macro/ + index.json
 data/
