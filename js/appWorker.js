@@ -13,10 +13,11 @@ var _lastDerivativesDataLoad = 0;
 var _lastPhase8DataLoad = 0;
 
 // ── [Item 21] 데이터 경과(staleness) 추적 ──
-// [V47-B1] >14일 경과 소스 → 관련 신뢰도 조정 로직 자동 skip (승수 1.0 클램프).
-// _checkDataStaleness() 14일 초과 시 등록. _applyMacroConfidenceToPatterns,
-// _applyPhase8ConfidenceToPatterns의 macro_latest/bonds_latest/flow_signals/
-// options_analytics 관련 블록이 _staleDataSources.has(name)로 스킵.
+// [V47-B1] >_STALE_DAYS 경과 소스 → 관련 신뢰도 조정 로직 자동 skip (승수 1.0 클램프).
+// _checkDataStaleness() 임계 초과 시 등록. Layer 3/7 서버 페이로드 + Layer 0/5 클라이언트
+// 게이트가 _staleDataSources.has(name)로 해당 소스 스킵. Layer 6 (Merton DD)은 종목 고유
+// 데이터이므로 14일 macro-staleness 대상 아님.
+var _STALE_DAYS = 14;  // [V48-H4] magic number → 상수화
 var _staleDataSources = new Set();
 var _stalenessLoadersComplete = 0;  // 3개 로더 완료 카운트
 var _stalenessChecked = false;       // 1회만 실행
@@ -319,6 +320,8 @@ function _initAnalysisWorker() {
         _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
         // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
         _applyEVAConfidenceToPatterns(detectedPatterns);
+        // [P6-003] FF3 loadings × MCS regime 신뢰도 조정 (Layer 4b, clamp [0.90, 1.10])
+        _applyFF3ConfidenceToPatterns(detectedPatterns);
         // [Phase KRX-API] 파생상품·수급 데이터 기반 신뢰도 조정
         _applyDerivativesConfidenceToPatterns(detectedPatterns);
         // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
@@ -490,8 +493,8 @@ function _checkDataStaleness(data, name, dateField, isArray) {
   var parsed = new Date(dateValue);
   if (isNaN(parsed.getTime())) return;
   var ageDays = Math.floor((Date.now() - parsed.getTime()) / 86400000);
-  if (ageDays > 14) {
-    // V47-B1: 14일 초과는 런타임 가드 트리거. 해당 소스 기반 승수는 1.0으로 클램프됨.
+  if (ageDays > _STALE_DAYS) {
+    // [V47-B1, V48-H4] _STALE_DAYS(14) 초과는 런타임 가드 트리거. 해당 소스 기반 승수는 1.0으로 클램프됨.
     _staleDataSources.add(name);
     _pipelineStatus[name] = ageDays > 30 ? 'stale' : 'aging';
     console.warn('[STALE] ' + name + ': ' + ageDays + '일 경과 (' + dateValue + ') -- 신뢰도 승수 1.0 클램프');
@@ -889,6 +892,14 @@ function _applyDerivativesConfidenceToPatterns(patterns) {
   var etf = _etfData;
   var shorts = _shortSellingData;
 
+  // [V48-H4] Layer 5 per-source stale guard (> _STALE_DAYS → 해당 소스 승수 skip)
+  if (_staleDataSources) {
+    if (_staleDataSources.has('derivatives'))    deriv    = null;
+    if (_staleDataSources.has('investor'))       investor = null;
+    if (_staleDataSources.has('etf'))            etf      = null;
+    if (_staleDataSources.has('shortselling'))   shorts   = null;
+  }
+
   // 데이터 전무 시 no-op
   if (!deriv && !investor && !etf && !shorts) return;
 
@@ -1104,7 +1115,7 @@ function _calcNaiveDD(candleCloses) {
 // DD ≥ 1.5: 경계 — 매수 소폭 할인
 // DD < 1.5: 위험 — 매수 강한 할인, 매도 부스트
 // DD < 1.0: 매우 위험 — 최대 할인
-// clamp [0.85, 1.15]: 종목 고유 지표이므로 제한적 범위
+// clamp [0.75, 1.15]: 종목 고유 지표이므로 제한적 범위 (하한 0.75: DD<1.0 tier 매우위험 구분)
 function _applyMertonDDToPatterns(patterns) {
   if (!patterns || patterns.length === 0 || !_currentDD) return;
   var dd = _currentDD.dd;
@@ -1206,6 +1217,12 @@ function _getFinancialDataForSR() {
 function _applyMarketContextToPatterns(patterns) {
   if (!_marketContext || !patterns || patterns.length === 0) return;
   if (_marketContext.source === 'demo') return; // 데모 데이터는 실제 조정 미적용
+
+  // [V48-H4] Layer 0 stale guard: _marketContext ccsi/netForeign은 macro_latest 파생
+  if (_staleDataSources && _staleDataSources.has('macro_latest')) {
+    console.warn('[STALE] Layer 0 MarketContext skipped (macro_latest > ' + _STALE_DAYS + 'd)');
+    return;
+  }
 
   // [V23] ATR 동적 cap
   var _capConf = getDynamicCap('confidence', _currentVolRegime);
@@ -1596,7 +1613,7 @@ function _updateMicroContext(candleData) {
 // Amihud ILLIQ (Doc18 §3.1) — 유동성 할인
 // HHI Mean-Reversion Boost (Doc33 §6.2) — 업종 집중도
 // _applyMacroConfidenceToPatterns() 직후 호출
-// clamp: [0.80, 1.15] (미시 보정은 매크로보다 좁은 범위)
+// clamp: [0.55, 1.15] (V47: short-ban 0.70 effect 수용으로 하한 0.80 → 0.55 widened)
 // ══════════════════════════════════════════════════════════════
 // [V6-FIX] B-5 M-5: Short-selling ban periods — Miller (1977), Diamond-Verrecchia (1987)
 // During bans: bearish patterns less reliable (can't short), bullish slightly less (no price discovery)
@@ -1699,6 +1716,87 @@ function _applyEVAConfidenceToPatterns(patterns) {
     p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
     if (p.confidencePred != null) {
       p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// [P6-003] FF3 Loadings × MCS Regime Confidence Multiplier (Layer 4b)
+//
+// Academic basis:
+//   Fama & French (1993) — SMB/HML factor premia
+//   Chan & Chen (1991) — size effect interacts with business cycle
+//   Petkova & Zhang (2005) — value premium procyclicality
+//
+// Logic: When macro regime is bull (mcsV2 >= 70), small caps (SMB > 0.3)
+// historically lead rally → buy boost. When regime is bear (mcsV2 <= 30),
+// large caps (SMB < -0.3) are defensive → sell dampened. HML analogously:
+// bull + value (HML > 0.3) → mild boost (value rotation); growth (HML < -0.3)
+// + bear → dampen.
+//
+// Conservative clamp [0.90, 1.10] — FF3 is not a direct pattern-return
+// model. Consumer of _ff3StockLoadings cache populated by financials.js.
+// Stale guard: skip when _staleDataSources has 'ff3_factors' or macro_composite.
+// ══════════════════════════════════════════════════════════════
+function _applyFF3ConfidenceToPatterns(patterns) {
+  if (!patterns || patterns.length === 0) return;
+  if (!currentStock || !currentStock.code) return;
+  // Factor guard — prevent double application
+  if (_appliedFactors && _appliedFactors.has('MICRO_FF3')) return;
+  // FF3 loadings require financials.js to have rendered for this stock
+  if (typeof getFF3Loadings !== 'function') return;
+  var loadings = getFF3Loadings(currentStock.code);
+  if (!loadings) return;
+  // Regime from MCS v2 — prefer fallback when active (P6-001)
+  var mcs = null;
+  if (_macroComposite) {
+    mcs = (_macroComposite.mcsFallbackActive && _macroComposite.mcsV2Fallback != null)
+      ? _macroComposite.mcsV2Fallback
+      : _macroComposite.mcsV2;
+  }
+  if (mcs == null) return;
+  // Stale guard: skip when macro_composite is stale
+  if (_staleDataSources && _staleDataSources.has('macro_composite')) {
+    console.warn('[STALE] Layer 4b FF3 skipped — macro_composite > ' + _STALE_DAYS + 'd');
+    return;
+  }
+
+  _appliedFactors.add('MICRO_FF3');
+
+  var _capConf = getDynamicCap('confidence', _currentVolRegime);
+  var _capPred = getDynamicCap('confidencePred', _currentVolRegime);
+
+  var bull = mcs >= 70;
+  var bear = mcs <= 30;
+  var smb = loadings.smbLoad;
+  var hml = loadings.hmlLoad;
+
+  for (var i = 0; i < patterns.length; i++) {
+    var p = patterns[i];
+    if (p.confidence == null) continue;
+    var adj = 1.0;
+    var isBuy = (p.signal === 'buy');
+    var isSell = (p.signal === 'sell');
+
+    // Size effect (SMB): bull→small cap lead; bear→large cap defensive
+    if (bull && smb > 0.3 && isBuy)        adj *= 1.05;
+    else if (bull && smb < -0.3 && isBuy)  adj *= 0.97;
+    else if (bear && smb < -0.3 && isSell) adj *= 0.95;  // dampen sell on large cap bear
+    else if (bear && smb > 0.3 && isSell)  adj *= 1.03;
+
+    // Value effect (HML): bull→value rotation; bear→growth underperforms
+    if (bull && hml > 0.3 && isBuy)        adj *= 1.04;
+    else if (bull && hml < -0.3 && isBuy)  adj *= 0.98;
+    else if (bear && hml < -0.3 && isSell) adj *= 1.03;
+
+    // Conservative clamp — FF3 not a direct pattern model
+    adj = Math.max(0.90, Math.min(1.10, adj));
+
+    if (adj !== 1.0) {
+      p.confidence = Math.max(_capConf[0], Math.min(_capConf[1], Math.round(p.confidence * adj)));
+      if (p.confidencePred != null) {
+        p.confidencePred = Math.max(_capPred[0], Math.min(_capPred[1], Math.round(p.confidencePred * adj)));
+      }
     }
   }
 }
@@ -1838,6 +1936,8 @@ async function _analyzeOnMainThread() {
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
   _applyEVAConfidenceToPatterns(detectedPatterns);
+  // [P6-003] FF3 loadings × MCS regime (Layer 4b, clamp [0.90, 1.10])
+  _applyFF3ConfidenceToPatterns(detectedPatterns);
   // [FIX] Worker 경로와 동일하게 파생상품 신뢰도 조정 추가
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   // [D-4] Merton Distance-to-Default 신용위험 기반 신뢰도 조정 (비금융주)
@@ -1917,6 +2017,8 @@ async function _analyzeDragOnMainThread(visibleCandles, clampFrom) {
   _applyMicroConfidenceToPatterns(detectedPatterns, _microContext);
   // [V38 CONF-M2] EVA Spread 매수 패턴 신뢰도 부스트 (Layer 4 직후)
   _applyEVAConfidenceToPatterns(detectedPatterns);
+  // [P6-003] FF3 loadings × MCS regime (Layer 4b)
+  _applyFF3ConfidenceToPatterns(detectedPatterns);
   _applyDerivativesConfidenceToPatterns(detectedPatterns);
   _applyMertonDDToPatterns(detectedPatterns);
   try { await _fetchPhase8Confidence(detectedPatterns); }

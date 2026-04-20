@@ -490,7 +490,7 @@ FILE_EXPORTS = {
 
 LOAD_ORDER = [
     "colors.js", "data.js", "api.js", "realtimeProvider.js",
-    "indicators.js", "patterns.js", "signalEngine.js", "chart.js",
+    "indicators.js", "aptModel.js", "patterns.js", "signalEngine.js", "chart.js",
     "patternRenderer.js", "signalRenderer.js", "backtester.js",
     "sidebar.js", "patternPanel.js", "financials.js", "drawingTools.js",
     "appState.js", "appWorker.js", "appUI.js", "app.js",
@@ -1930,6 +1930,67 @@ def _resolve_nested(data, key_path):
     return cur
 
 
+def check_anatomy(strict=False):
+    """[P6-004] Verify ANATOMY V8 MD <-> PDF SHA256 sync via sidecar."""
+    import hashlib
+    import json as _json
+    section("CHECK ANATOMY - V8 MASTER md/pdf SHA256 sync (P6-004)")
+    errors = 0
+    warnings = 0
+
+    md_path = ROOT / "docs" / "anatomy_v8" / "CheeseStock_Anatomy_V8_KO_MASTER.md"
+    pdf_path = ROOT / "docs" / "anatomy_v8" / "CheeseStock_Anatomy_V8_KO_MASTER.pdf"
+    sha_path = ROOT / "docs" / "anatomy_v8" / "CheeseStock_Anatomy_V8_KO_MASTER.sha256.json"
+
+    def sha256_of(path):
+        if not path.exists():
+            return None
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    if not md_path.exists():
+        fail(f"MASTER md not found: {md_path.relative_to(ROOT)}")
+        return 1, 0
+    md_sha = sha256_of(md_path)
+    ok(f"MASTER md present ({md_sha[:16]}...)")
+
+    if not sha_path.exists():
+        warn("sha256 sidecar missing - run `python scripts/build_anatomy_pdf.py` to pin")
+        return 0, 1
+
+    try:
+        with open(sha_path, "r", encoding="utf-8") as f:
+            sidecar = _json.load(f)
+    except (_json.JSONDecodeError, OSError) as e:
+        fail(f"sha256 sidecar parse error: {e}")
+        return 1, 0
+
+    if sidecar.get("md_sha") != md_sha:
+        fail(
+            f"MD SHA drift vs sidecar: current={md_sha[:16]}... "
+            f"sidecar={(sidecar.get('md_sha') or 'null')[:16]}... "
+            "(rebuild: python scripts/build_anatomy_pdf.py)"
+        )
+        return 1, 0
+    ok("MD SHA matches sidecar")
+
+    if not pdf_path.exists():
+        warn(f"PDF missing: {pdf_path.relative_to(ROOT)}")
+        return 0, 1
+    pdf_sha_now = sha256_of(pdf_path)
+    if sidecar.get("pdf_sha") != pdf_sha_now:
+        fail(
+            f"PDF SHA drift vs sidecar: current={pdf_sha_now[:16]}... "
+            f"sidecar={(sidecar.get('pdf_sha') or 'null')[:16]}..."
+        )
+        return 1, 0
+    ok(f"PDF SHA matches sidecar (built {sidecar.get('built_at','?')})")
+    return errors, warnings
+
+
 def check_criteria(strict=False):
     section("CHECK 10 - Backtest Acceptance Criteria (7 criteria)")
     errors = 0
@@ -2135,7 +2196,7 @@ def main():
         "--check",
         choices=["patterns", "colors", "dashes", "globals", "scripts", "pipeline",
                  "collision", "dead_exports", "canvas", "criteria",
-                 "bundle", "ip", "server", "phase25", "security", "all"],
+                 "bundle", "ip", "server", "phase25", "security", "anatomy", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -2167,6 +2228,7 @@ def main():
         "server":        check_server_endpoints,
         "phase25":       check_phase25_cleanup,
         "security":      check_security,
+        "anatomy":       check_anatomy,
     }
 
     run = list(checks.keys()) if args.check == "all" else [args.check]

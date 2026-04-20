@@ -30,15 +30,22 @@ function adjustPatterns(patterns, ctx) {
   const out = patterns.map((p) => ({ ...p }));
 
   // MCS adjustment (mcsV2 from macro_composite)
-  if (!applied.has('MACRO_COMPOSITE') && composite && composite.mcsV2 != null) {
-    let mcs = composite.mcsV2;
-    if (mcs > 0 && mcs <= 1.0) mcs = mcs * 100;
-    for (const p of out) {
-      if (p.confidence == null) continue;
-      if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') p.confidence *= 1.05;
-      else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') p.confidence *= 1.05;
+  // [P6-001] When ECOS primary is stale (>14d), compute_macro_composite.py sets
+  // mcsFallbackActive=true and populates mcsV2Fallback (KOSIS 4-component). Prefer
+  // the fallback to avoid degraded signal from an outdated 8-component composite.
+  if (!applied.has('MACRO_COMPOSITE') && composite) {
+    const useFallback = composite.mcsFallbackActive === true && composite.mcsV2Fallback != null;
+    const mcsSrc = useFallback ? composite.mcsV2Fallback : composite.mcsV2;
+    if (mcsSrc != null) {
+      let mcs = mcsSrc;
+      if (mcs > 0 && mcs <= 1.0) mcs = mcs * 100;
+      for (const p of out) {
+        if (p.confidence == null) continue;
+        if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') p.confidence *= 1.05;
+        else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') p.confidence *= 1.05;
+      }
+      applied.add('MACRO_COMPOSITE');
     }
-    applied.add('MACRO_COMPOSITE');
   }
 
   // HMM regime + foreign flow (uses server-side flow_signals.json)

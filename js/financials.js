@@ -23,6 +23,9 @@ var _bondMetrics = null;
 var _marketIndexCloses = { kospi: null, kosdaq: null };
 // ── FF3 팩터 데이터 캐시 (Fama-French 1993) ──
 var _ff3FactorData = null;
+// [P6-003] Per-stock FF3 loadings cache — consumed by appWorker.js::_applyFF3ConfidenceToPatterns.
+// Shape: { [code]: { smbLoad, hmlLoad, mktBeta, alpha, n, computedAt } }
+var _ff3StockLoadings = {};
 // ── CAPM Beta JSON 캐시 (compute_capm_beta.py 출력, DD 포함) ──
 var _capmBetaJson = null;
 
@@ -374,8 +377,21 @@ async function _renderFF3Factors(stock) {
     }
   }
   // beta = [alpha, mkt_beta, smb_loading, hml_loading]
+  var alpha = mat[0][4];
+  var mktBeta = mat[1][4];
   var smbLoad = mat[2][4];
   var hmlLoad = mat[3][4];
+  // [P6-003] Cache loadings for confidence multiplier consumer (appWorker.js)
+  if (stock && stock.code) {
+    _ff3StockLoadings[stock.code] = {
+      smbLoad: smbLoad,
+      hmlLoad: hmlLoad,
+      mktBeta: mktBeta,
+      alpha: alpha,
+      n: N,
+      computedAt: Date.now(),
+    };
+  }
   // Display with style labels
   var smbLabel = smbLoad > 0.3 ? '\uC18C\uD615\uC8FC' : smbLoad < -0.3 ? '\uB300\uD615\uC8FC' : '\uC911\uB9BD';
   var hmlLabel = hmlLoad > 0.3 ? '\uAC00\uCE58\uC8FC' : hmlLoad < -0.3 ? '\uC131\uC7A5\uC8FC' : '\uC911\uB9BD';
@@ -383,6 +399,15 @@ async function _renderFF3Factors(stock) {
   elSmb.className = 'fin-grid-value' + (smbLoad >= 0 ? ' up' : ' dn');
   elHml.textContent = hmlLoad.toFixed(2) + ' (' + hmlLabel + ')';
   elHml.className = 'fin-grid-value' + (hmlLoad >= 0 ? ' up' : ' dn');
+}
+
+// [P6-003] Expose FF3 loadings lookup — consumed by appWorker.js::_applyFF3ConfidenceToPatterns.
+// Returns null if code has no cached loadings or sample size below reliability threshold (n<60).
+function getFF3Loadings(code) {
+  if (!code) return null;
+  var rec = _ff3StockLoadings[code];
+  if (!rec || rec.n < 60) return null;
+  return rec;
 }
 
 /** 경기순환 국면 배지 렌더링 — OECD CLI 4-phase (core_data/29 §1.2) */

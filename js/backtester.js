@@ -1420,6 +1420,36 @@ class PatternBacktester {
         momentum60 = (candles[idx].close / candles[idx - 60].close - 1) * 100;
       }
 
+      // [P6-002] APT-augmented prediction (Option C: orphan field, no chain coupling)
+      // aptModel is main-thread-only (loaded via script tag); Worker context
+      // has no fetch, so typeof guard + isLoaded() gate yields null there.
+      // Consumers who want APT-enhanced UI should read occ.aptPrediction directly.
+      // Full APT factors (beta60d/valueInvPbr/logSize/liquidity20d) require
+      // meta from financials.js; unavailable in _collectOccurrences scope →
+      // passed as null (aptModel.predict contributes zero for null factors per contract).
+      var aptPrediction = null;
+      if (typeof aptModel !== 'undefined' && aptModel && aptModel.isLoaded && aptModel.isLoaded()) {
+        try {
+          aptPrediction = aptModel.predict({
+            confidence: confidence,
+            signal: p.signal || 'neutral',
+            marketType: 'kospi',            // default; caller may override via backtestAll(stockCode)
+            hw: p.hw || 1,
+            vw: p.vw || 1,
+            mw: p.mw || 1,
+            rw: p.rw || 1,
+            patternTier: p.tier != null ? p.tier : 0,
+            momentum60d: momentum60,        // already computed above
+            beta60d: null,                   // unavailable in this scope
+            valueInvPbr: null,
+            logSize: null,
+            liquidity20d: null,
+          });
+        } catch (e) {
+          aptPrediction = null;
+        }
+      }
+
       occurrences.push({
         idx: idx,
         confidence: confidence,
@@ -1429,6 +1459,7 @@ class PatternBacktester {
         wc: p.wc != null ? p.wc : ((p.hw || 1) * (p.mw || 1)),
         hw: p.hw || 1.0, // [C-2 FIX] regimeWR이 hw 기반 trending/reverting 분류에 사용 — 누락 시 항상 neutral
         momentum60: momentum60,
+        aptPrediction: aptPrediction,  // [P6-002] expected 5d return (%) from APT Ridge; null if model unloaded
         priceTarget: (p.priceTarget != null && isFinite(p.priceTarget)) ? p.priceTarget : null,
         patternSignal: p.signal || null,
       });
@@ -2169,6 +2200,30 @@ class PatternBacktester {
               } else {
                 stats.icir = null;
               }
+            }
+          }
+        }
+      }
+
+      // [P6-002] APT-augmented IC — Spearman rank correlation between
+      // aptModel.predict() output and realized returns at horizon h.
+      // Logged alongside stats.ic (5-col WLS baseline) for comparison.
+      // Only computed for h=5 (APT model trained at horizon=5d) and n>=20.
+      if (h === 5 && validOccs.length >= 20) {
+        var aptPairs = [];
+        for (var api = 0; api < validOccs.length; api++) {
+          var apOcc = validOccs[api];
+          if (apOcc.aptPrediction != null && isFinite(apOcc.aptPrediction)) {
+            aptPairs.push([apOcc.aptPrediction, returns[api]]);
+          }
+        }
+        if (aptPairs.length >= 20) {
+          var icApt = this._spearmanCorr(aptPairs);
+          if (icApt != null && isFinite(icApt)) {
+            stats.icApt = +icApt.toFixed(3);
+            stats.icAptN = aptPairs.length;
+            if (stats.ic != null) {
+              stats.icAptDelta = +(stats.icApt - stats.ic).toFixed(3);
             }
           }
         }

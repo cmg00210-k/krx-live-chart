@@ -433,6 +433,159 @@ def compute_credit_cycle_phase(bonds):
     }
 
 
+_MCS_FALLBACK_WEIGHTS = {
+    'cli':    0.40,   # OECD/KOSIS CLI — 가장 강한 선행성 (Estrella & Mishkin)
+    'esi':    0.25,   # 경제심리지수 — 소비자+기업 합성 심리
+    'ipi':    0.20,   # 산업생산지수 — 실물경제 동행지표
+    'retail': 0.15,   # 소매판매 — 소비 모멘텀 대리
+}
+
+
+def _ecos_stale(macro, max_age_days=14):
+    """Returns True if macro_latest.json is missing or older than max_age_days.
+
+    Used to trigger MCS v2 KOSIS fallback when ECOS-derived components (PMI,
+    BSI, exports YoY, unemployment, term spread) are stale or unavailable.
+    """
+    if not macro:
+        return True
+    updated = macro.get('updated') or macro.get('lastUpdated')
+    if not updated:
+        return True
+    try:
+        if 'T' in updated:
+            ts = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+        else:
+            ts = datetime.strptime(updated, '%Y-%m-%d')
+    except (ValueError, TypeError):
+        return True
+    age_days = (datetime.now() - ts.replace(tzinfo=None)).days
+    return age_days > max_age_days
+
+
+def compute_mcs_v2_fallback(kosis):
+    """
+    MCS v2 KOSIS-only 4-component fallback.
+
+    When ECOS primary feed is stale (>14d), recompute MCS using only the four
+    KOSIS leading indicators (CLI, ESI, IPI, retail sales). Weights normalized
+    such that available components sum to 1.0 (missing components redistribute).
+
+    Academic basis:
+      OECD CLI methodology — CLI is the strongest single leading indicator
+      Lee & Park (2013) — KOSIS leading indicator validation for KRX
+      Doc31 §4.2 — KOSIS sentiment composites for KOSPI signal
+
+    Returns dict with same shape as compute_mcs_v2() output, plus a
+    'fallbackComposition' field listing which components were used.
+    """
+    if not kosis:
+        return None
+
+    indicators = {}
+    available_weight = 0.0
+
+    # CLI (KOSIS DT_1C8016 A01 — absolute level index, base 2020=100)
+    cli = kosis.get('cli_composite')
+    if cli is not None:
+        indicators['cli'] = _normalize_range(cli, *CLI_RANGE)
+        available_weight += _MCS_FALLBACK_WEIGHTS['cli']
+
+    esi = kosis.get('esi')
+    if esi is not None:
+        indicators['esi'] = _normalize_range(esi, *ESI_RANGE)
+        available_weight += _MCS_FALLBACK_WEIGHTS['esi']
+
+    ipi = kosis.get('ipi_all')
+    if ipi is not None:
+        indicators['ipi'] = _normalize_range(ipi, *IPI_RANGE)
+        available_weight += _MCS_FALLBACK_WEIGHTS['ipi']
+
+    # Retail sales — base 2020=100. Reuse IPI_RANGE (both production-level indices).
+    retail = kosis.get('retail_sales')
+    if retail is not None:
+        indicators['retail'] = _normalize_range(retail, *IPI_RANGE)
+        available_weight += _MCS_FALLBACK_WEIGHTS['retail']
+
+    if not indicators or available_weight <= 0:
+        return None
+
+    weighted_sum = 0.0
+    for key, norm_val in indicators.items():
+        weighted_sum += norm_val * (_MCS_FALLBACK_WEIGHTS[key] / available_weight)
+    mcs_score = max(0.0, min(100.0, round(weighted_sum * 100, 1)))
+
+    return {
+        'mcsV2Fallback': mcs_score,
+        'scale': '0-100',
+        'components': {k: round(v, 4) for k, v in indicators.items()},
+        'fallbackComposition': list(indicators.keys()),
+        'availableIndicators': len(indicators),
+        'totalIndicators': len(_MCS_FALLBACK_WEIGHTS),
+        'effectiveWeight': round(available_weight, 3),
+    }
+
+
+def compute_adas_shock(macro, kosis):
+    """
+    AD-AS 4-Shock Classifier
+
+    CPI 전년동월비와 IPI 수준으로 4가지 거시 충격 시나리오를 분류.
+    Academic: Blanchard & Quah (1989): SVAR long-run output vs price level.
+
+    Classification:
+      CPI↑ IPI↑ → demand_positive (수요 확장)
+      CPI↓ IPI↓ → demand_negative (수요 위축)
+      CPI↑ IPI↓ → supply_negative (스태그플레이션)
+      CPI↓ IPI↑ → supply_positive (골디락스)
+
+    CPI direction: cpi_yoy > BOK target (TAYLOR_PI_STAR = 2.0%) → up
+    IPI direction: ipi level > base year 100 → up (production expansion)
+    """
+    if not macro and not kosis:
+        return None
+
+    cpi_yoy = macro.get('cpi_yoy') if macro else None
+    ipi_level = None
+    if macro and macro.get('ipi') is not None:
+        ipi_level = macro['ipi']
+    elif kosis and kosis.get('ipi_all') is not None:
+        ipi_level = kosis['ipi_all']
+
+    if cpi_yoy is None or ipi_level is None:
+        print(f'  [WARN] AD-AS: missing data (cpi_yoy={cpi_yoy}, ipi={ipi_level})')
+        return None
+
+    cpi_up = cpi_yoy > TAYLOR_PI_STAR  # Inflation above target
+    ipi_up = ipi_level > 100.0         # Production above base year (2020=100)
+
+    if cpi_up and ipi_up:
+        shock = 'demand_positive'
+        desc = '수요 확장 — 물가↑ 생산↑'
+    elif not cpi_up and not ipi_up:
+        shock = 'demand_negative'
+        desc = '수요 위축 — 물가↓ 생산↓'
+    elif cpi_up and not ipi_up:
+        shock = 'supply_negative'
+        desc = '공급 충격 — 물가↑ 생산↓ (스태그플레이션)'
+    else:  # not cpi_up and ipi_up
+        shock = 'supply_positive'
+        desc = '공급 확장 — 물가↓ 생산↑ (골디락스)'
+
+    return {
+        'adAsShock': shock,
+        'adAsDetail': {
+            'cpiYoY': round(cpi_yoy, 2),
+            'ipiLevel': round(ipi_level, 1),
+            'cpiThreshold': TAYLOR_PI_STAR,
+            'ipiThreshold': 100.0,
+            'cpiUp': cpi_up,
+            'ipiUp': ipi_up,
+            'description': desc,
+        }
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description='Macro Composite Score v2 산출')
     parser.add_argument('--verbose', action='store_true', help='상세 출력')
@@ -489,6 +642,25 @@ def main():
     print('\n--- MCS v2 Computation ---')
     mcs_result = compute_mcs_v2(kosis, ecos, macro, bonds, verbose=args.verbose)
 
+    # ── MCS v2 KOSIS 4-component fallback (Phase 6 P6-001) ──
+    # Always compute so consumers can compare; mark fallbackActive=True when
+    # ECOS primary feed is stale (>14d) or absent. Server confidence/macro.js
+    # will substitute mcsV2Fallback for mcsV2 when fallbackActive=True.
+    print('\n--- MCS v2 Fallback (KOSIS 4-component) ---')
+    fallback_active = _ecos_stale(macro, max_age_days=14)
+    fallback_result = compute_mcs_v2_fallback(kosis)
+    if fallback_result:
+        print(f'  Fallback MCS v2: {fallback_result["mcsV2Fallback"]} / 100')
+        print(f'  Components: {fallback_result["fallbackComposition"]}')
+        print(f'  Available: {fallback_result["availableIndicators"]}/{fallback_result["totalIndicators"]}')
+    else:
+        print('  [SKIP] KOSIS unavailable — no fallback computed')
+    if fallback_active:
+        age = '(no macro_latest)' if not macro else f'(age={macro.get("updated","?")})'
+        print(f'  [FALLBACK ACTIVE] ECOS primary stale >14d {age} — consumers should use mcsV2Fallback')
+    else:
+        print('  [FALLBACK STANDBY] ECOS primary fresh — mcsV2 authoritative')
+
     # ── Taylor Gap ──
     print('\n--- Taylor Gap ---')
     taylor_result = compute_taylor_gap(macro, ecos, kosis=kosis)
@@ -516,6 +688,18 @@ def main():
         print(f'  Phase: {cc_result["creditCyclePhase"]}')
         print(f'  AA- Spread: {cc_result["aaSpread"]}%p')
         print(f'  {cc_result["description"]}')
+
+    # ── AD-AS 4-Shock Classifier ──
+    print('\n--- AD-AS Shock Classification ---')
+    adas_result = compute_adas_shock(macro, kosis)
+    if adas_result:
+        print(f'  Shock: {adas_result["adAsShock"]}')
+        detail = adas_result['adAsDetail']
+        print(f'  CPI YoY: {detail["cpiYoY"]}% (threshold: {detail["cpiThreshold"]}%)')
+        print(f'  IPI Level: {detail["ipiLevel"]} (threshold: {detail["ipiThreshold"]})')
+        print(f'  {detail["description"]}')
+    else:
+        print('  [SKIP] Insufficient data for AD-AS classification')
 
     # ── 출력 검증 ──
     if mcs_result:
@@ -546,8 +730,15 @@ def main():
         'yieldCurveDetail': yc_result,
         'creditCyclePhase': cc_result.get('creditCyclePhase') if cc_result else None,
         'creditCycleDetail': cc_result,
+        'adAsShock': adas_result.get('adAsShock') if adas_result else None,
+        'adAsDetail': adas_result.get('adAsDetail') if adas_result else None,
+        # ── Phase 6 P6-001: MCS v2 KOSIS 4-component fallback ──
+        'mcsV2Fallback': fallback_result.get('mcsV2Fallback') if fallback_result else None,
+        'mcsFallbackActive': bool(fallback_active),
+        'mcsFallbackDetail': fallback_result,
         'parameters': {
             'weights': MCS_WEIGHTS,
+            'fallback_weights': _MCS_FALLBACK_WEIGHTS,
             'taylor_r_star': TAYLOR_R_STAR,
             'taylor_pi_star': TAYLOR_PI_STAR,
             'cli_to_gap_scale': CLI_TO_GAP_SCALE,
@@ -571,6 +762,11 @@ def main():
         print(f'  Yield Curve Phase:  {yc_result["yieldCurvePhase"]}')
     if cc_result:
         print(f'  Credit Cycle Phase: {cc_result["creditCyclePhase"]}')
+    if adas_result:
+        print(f'  AD-AS Shock:        {adas_result["adAsShock"]}')
+    if fallback_result:
+        marker = '*ACTIVE*' if fallback_active else 'standby'
+        print(f'  MCS v2 Fallback:    {fallback_result["mcsV2Fallback"]} / 100  [{marker}]')
     print(f'\n  저장: {OUT_PATH}')
 
 

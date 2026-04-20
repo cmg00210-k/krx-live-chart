@@ -5,7 +5,7 @@
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'cheesestock-v83';
+const CACHE_NAME = 'cheesestock-v85';
 
 // 오프라인 시에도 앱 실행에 필요한 정적 자산 목록
 // [V48-SEC Phase 3] /js/_shared/sign.js 추가 (HMAC 서명 + 세션 초기화)
@@ -19,6 +19,7 @@ const STATIC_ASSETS = [
   '/js/data.js',
   '/js/api.js',
   '/js/indicators.js',
+  '/js/aptModel.js',
   '/js/patterns.js',
   '/js/signalEngine.js',
   '/js/chart.js',
