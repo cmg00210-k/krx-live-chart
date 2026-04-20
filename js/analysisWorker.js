@@ -79,7 +79,7 @@ try {
     'indicators.js?v=28',
     'patterns.js?v=50',
     'signalEngine.js?v=47',
-    'backtester.js?v=47'
+    'backtester.js?v=48'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
@@ -428,6 +428,8 @@ self.onmessage = async function (e) {
       if (_cacheMiss && _autoTf !== '1m' && _autoTf !== '5m' && analyzeCandles && analyzeCandles.length >= 50 && typeof backtester !== 'undefined') {
         try {
           backtester._currentMarket = msg.market || '';
+          // [V48-SEC Phase 7 P7-001] stockMeta for APT factor computation (main thread injects).
+          backtester._currentStockMeta = msg.stockMeta || null;
           // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 '1d'로 리셋 방지
           var _savedTf = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
           // [V48-Phase2] server-first cost-calibrated stats; falls back to client backtestAll on error.
@@ -508,6 +510,8 @@ self.onmessage = async function (e) {
       }
 
       backtester._currentMarket = msg.market || '';
+      // [V48-SEC Phase 7 P7-001] stockMeta for APT factor computation.
+      backtester._currentStockMeta = msg.stockMeta || null;
       // [H-2] save/restore _currentTimeframe — 백테스터 내부 analyze()가 리셋 방지
       var _savedTf2 = (typeof PatternEngine !== 'undefined') ? PatternEngine._currentTimeframe : null;
       // [V48-Phase2] server-first cost-calibrated stats; falls back to client backtestAll on error.

@@ -204,6 +204,8 @@
 % arraystretch=1.35 provides symmetric spacing instead.
 \setlength{\aboverulesep}{2pt}             % booktabs: slightly more breathing above rules
 \setlength{\belowrulesep}{2pt}             % booktabs: slightly more breathing below rules
+\setlength{\LTleft}{0pt}                   % longtable left margin: flush with body text
+\setlength{\LTright}{\fill}                % longtable right margin: fill remaining space
 \setlength{\LTpost}{6pt}                   % longtable post-spacing (6pt for table-sourcecite gap)
 
 % Booktabs + hline rules: Stage-colored at 55% for screen/print visibility
@@ -538,7 +540,7 @@
     \stageflowsep &
       \stagecard{5}{stageFiveMarker}{서비스 전달}{아키텍처에서 화면으로}{} \\
   \end{tabularx}%
-  \vspace{8pt}\par%
+  \vspace{2pt}\par%
 }
 
 % ============================================================
@@ -561,6 +563,8 @@
 % ============================================================
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+% pandoc >=3.0 with --listings emits \passthrough for inline verbatim; provide no-op if missing.
+\providecommand{\passthrough}[1]{#1}
 \newcounter{none}
 
 $if(highlighting-macros)$

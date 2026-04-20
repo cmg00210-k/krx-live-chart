@@ -79,6 +79,10 @@ class PatternBacktester {
     this._rlPolicy = null;
     this._rlPolicyAttempted = false;
     this._currentMarket = '';  // set by Worker message or main thread
+    // [V48-SEC Phase 7 P7-001] APT factor meta context. Callers set this before
+    // backtestAll/backtest to activate value/size/liquidity factors. Null in Worker
+    // context without main-thread wiring → factors remain null → MVP status INSUFFICIENT.
+    this._currentStockMeta = null;
     this._rlTier1 = new Set(['doubleBottom','doubleTop','risingWedge','threeWhiteSoldiers']);  // invertedHammer: Tier-2 (win rate 52.3%)
     this._rlTier3 = new Set(['fallingWedge']);
     // [V22-B Phase 3-Step 6] OOS winrates 로드 가드
@@ -776,6 +780,285 @@ class PatternBacktester {
    *  @param {Array} pairs — [[predicted, actual], ...] (minimum 5 pairs)
    *  @returns {number|null} — Spearman rho in [-1, 1], or null if insufficient data
    */
+  /**
+   * [V48-SEC Phase 7 P7-001] Fisher 95% CI for correlation coefficient.
+   * Fisher (1921) z-transform: z = ½ ln((1+r)/(1-r)), SE(z) = 1/√(n-3).
+   * Back-transform via tanh. `nEff` is nDates for cross-sectional IC,
+   * nPairs for pooled IC — using nPairs on XS IC under-states SE due
+   * to within-date clustering.
+   *
+   * @param {number} r    - Spearman correlation (mean cross-sectional IC)
+   * @param {number} nEff - effective sample size (nDates or nPairs)
+   * @returns {{lower: number|null, upper: number|null}}
+   */
+  _fisherCI(r, nEff) {
+    if (r == null || !isFinite(r) || nEff == null || nEff < 4) {
+      return { lower: null, upper: null };
+    }
+    var rClip = r;
+    if (rClip >= 1) rClip = 1 - 1e-6;
+    if (rClip <= -1) rClip = -1 + 1e-6;
+    var z = 0.5 * Math.log((1 + rClip) / (1 - rClip));
+    var se = 1 / Math.sqrt(nEff - 3);
+    var zLo = z - 1.96 * se;
+    var zHi = z + 1.96 * se;
+    var tanh = function(x) {
+      var e2 = Math.exp(2 * x);
+      return (e2 - 1) / (e2 + 1);
+    };
+    return { lower: +tanh(zLo).toFixed(4), upper: +tanh(zHi).toFixed(4) };
+  }
+
+  /**
+   * [V48-SEC Phase 7 P7-001] APT IC precision measurement — 6-Layer MVP
+   * (L1 Pairing + L2 Cross-sectional + L3 ICIR + L4 Multi-horizon outer-loop
+   * + L5 Fisher CI + L9 Null contamination split). Phase 8 deferred: L6/L7/L8/L10.
+   *
+   * Returns plain object (postMessage-safe, no functions).
+   * Invariants:
+   *  - Runs in Worker context as well — reads only occ.aptPrediction + occ.aptFactors;
+   *    never calls aptModel (unavailable in Worker).
+   *  - Safe for nPaired < 20 → returns status='INSUFFICIENT'.
+   *  - Cost O(n log n) Spearman + O(nDates) XS agg ≈ 20ms/horizon.
+   *
+   * @param {Array}  validOccs - occurrences that survived horizon gating
+   * @param {Array}  returns   - aligned realized returns (%)
+   * @param {number} h         - horizon (days)
+   * @param {Array}  candles   - full candle array for date normalization
+   * @param {Object} reg       - WLS regression result for baseline pairing
+   * @returns {Object}
+   */
+  _computeAPTDiagnostic(validOccs, returns, h, candles, reg) {
+    var K_MIN = 5, MIN_PAIRS = 20;
+    var self = this;
+
+    var empty = {
+      horizon: h, kMin: K_MIN, nPairs: 0, nDates: 0,
+      icApt: null, icWls: null, icLift: null,
+      icXSIsPooled: false, icir: null, icirAnn: null, stdICPerDate: 0,
+      ci95: { lower: null, upper: null },
+      fullFactorN: 0, partialFactorN: 0, fullFactorRatio: 0,
+      icFull: null, icFullCI: null, icPart: null, fullPartDelta: null,
+      mvpStatus: 'INSUFFICIENT', failReason: 'no_data',
+    };
+
+    // ---- L1 Pairing ----
+    var pairedIdx = [], aptPreds = [], wlsPreds = [], rets = [];
+    for (var i = 0; i < validOccs.length; i++) {
+      var occ = validOccs[i];
+      if (occ.aptPrediction == null || !isFinite(occ.aptPrediction)) continue;
+      if (!reg || !reg.coeffs || reg.coeffs.length < 5) continue;
+      var xWLS = [
+        1,
+        (occ.confidencePred || occ.confidence || 50) / 100,
+        occ.trendStrength || 0,
+        Math.log(Math.max(occ.volumeRatio || 1, 0.1)),
+        occ.atrNorm || 0.02,
+      ];
+      var wp = 0;
+      for (var j = 0; j < xWLS.length; j++) wp += xWLS[j] * reg.coeffs[j];
+      if (!isFinite(wp)) continue;
+      pairedIdx.push(i);
+      aptPreds.push(occ.aptPrediction);
+      wlsPreds.push(wp);
+      rets.push(returns[i]);
+    }
+    var nPaired = pairedIdx.length;
+    if (nPaired < MIN_PAIRS) {
+      empty.nPairs = nPaired;
+      empty.failReason = 'nPaired_lt_' + MIN_PAIRS;
+      return empty;
+    }
+
+    // Pooled baseline (used for lift + fallback)
+    var aptPoolPairs = [], wlsPoolPairs = [];
+    for (var pp = 0; pp < nPaired; pp++) {
+      aptPoolPairs.push([aptPreds[pp], rets[pp]]);
+      wlsPoolPairs.push([wlsPreds[pp], rets[pp]]);
+    }
+    var icAptPool = this._spearmanCorr(aptPoolPairs);
+    var icWlsPool = this._spearmanCorr(wlsPoolPairs);
+    var icLift = (icAptPool != null && icWlsPool != null)
+      ? +(icAptPool - icWlsPool).toFixed(4) : null;
+
+    // ---- L2 Cross-Sectional per-Date ----
+    function normalizeDate(t) {
+      if (typeof t === 'string') return t.slice(0, 10);
+      if (typeof t === 'number' && t > 0 && t < 4102444800) {
+        var d = new Date((t + 9 * 3600) * 1000); // KST offset
+        var iso = d.toISOString();
+        return iso.slice(0, 10);
+      }
+      return null;
+    }
+
+    var byDate = Object.create(null);
+    for (var i2 = 0; i2 < nPaired; i2++) {
+      var occ2 = validOccs[pairedIdx[i2]];
+      var c = candles && candles[occ2.idx];
+      var dk = c && normalizeDate(c.time);
+      if (!dk) continue;
+      if (!byDate[dk]) byDate[dk] = [];
+      byDate[dk].push([aptPreds[i2], rets[i2]]);
+    }
+
+    var icPerDate = [];
+    for (var key in byDate) {
+      if (byDate[key].length < K_MIN) continue;
+      var ic_t = this._spearmanCorr(byDate[key]);
+      if (ic_t != null && isFinite(ic_t) && Math.abs(ic_t) < 0.9999) icPerDate.push(ic_t);
+    }
+    var nDates = icPerDate.length;
+
+    var meanIC, icXSIsPooled;
+    if (nDates >= 10) {
+      var s = 0;
+      for (var d1 = 0; d1 < nDates; d1++) s += icPerDate[d1];
+      meanIC = s / nDates;
+      icXSIsPooled = false;
+    } else {
+      meanIC = icAptPool;
+      icXSIsPooled = true;
+    }
+
+    // ---- L3 ICIR ----
+    var icir = null, icirAnn = null, stdIC = 0;
+    if (nDates >= 10 && !icXSIsPooled) {
+      var sumSq = 0;
+      for (var d2 = 0; d2 < nDates; d2++) {
+        var dv = icPerDate[d2] - meanIC;
+        sumSq += dv * dv;
+      }
+      stdIC = Math.sqrt(Math.max(sumSq / (nDates - 1), 0));
+      if (stdIC > 1e-6) {
+        icir = meanIC / stdIC;
+        icirAnn = icir * Math.sqrt(252 / Math.max(h, 1));
+      }
+    }
+
+    // ---- L5 Fisher CI ----
+    var nEff = icXSIsPooled ? nPaired : nDates;
+    var ci95 = this._fisherCI(meanIC, nEff);
+
+    // ---- L9 Null Contamination Split ----
+    var factorKeys = ['momentum', 'beta', 'value', 'size', 'liquidity'];
+    var fullDates = Object.create(null), partDates = Object.create(null);
+    var nFull = 0, nPartial = 0;
+    for (var i3 = 0; i3 < nPaired; i3++) {
+      var occ3 = validOccs[pairedIdx[i3]];
+      if (!occ3.aptFactors) continue;
+      var nonNull = 0;
+      for (var fk = 0; fk < factorKeys.length; fk++) {
+        var vv = occ3.aptFactors[factorKeys[fk]];
+        if (vv != null && isFinite(vv)) nonNull++;
+      }
+      var c3 = candles && candles[occ3.idx];
+      var dk3 = c3 && normalizeDate(c3.time);
+      if (nonNull === 5) {
+        nFull++;
+        if (dk3) {
+          if (!fullDates[dk3]) fullDates[dk3] = [];
+          fullDates[dk3].push([aptPreds[i3], rets[i3]]);
+        }
+      } else if (nonNull >= 1) {
+        nPartial++;
+        if (dk3) {
+          if (!partDates[dk3]) partDates[dk3] = [];
+          partDates[dk3].push([aptPreds[i3], rets[i3]]);
+        }
+      }
+    }
+    var fullFactorRatio = (nFull + nPartial > 0) ? nFull / (nFull + nPartial) : 0;
+
+    function xsMean(dateMap, km) {
+      var arr = [];
+      for (var kk in dateMap) {
+        if (dateMap[kk].length < km) continue;
+        var ic = self._spearmanCorr(dateMap[kk]);
+        if (ic != null && isFinite(ic) && Math.abs(ic) < 0.9999) arr.push(ic);
+      }
+      if (arr.length < 10) return { mean: null, nDates: arr.length };
+      var su = 0;
+      for (var aj = 0; aj < arr.length; aj++) su += arr[aj];
+      return { mean: su / arr.length, nDates: arr.length };
+    }
+    var fullRes = xsMean(fullDates, K_MIN);
+    var partRes = xsMean(partDates, K_MIN);
+    var icFullCI = (fullRes.mean != null) ? this._fisherCI(fullRes.mean, fullRes.nDates) : null;
+    var fullPartDelta = (fullRes.mean != null && partRes.mean != null)
+      ? +(fullRes.mean - partRes.mean).toFixed(4) : null;
+
+    // ---- MVP Status judgment (per-horizon) ----
+    var status = 'PASS';
+    var failReason = null;
+    if (icXSIsPooled && nDates < 10) { status = 'WARN'; failReason = 'nDates_lt_10_fell_back_pooled'; }
+    if (ci95.upper != null && ci95.upper <= 0) { status = 'FAIL'; failReason = 'ci_upper_lt_zero_adverse_signal'; }
+    else if (ci95.lower != null && ci95.lower <= 0) { if (status === 'PASS') { status = 'WARN'; failReason = 'ci_spans_zero'; } }
+    if (h === 5) {
+      if (icirAnn != null && icirAnn < 0.3) { if (status === 'PASS') { status = 'WARN'; failReason = 'icir_ann_lt_0_3_at_h5'; } }
+      if (icLift != null && icLift < 0.015) { if (status === 'PASS') { status = 'WARN'; failReason = 'ic_lift_lt_0_015_at_h5'; } }
+    }
+    if (fullFactorRatio < 0.5) { if (status === 'PASS') { status = 'WARN'; failReason = 'full_factor_ratio_lt_0_5'; } }
+
+    return {
+      horizon: h, kMin: K_MIN,
+      icApt: meanIC != null ? +meanIC.toFixed(4) : null,
+      icWls: icWlsPool != null ? +icWlsPool.toFixed(4) : null,
+      icLift: icLift,
+      nPairs: nPaired,
+      nDates: nDates,
+      icXSIsPooled: icXSIsPooled,
+      icir: icir != null ? +icir.toFixed(3) : null,
+      icirAnn: icirAnn != null ? +icirAnn.toFixed(3) : null,
+      stdICPerDate: +stdIC.toFixed(4),
+      ci95: ci95,
+      fullFactorN: nFull,
+      partialFactorN: nPartial,
+      fullFactorRatio: +fullFactorRatio.toFixed(3),
+      icFull: fullRes.mean != null ? +fullRes.mean.toFixed(4) : null,
+      icFullCI: icFullCI,
+      icPart: partRes.mean != null ? +partRes.mean.toFixed(4) : null,
+      fullPartDelta: fullPartDelta,
+      mvpStatus: status,
+      failReason: failReason,
+    };
+  }
+
+  /**
+   * [V48-SEC Phase 7 P7-001] Aggregate APT MVP gate across horizons (L4 sign consistency
+   * + 5/5 GO gate). Called after _computeStats horizon loop.
+   */
+  _computeAPTMeta(result) {
+    var meta = { signConsistent: null, signH: {}, mvpGate: null };
+    var signs = {};
+    [3, 5, 10].forEach(function(h) {
+      var d = result[h] && result[h].aptDiagnostic;
+      if (d && d.icApt != null) signs[h] = Math.sign(d.icApt);
+    });
+    if (signs[3] != null && signs[5] != null && signs[10] != null) {
+      meta.signH = signs;
+      meta.signConsistent = (signs[3] === signs[5] && signs[5] === signs[10] && signs[5] !== 0);
+    }
+    var d5 = result[5] && result[5].aptDiagnostic;
+    if (d5) {
+      var gates = {
+        icirAnn:        d5.icirAnn != null && d5.icirAnn >= 0.3,
+        icLift:         d5.icLift != null && d5.icLift >= 0.015,
+        ci95Lower:      d5.ci95 && d5.ci95.lower != null && d5.ci95.lower > 0,
+        fullRatio:      d5.fullFactorRatio >= 0.5,
+        signConsistent: meta.signConsistent === true,
+      };
+      var passCount = 0;
+      for (var g in gates) if (gates[g]) passCount++;
+      meta.mvpGate = {
+        gates: gates,
+        passCount: passCount,
+        status: passCount === 5 ? 'GO' : (passCount >= 3 ? 'HOLD' : 'NOGO'),
+      };
+    }
+    return meta;
+  }
+
   _spearmanCorr(pairs) {
     if (!pairs || pairs.length < 5) return null;
     var n = pairs.length;
@@ -1372,18 +1655,29 @@ class PatternBacktester {
     var vma = this._vmaCache.vma;
 
     var all = this._analyzeCache.patterns;
-    var occurrences = [];
+
+    // [V48-SEC Phase 7 P7-001] 2-pass 구조: raw factor 수집 → cohort z-score → predict.
+    // aptModel은 main thread only (Worker context에서는 undefined → rawFactors 모두 null).
+    // stockMeta (marketCap/pbr/market/marketReturns60d)는 this._currentStockMeta에서
+    // 주입 받음; 미설정 시 value/size/liquidity factor null (momentum은 candles만으로 가능).
+    var aptEnabled = (typeof aptModel !== 'undefined' && aptModel
+                      && aptModel.isLoaded && aptModel.isLoaded());
+    var stockMeta = (this._currentStockMeta && typeof this._currentStockMeta === 'object')
+                    ? this._currentStockMeta : null;
+    var marketTypeFlag = (this._currentMarket || 'kospi').toLowerCase().indexOf('kosdaq') >= 0
+                         ? 'kosdaq' : 'kospi';
+
+    // Pass 1 — 패턴 기본 속성 + raw APT factor 수집
+    var staging = [];
     for (var pi = 0; pi < all.length; pi++) {
       var p = all[pi];
       if (p.type !== patternType) continue;
       var idx = p.endIndex !== undefined ? p.endIndex : p.startIndex;
       if (idx === undefined) continue;
 
-      // 패턴 특성 추출 (WLS 회귀용) — Dual Confidence: confidencePred 우선 사용
       var confidence = (p.confidencePred != null) ? p.confidencePred
                      : (p.confidence != null) ? p.confidence : 50;
 
-      // 추세 강도: patternEngine._detectTrend 직접 호출 대신, 간단 회귀로 추정
       var trendStrength = 0;
       var lookback = Math.min(10, idx);
       if (lookback >= 3 && atr) {
@@ -1402,66 +1696,100 @@ class PatternBacktester {
         }
       }
 
-      // 거래량 비율: volume[idx] / VMA(20)
       var volumeRatio = 1;
       if (vma && vma[idx] && vma[idx] > 0 && candles[idx].volume) {
         volumeRatio = candles[idx].volume / vma[idx];
       }
 
-      // ATR 정규화: ATR[idx] / close[idx]
       var atrNorm = 0.02;
       if (atr && atr[idx] && candles[idx].close > 0) {
         atrNorm = atr[idx] / candles[idx].close;
       }
 
-      // APT Factor: 60-day momentum (Jegadeesh & Titman 1993)
       var momentum60 = 0;
       if (idx >= 60 && candles[idx - 60].close > 0) {
         momentum60 = (candles[idx].close / candles[idx - 60].close - 1) * 100;
       }
 
-      // [P6-002] APT-augmented prediction (Option C: orphan field, no chain coupling)
-      // aptModel is main-thread-only (loaded via script tag); Worker context
-      // has no fetch, so typeof guard + isLoaded() gate yields null there.
-      // Consumers who want APT-enhanced UI should read occ.aptPrediction directly.
-      // Full APT factors (beta60d/valueInvPbr/logSize/liquidity20d) require
-      // meta from financials.js; unavailable in _collectOccurrences scope →
-      // passed as null (aptModel.predict contributes zero for null factors per contract).
+      // Raw APT factors (pre z-score). null if aptModel unavailable (Worker) or meta missing.
+      var rawApt = null;
+      if (aptEnabled) {
+        try {
+          rawApt = aptModel.computeFactors(candles, idx, stockMeta || {});
+        } catch (_e) { rawApt = null; }
+      }
+
+      staging.push({
+        p: p, idx: idx, confidence: confidence, trendStrength: trendStrength,
+        volumeRatio: volumeRatio, atrNorm: atrNorm, momentum60: momentum60,
+        rawApt: rawApt,
+      });
+    }
+
+    // Pass 2 — cohort robust z-score (median + MAD*1.4826, winsorize [-3,3]).
+    // Falls back to all-zero entries if n < 5 or aptModel absent.
+    var zList = null;
+    if (aptEnabled && staging.length >= 5) {
+      try {
+        var rawFactorsList = staging.map(function(s) { return s.rawApt; });
+        zList = aptModel.zscoreCohort(rawFactorsList);
+      } catch (_e) { zList = null; }
+    }
+
+    // Pass 3 — predict with z-scored factors + build final occurrences
+    var occurrences = [];
+    for (var si = 0; si < staging.length; si++) {
+      var s = staging[si];
       var aptPrediction = null;
-      if (typeof aptModel !== 'undefined' && aptModel && aptModel.isLoaded && aptModel.isLoaded()) {
+      var aptFactors = null;
+
+      if (aptEnabled) {
+        var z = (zList && zList[si]) ? zList[si] : null;
         try {
           aptPrediction = aptModel.predict({
-            confidence: confidence,
-            signal: p.signal || 'neutral',
-            marketType: 'kospi',            // default; caller may override via backtestAll(stockCode)
-            hw: p.hw || 1,
-            vw: p.vw || 1,
-            mw: p.mw || 1,
-            rw: p.rw || 1,
-            patternTier: p.tier != null ? p.tier : 0,
-            momentum60d: momentum60,        // already computed above
-            beta60d: null,                   // unavailable in this scope
-            valueInvPbr: null,
-            logSize: null,
-            liquidity20d: null,
+            confidence: s.confidence,
+            signal: s.p.signal || 'neutral',
+            marketType: marketTypeFlag,
+            hw: s.p.hw || 1,
+            vw: s.p.vw || 1,
+            mw: s.p.mw || 1,
+            rw: s.p.rw || 1,
+            patternTier: s.p.tier != null ? s.p.tier : 0,
+            momentum60d: z ? z.momentum60d : null,
+            beta60d: z ? z.beta60d : null,
+            valueInvPbr: z ? z.valueInvPbr : null,
+            logSize: z ? z.logSize : null,
+            liquidity20d: z ? z.liquidity20d : null,
           });
-        } catch (e) {
-          aptPrediction = null;
+        } catch (_e) { aptPrediction = null; }
+
+        // Persist which factors were actually computed (pre-z) so downstream L9
+        // (null contamination split) can group occurrences by factor completeness.
+        // Plain object — postMessage-safe (no functions, no circular refs).
+        if (s.rawApt) {
+          aptFactors = {
+            momentum: s.rawApt.momentum60d,
+            beta:     s.rawApt.beta60d,
+            value:    s.rawApt.valueInvPbr,
+            size:     s.rawApt.logSize,
+            liquidity:s.rawApt.liquidity20d,
+          };
         }
       }
 
       occurrences.push({
-        idx: idx,
-        confidence: confidence,
-        trendStrength: trendStrength,
-        volumeRatio: volumeRatio,
-        atrNorm: atrNorm,
-        wc: p.wc != null ? p.wc : ((p.hw || 1) * (p.mw || 1)),
-        hw: p.hw || 1.0, // [C-2 FIX] regimeWR이 hw 기반 trending/reverting 분류에 사용 — 누락 시 항상 neutral
-        momentum60: momentum60,
-        aptPrediction: aptPrediction,  // [P6-002] expected 5d return (%) from APT Ridge; null if model unloaded
-        priceTarget: (p.priceTarget != null && isFinite(p.priceTarget)) ? p.priceTarget : null,
-        patternSignal: p.signal || null,
+        idx: s.idx,
+        confidence: s.confidence,
+        trendStrength: s.trendStrength,
+        volumeRatio: s.volumeRatio,
+        atrNorm: s.atrNorm,
+        wc: s.p.wc != null ? s.p.wc : ((s.p.hw || 1) * (s.p.mw || 1)),
+        hw: s.p.hw || 1.0,
+        momentum60: s.momentum60,
+        aptPrediction: aptPrediction,
+        aptFactors: aptFactors,
+        priceTarget: (s.p.priceTarget != null && isFinite(s.p.priceTarget)) ? s.p.priceTarget : null,
+        patternSignal: s.p.signal || null,
       });
     }
     return occurrences;
@@ -2205,32 +2533,23 @@ class PatternBacktester {
         }
       }
 
-      // [P6-002] APT-augmented IC — Spearman rank correlation between
-      // aptModel.predict() output and realized returns at horizon h.
-      // Logged alongside stats.ic (5-col WLS baseline) for comparison.
-      // Only computed for h=5 (APT model trained at horizon=5d) and n>=20.
-      if (h === 5 && validOccs.length >= 20) {
-        var aptPairs = [];
-        for (var api = 0; api < validOccs.length; api++) {
-          var apOcc = validOccs[api];
-          if (apOcc.aptPrediction != null && isFinite(apOcc.aptPrediction)) {
-            aptPairs.push([apOcc.aptPrediction, returns[api]]);
-          }
-        }
-        if (aptPairs.length >= 20) {
-          var icApt = this._spearmanCorr(aptPairs);
-          if (icApt != null && isFinite(icApt)) {
-            stats.icApt = +icApt.toFixed(3);
-            stats.icAptN = aptPairs.length;
-            if (stats.ic != null) {
-              stats.icAptDelta = +(stats.icApt - stats.ic).toFixed(3);
-            }
-          }
-        }
-      }
+      // [V48-SEC Phase 7 P7-001] APT IC precision diagnostic — 6-Layer MVP
+      // (L1 Pairing + L2 Cross-sectional + L3 ICIR + L5 Fisher CI + L9 Null split).
+      // Replaces the Phase 6 single-point icApt block with date-stratified
+      // cross-sectional measurement across all horizons. L4 sign consistency
+      // aggregated post-loop via _computeAPTMeta. L6/L7/L8/L10 deferred to Phase 8.
+      var aptDiag = this._computeAPTDiagnostic(validOccs, returns, h, candles, reg);
+      stats.aptDiagnostic = aptDiag;
+      // Legacy Phase 6 fields preserved for existing consumers (reliability tier etc.)
+      stats.icApt = aptDiag.icApt;
+      stats.icAptN = aptDiag.nPairs;
+      stats.icAptDelta = aptDiag.icLift;
 
       result[h] = stats;
     }
+
+    // [V48-SEC Phase 7 P7-001] L4 sign consistency h∈{3,5,10} + MVP 5/5 gate
+    result._aptMeta = this._computeAPTMeta(result);
 
     return result;
   }

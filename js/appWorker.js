@@ -385,6 +385,7 @@ function _initAnalysisWorker() {
             type: 'backtest',
             candles: candles,
             market: currentStock && currentStock.market ? currentStock.market : '',
+            stockMeta: _getStockMetaForApt(), // [V48-SEC Phase 7 P7-001]
             version: _workerVersion,
             timeframe: currentTimeframe,
           });
@@ -464,6 +465,7 @@ function _requestWorkerAnalysis() {
     market: currentStock && currentStock.market ? currentStock.market : '',
     timeframe: currentTimeframe,
     financialData: _getFinancialDataForSR(),  // 밸류에이션 S/R용 bps/eps
+    stockMeta: _getStockMetaForApt(), // [V48-SEC Phase 7 P7-001] APT factor meta
   });
 }
 
@@ -1198,6 +1200,40 @@ function _getFinancialDataForSR() {
   var eps = latest.eps ? Number(latest.eps) : null;
   if (!bps && !eps) return null;
   return { bps: bps || null, eps: eps || null };
+}
+
+/**
+ * [V48-SEC Phase 7 P7-001] Per-stock meta for APT factor computation.
+ * Returns `{ marketCap, pbr, market }` or null. Consumed by backtester via
+ * postMessage → analysisWorker sets backtester._currentStockMeta.
+ *
+ * marketCap: 억원 (from ALL_STOCKS or cached financials)
+ * pbr:       marketCap / totalEquity (if both available), else null
+ * market:    'kospi' | 'kosdaq'
+ * Returns null when in seed/unknown state (factor contribution defaults to 0).
+ */
+function _getStockMetaForApt() {
+  if (!currentStock) return null;
+  var market = (currentStock.market || '').toLowerCase().indexOf('kosdaq') >= 0 ? 'kosdaq' : 'kospi';
+  // Marketcap (억원). currentStock.marketCap may be direct number or derived.
+  var mcap = (typeof currentStock.marketCap === 'number' && isFinite(currentStock.marketCap)
+              && currentStock.marketCap > 0) ? currentStock.marketCap : null;
+
+  var pbr = null;
+  try {
+    var cached = (typeof _financialCache !== 'undefined') ? _financialCache[currentStock.code] : null;
+    if (cached && (cached.source === 'dart' || cached.source === 'hardcoded')) {
+      var qarr = (cached.quarterly && cached.quarterly.length) ? cached.quarterly : cached.annual;
+      if (qarr && qarr.length) {
+        var latest = qarr[0];
+        var te = latest.totalEquity != null ? Number(latest.totalEquity) : null;
+        if (mcap && te && te > 0) pbr = +(mcap / te).toFixed(3);
+      }
+    }
+  } catch (_e) { pbr = null; }
+
+  if (mcap == null && pbr == null) return null;
+  return { marketCap: mcap, pbr: pbr, market: market };
 }
 
 /**

@@ -37,7 +37,13 @@ var aptModel = (function() {
   function _loadCoefficients() {
     if (_loading) return _loading;
     if (_loaded) return Promise.resolve();
-    _loading = fetch('/data/backtest/mra_apt_coefficients.json', { cache: 'default' })
+    // [V48-SEC Phase 7 P7-001] Coefficients moved behind /api/apt (HMAC+Origin).
+    // Prefer _signGet when sign.js is loaded; fall back to plain fetch only if
+    // running in a context without session wiring (e.g. standalone tests).
+    var _fetch = (typeof self !== 'undefined' && typeof self._signGet === 'function')
+      ? self._signGet('/api/apt')
+      : fetch('/api/apt', { cache: 'no-store', credentials: 'same-origin' });
+    _loading = _fetch
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -117,16 +123,17 @@ var aptModel = (function() {
 
   /**
    * Compute per-stock APT factor vector from raw market data.
-   * Returns null if data insufficient. Caller should z-score before predict()
-   * if consistent with training cohort normalization is required.
+   * [V48-SEC Phase 7 P7-001] Per-factor gates replace global idx<60 gate so
+   * short-history stocks still contribute value_inv_pbr / log_size.
    *
    * @param {Array} candles - OHLCV array (daily)
    * @param {number} idx    - occurrence index in candles
    * @param {Object} meta   - { marketCap, pbr, marketReturns60d? }
    * @returns {Object|null} - { momentum60d, beta60d, valueInvPbr, logSize, liquidity20d }
+   *                          Fields may be null individually; object itself null only if idx invalid.
    */
   function computeFactors(candles, idx, meta) {
-    if (!candles || idx == null || idx < 60 || idx >= candles.length) return null;
+    if (!candles || idx == null || idx < 0 || idx >= candles.length) return null;
     meta = meta || {};
 
     var out = {
@@ -137,15 +144,20 @@ var aptModel = (function() {
       liquidity20d: null
     };
 
-    // momentum_60d: 60-day return
-    var p0 = candles[idx - 60] && candles[idx - 60].close;
-    var pT = candles[idx] && candles[idx].close;
-    if (p0 > 0 && pT > 0) {
-      out.momentum60d = (pT / p0 - 1) * 100;
+    // momentum_60d: 60-day return (requires idx >= 60)
+    if (idx >= 60) {
+      var p0 = candles[idx - 60] && candles[idx - 60].close;
+      var pT = candles[idx] && candles[idx].close;
+      if (p0 > 0 && pT > 0) {
+        out.momentum60d = (pT / p0 - 1) * 100;
+      }
     }
 
-    // beta_60d: requires market returns co-series — omit unless supplied
-    if (Array.isArray(meta.marketReturns60d) && meta.marketReturns60d.length === 60) {
+    // beta_60d: requires market returns co-series (caller must supply)
+    if (idx >= 60
+        && Array.isArray(meta.marketReturns60d)
+        && meta.marketReturns60d.length === 60
+        && meta.marketReturns60d.every(function(r) { return typeof r === 'number' && isFinite(r); })) {
       var stockRets = [];
       for (var i = idx - 59; i <= idx; i++) {
         var pPrev = candles[i - 1] && candles[i - 1].close;
@@ -162,17 +174,23 @@ var aptModel = (function() {
         cov += (stockRets[k] - mS) * (mktRets[k] - mM);
         varM += (mktRets[k] - mM) * (mktRets[k] - mM);
       }
-      out.beta60d = varM > 0 ? cov / varM : null;
+      if (varM > 1e-10) out.beta60d = cov / varM;
     }
 
-    // value_inv_pbr: 1/PBR (caller supplies pbr from financials)
-    if (meta.pbr > 0) out.valueInvPbr = 1 / meta.pbr;
+    // value_inv_pbr: 1/PBR, gate pbr > 0.01 (matches training L.331 -- prevents
+    // 1/pbr explosion for near-zero/negative book value)
+    if (typeof meta.pbr === 'number' && isFinite(meta.pbr) && meta.pbr > 0.01) {
+      out.valueInvPbr = 1 / meta.pbr;
+    }
 
     // log_size: log(marketCap in 억원)
-    if (meta.marketCap > 0) out.logSize = Math.log(meta.marketCap);
+    if (typeof meta.marketCap === 'number' && isFinite(meta.marketCap) && meta.marketCap > 0) {
+      out.logSize = Math.log(meta.marketCap);
+    }
 
-    // liquidity_20d: 20-day avg turnover (volume × close / marketCap)
-    if (meta.marketCap > 0 && idx >= 19) {
+    // liquidity_20d: 20-day avg turnover × 100 (training L.350 unit parity).
+    // Require count >= 10 trading days (tolerate up to 11 suspension days).
+    if (typeof meta.marketCap === 'number' && meta.marketCap > 0 && idx >= 19) {
       var sumTurnover = 0;
       var count = 0;
       for (var w = idx - 19; w <= idx; w++) {
@@ -182,9 +200,83 @@ var aptModel = (function() {
           count++;
         }
       }
-      if (count > 0) out.liquidity20d = sumTurnover / count;
+      if (count >= 10) out.liquidity20d = (sumTurnover / count) * 100;
     }
 
+    return out;
+  }
+
+  /**
+   * Cohort robust z-score: match training pipeline's per-date normalization
+   * (scripts/mra_apt_extended.py L.382-393) using median + MAD*1.4826.
+   * Winsorize to [-3, 3]. Null raws and null factor values → 0 contribution.
+   *
+   * Design note: training uses per-date cross-sectional stats. Client replicates
+   * the formula (not the exact values) on the runtime cohort — math symmetry
+   * preserved, distribution shift acknowledged. μ/σ never persisted.
+   *
+   * @param {Array<Object|null>} rawList - output of computeFactors per occurrence
+   * @returns {Array<Object>} - same length; each entry has 5 finite z-scored factors
+   */
+  function zscoreCohort(rawList) {
+    var zero = function() {
+      return { momentum60d: 0, beta60d: 0, valueInvPbr: 0, logSize: 0, liquidity20d: 0 };
+    };
+    var n = rawList ? rawList.length : 0;
+    if (n < 5) return rawList ? rawList.map(zero) : [];
+
+    var factors = ['momentum60d', 'beta60d', 'valueInvPbr', 'logSize', 'liquidity20d'];
+    var params = {};
+
+    for (var f = 0; f < factors.length; f++) {
+      var fname = factors[f];
+      var vals = [];
+      for (var i = 0; i < n; i++) {
+        var r = rawList[i];
+        if (r) {
+          var v = r[fname];
+          if (typeof v === 'number' && isFinite(v)) vals.push(v);
+        }
+      }
+      if (vals.length < 3) { params[fname] = null; continue; }
+      vals.sort(function(a, b) { return a - b; });
+      var median = vals[Math.floor(vals.length / 2)];
+      var absdev = [];
+      for (var j = 0; j < vals.length; j++) absdev.push(Math.abs(vals[j] - median));
+      absdev.sort(function(a, b) { return a - b; });
+      var mad = absdev[Math.floor(absdev.length / 2)];
+      var scale = (mad > 1e-10) ? (mad * 1.4826) : null;
+      if (scale == null) {
+        // MAD == 0 (>50% values identical): fall back to sample std
+        var mean = 0;
+        for (var k = 0; k < vals.length; k++) mean += vals[k];
+        mean /= vals.length;
+        var sumSq = 0;
+        for (var l = 0; l < vals.length; l++) sumSq += (vals[l] - mean) * (vals[l] - mean);
+        var std = Math.sqrt(sumSq / Math.max(vals.length - 1, 1));
+        scale = (std > 1e-10) ? std : null;
+      }
+      params[fname] = (scale && scale > 1e-10) ? { median: median, scale: scale } : null;
+    }
+
+    var out = [];
+    for (var m = 0; m < n; m++) {
+      var raw = rawList[m];
+      var e = zero();
+      if (raw) {
+        for (var fi = 0; fi < factors.length; fi++) {
+          var fn = factors[fi];
+          var val = raw[fn];
+          var p = params[fn];
+          if (p && typeof val === 'number' && isFinite(val)) {
+            var z = (val - p.median) / p.scale;
+            if (z > 3) z = 3; else if (z < -3) z = -3;
+            e[fn] = z;
+          }
+        }
+      }
+      out.push(e);
+    }
     return out;
   }
 
@@ -206,6 +298,7 @@ var aptModel = (function() {
     init: init,
     predict: predict,
     computeFactors: computeFactors,
+    zscoreCohort: zscoreCohort,
     isLoaded: isLoaded,
     hasFailed: hasFailed,
     getMeta: getMeta

@@ -1294,6 +1294,7 @@ IP_PROTECTED_JSONS = [
     "data/backtest/flow_signals.json",
     "data/backtest/hmm_regimes.json",
     "data/backtest/eva_scores.json",
+    "data/backtest/mra_apt_coefficients.json",
 ]
 
 IP_PAGES_FUNCTIONS = [
@@ -1302,6 +1303,7 @@ IP_PAGES_FUNCTIONS = [
     "functions/api/flow.js",
     "functions/api/hmm.js",
     "functions/api/eva.js",
+    "functions/api/apt.js",
 ]
 
 
@@ -1330,14 +1332,28 @@ def check_ip_protection(strict=False):
             ok(f"stage_deploy.py excludes {basename}")
 
     # 12c. deploy/ (if staged) has the 4 runtime IP JSONs under functions/_data/
-    #      and does NOT have them under data/backtest/
+    #      and does NOT have them under data/backtest/ (unless it's a SEC_PLACEHOLDER:
+    #      tiny {"moved": "/api/..."} stub for CDN stale-cache eviction — Phase 7).
     deploy = ROOT / "deploy"
     if deploy.exists():
         for rel in IP_PROTECTED_JSONS:
             p = deploy / rel
             if p.exists():
-                fail(f"LEAK: deploy/{rel} present — IP file not excluded!")
-                errors += 1
+                # Allow placeholder (<1KB, contains "moved": "/api/..."). Real IP
+                # coefficient files are always > 1KB for all 5 protected JSONs.
+                is_placeholder = False
+                try:
+                    if p.stat().st_size < 1024:
+                        raw = p.read_text(encoding="utf-8")
+                        if '"moved"' in raw and '/api/' in raw:
+                            is_placeholder = True
+                except OSError:
+                    pass
+                if is_placeholder:
+                    ok(f"deploy/{rel} is CDN-eviction placeholder (<1KB, moved marker)")
+                else:
+                    fail(f"LEAK: deploy/{rel} present — IP file not excluded!")
+                    errors += 1
             else:
                 ok(f"deploy/{rel} correctly excluded")
         # The 4 runtime files should be under functions/_data/
@@ -1360,6 +1376,7 @@ def check_ip_protection(strict=False):
         (JS / "appWorker.js", "/api/flow"),
         (JS / "appWorker.js", "/api/eva"),
         (JS / "financials.js", "/api/eva"),
+        (JS / "aptModel.js", "/api/apt"),
     ]
     for path, endpoint in client_checks:
         if not path.exists():
@@ -1629,6 +1646,7 @@ PHASE3_GUARDED_ENDPOINTS = [
     ("functions/api/flow.js",                 "guardGet"),
     ("functions/api/hmm.js",                  "guardGet"),
     ("functions/api/eva.js",                  "guardGet"),
+    ("functions/api/apt.js",                  "guardGet"),
     ("functions/api/confidence/macro.js",     "guardPost"),
     ("functions/api/confidence/phase8.js",    "guardPost"),
     ("functions/api/backtest/analyze.js",     "guardPost"),

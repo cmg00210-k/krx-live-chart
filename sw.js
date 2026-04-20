@@ -5,7 +5,7 @@
 //  WebSocket/비-GET 요청: 무시 (인터셉트 불가)
 // ══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'cheesestock-v85';
+const CACHE_NAME = 'cheesestock-v87';
 
 // 오프라인 시에도 앱 실행에 필요한 정적 자산 목록
 // [V48-SEC Phase 3] /js/_shared/sign.js 추가 (HMAC 서명 + 세션 초기화)
@@ -107,6 +107,10 @@ self.addEventListener('fetch', function(event) {
 
   // GET 이외의 요청은 캐싱 불가 — 네트워크로 직접 전달
   if (event.request.method !== 'GET') return;
+
+  // [V48-SEC Phase 7] /api/* Pages Functions — 서버 endpoint, 캐싱 불가
+  // (Cache-Control: no-store + HMAC 서명 timestamp 포함 → stale cache 유해)
+  if (url.pathname.startsWith('/api/')) return;
 
   // 외부 CDN 리소스 (Lightweight Charts, Pretendard, JetBrains Mono 등)
   // — Cache-First + 네트워크 갱신 (stale-while-revalidate)

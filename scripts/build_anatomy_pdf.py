@@ -79,13 +79,15 @@ def run_pandoc():
     version = subprocess.run(['pandoc', '--version'], capture_output=True, text=True, check=False)
     ver_line = (version.stdout or '').splitlines()[0] if version.returncode == 0 else 'unknown'
 
+    # pandoc >=3.x: --listings was deprecated + requires listings package which
+    # cheesestock-v8.tex does not load. Use pandoc's built-in highlighter instead.
     cmd = [
         'pandoc', MD_PATH,
         '-o', PDF_PATH,
         '--pdf-engine=xelatex',
         '--template', TEMPLATE,
         '--toc', '--toc-depth=3',
-        '--listings',
+        '--highlight-style=tango',
         '-V', 'geometry:a4paper,margin=2cm',
         '-V', 'CJKmainfont:Pretendard',
         '-V', 'CJKmainfontoptions:AutoFakeSlant',
