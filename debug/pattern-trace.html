@@ -12,8 +12,18 @@
   <link rel="stylesheet"
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="./traceStyles.css">
-  <!-- KRX_COLORS frozen constants — no side effects, safe to load standalone -->
-  <script src="../js/colors.js"></script>
+
+  <!-- ── Production globals (read-only consumption, no production DOM touched) ── -->
+  <!-- Load order mirrors js/analysisWorker.js importScripts order -->
+  <!-- ?v=N pins match index.html L743-746; bump alongside production bumps. -->
+  <!-- colors.js — frozen KRX_COLORS constants, no side effects -->
+  <script src="../js/colors.js?v=14"></script>
+  <!-- data.js — PAST_DATA, getPastData(); needed by api.js -->
+  <script src="../js/data.js?v=13"></script>
+  <!-- api.js — KRX_API_CONFIG, dataService, ALL_STOCKS, TIMEFRAMES -->
+  <script src="../js/api.js?v=15"></script>
+  <!-- realtimeProvider.js — realtimeProvider singleton (.onTick, .start, .stop) -->
+  <script src="../js/realtimeProvider.js?v=11"></script>
 </head>
 <body>
   <!-- ── Header ── -->
@@ -25,8 +35,8 @@
   </header>
 
   <!-- ── Session 2 banner (shown when source != file) ── -->
-  <div id="session2-banner" style="display:none">
-    Live scan available in Session 2. Use file-drop mode for now.
+  <div id="session2-banner" class="banner-hidden">
+    Live scan available. Use file-drop mode for Session 1 replay.
   </div>
 
   <!-- ── Main layout ── -->
@@ -44,6 +54,9 @@
         <input type="range" id="trace-scrubber" min="0" max="100" value="0">
         <span id="trace-scrubber-label">Bar 0 / 0</span>
         <span id="trace-play-hint" class="muted">Space: play/pause &nbsp; Shift+Space: 10x</span>
+        <button type="button" id="trace-download-btn" class="download-btn" disabled
+                title="Download current trace as JSON (for A/B regression capture)"
+                aria-label="Download current trace JSON">Download trace</button>
       </div>
 
       <!-- File-drop overlay — fades out after successful load -->
@@ -51,9 +64,9 @@
         <div id="trace-dropzone-inner">
           <div class="drop-icon">&#8681;</div>
           <p>Drop trace JSON here, or</p>
-          <label class="file-btn">
+          <label class="file-btn" for="trace-file-input">
             Browse
-            <input type="file" id="trace-file-input" accept=".json">
+            <input type="file" id="trace-file-input" accept=".json" title="Trace JSON file" aria-label="Browse for trace JSON file">
           </label>
           <p class="muted">
             Expected:

@@ -90,8 +90,11 @@ window.traceCanvas = (() => {
     return _state.chartTop + h * (1 - (price - _state.priceMin) / range);
   }
 
-  // Bar index → center X (returns null if out of view)
+  // Bar index → center X (returns null if out of view, null, or non-finite).
+  // S2.5: null/undefined/NaN inputs now return null instead of NaN, so the 10+
+  // call sites that short-circuit on `x === null` handle them correctly.
   function _barToX(barIndex) {
+    if (barIndex == null || !isFinite(barIndex)) return null;
     const rel = barIndex - _state.viewOffset;
     if (rel < 0 || rel >= _state.barsVisible) return null;
     return _state.marginLeft + (rel + 0.5) * _state.candleW;
@@ -172,8 +175,8 @@ window.traceCanvas = (() => {
       ctx.lineTo(x, lowY);
       ctx.stroke();
 
-      // Body
-      ctx.fillStyle = isUp ? color : color;
+      // Body — M1 fix: collapsed dead ternary (isUp ? color : color)
+      ctx.fillStyle = color;
       ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyHeight);
     }
 
@@ -498,11 +501,24 @@ window.traceCanvas = (() => {
         ctx.fillRect(barAreaX + baseW + Math.max(0, qualityD) * scaleX, y, confluenceD * scaleX, rowH);
       }
 
-      // Clamp indicator: red right edge if capped
-      const cap = _state.trace.meta && _state.trace.meta.dynamicATRCap;
-      if (cap !== undefined && finalC >= totalC) {
-        ctx.fillStyle = '#E05050';
-        ctx.fillRect(barAreaX + totalC * scaleX - 2, y, 2, rowH);
+      // M2 fix: clamp indicator — paint red right edge ONLY when finalConfidence
+      // matches an actual numeric ATR cap ceiling recorded in the trace.
+      // Path: trace.preAnalyze.regime.dynamicATRCap (not trace.meta.dynamicATRCap).
+      // The cap may be { _unavailable: true } at A-MVP — skip entirely if not a number.
+      // We also require confidencePath to exist and at least one stage delta to equal
+      // the cap value (within tolerance 0.01), confirming this detection was actually clamped.
+      const regime  = _state.trace.preAnalyze && _state.trace.preAnalyze.regime;
+      const capRaw  = regime && regime.dynamicATRCap;
+      const capNum  = (typeof capRaw === 'number') ? capRaw : null;
+      if (capNum !== null && l3.confidencePath && l3.confidencePath.length) {
+        const TOL = 0.01;
+        const wasClamped = l3.confidencePath.some(function (step) {
+          return Math.abs(Math.abs(step.delta || 0) - capNum) <= TOL;
+        });
+        if (wasClamped && finalC >= capNum - TOL) {
+          ctx.fillStyle = KRX_COLORS.UP; // L1 fix: use KRX_COLORS.UP instead of '#E05050'
+          ctx.fillRect(barAreaX + totalC * scaleX - 2, y, 2, rowH);
+        }
       }
 
       // Label: confidence value
@@ -746,7 +762,7 @@ window.traceCanvas = (() => {
     if (_tooltipEl) _tooltipEl.classList.remove('visible');
   }
 
-  // ── Mouse events ──
+  // ── Mouse event handlers — stored as named references for removeEventListener (M3) ──
   function _onMouseMove(e) {
     const rect  = canvas.getBoundingClientRect();
     const mx    = e.clientX - rect.left;
@@ -783,9 +799,10 @@ window.traceCanvas = (() => {
     _hideTooltip();
   }
 
-  // ── ResizeObserver ──
+  // ── ResizeObserver — M3: guard against double-init ──
   let _resizeObserver = null;
   function _initResize() {
+    if (_resizeObserver) return; // already initialized — skip
     if (typeof ResizeObserver !== 'undefined') {
       _resizeObserver = new ResizeObserver(() => _resize());
       _resizeObserver.observe(canvas.parentElement);
@@ -795,20 +812,27 @@ window.traceCanvas = (() => {
   }
 
   // ── Public API ──
+
   function load(trace) {
-    _state.trace       = trace;
-    _state.bars        = trace.bars || [];
-    _state.scrubberBar = 0;
-    _state.viewOffset  = 0;
+    _state.trace        = trace;
+    _state.bars         = trace.bars || [];
+    _state.scrubberBar  = 0;
+    _state.viewOffset   = 0;
     _state._nearMissMap = null;
 
     // Show as many bars as possible; cap at 250 for performance
-    const maxVisible = Math.min(250, _state.bars.length);
+    const maxVisible   = Math.min(250, _state.bars.length);
     _state.barsVisible = Math.min(maxVisible, 120);
 
     // If bars.length > barsVisible, start from end (most recent)
     if (_state.bars.length > _state.barsVisible) {
       _state.viewOffset = _state.bars.length - _state.barsVisible;
+    }
+
+    // Tail-follow: if enabled and bar count grew, auto-advance to last bar
+    if (_state.tailFollow && _state.bars.length > 0) {
+      _state.scrubberBar = _state.bars.length - 1;
+      _state.viewOffset  = Math.max(0, _state.bars.length - _state.barsVisible);
     }
 
     _resize();
@@ -833,7 +857,37 @@ window.traceCanvas = (() => {
     _resize();
   }
 
+  /**
+   * setTailFollow(bool) — enable or disable tail-follow mode.
+   * When true, the next load() call with more bars than before
+   * automatically advances scrubberBar to bars.length-1.
+   * pattern-trace.js sets this based on user interaction with the scrubber.
+   */
+  function setTailFollow(enabled) {
+    _state.tailFollow = !!enabled;
+  }
+
+  /**
+   * destroy() — M3: tear down ResizeObserver and mouse listeners.
+   * Called from pattern-trace.js beforeunload handler.
+   * Does NOT remove the canvas DOM element (viewer owns that).
+   */
+  function destroy() {
+    if (_resizeObserver) {
+      _resizeObserver.disconnect();
+      _resizeObserver = null;
+    } else {
+      // Fallback path: remove window listener
+      window.removeEventListener('resize', _resize);
+    }
+    canvas.removeEventListener('mousemove', _onMouseMove);
+    canvas.removeEventListener('mouseleave', _onMouseLeave);
+  }
+
   // ── Init ──
+  // Extend _state with tail-follow flag (default off; live-scan sets via setTailFollow)
+  _state.tailFollow = false;
+
   _initTooltip();
   _initResize();
   canvas.addEventListener('mousemove', _onMouseMove);
@@ -841,6 +895,6 @@ window.traceCanvas = (() => {
   // Initial blank render
   _resize();
 
-  return { load, setScrubberBar, getBarCount, resize };
+  return { load, setScrubberBar, getBarCount, resize, setTailFollow, destroy };
 
 })();

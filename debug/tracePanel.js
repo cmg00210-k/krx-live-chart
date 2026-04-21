@@ -13,20 +13,32 @@
 //    2. Regime card (6 weight bars from preAnalyze.regime)
 //    3. EB Shrinkage N0 slider  (live Wilson CI recompute)
 //    4. Family filter (45 checkboxes in 5 collapsible groups)
-//       - BH-FDR badge, Wilson CI, sample power per row
+//       - BH-FDR badge + numeric threshold, Wilson CI, sample power per row
 //    5. Pattern detection cards (sorted by confidence, clickable to scrubber)
+//       - EB shrunk value live-updates with N0 slider
 //    6. Near-miss summary
 //    7. S/R levels
 //    8. Aggregate stats + unexplained rejection counter + anti-predictor alerts
+//       - anti-predictor list live-updates with N0 slider
 //
 //  Statistical formulas:
 //    Wilson 95% CI: (p + z²/2n ± z√(p(1-p)/n + z²/4n²)) / (1 + z²/n), z=1.96
 //    EB shrinkage:  shrunk_wr = (N·raw + N0·grand_mean) / (N + N0)
-//    BH-FDR:        cross-asset threshold q/√2631 ≈ 9.62e-4  (q=0.05)
+//    BH-FDR:        cross-asset scalar q/√N_stocks ≈ 9.62e-4  (q=0.05, N=2700)
+//                   (backtester applies rank-aware step-up; viewer shows rank-0 gate only)
 //    Power rule:    n_min = 10/p  (Cohen)
 //
 //  Dependencies: js/colors.js → KRX_COLORS  (loaded before this file)
 //  Zero production-file touch.  No eval on user input.
+//
+//  Session 2 refinements (2026-04-21):
+//    - Cohen power fallback bullet when pVal absent but shrinkage delta > 5pp
+//    - Anti-predictor card strict null guard (antiPredictor===true not truthy)
+//    - Pattern card EB shrunk live-update via data-wr-raw/data-wr-n/data-wr-grand
+//    - Aggregate anti-predictor list live-update via _refreshAntiPredictors()
+//    - Wilson CI small-n asterisk flag (n < 5)
+//    - BH-FDR numeric threshold displayed adjacent to P/F badge
+//    - Aggregate rejection source tooltip ("aggregate" → Session 3 estimation note)
 // ══════════════════════════════════════════════════════════════════════════
 
 window.tracePanel = (function () {
@@ -34,7 +46,7 @@ window.tracePanel = (function () {
 
   // ── Statistical constants ─────────────────────────────────────────────
   var Z_96         = 1.96;
-  var BH_FDR_CROSS = 9.62e-4;   // q/sqrt(2631), q=0.05
+  var BH_FDR_CROSS = 9.62e-4;   // q/sqrt(N_stocks=2700), q=0.05 (matches backtester.js:1321)
   var DEFAULT_N0   = 35;
   var DEFAULT_GRAND = 45.0;     // grand-mean win-rate % fallback
 
@@ -109,6 +121,8 @@ window.tracePanel = (function () {
   var _filterCallbacks = [];
   var _checkedKeys     = new Set(TAXONOMY.map(function (t) { return t.key; }));
   var _n0              = DEFAULT_N0;
+  // Stored trace reference for live-update helpers (set in load())
+  var _currentTrace    = null;
 
   // ── Utilities ─────────────────────────────────────────────────────────
   function _esc(str) {
@@ -154,7 +168,10 @@ window.tracePanel = (function () {
     var p01    = shrunk / 100;
     var ci     = _wilsonCI(p01, n);
     if (!ci) return _fmt(shrunk, 1) + '%';
-    return _fmt(shrunk, 1) + '% [' + _fmt(ci.lo * 100, 1) + ',' + _fmt(ci.hi * 100, 1) + ']';
+    var str = _fmt(shrunk, 1) + '% [' + _fmt(ci.lo * 100, 1) + ',' + _fmt(ci.hi * 100, 1) + ']';
+    // Small-n asterisk: CI is mathematically valid but statistically uninformative
+    if (n < 5) str += '*';
+    return str;
   }
 
   // ── Build perPattern index ────────────────────────────────────────────
@@ -330,9 +347,9 @@ window.tracePanel = (function () {
           '<th>Pattern</th>' +
           '<th title="Detected count">Det</th>' +
           '<th title="Near-miss count">NM</th>' +
-          '<th title="EB-shrunk Wilson CI">WR (shrunk)</th>' +
-          '<th title="BH-FDR p-value badge">BH</th>' +
-          '<th title="Sample power (Cohen n>=10/p)">Pwr</th>' +
+          '<th title="EB-shrunk Wilson CI (* = n<5)">WR (shrunk)</th>' +
+          '<th title="BH-FDR p-value badge + threshold">BH</th>' +
+          '<th title="Detectability heuristic: n>=10/p (diagnostic only, not formal Cohen power)">Detect</th>' +
         '</tr>';
       tbl.appendChild(thead);
 
@@ -371,27 +388,43 @@ window.tracePanel = (function () {
     // Wilson CI string
     var wStr = _wilsonStr(rawWR, wrN, _n0, grand);
 
-    // BH-FDR
+    // BH-FDR — show P/F badge + numeric threshold
     var bhHtml = '<span class="muted">—</span>';
     if (pVal != null) {
       var bhPass = pVal <= bhThr;
+      // Format threshold in exponential notation for compactness
+      var thrStr = bhThr.toExponential(2);
       bhHtml = '<span class="tp-mono" style="font-size:10px">' + pVal.toExponential(2) + '</span>' +
                ' <span class="tp-bh-' + (bhPass ? 'pass' : 'fail') + '">' +
-               (bhPass ? 'P' : 'F') + '</span>';
+               (bhPass ? 'P' : 'F') + '</span>' +
+               // Numeric threshold adjacent in small muted text
+               ' <span class="muted tp-mono" style="font-size:9px" title="BH-FDR threshold">' +
+               thrStr + '</span>';
     }
 
-    // Sample power
+    // Sample power — Cohen rule; fallback bullet when pVal absent but shrinkage available
     var pwrHtml = '<span class="muted">—</span>';
     if (pVal != null && wrN != null) {
       var strong = wrN >= (10 / pVal);
       pwrHtml = '<span class="tp-pwr-' + (strong ? 'strong' : 'weak') + '">' +
                 (strong ? 'OK' : 'low') + '</span>';
+    } else if (pVal == null && rawWR != null && wrN != null) {
+      // Fallback bullet: pVal absent but shrinkage delta vs grand mean is notable (>5pp)
+      var shrunkNow = _shrink(rawWR, wrN, _n0, grand);
+      var delta     = Math.abs(shrunkNow - grand);
+      if (delta > 5) {
+        var sign      = (shrunkNow - grand) >= 0 ? '+' : '';
+        var tipText   = 'pVal absent — directional only (shrinkage ' + sign + delta.toFixed(1) + 'pp from ' + grand.toFixed(1) + '%)';
+        pwrHtml = '<span class="tp-pwr-bullet" title="' + _esc(tipText) + '">&#x2022;</span>';
+      }
     }
 
-    // Anti-predictor inline icon
+    // Anti-predictor inline icon — antiPredictor must be exactly true (strict).
+    // S2.5: `inv !== true` treats null/undefined as "not inverted" (patterns.js does
+    // not currently set p.inverted; previously `inv === false` made this dead code).
     var antiIcon = '';
     if (rawWR != null && wrN != null && finConf != null && finConf > 50 &&
-        antiP === true && inv === false) {
+        antiP === true && inv !== true) {
       var shrunk = _shrink(rawWR, wrN, _n0, grand);
       if (shrunk < 48) {
         antiIcon = ' <span class="tp-anti-icon" title="anti-predictor: WR(shrunk)<48 but conf>50">&#9888;</span>';
@@ -442,12 +475,16 @@ window.tracePanel = (function () {
     tr.appendChild(tdNM);
 
     // Wilson CI cell — data attrs for live slider refresh
+    // Small-n tooltip injected as title attr; the asterisk is appended by _wilsonStr()
     var tdWR = document.createElement('td');
     tdWR.className = 'tp-wilson-cell tp-mono';
     tdWR.setAttribute('data-key',     key);
     tdWR.setAttribute('data-raw-wr',  rawWR  != null ? rawWR  : '');
     tdWR.setAttribute('data-wr-n',    wrN    != null ? wrN    : '');
     tdWR.setAttribute('data-grand',   grand);
+    if (wrN != null && wrN < 5) {
+      tdWR.setAttribute('title', 'n<5 — CI statistically uninformative');
+    }
     tdWR.style.fontSize = '10px';
     tdWR.textContent = wStr;
     tr.appendChild(tdWR);
@@ -465,8 +502,9 @@ window.tracePanel = (function () {
     return tr;
   }
 
-  // Live Wilson CI refresh
+  // Live Wilson CI refresh — updates family-table cells AND pattern-card EB spans
   function _refreshWilsonCells() {
+    // Section 4: family filter table cells
     var cells = document.querySelectorAll('.tp-wilson-cell');
     cells.forEach(function (td) {
       var rawWR = parseFloat(td.getAttribute('data-raw-wr'));
@@ -474,7 +512,80 @@ window.tracePanel = (function () {
       var grand = parseFloat(td.getAttribute('data-grand'));
       if (isNaN(rawWR) || isNaN(wrN)) return;
       td.textContent = _wilsonStr(rawWR, wrN, _n0, isNaN(grand) ? DEFAULT_GRAND : grand);
+      // Re-apply small-n tooltip (title attr stays; textContent now includes asterisk)
     });
+
+    // Section 5: pattern detection card EB shrunk values
+    // Each pattern card has a span.tp-eb-shrunk with data-wr-raw/data-wr-n/data-wr-grand
+    var ebSpans = document.querySelectorAll('.tp-eb-shrunk');
+    ebSpans.forEach(function (span) {
+      var rawWR = parseFloat(span.getAttribute('data-wr-raw'));
+      var wrN   = parseFloat(span.getAttribute('data-wr-n'));
+      var grand = parseFloat(span.getAttribute('data-wr-grand'));
+      if (isNaN(rawWR) || isNaN(wrN)) return;
+      var gm      = isNaN(grand) ? DEFAULT_GRAND : grand;
+      var shrunk  = _shrink(rawWR, wrN, _n0, gm);
+      span.textContent = shrunk.toFixed(1) + '%';
+    });
+
+    // Section 8: anti-predictor list (recomputed against current N0)
+    _refreshAntiPredictors();
+  }
+
+  // Rebuild anti-predictor cards in Section 8 without full panel innerHTML rebuild
+  function _refreshAntiPredictors() {
+    var panel = _panelEl();
+    if (!panel || !_currentTrace) return;
+
+    var container = document.getElementById('tp-anti-predictor-container');
+    if (!container) return;
+
+    var perPattern = _currentTrace.perPattern;
+    if (!perPattern) { container.innerHTML = ''; return; }
+
+    var antiCards = [];
+    perPattern.forEach(function (pp) {
+      if (!pp.detected) return;
+      pp.detected.forEach(function (det) {
+        if (!det || !det.l3) return;
+        var l3 = det.l3;
+        // antiPredictor strict true; inverted accepts null/undefined as "not inverted"
+        // (patterns.js does not currently populate p.inverted; S2.5 fix vs dead-code gate).
+        if (l3.antiPredictor !== true || l3.inverted === true) return;
+        if (l3.finalConfidence == null || l3.finalConfidence <= 50) return;
+        var shrunk = null;
+        if (l3.wr && l3.wr.raw != null && l3.wr.N != null) {
+          shrunk = _shrink(l3.wr.raw, l3.wr.N, _n0, l3.wr.grandMean);
+        }
+        if (shrunk == null || shrunk < 48) {
+          antiCards.push({
+            family:   pp.family,
+            barIndex: det.barIndex,
+            conf:     l3.finalConfidence,
+            shrunk:   shrunk,
+          });
+        }
+      });
+    });
+
+    if (antiCards.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    var html = '<div class="panel-section-title" style="color:#ff8a80">Anti-Predictor Alerts (' + antiCards.length + ')</div>';
+    antiCards.forEach(function (c) {
+      var barIdxNum = Number(c.barIndex);
+      var confNum   = Number(c.conf);
+      html += '<div class="pattern-card" style="border-color:#ff8a80">' +
+        '<span style="color:#ff8a80;font-weight:700">' + _esc(c.family) + '</span>' +
+        ' bar#' + (isFinite(barIdxNum) ? barIdxNum : '?') +
+        ' WR(shrunk)=' + (c.shrunk != null ? _fmt(c.shrunk, 1) + '%' : '—') +
+        ' conf=' + (isFinite(confNum) ? confNum : '?') +
+        ' <span class="tp-tag-anti">antiPredictor=true, inverted!=true</span>' +
+        '</div>';
+    });
+    container.innerHTML = html;
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -518,13 +629,29 @@ window.tracePanel = (function () {
       var stopStr   = l3.stopLoss    ? Number(l3.stopLoss).toLocaleString()    : '—';
       var targetStr = l3.priceTarget ? Number(l3.priceTarget).toLocaleString() : '—';
 
+      // EB shrunk: use span.tp-eb-shrunk with data-* attrs for N0 slider live-update.
+      // N0 is fixed in trace JSON (l3.wr.N0 reflects the N0 used at compute time).
+      // The viewer's slider recomputes on-the-fly from raw+N using the current _n0.
       var wrHtml = '';
       if (l3.wr) {
-        var wr = l3.wr;
+        var wr      = l3.wr;
+        var rawWR   = wr.raw   != null ? wr.raw  : null;
+        var wrN     = wr.N     != null ? wr.N    : null;
+        var grand   = wr.grandMean != null ? wr.grandMean : DEFAULT_GRAND;
+        // Live-recomputed shrunk value shown in span.tp-eb-shrunk
+        var shrunkNow = (rawWR != null && wrN != null)
+          ? _shrink(rawWR, wrN, _n0, grand)
+          : null;
+        var shrunkDisplay = shrunkNow != null ? shrunkNow.toFixed(1) + '%' : (wr.shrunk != null ? Number(wr.shrunk).toFixed(1) + '%' : '?');
+
         wrHtml = '<div class="pattern-card-meta" style="margin-top:4px">' +
-          '<span>EB shrunk: ' + (wr.shrunk != null ? Number(wr.shrunk).toFixed(1) : '?') + '%</span>' +
-          '<span>N=' + (wr.N || '?') + '</span>' +
-          '<span>N\u2080=' + (wr.N0 != null ? wr.N0 : '35') + '</span>' +
+          '<span>EB shrunk: <span class="tp-eb-shrunk"' +
+            (rawWR != null ? ' data-wr-raw="' + rawWR + '"' : '') +
+            (wrN   != null ? ' data-wr-n="'  + wrN   + '"' : '') +
+            ' data-wr-grand="' + grand + '"' +
+          '>' + shrunkDisplay + '</span></span>' +
+          '<span>N=' + (wrN || '?') + '</span>' +
+          '<span>N\u2080=' + (wr.N0 != null ? wr.N0 : _n0) + '</span>' +
           '</div>';
       }
 
@@ -536,25 +663,31 @@ window.tracePanel = (function () {
         pathHtml = '<div class="pattern-card-meta" style="word-break:break-all;margin-top:2px">' + steps + '</div>';
       }
 
+      // Anti-predictor warning — antiPredictor strict true; inverted null/undefined = not inverted (S2.5).
       var warnHtml = '';
-      if (l3.antiPredictor && !l3.inverted && confNum > 50) {
+      if (l3.antiPredictor === true && l3.inverted !== true && confNum > 50) {
         warnHtml = '<div style="color:#ff8a80;font-size:10px;margin-top:4px">Anti-predictor 경고</div>';
       }
 
-      html += '<div class="pattern-card" data-bar="' + det.barIndex + '">' +
+      // S2-H2: coerce barIndex and conf to Number before interpolation.
+      var barIdxSafe = Number(det.barIndex);
+      var barIdxStr  = isFinite(barIdxSafe) ? String(barIdxSafe) : '?';
+      var confStr    = isFinite(confNum) ? String(confNum) : '?';
+      // confColor is chosen from a fixed palette above (not user-controlled) — safe.
+      html += '<div class="pattern-card" data-bar="' + (isFinite(barIdxSafe) ? barIdxSafe : '') + '">' +
         '<div class="pattern-card-header">' +
           '<span class="pattern-card-name">' + _esc(nameKo) + '</span>' +
-          '<span class="pattern-card-conf" style="color:' + confColor + '">' + conf + '%</span>' +
+          '<span class="pattern-card-conf" style="color:' + confColor + '">' + confStr + '%</span>' +
         '</div>' +
         '<div class="pattern-card-meta">' +
-          '<span>Bar ' + (det.barIndex != null ? det.barIndex : '?') + '</span>' +
+          '<span>Bar ' + barIdxStr + '</span>' +
           '<span>' + _esc(l3.outcome || '?') + '</span>' +
           '<span>SL:' + stopStr + '</span>' +
           '<span>TP:' + targetStr + '</span>' +
         '</div>' +
         wrHtml + pathHtml + warnHtml +
         '<div class="conf-bar-wrap">' +
-          '<div class="conf-bar-fill" style="width:' + confNum + '%"></div>' +
+          '<div class="conf-bar-fill" style="width:' + (isFinite(confNum) ? confNum : 0) + '%"></div>' +
         '</div>' +
         '</div>';
     });
@@ -614,13 +747,18 @@ window.tracePanel = (function () {
 
   // ══════════════════════════════════════════════════════════════════════
   //  Section 8 — Aggregate stats + unexplained rejection + anti-predictor
+  //
+  //  The anti-predictor cards list is placed in a div#tp-anti-predictor-container
+  //  so _refreshAntiPredictors() can update it via innerHTML without rebuilding
+  //  the entire panel. The aggregate counts table is static (not N0-dependent).
   // ══════════════════════════════════════════════════════════════════════
   function _renderAggregateStats(trace) {
     var perPattern = trace.perPattern;
     if (!perPattern || !perPattern.length) return '';
 
     var totalConsidered = 0, totalDetected = 0, totalNear = 0, totalUnexplained = 0;
-    var antiCards = [];
+    // Aggregate source for tooltip
+    var aggSource = null;
 
     perPattern.forEach(function (pp) {
       var agg = pp.aggregateRejected;
@@ -629,25 +767,16 @@ window.tracePanel = (function () {
         totalDetected    += agg.detected          || 0;
         totalNear        += agg.nearMiss          || 0;
         totalUnexplained += agg.unexplainedReject || 0;
+        // Take source from first pp that has it
+        if (aggSource == null && agg.source) aggSource = agg.source;
       }
-
-      // Anti-predictor card collection
-      if (!pp.detected) return;
-      pp.detected.forEach(function (det) {
-        if (!det || !det.l3) return;
-        var l3 = det.l3;
-        if (l3.antiPredictor === true && l3.inverted === false &&
-            l3.finalConfidence != null && l3.finalConfidence > 50) {
-          var shrunk = null;
-          if (l3.wr && l3.wr.raw != null && l3.wr.N != null) {
-            shrunk = _shrink(l3.wr.raw, l3.wr.N, _n0, l3.wr.grandMean);
-          }
-          if (shrunk == null || shrunk < 48) {
-            antiCards.push({ family: pp.family, barIndex: det.barIndex, conf: l3.finalConfidence, shrunk: shrunk });
-          }
-        }
-      });
     });
+
+    // Build source tooltip for unexplained-reject row
+    var unexplainedTooltip = 'Main-thread 14-stage cascade not traced in MVP. See appWorker.js L309-336.';
+    if (aggSource === 'aggregate') {
+      unexplainedTooltip = '추정치 — Session 3 helper-observer에서 정밀화';
+    }
 
     var html = '<div class="panel-section-title">집계 통계</div>';
     if (totalConsidered) {
@@ -655,28 +784,18 @@ window.tracePanel = (function () {
         '<tr><td>총 검토</td><td>' + totalConsidered + '</td></tr>' +
         '<tr><td>감지됨</td><td style="color:#26a69a">' + totalDetected + '</td></tr>' +
         '<tr><td>Near Miss</td><td style="color:#ff9800">' + totalNear + '</td></tr>' +
-        '<tr><td>미설명 기각 <span class="tp-help" title="Main-thread 14-stage cascade not traced in MVP. See appWorker.js L309-336.">?</span></td>' +
+        '<tr><td>미설명 기각 <span class="tp-help" title="' + _esc(unexplainedTooltip) + '">?</span>' +
+          (aggSource ? ' <span class="muted tp-mono" style="font-size:9px">[' + _esc(aggSource) + ']</span>' : '') +
+          '</td>' +
           '<td style="color:#787b86">' + totalUnexplained + '</td></tr>' +
         '</tbody></table>';
     } else {
       html += '<div style="padding:6px 14px;font-size:11px;color:#787b86">Not captured at mvp level</div>';
     }
 
-    if (antiCards.length > 0) {
-      html += '<div class="panel-section-title" style="color:#ff8a80">Anti-Predictor Alerts (' + antiCards.length + ')</div>';
-      antiCards.forEach(function (c) {
-        // H2: coerce numerics before interpolation
-        var barIdxNum = Number(c.barIndex);
-        var confNum   = Number(c.conf);
-        html += '<div class="pattern-card" style="border-color:#ff8a80">' +
-          '<span style="color:#ff8a80;font-weight:700">' + _esc(c.family) + '</span>' +
-          ' bar#' + (isFinite(barIdxNum) ? barIdxNum : '?') +
-          ' WR(shrunk)=' + (c.shrunk != null ? _fmt(c.shrunk, 1) + '%' : '—') +
-          ' conf=' + (isFinite(confNum) ? confNum : '?') +
-          ' <span class="tp-tag-anti">antiPredictor=true, inverted=false</span>' +
-          '</div>';
-      });
-    }
+    // Anti-predictor container: initially populated; live-updated by _refreshAntiPredictors()
+    html += '<div id="tp-anti-predictor-container"></div>';
+
     return html;
   }
 
@@ -687,6 +806,9 @@ window.tracePanel = (function () {
     var panel = _panelEl();
     if (!panel) return;
     panel.innerHTML = '';
+
+    // Store trace reference for live-update helpers
+    _currentTrace = trace;
 
     // Static HTML sections
     var staticHtml =
@@ -700,7 +822,6 @@ window.tracePanel = (function () {
     panel.innerHTML = staticHtml;
 
     // N0 slider (interactive — must be DOM element not HTML string)
-    var regimeNode = panel.querySelector('[data-section="regime"]');
     var n0El = _buildN0SliderEl();
     panel.insertBefore(n0El, panel.firstChild.nextSibling || null);
     var slider = n0El.querySelector('#tp-n0-slider');
@@ -716,16 +837,17 @@ window.tracePanel = (function () {
     // Family filter section (DOM-built for checkbox interactivity)
     var ppIdx   = _buildPpIndex(trace);
     var famSect = _buildFamilySection(ppIdx);
-    // Insert after regime card (third child after header + n0 slider + regime)
-    // Locate the aggregate stats divider and insert before pattern cards
+    // Insert before the pattern cards title
     var firstCardDiv = panel.querySelector('.pattern-card');
     if (firstCardDiv) {
       var cardTitle = firstCardDiv.previousElementSibling;
-      // Insert family section before the pattern cards title
       panel.insertBefore(famSect, cardTitle || firstCardDiv);
     } else {
       panel.appendChild(famSect);
     }
+
+    // Populate anti-predictor container with initial state (uses current _n0)
+    _refreshAntiPredictors();
 
     // Click on pattern card -> jump scrubber
     panel.querySelectorAll('.pattern-card[data-bar]').forEach(function (card) {
