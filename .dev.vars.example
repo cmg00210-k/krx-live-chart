@@ -1,0 +1,16 @@
+# [V48-SEC Phase 3] Wrangler local dev secrets template.
+#
+# 1. Copy this file to `.dev.vars` (already in .gitignore — never commit).
+# 2. Generate a 32-byte base64 secret:  openssl rand -base64 32
+# 3. Paste it as CHEESESTOCK_HMAC_SECRET value below.
+# 4. Start local dev:  wrangler pages dev deploy/ --binding RATE_LIMIT_KV=<preview_id>
+#
+# The same secret should NOT be used for production. Production secrets live
+# in the Cloudflare dashboard (Settings -> Environment variables -> Encrypted)
+# and are set via `wrangler secret put CHEESESTOCK_HMAC_SECRET`.
+#
+# For 90-day rotation, set CHEESESTOCK_HMAC_SECRET_PREV to the previous value
+# during the grace window (both keys are tried on verify; see functions/_shared/hmac.js).
+
+CHEESESTOCK_HMAC_SECRET="REPLACE_ME_WITH_OPENSSL_RAND_BASE64_32"
+# CHEESESTOCK_HMAC_SECRET_PREV=""

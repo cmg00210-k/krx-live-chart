@@ -36,6 +36,7 @@ Exit codes: 0 = OK, 1 = error
 import os
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
+import json
 import shutil
 import argparse
 
@@ -55,6 +56,7 @@ EXCLUDE_DIRS = {
     "scripts", "core_data", "pattern_impl", "docs", "server",
     ".claude", ".git", "deploy", "logs",  # never recurse into deploy/ itself
     "node_modules",  # [P0-fix] 1,489 files leaked to production — dev-only
+    "debug",  # [pattern-trace] local debug tools — never deploy to production
     # czw/ removed — calibration data moved to data/backtest/
     os.path.join("data", "backtest", "results"),
     os.path.join("data", "delisted"),  # 308 files, only used by Python backtest scripts
@@ -75,6 +77,11 @@ _BASE_EXCLUDE_SUFFIX_PATTERNS = [
 # Use OS-native sep so comparisons work on both Windows and Unix.
 EXCLUDE_EXACT = {
     ".env",                        # NEVER deploy -- contains DART_API_KEY
+    # [V48-SEC Phase 3] Wrangler local-dev secrets. CHEESESTOCK_HMAC_SECRET,
+    # session master key, KV dev bindings. Production secrets are set via
+    # `wrangler secret put` (Cloudflare-side, never in bundle) -- this entry
+    # ensures a local .dev.vars never hard-links into deploy/.
+    ".dev.vars",
     # .cfignore removed (wrangler ignores it; stage_deploy.py is the sole gatekeeper)
     ".vercelignore",               # leftover from old Vercel setup
     "vercel.json",                 # leftover from old Vercel setup
@@ -111,6 +118,9 @@ EXCLUDE_EXACT = {
     os.path.join("data", "backtest", "flow_signals.json"),
     os.path.join("data", "backtest", "hmm_regimes.json"),
     os.path.join("data", "backtest", "eva_scores.json"),
+    # [V48-SEC Phase 7 P7-001] APT Ridge coefficients -- moved behind /api/apt
+    # to prevent raw inference pipeline reverse-engineering.
+    os.path.join("data", "backtest", "mra_apt_coefficients.json"),
 }
 
 # [V48-SEC Phase 1] IP-protected JSONs served via Pages Functions.
@@ -121,7 +131,25 @@ SEC_PROTECTED_JSONS = [
     os.path.join("data", "backtest", "flow_signals.json"),
     os.path.join("data", "backtest", "hmm_regimes.json"),
     os.path.join("data", "backtest", "eva_scores.json"),
+    # [V48-SEC Phase 7 P7-001] APT coefficients served via /api/apt (HMAC+Origin).
+    os.path.join("data", "backtest", "mra_apt_coefficients.json"),
 ]
+
+# [V48-SEC Phase 7 P7-001] CDN stale-cache eviction placeholders.
+# When a file moves from public static hosting to an authenticated /api/ endpoint,
+# Cloudflare's stale-while-revalidate=86400 can keep serving the OLD public content
+# for up to 24h even after exclusion. To evict the cache deterministically, we
+# deploy a tiny JSON placeholder at the same URL. CF caches this new small body,
+# evicting the stale real content within minutes.
+# Placeholders live ONLY in deploy/; the source tree is not touched.
+SEC_PLACEHOLDERS = {
+    os.path.join("data", "backtest", "mra_apt_coefficients.json"): {
+        "moved": "/api/apt",
+        "protected": True,
+        "phase": "V48-SEC-Phase7-P7-001",
+        "note": "Coefficients moved behind HMAC+Origin-gated endpoint. Use /api/apt.",
+    },
+}
 
 # ---------------------------------------------------------------------------
 
@@ -373,6 +401,23 @@ def main():
         else:
             print("IP-protected JSONs: {} copied to deploy/functions/_data/".format(sec_copied))
 
+        # [V48-SEC Phase 7] Write CDN stale-cache eviction placeholders into deploy/.
+        # These tiny JSON files replace the OLD public URL so CF caches the placeholder,
+        # evicting stale content within minutes (vs. 24h natural expiry).
+        ph_written = 0
+        for rel_placeholder, content in SEC_PLACEHOLDERS.items():
+            dst = os.path.join(DEPLOY_DIR, rel_placeholder)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            try:
+                with open(dst, "w", encoding="utf-8") as f:
+                    json.dump(content, f, indent=2)
+                ph_written += 1
+                linked += 1
+            except OSError as e:
+                print("WARNING: placeholder write failed for {}: {}".format(rel_placeholder, e))
+        if ph_written:
+            print("CDN placeholders: {} written to deploy/ for stale-cache eviction".format(ph_written))
+
     # [V48-SEC Phase 1] --bundled: merge deploy.bundled/ into deploy/.
     # Replaces index.html, sw.js, analysisWorker.js; drops 19 raw JS files.
     if args.bundled and not args.dry_run:
@@ -445,10 +490,12 @@ def main():
             os.path.join("functions", "api", "flow.js"),
             os.path.join("functions", "api", "hmm.js"),
             os.path.join("functions", "api", "eva.js"),
+            os.path.join("functions", "api", "apt.js"),
             os.path.join("functions", "_data", "calibrated_constants.json"),
             os.path.join("functions", "_data", "flow_signals.json"),
             os.path.join("functions", "_data", "hmm_regimes.json"),
             os.path.join("functions", "_data", "eva_scores.json"),
+            os.path.join("functions", "_data", "mra_apt_coefficients.json"),
         ]
         if args.bundled:
             # In bundled mode, require at least one app.*.js and worker.*.js
@@ -486,6 +533,7 @@ def main():
                 os.path.join("js", "appWorker.js"),
                 os.path.join("js", "appUI.js"),
                 os.path.join("js", "app.js"),
+                os.path.join("js", "aptModel.js"),
             ]
         missing_critical = []
         for f in CRITICAL_FILES:

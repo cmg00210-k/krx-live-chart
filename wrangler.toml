@@ -1,0 +1,47 @@
+# [V48-SEC Phase 3] Cloudflare Pages + KV configuration.
+#
+# This file is used by `wrangler pages deploy` and `wrangler pages dev`.
+# Production secrets (CHEESESTOCK_HMAC_SECRET, CHEESESTOCK_HMAC_SECRET_PREV)
+# are NEVER stored here — set via `wrangler secret put` and managed in the
+# Cloudflare dashboard under Settings -> Environment variables -> Encrypted.
+#
+# Local development: put secrets in .dev.vars (gitignored) at project root.
+#
+# Rotation policy (90-day master key rotation without user disruption):
+#   1. Copy current CHEESESTOCK_HMAC_SECRET into CHEESESTOCK_HMAC_SECRET_PREV:
+#        wrangler secret put CHEESESTOCK_HMAC_SECRET_PREV  (paste current value)
+#   2. Generate new secret and overwrite CURRENT:
+#        openssl rand -base64 32 | wrangler secret put CHEESESTOCK_HMAC_SECRET
+#   3. Wait 24 hours (2x token lifetime margin); then:
+#        wrangler secret delete CHEESESTOCK_HMAC_SECRET_PREV
+#
+# KV namespace: `wrangler kv namespace create RATE_LIMIT_KV` returns an id
+# that replaces the placeholder below. A separate STAGING namespace may be
+# created for preview deployments to isolate rate-limit counters.
+
+name = "cheesestock"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "./deploy"
+
+# ---- KV bindings (UNCOMMENT after creating namespace) ----
+# Step 1 (one-time, Phase 3 deploy day):
+#   wrangler kv namespace create RATE_LIMIT_KV
+# Step 2: copy returned "id" into the block below and uncomment.
+# Step 3 (optional, for local `wrangler pages dev`):
+#   wrangler kv namespace create RATE_LIMIT_KV --preview
+#   then set preview_id as well.
+#
+# While the block is commented the server gracefully degrades to "fail open"
+# on rate limits and nonce checks (see functions/_shared/rate_limit.js +
+# functions/_shared/hmac.js — both return allowed=true when KV is absent).
+# This is safe for local dev but MUST be uncommented before production.
+#
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "REPLACE_WITH_KV_ID_FROM_WRANGLER_OUTPUT"
+# preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
+
+# ---- Environment variables ----
+# Non-secret vars can be listed here. Secrets are injected at runtime via
+# `wrangler secret put` and accessed through `env.<NAME>` in Pages Functions.
+# Do NOT put CHEESESTOCK_HMAC_SECRET or CHEESESTOCK_HMAC_SECRET_PREV here.

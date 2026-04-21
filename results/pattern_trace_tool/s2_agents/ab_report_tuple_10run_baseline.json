@@ -1,0 +1,78 @@
+{
+  "generatedAt": "2026-04-21T10:52:43.743Z",
+  "totalRuns": 10,
+  "passed": 10,
+  "failed": 0,
+  "results": [
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 92,
+      "debugCount": 92,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 46,
+      "debugCount": 46,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 75,
+      "debugCount": 75,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 0,
+      "debugCount": 0,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 0,
+      "debugCount": 0,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 99,
+      "debugCount": 99,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 101,
+      "debugCount": 101,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 23,
+      "debugCount": 23,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 45,
+      "debugCount": 45,
+      "pass": true,
+      "diffs": []
+    },
+    {
+      "label": "prod_ref.json vs debug_trace.json",
+      "prodCount": 100,
+      "debugCount": 100,
+      "pass": true,
+      "diffs": []
+    }
+  ]
+}

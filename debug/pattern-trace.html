@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CheeseStock Pattern Trace (debug)</title>
+  <!-- Pretendard + JetBrains Mono (same CDN as production) -->
+  <link rel="stylesheet"
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css"
+    integrity="sha384-V6D6tclS+1ROe6W7mgqDzlz750VoLpzneK+eS5rMAgkReZxe5YZeA91NeDdV+Z8E"
+    crossorigin="anonymous">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="./traceStyles.css">
+
+  <!-- ── Production globals (read-only consumption, no production DOM touched) ── -->
+  <!-- Load order mirrors js/analysisWorker.js importScripts order -->
+  <!-- ?v=N pins match index.html L743-746; bump alongside production bumps. -->
+  <!-- colors.js — frozen KRX_COLORS constants, no side effects -->
+  <script src="../js/colors.js?v=14"></script>
+  <!-- data.js — PAST_DATA, getPastData(); needed by api.js -->
+  <script src="../js/data.js?v=13"></script>
+  <!-- api.js — KRX_API_CONFIG, dataService, ALL_STOCKS, TIMEFRAMES -->
+  <script src="../js/api.js?v=15"></script>
+  <!-- realtimeProvider.js — realtimeProvider singleton (.onTick, .start, .stop) -->
+  <script src="../js/realtimeProvider.js?v=11"></script>
+</head>
+<body>
+  <!-- ── Header ── -->
+  <header id="trace-header">
+    <h1>Pattern Trace <span id="schema-version-label">v1</span>
+      <span class="badge" id="source-badge">File-replay</span>
+    </h1>
+    <div id="trace-meta-summary"></div>
+  </header>
+
+  <!-- ── Session 2 banner (shown when source != file) ── -->
+  <div id="session2-banner" class="banner-hidden">
+    Live scan available. Use file-drop mode for Session 1 replay.
+  </div>
+
+  <!-- ── Main layout ── -->
+  <div id="trace-layout">
+    <!-- Left panel: pattern list + stats -->
+    <aside id="trace-panel">
+      <!-- tracePanel.js owns this DOM subtree -->
+    </aside>
+
+    <!-- Right: canvas + scrubber + dropzone overlay -->
+    <main id="trace-canvas-wrap">
+      <canvas id="trace-canvas" aria-label="Pattern trace chart"></canvas>
+
+      <div id="trace-scrubber-wrap">
+        <input type="range" id="trace-scrubber" min="0" max="100" value="0">
+        <span id="trace-scrubber-label">Bar 0 / 0</span>
+        <span id="trace-play-hint" class="muted">Space: play/pause &nbsp; Shift+Space: 10x</span>
+        <button type="button" id="trace-download-btn" class="download-btn" disabled
+                title="Download current trace as JSON (for A/B regression capture)"
+                aria-label="Download current trace JSON">Download trace</button>
+      </div>
+
+      <!-- File-drop overlay — fades out after successful load -->
+      <div id="trace-dropzone">
+        <div id="trace-dropzone-inner">
+          <div class="drop-icon">&#8681;</div>
+          <p>Drop trace JSON here, or</p>
+          <label class="file-btn" for="trace-file-input">
+            Browse
+            <input type="file" id="trace-file-input" accept=".json" title="Trace JSON file" aria-label="Browse for trace JSON file">
+          </label>
+          <p class="muted">
+            Expected:
+            <code>results/pattern_traces/&lt;code&gt;_&lt;date&gt;_&lt;tf&gt;.json</code>
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── Script load order (Canvas renderer first, then panel, then orchestrator) ── -->
+  <script src="./traceCanvas.js"></script>
+  <script src="./tracePanel.js"></script>
+  <script src="./pattern-trace.js"></script>
+</body>
+</html>

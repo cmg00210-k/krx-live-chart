@@ -12,7 +12,8 @@ import flowSignals from '../../_data/flow_signals.json' with { type: 'json' };
 // HMM regime label inside flow_signals.stocks[code].hmmRegimeLabel. Loading
 // them anyway primes the bundle so future Phase 8 expansions can reference
 // without an extra import round.
-import { guardRequest, jsonResponse, forbiddenResponse } from '../../_shared/origin.js';
+import { jsonResponse } from '../../_shared/origin.js';
+import { guardPost, preflightResponse } from '../../_shared/guard.js';
 import { REGIME_CONFIDENCE_MULT, MCS_THRESHOLDS, getDynamicCap, clamp } from '../../_lib/macro_tables.mjs';
 
 function adjustPatterns(patterns, ctx) {
@@ -29,15 +30,22 @@ function adjustPatterns(patterns, ctx) {
   const out = patterns.map((p) => ({ ...p }));
 
   // MCS adjustment (mcsV2 from macro_composite)
-  if (!applied.has('MACRO_COMPOSITE') && composite && composite.mcsV2 != null) {
-    let mcs = composite.mcsV2;
-    if (mcs > 0 && mcs <= 1.0) mcs = mcs * 100;
-    for (const p of out) {
-      if (p.confidence == null) continue;
-      if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') p.confidence *= 1.05;
-      else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') p.confidence *= 1.05;
+  // [P6-001] When ECOS primary is stale (>14d), compute_macro_composite.py sets
+  // mcsFallbackActive=true and populates mcsV2Fallback (KOSIS 4-component). Prefer
+  // the fallback to avoid degraded signal from an outdated 8-component composite.
+  if (!applied.has('MACRO_COMPOSITE') && composite) {
+    const useFallback = composite.mcsFallbackActive === true && composite.mcsV2Fallback != null;
+    const mcsSrc = useFallback ? composite.mcsV2Fallback : composite.mcsV2;
+    if (mcsSrc != null) {
+      let mcs = mcsSrc;
+      if (mcs > 0 && mcs <= 1.0) mcs = mcs * 100;
+      for (const p of out) {
+        if (p.confidence == null) continue;
+        if (mcs >= MCS_THRESHOLDS.strong_bull && p.signal === 'buy') p.confidence *= 1.05;
+        else if (mcs <= MCS_THRESHOLDS.strong_bear && p.signal === 'sell') p.confidence *= 1.05;
+      }
+      applied.add('MACRO_COMPOSITE');
     }
-    applied.add('MACRO_COMPOSITE');
   }
 
   // HMM regime + foreign flow (uses server-side flow_signals.json)
@@ -105,29 +113,24 @@ function adjustPatterns(patterns, ctx) {
   return { patterns: out, appliedFactors: Array.from(applied) };
 }
 
-export async function onRequestPost({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
+export async function onRequestPost({ request, env }) {
+  const g = await guardPost(request, env, 'heavy_post');
+  if (!g.ok) return g.response;
+
   let body;
-  try { body = await request.json(); }
-  catch (_) { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+  try { body = JSON.parse(g.body || '{}'); }
+  catch (_) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } },
+    );
+  }
   const patterns = Array.isArray(body && body.patterns) ? body.patterns : [];
   const ctx = (body && body.context) || {};
   const result = adjustPatterns(patterns, ctx);
-  return jsonResponse(result, guard.origin, { 'Cache-Control': 'no-store' });
+  return jsonResponse(result, g.origin, { 'Cache-Control': 'no-store' });
 }
 
 export async function onRequestOptions({ request }) {
-  const guard = guardRequest(request);
-  if (!guard.ok) return forbiddenResponse();
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': guard.origin,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400',
-      'Vary': 'Origin',
-    },
-  });
+  return preflightResponse(request, 'POST, OPTIONS');
 }

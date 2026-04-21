@@ -1,0 +1,173 @@
+{
+  "generatedAt": "2026-04-21T10:52:34.572Z",
+  "harness": "scripts/pattern_trace_headless_ab.mjs",
+  "totals": {
+    "runs": 10,
+    "pass": 10,
+    "fail": 0,
+    "skip": 0,
+    "error": 0
+  },
+  "results": [
+    {
+      "pair": {
+        "code": "005930",
+        "market": "KOSPI",
+        "tf": "1d"
+      },
+      "status": "PASS",
+      "ms": 106,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 75,
+      "dbgCount": 75,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\005930_1d"
+    },
+    {
+      "pair": {
+        "code": "005930",
+        "market": "KOSPI",
+        "tf": "1m"
+      },
+      "status": "PASS",
+      "ms": 60,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 0,
+      "dbgCount": 0,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\005930_1m"
+    },
+    {
+      "pair": {
+        "code": "035720",
+        "market": "KOSPI",
+        "tf": "1d"
+      },
+      "status": "PASS",
+      "ms": 58,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 99,
+      "dbgCount": 99,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\035720_1d"
+    },
+    {
+      "pair": {
+        "code": "000660",
+        "market": "KOSPI",
+        "tf": "15m"
+      },
+      "status": "PASS",
+      "ms": 44,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 46,
+      "dbgCount": 46,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\000660_15m"
+    },
+    {
+      "pair": {
+        "code": "000250",
+        "market": "KOSDAQ",
+        "tf": "1d"
+      },
+      "status": "PASS",
+      "ms": 81,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 92,
+      "dbgCount": 92,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\000250_1d"
+    },
+    {
+      "pair": {
+        "code": "293490",
+        "market": "KOSDAQ",
+        "tf": "1d"
+      },
+      "status": "PASS",
+      "ms": 72,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 100,
+      "dbgCount": 100,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\293490_1d"
+    },
+    {
+      "pair": {
+        "code": "035420",
+        "market": "KOSPI",
+        "tf": "1m"
+      },
+      "status": "PASS",
+      "ms": 64,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 0,
+      "dbgCount": 0,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\035420_1m"
+    },
+    {
+      "pair": {
+        "code": "207940",
+        "market": "KOSPI",
+        "tf": "30m"
+      },
+      "status": "PASS",
+      "ms": 32,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 23,
+      "dbgCount": 23,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\207940_30m"
+    },
+    {
+      "pair": {
+        "code": "068270",
+        "market": "KOSPI",
+        "tf": "1d"
+      },
+      "status": "PASS",
+      "ms": 55,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 101,
+      "dbgCount": 101,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\068270_1d"
+    },
+    {
+      "pair": {
+        "code": "247540",
+        "market": "KOSDAQ",
+        "tf": "15m"
+      },
+      "status": "PASS",
+      "ms": 30,
+      "delta": 0,
+      "determinismDelta": 0,
+      "prodCount": 45,
+      "dbgCount": 45,
+      "prodOnly": [],
+      "dbgOnly": [],
+      "outDir": "C:\\Users\\seth1\\krx-live-chart-remote\\results\\pattern_trace_tool\\ab_reports\\247540_15m"
+    }
+  ]
+}
