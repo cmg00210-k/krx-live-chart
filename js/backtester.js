@@ -944,6 +944,9 @@ class PatternBacktester {
     var factorKeys = ['momentum', 'beta', 'value', 'size', 'liquidity'];
     var fullDates = Object.create(null), partDates = Object.create(null);
     var nFull = 0, nPartial = 0;
+    // [V48-SEC Phase 8] Track beta60d availability: any occurrence with
+    // non-null beta means runtime market-index plumbing is active.
+    var anyBetaAvailable = false;
     for (var i3 = 0; i3 < nPaired; i3++) {
       var occ3 = validOccs[pairedIdx[i3]];
       if (!occ3.aptFactors) continue;
@@ -951,6 +954,9 @@ class PatternBacktester {
       for (var fk = 0; fk < factorKeys.length; fk++) {
         var vv = occ3.aptFactors[factorKeys[fk]];
         if (vv != null && isFinite(vv)) nonNull++;
+      }
+      if (occ3.aptFactors.beta != null && isFinite(occ3.aptFactors.beta)) {
+        anyBetaAvailable = true;
       }
       var c3 = candles && candles[occ3.idx];
       var dk3 = c3 && normalizeDate(c3.time);
@@ -1019,6 +1025,7 @@ class PatternBacktester {
       icFullCI: icFullCI,
       icPart: partRes.mean != null ? +partRes.mean.toFixed(4) : null,
       fullPartDelta: fullPartDelta,
+      betaAvailable: anyBetaAvailable,
       mvpStatus: status,
       failReason: failReason,
     };
@@ -1050,10 +1057,17 @@ class PatternBacktester {
       };
       var passCount = 0;
       for (var g in gates) if (gates[g]) passCount++;
+      // [V48-SEC Phase 8] Runtime beta60d availability flag. Currently always
+      // false — runtime has no historical market-index series plumbing (see
+      // aptModel.js L.157-178 requires meta.marketReturns60d). Phase 9 backlog.
+      // fullFactorRatio effectively measures 4-of-5 factor completeness here.
+      var betaAvailable = (d5.betaAvailable === true);
       meta.mvpGate = {
         gates: gates,
         passCount: passCount,
         status: passCount === 5 ? 'GO' : (passCount >= 3 ? 'HOLD' : 'NOGO'),
+        betaAvailable: betaAvailable,
+        effectiveFactorCount: betaAvailable ? 5 : 4,
       };
     }
     return meta;
@@ -1626,10 +1640,17 @@ class PatternBacktester {
    */
   _collectOccurrences(candles, patternType) {
     // patternEngine.analyze()는 전체 캔들을 받아 모든 패턴을 반환
-    // 캐시 키에 analyze 결과를 저장해 중복 호출 방지
-    if (!this._analyzeCache || this._analyzeCache._candles !== candles) {
+    // 캐시 키에 analyze 결과를 저장해 중복 호출 방지.
+    // [V48-SEC Phase 8 HIGH#2 fix] _currentStockMeta / _currentMarket 도 키에 포함 —
+    // 동일 candles 배열 참조가 두 종목에 재사용될 경우 APT factor 교차 오염 방지.
+    var metaKey = (this._currentStockMeta ? JSON.stringify(this._currentStockMeta) : 'null')
+                  + '|' + (this._currentMarket || 'null');
+    if (!this._analyzeCache
+        || this._analyzeCache._candles !== candles
+        || this._analyzeCache._metaKey !== metaKey) {
       this._analyzeCache = {
         _candles: candles,
+        _metaKey: metaKey,
         patterns: patternEngine.analyze(candles),
       };
     }
@@ -2538,12 +2559,16 @@ class PatternBacktester {
       // Replaces the Phase 6 single-point icApt block with date-stratified
       // cross-sectional measurement across all horizons. L4 sign consistency
       // aggregated post-loop via _computeAPTMeta. L6/L7/L8/L10 deferred to Phase 8.
-      var aptDiag = this._computeAPTDiagnostic(validOccs, returns, h, candles, reg);
-      stats.aptDiagnostic = aptDiag;
-      // Legacy Phase 6 fields preserved for existing consumers (reliability tier etc.)
-      stats.icApt = aptDiag.icApt;
-      stats.icAptN = aptDiag.nPairs;
-      stats.icAptDelta = aptDiag.icLift;
+      // [V48-SEC Phase 8 P2a fix] Worker context (analysisWorker.js importScripts
+      // excludes aptModel.js) — skip diagnostic to avoid measuring all-zero APT.
+      if (typeof aptModel !== 'undefined' && aptModel) {
+        var aptDiag = this._computeAPTDiagnostic(validOccs, returns, h, candles, reg);
+        stats.aptDiagnostic = aptDiag;
+        // Legacy Phase 6 fields preserved for existing consumers (reliability tier etc.)
+        stats.icApt = aptDiag.icApt;
+        stats.icAptN = aptDiag.nPairs;
+        stats.icAptDelta = aptDiag.icLift;
+      }
 
       result[h] = stats;
     }

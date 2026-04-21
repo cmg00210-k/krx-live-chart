@@ -140,11 +140,28 @@ function CodeBlock(el)
   -- Indentation: 2 spaces per level. Level 1=root, 2=branch, 3=leaf, 4+=detail
   local lang = el.classes[1] or ""
   if lang == "tree" then
+    -- LaTeX-escape text inside \tree* macro arguments. Raw markdown content
+    -- may contain `_` (subscripts), `$`, `&`, `#`, `%`, `{`, `}`, `~`, `^`, `\`
+    -- which trigger math mode or command parsing inside macro args.
+    local function latex_escape_tree(s)
+      return s
+        :gsub("\\", "\\textbackslash{}")
+        :gsub("{", "\\{")
+        :gsub("}", "\\}")
+        :gsub("%%", "\\%%")
+        :gsub("%$", "\\$")
+        :gsub("&", "\\&")
+        :gsub("#", "\\#")
+        :gsub("_", "\\_")
+        :gsub("~", "\\textasciitilde{}")
+        :gsub("%^", "\\textasciicircum{}")
+    end
     local latex = "\\begin{datatree}\n"
     for line in text:gmatch("[^\n]+") do
       local spaces = #(line:match("^( *)") or "")
       local content = line:gsub("^%s+", "")
       if content ~= "" then
+        content = latex_escape_tree(content)
         local level = math.floor(spaces / 2) + 1
         if level <= 1 then
           latex = latex .. "\\treeroot{" .. content .. "}\n"
@@ -388,24 +405,29 @@ function Table(el)
   end
 
   -- Auto right-align numeric columns (CFA/Bloomberg standard)
+  -- Only override columns with AlignDefault (no explicit markdown alignment).
+  -- Columns explicitly marked as :--: (center) or ---: (right) are preserved.
   for c = 1, ncols do
-    local num_count, total = 0, 0
-    for _, body in ipairs(el.bodies) do
-      for _, row in ipairs(body.body) do
-        if row.cells[c] then
-          total = total + 1
-          local text = pandoc.utils.stringify(row.cells[c].contents)
-          -- Pure numeric only: "65", "3.14", "50%", "-2.5", "1,234"
-          -- Excludes Korean suffixes like "1등급", "47개 문서"
-          if text:match("^[%-]?%d+[%.%%]?%d*$")
-             or text:match("^[%-]?%d+,%d+$") then
-            num_count = num_count + 1
+    local current_align = el.colspecs[c][1]
+    if current_align == pandoc.AlignDefault then
+      local num_count, total = 0, 0
+      for _, body in ipairs(el.bodies) do
+        for _, row in ipairs(body.body) do
+          if row.cells[c] then
+            total = total + 1
+            local text = pandoc.utils.stringify(row.cells[c].contents)
+            -- Pure numeric only: "65", "3.14", "50%", "-2.5", "1,234"
+            -- Excludes Korean suffixes like "1등급", "47개 문서"
+            if text:match("^[%-]?%d+[%.%%]?%d*$")
+               or text:match("^[%-]?%d+,%d+$") then
+              num_count = num_count + 1
+            end
           end
         end
       end
-    end
-    if total > 0 and num_count / total >= 0.5 then
-      el.colspecs[c] = {pandoc.AlignRight, el.colspecs[c][2]}
+      if total > 0 and num_count / total >= 0.5 then
+        el.colspecs[c] = {pandoc.AlignRight, el.colspecs[c][2]}
+      end
     end
   end
 
@@ -506,11 +528,27 @@ function Table(el)
           modified = true
         end
 
-      -- 3-column tables: rebalance to 12:25:63 (id:label:description)
+      -- 3-column tables: content-aware first column width
+      -- Measure max cell text length (bytes) in first column to size it tightly
       elseif n == 3 then
-        widths[1] = 0.12
-        widths[2] = 0.25
-        widths[3] = 0.63
+        local max_len = 0
+        for _, body in ipairs(el.bodies) do
+          for _, row in ipairs(body.body) do
+            if row.cells[1] then
+              local text = pandoc.utils.stringify(row.cells[1].contents)
+              if #text > max_len then max_len = #text end
+            end
+          end
+        end
+        if max_len <= 6 then
+          -- Very short identifiers: 절 numbers (1.1~5.3), single symbols
+          widths[1] = 0.07; widths[2] = 0.23; widths[3] = 0.70
+        elseif max_len <= 15 then
+          -- Medium identifiers: Korean labels, short codes
+          widths[1] = 0.10; widths[2] = 0.25; widths[3] = 0.65
+        else
+          widths[1] = 0.12; widths[2] = 0.25; widths[3] = 0.63
+        end
         modified = true
 
       -- 4+ columns: expand any column below MIN_COL_PCT

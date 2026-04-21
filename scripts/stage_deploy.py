@@ -532,6 +532,7 @@ def main():
                 os.path.join("js", "appWorker.js"),
                 os.path.join("js", "appUI.js"),
                 os.path.join("js", "app.js"),
+                os.path.join("js", "aptModel.js"),
             ]
         missing_critical = []
         for f in CRITICAL_FILES:
