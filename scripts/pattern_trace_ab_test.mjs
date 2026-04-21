@@ -235,9 +235,17 @@ function extractProdTuples(prodRef) {
 
   patterns.forEach(function (p) {
     if (!p) return;
+    // S2.5 post-merge fix: patternEngine.analyze returns `endIndex` on
+    // multi-bar patterns; fall back through barIndex/endIdx/idx to cover
+    // all variants emitted by detect* methods.
+    const barIdx = p.barIndex  != null ? p.barIndex
+                 : p.endIndex  != null ? p.endIndex
+                 : p.endIdx    != null ? p.endIdx
+                 : p.idx       != null ? p.idx
+                 : null;
     tuples.push({
       type:        p.type        || p.pattern || null,
-      barIndex:    p.barIndex    != null ? p.barIndex : null,
+      barIndex:    barIdx,
       outcome:     p.outcome     || 'detected',
       confidence:  p.confidence  != null ? Number(p.confidence)  : null,
       priceTarget: p.priceTarget != null ? Number(p.priceTarget) : null,
