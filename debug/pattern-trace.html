@@ -15,14 +15,15 @@
 
   <!-- ── Production globals (read-only consumption, no production DOM touched) ── -->
   <!-- Load order mirrors js/analysisWorker.js importScripts order -->
+  <!-- ?v=N pins match index.html L743-746; bump alongside production bumps. -->
   <!-- colors.js — frozen KRX_COLORS constants, no side effects -->
-  <script src="../js/colors.js"></script>
+  <script src="../js/colors.js?v=14"></script>
   <!-- data.js — PAST_DATA, getPastData(); needed by api.js -->
-  <script src="../js/data.js"></script>
+  <script src="../js/data.js?v=13"></script>
   <!-- api.js — KRX_API_CONFIG, dataService, ALL_STOCKS, TIMEFRAMES -->
-  <script src="../js/api.js"></script>
+  <script src="../js/api.js?v=15"></script>
   <!-- realtimeProvider.js — realtimeProvider singleton (.onTick, .start, .stop) -->
-  <script src="../js/realtimeProvider.js"></script>
+  <script src="../js/realtimeProvider.js?v=11"></script>
 </head>
 <body>
   <!-- ── Header ── -->

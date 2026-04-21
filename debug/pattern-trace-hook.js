@@ -96,44 +96,48 @@
 
   // ── LOOKBACK_BY_FAMILY — conservative minimum bars a detector consumes ──
   // Values chosen from patterns.js detector bodies (grep of detect* fns 2026-04-21):
-  //   - Single-bar: 1-bar body + 14-bar ATR baseline (ctx.atr = calcATR(14))
-  //   - Double-bar: 2-bar body + 14-bar ATR baseline → considered = length - 1 - 13
-  //   - Triple-bar: 3-bar body + 14-bar ATR baseline → considered = length - 2 - 13
-  //   - 5-bar multi (rising/fallingThreeMethods): length - 4 - 13
-  //   - Chart patterns: pivot scans use larger windows; conservative estimates below.
+  //   - Base ATR(14) baseline: 14-bar priors for any ctx.atr access
+  //   - Trend-gated families call _detectTrend(candles, i, 10, atr) which requires
+  //     10 additional priors → effective minLookback = 14 + 10 = 24 (per VERIFY_pattern.md).
+  //   - Non-trend-gated single-bar (marubozu, beltHold, pure dojis): minLookback=14.
+  //   - 5-bar multi (rising/fallingThreeMethods): body encompasses trend via bar-0
+  //     requirement; no extra trend-gate call → minLookback=14.
+  //   - Chart patterns: pivot scans use larger windows (still underestimates vs
+  //     HS_WINDOW=120 and cupAndHandle=200; rigorous fix requires helper-observer
+  //     and is deferred to Session 3).
   // Key fields: type='bar'|'chart'; barWindow=patt body length; minLookback=bars consumed
   // before first eligible detection point.
   var LOOKBACK_BY_FAMILY = {
-    // 1-bar candles (13) — ATR(14) baseline requires 14 priors; first eligible idx=14
-    hammer:              { type: 'bar', barWindow: 1, minLookback: 14 },
-    invertedHammer:      { type: 'bar', barWindow: 1, minLookback: 14 },
-    hangingMan:          { type: 'bar', barWindow: 1, minLookback: 14 },
-    shootingStar:        { type: 'bar', barWindow: 1, minLookback: 14 },
-    doji:                { type: 'bar', barWindow: 1, minLookback: 14 },
+    // 1-bar candles (13) — trend-gated (6) use 24, pure-shape (7) use 14
+    hammer:              { type: 'bar', barWindow: 1, minLookback: 24 },
+    invertedHammer:      { type: 'bar', barWindow: 1, minLookback: 24 },
+    hangingMan:          { type: 'bar', barWindow: 1, minLookback: 24 },
+    shootingStar:        { type: 'bar', barWindow: 1, minLookback: 24 },
+    doji:                { type: 'bar', barWindow: 1, minLookback: 24 },
     dragonflyDoji:       { type: 'bar', barWindow: 1, minLookback: 14 },
     gravestoneDoji:      { type: 'bar', barWindow: 1, minLookback: 14 },
     longLeggedDoji:      { type: 'bar', barWindow: 1, minLookback: 14 },
-    spinningTop:         { type: 'bar', barWindow: 1, minLookback: 14 },
+    spinningTop:         { type: 'bar', barWindow: 1, minLookback: 24 },
     bullishMarubozu:     { type: 'bar', barWindow: 1, minLookback: 14 },
     bearishMarubozu:     { type: 'bar', barWindow: 1, minLookback: 14 },
     bullishBeltHold:     { type: 'bar', barWindow: 1, minLookback: 14 },
     bearishBeltHold:     { type: 'bar', barWindow: 1, minLookback: 14 },
-    // 2-bar doubles (10)
-    bullishEngulfing:    { type: 'bar', barWindow: 2, minLookback: 14 },
-    bearishEngulfing:    { type: 'bar', barWindow: 2, minLookback: 14 },
-    bullishHarami:       { type: 'bar', barWindow: 2, minLookback: 14 },
-    bearishHarami:       { type: 'bar', barWindow: 2, minLookback: 14 },
-    bullishHaramiCross:  { type: 'bar', barWindow: 2, minLookback: 14 },
-    bearishHaramiCross:  { type: 'bar', barWindow: 2, minLookback: 14 },
-    piercingLine:        { type: 'bar', barWindow: 2, minLookback: 14 },
-    darkCloud:           { type: 'bar', barWindow: 2, minLookback: 14 },
-    tweezerBottom:       { type: 'bar', barWindow: 2, minLookback: 14 },
-    tweezerTop:          { type: 'bar', barWindow: 2, minLookback: 14 },
-    // 3-bar triples (9)
+    // 2-bar doubles (10) — all trend-gated via _detectTrend(i-1, 10, atr)
+    bullishEngulfing:    { type: 'bar', barWindow: 2, minLookback: 24 },
+    bearishEngulfing:    { type: 'bar', barWindow: 2, minLookback: 24 },
+    bullishHarami:       { type: 'bar', barWindow: 2, minLookback: 24 },
+    bearishHarami:       { type: 'bar', barWindow: 2, minLookback: 24 },
+    bullishHaramiCross:  { type: 'bar', barWindow: 2, minLookback: 24 },
+    bearishHaramiCross:  { type: 'bar', barWindow: 2, minLookback: 24 },
+    piercingLine:        { type: 'bar', barWindow: 2, minLookback: 24 },
+    darkCloud:           { type: 'bar', barWindow: 2, minLookback: 24 },
+    tweezerBottom:       { type: 'bar', barWindow: 2, minLookback: 24 },
+    tweezerTop:          { type: 'bar', barWindow: 2, minLookback: 24 },
+    // 3-bar triples (9) — morningStar/eveningStar trend-gated via _detectTrend(i-2, 10, atr)
     threeWhiteSoldiers:  { type: 'bar', barWindow: 3, minLookback: 14 },
     threeBlackCrows:     { type: 'bar', barWindow: 3, minLookback: 14 },
-    morningStar:         { type: 'bar', barWindow: 3, minLookback: 14 },
-    eveningStar:         { type: 'bar', barWindow: 3, minLookback: 14 },
+    morningStar:         { type: 'bar', barWindow: 3, minLookback: 24 },
+    eveningStar:         { type: 'bar', barWindow: 3, minLookback: 24 },
     threeInsideUp:       { type: 'bar', barWindow: 3, minLookback: 14 },
     threeInsideDown:     { type: 'bar', barWindow: 3, minLookback: 14 },
     abandonedBabyBullish:{ type: 'bar', barWindow: 3, minLookback: 14 },
@@ -329,7 +333,11 @@
   }
 
   // ── BH-FDR threshold (cross-asset baseline) ─────────────────────────────
-  // Plan line 157: q/√N_tests ≈ 9.62e-4 with q=0.05, N_tests=2631.
+  // S2.5 corrected derivation: 9.62e-4 = q/√N_stocks with q=0.05, N_stocks=2700
+  // (ALL_STOCKS.length baseline used by js/backtester.js:1321 `crossQ = ALPHA/sqrtN`).
+  // Prior docstring said q/√N_tests=2631 (arithmetic off by ~1.3%; semantic label wrong).
+  // The backtester applies a rank-aware step-up `p ≤ (k+1)·crossQ/m`; the viewer shows
+  // only the rank-0 scalar — sufficient as a rough cross-asset gate, not a per-rank test.
   // backtester.js _applyBHFDR uses Math.sqrt(ALL_STOCKS.length ~2700) for the
   // same purpose. Hook exposes the fixed baseline so the viewer does not need
   // ALL_STOCKS at display time. If backtester has already computed it for this

@@ -24,7 +24,8 @@
 //  Statistical formulas:
 //    Wilson 95% CI: (p + z²/2n ± z√(p(1-p)/n + z²/4n²)) / (1 + z²/n), z=1.96
 //    EB shrinkage:  shrunk_wr = (N·raw + N0·grand_mean) / (N + N0)
-//    BH-FDR:        cross-asset threshold q/√2631 ≈ 9.62e-4  (q=0.05)
+//    BH-FDR:        cross-asset scalar q/√N_stocks ≈ 9.62e-4  (q=0.05, N=2700)
+//                   (backtester applies rank-aware step-up; viewer shows rank-0 gate only)
 //    Power rule:    n_min = 10/p  (Cohen)
 //
 //  Dependencies: js/colors.js → KRX_COLORS  (loaded before this file)
@@ -45,7 +46,7 @@ window.tracePanel = (function () {
 
   // ── Statistical constants ─────────────────────────────────────────────
   var Z_96         = 1.96;
-  var BH_FDR_CROSS = 9.62e-4;   // q/sqrt(2631), q=0.05
+  var BH_FDR_CROSS = 9.62e-4;   // q/sqrt(N_stocks=2700), q=0.05 (matches backtester.js:1321)
   var DEFAULT_N0   = 35;
   var DEFAULT_GRAND = 45.0;     // grand-mean win-rate % fallback
 
@@ -348,7 +349,7 @@ window.tracePanel = (function () {
           '<th title="Near-miss count">NM</th>' +
           '<th title="EB-shrunk Wilson CI (* = n<5)">WR (shrunk)</th>' +
           '<th title="BH-FDR p-value badge + threshold">BH</th>' +
-          '<th title="Sample power (Cohen n>=10/p)">Pwr</th>' +
+          '<th title="Detectability heuristic: n>=10/p (diagnostic only, not formal Cohen power)">Detect</th>' +
         '</tr>';
       tbl.appendChild(thead);
 
@@ -418,11 +419,12 @@ window.tracePanel = (function () {
       }
     }
 
-    // Anti-predictor inline icon — strict check: antiPredictor must be exactly true
-    // (null or undefined when A-MVP/A-Mid leaves it unset must NOT trigger)
+    // Anti-predictor inline icon — antiPredictor must be exactly true (strict).
+    // S2.5: `inv !== true` treats null/undefined as "not inverted" (patterns.js does
+    // not currently set p.inverted; previously `inv === false` made this dead code).
     var antiIcon = '';
     if (rawWR != null && wrN != null && finConf != null && finConf > 50 &&
-        antiP === true && inv === false) {
+        antiP === true && inv !== true) {
       var shrunk = _shrink(rawWR, wrN, _n0, grand);
       if (shrunk < 48) {
         antiIcon = ' <span class="tp-anti-icon" title="anti-predictor: WR(shrunk)<48 but conf>50">&#9888;</span>';
@@ -547,8 +549,9 @@ window.tracePanel = (function () {
       pp.detected.forEach(function (det) {
         if (!det || !det.l3) return;
         var l3 = det.l3;
-        // Strict check: antiPredictor must be exactly true
-        if (l3.antiPredictor !== true || l3.inverted !== false) return;
+        // antiPredictor strict true; inverted accepts null/undefined as "not inverted"
+        // (patterns.js does not currently populate p.inverted; S2.5 fix vs dead-code gate).
+        if (l3.antiPredictor !== true || l3.inverted === true) return;
         if (l3.finalConfidence == null || l3.finalConfidence <= 50) return;
         var shrunk = null;
         if (l3.wr && l3.wr.raw != null && l3.wr.N != null) {
@@ -579,7 +582,7 @@ window.tracePanel = (function () {
         ' bar#' + (isFinite(barIdxNum) ? barIdxNum : '?') +
         ' WR(shrunk)=' + (c.shrunk != null ? _fmt(c.shrunk, 1) + '%' : '—') +
         ' conf=' + (isFinite(confNum) ? confNum : '?') +
-        ' <span class="tp-tag-anti">antiPredictor=true, inverted=false</span>' +
+        ' <span class="tp-tag-anti">antiPredictor=true, inverted!=true</span>' +
         '</div>';
     });
     container.innerHTML = html;
@@ -660,9 +663,9 @@ window.tracePanel = (function () {
         pathHtml = '<div class="pattern-card-meta" style="word-break:break-all;margin-top:2px">' + steps + '</div>';
       }
 
-      // Anti-predictor warning — strict null check: antiPredictor must be exactly true
+      // Anti-predictor warning — antiPredictor strict true; inverted null/undefined = not inverted (S2.5).
       var warnHtml = '';
-      if (l3.antiPredictor === true && l3.inverted === false && confNum > 50) {
+      if (l3.antiPredictor === true && l3.inverted !== true && confNum > 50) {
         warnHtml = '<div style="color:#ff8a80;font-size:10px;margin-top:4px">Anti-predictor 경고</div>';
       }
 

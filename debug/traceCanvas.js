@@ -90,8 +90,11 @@ window.traceCanvas = (() => {
     return _state.chartTop + h * (1 - (price - _state.priceMin) / range);
   }
 
-  // Bar index → center X (returns null if out of view)
+  // Bar index → center X (returns null if out of view, null, or non-finite).
+  // S2.5: null/undefined/NaN inputs now return null instead of NaN, so the 10+
+  // call sites that short-circuit on `x === null` handle them correctly.
   function _barToX(barIndex) {
+    if (barIndex == null || !isFinite(barIndex)) return null;
     const rel = barIndex - _state.viewOffset;
     if (rel < 0 || rel >= _state.barsVisible) return null;
     return _state.marginLeft + (rel + 0.5) * _state.candleW;
