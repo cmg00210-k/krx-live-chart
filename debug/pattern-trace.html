@@ -54,6 +54,9 @@
         <input type="range" id="trace-scrubber" min="0" max="100" value="0">
         <span id="trace-scrubber-label">Bar 0 / 0</span>
         <span id="trace-play-hint" class="muted">Space: play/pause &nbsp; Shift+Space: 10x</span>
+        <button type="button" id="trace-download-btn" class="download-btn" disabled
+                title="Download current trace as JSON (for A/B regression capture)"
+                aria-label="Download current trace JSON">Download trace</button>
       </div>
 
       <!-- File-drop overlay — fades out after successful load -->

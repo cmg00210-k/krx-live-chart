@@ -158,6 +158,9 @@
   function _applyTrace(trace) {
     _stopPlay(); // H1: cancel any in-flight rAF before swapping state
     window.__TRACE__ = trace; // expose for console debugging
+    // S2.5 post-merge addendum: enable Download button once a valid trace is loaded
+    var dlBtn = document.getElementById('trace-download-btn');
+    if (dlBtn) dlBtn.disabled = false;
 
     const barCount = trace.bars ? trace.bars.length : 0;
 
@@ -788,11 +791,68 @@
   window.addEventListener('beforeunload', _cleanup);
 
   // ══════════════════════════════════════════════════════
-  //  Session 2/3 stubs
+  //  Trace download — enables the manual A/B regression capture workflow
+  //  described in HANDOFF_SESSION2.md and scripts/pattern_trace_ab_test.mjs.
+  //  Filename: <code>_<YYYYMMDD>_<tf>.json (or `trace_<YYYYMMDD>.json` if meta absent).
   // ══════════════════════════════════════════════════════
+  function _downloadCurrentTrace() {
+    var trace = window.__TRACE__;
+    if (!trace || !trace.meta) {
+      var errMsg = '다운로드 실패: 로드된 trace가 없습니다.';
+      if (typeof tracePanel !== 'undefined' && tracePanel.showError) {
+        tracePanel.showError(errMsg);
+      } else {
+        console.error('[PatternTrace]', errMsg);
+      }
+      return null;
+    }
+    // Build filename
+    var meta = trace.meta || {};
+    var d    = new Date();
+    var yyyy = d.getFullYear();
+    var mm   = String(d.getMonth() + 1).padStart(2, '0');
+    var dd   = String(d.getDate()).padStart(2, '0');
+    var parts = [];
+    if (meta.stockCode) parts.push(String(meta.stockCode));
+    parts.push(yyyy + mm + dd);
+    if (meta.timeframe) parts.push(String(meta.timeframe));
+    var fname = parts.join('_') + '.json';
+    // Serialize + download
+    var blob, url;
+    try {
+      blob = new Blob([JSON.stringify(trace, null, 2)], { type: 'application/json' });
+      url  = URL.createObjectURL(blob);
+    } catch (e) {
+      console.error('[PatternTrace] Blob creation failed:', e);
+      return null;
+    }
+    var a  = document.createElement('a');
+    a.href     = url;
+    a.download = fname;
+    a.rel      = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Revoke URL after a tick to allow the download to start
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    console.log('[PatternTrace] Downloaded', fname, '(' + blob.size + ' bytes)');
+    return fname;
+  }
+
+  function _initDownloadButton() {
+    var btn = document.getElementById('trace-download-btn');
+    if (!btn) return;
+    btn.addEventListener('click', _downloadCurrentTrace);
+  }
+
+  // Public: allow console-driven download as well
+  window.__trace_download = _downloadCurrentTrace;
+
+  // Legacy stub retained as an alias for S3 forward-compatibility
   window.__trace_exportAnnotated = function () {
-    console.warn('[PatternTrace] __trace_exportAnnotated not yet implemented (Session 3).');
-    return null;
+    console.warn('[PatternTrace] __trace_exportAnnotated is Session 3 scope; ' +
+      'using __trace_download() as a compatibility shim.');
+    return _downloadCurrentTrace();
   };
 
   // Convenience: expose load function for programmatic use (e.g. paste from console)
@@ -814,6 +874,7 @@
   _initScrubber();
   _initKeyboard();
   _initWindowResize();
+  _initDownloadButton();
 
   if (_isLive) {
     // Add [live] Follow button next to scrubber
