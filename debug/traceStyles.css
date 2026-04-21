@@ -84,6 +84,65 @@ html, body {
   font-size: 12px;
   padding: 8px 16px;
   text-align: center;
+  display: block;
+}
+/* Hidden state — replaces inline style="display:none" */
+#session2-banner.banner-hidden {
+  display: none;
+}
+
+/* ── Connection dot (live-scan source badge status indicator) ── */
+.connection-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-left: 5px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.connection-dot.connected   { background: #26a69a; box-shadow: 0 0 4px #26a69a88; }
+.connection-dot.reconnecting { background: #f59e0b; animation: dot-pulse 1.2s ease-in-out infinite; will-change: transform; }
+.connection-dot.failed      { background: var(--up); }
+
+/* ── Tail-follow pulse animation on source badge ── */
+/* Use opacity+scale (GPU-composited) instead of box-shadow (triggers Paint) */
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.75; transform: scale(1.04); }
+}
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(0.6); }
+}
+
+.badge.wss.pulsing    { animation: badge-pulse 1.8s ease-in-out infinite; will-change: opacity, transform; }
+.badge.kiwoom.pulsing { animation: badge-pulse 1.8s ease-in-out infinite; will-change: opacity, transform; }
+
+/* ── [live] Follow button ── */
+.follow-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.follow-btn:hover {
+  background: #2f3548;
+  color: var(--text);
+}
+.follow-btn.active {
+  background: rgba(41, 98, 255, 0.18);
+  border-color: rgba(41, 98, 255, 0.5);
+  color: #90b0ff;
 }
 
 /* ── Main layout: panel | canvas ── */
