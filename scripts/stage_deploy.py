@@ -56,6 +56,7 @@ EXCLUDE_DIRS = {
     "scripts", "core_data", "pattern_impl", "docs", "server",
     ".claude", ".git", "deploy", "logs",  # never recurse into deploy/ itself
     "node_modules",  # [P0-fix] 1,489 files leaked to production — dev-only
+    "debug",  # [pattern-trace] local debug tools — never deploy to production
     # czw/ removed — calibration data moved to data/backtest/
     os.path.join("data", "backtest", "results"),
     os.path.join("data", "delisted"),  # 308 files, only used by Python backtest scripts
