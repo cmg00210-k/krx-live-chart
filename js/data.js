@@ -177,7 +177,14 @@ async function getFinancialData(code, period) {
       const quarterly = toDisplay(data.quarterly || []);
       const annual = toDisplay(data.annual || []);
 
-      _financialCache[code] = { quarterly, annual, source: data.source || 'dart', fetchedAt: Date.now() };
+      // annual 순이익 시계열 추출 (eps_stability mediator — Jensen-Meckling 1976)
+      var niHist = [];
+      if (annual && annual.length > 0) {
+        for (var ai = annual.length - 1; ai >= 0; ai--) {
+          if (annual[ai].ni != null && annual[ai].ni !== 0) niHist.push(annual[ai].ni);
+        }
+      }
+      _financialCache[code] = { quarterly, annual, source: data.source || 'dart', fetchedAt: Date.now(), ni_history: niHist.length >= 3 ? niHist : null };
       return period === 'quarter' ? quarterly : annual;
     }
   } catch (e) {
@@ -191,11 +198,24 @@ async function getFinancialData(code, period) {
   const fallback = getPastData(code, period);
   const isHardcoded = !!PAST_DATA[code];
   const existing = _financialCache[code] || {};
+  // eps_stability 시계열: hardcoded만 구성, seed 데이터 제외 (fake data 방지)
+  var fbNiHist = existing.ni_history || null;
+  if (isHardcoded && !fbNiHist) {
+    var fbAnnual = period === 'annual' ? fallback : (existing.annual || []);
+    if (fbAnnual && fbAnnual.length > 0) {
+      var niArr = [];
+      for (var ai = fbAnnual.length - 1; ai >= 0; ai--) {
+        if (fbAnnual[ai].ni != null && fbAnnual[ai].ni !== 0) niArr.push(fbAnnual[ai].ni);
+      }
+      if (niArr.length >= 3) fbNiHist = niArr;
+    }
+  }
   _financialCache[code] = {
     quarterly: period === 'quarter' ? fallback : (existing.quarterly || []),
     annual: period === 'annual' ? fallback : (existing.annual || []),
     source: isHardcoded ? 'hardcoded' : 'seed',
     fetchedAt: Date.now(),
+    ni_history: isHardcoded ? fbNiHist : null,
   };
   return fallback;
 }

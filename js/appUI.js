@@ -3169,7 +3169,7 @@ async function _startScreenerScan() {
   var screenerWorker = null;
   var workerReady = false;
   try {
-    screenerWorker = new Worker('js/screenerWorker.js?v=10');
+    screenerWorker = new Worker('js/screenerWorker.js?v=11');
   } catch (workerErr) {
     console.warn('[Screener] Worker 생성 실패, 메인 스레드 폴백:', workerErr.message);
   }

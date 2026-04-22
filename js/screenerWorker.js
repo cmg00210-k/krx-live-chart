@@ -20,13 +20,13 @@ var _workerReady = false;
 
 // ── Worker 내부에 필요한 스크립트 로드 ───────────────
 // importScripts 경로는 Worker 파일(js/) 기준 상대 경로
+// [V38] signalEngine/backtester 제거: screener는 patternEngine.analyze()만 사용.
+//       patterns.js 내 backtester 참조는 typeof guard로 보호됨.
 try {
   importScripts(
     'colors.js?v=14',
     'indicators.js?v=28',
-    'patterns.js?v=50',
-    'signalEngine.js?v=47',
-    'backtester.js?v=42'
+    'patterns.js?v=50'
   );
   _workerReady = true;
   self.postMessage({ type: 'ready' });
